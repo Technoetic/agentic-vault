@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "볼트 세션 인계·핫 컨텍스트 주입 중...",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\" || python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\""
+          },
+          {
+            "type": "command",
+            "async": true,
+            "statusMessage": "볼트 무결성·사실 모순 검사 중...",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py\" || python3 \"${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

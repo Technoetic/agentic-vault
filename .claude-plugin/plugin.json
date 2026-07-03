@@ -1,0 +1,10 @@
+{
+  "name": "agentic-vault",
+  "version": "0.1.0",
+  "description": "파일 기반 에이전틱 메모리 — 제텔카스텐식 옵시디언 볼트를 Claude Code의 영구 상태 계층으로 쓰는 플러그인 (LLM Wiki + 계층형 메모리 + 세션 인계)",
+  "author": {
+    "name": "전문준"
+  },
+  "license": "MIT",
+  "keywords": ["agentic-memory", "obsidian", "zettelkasten", "llm-wiki", "knowledge-vault", "context-engineering"]
+}

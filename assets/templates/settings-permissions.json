@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(/10-inbox/_processed/**)",
+      "Read(/20-knowledge/_archive/**)",
+      "Read(/50-projects/_completed/**)",
+      "Read(/90-assets/**)",
+      "Read(/.obsidian/**)",
+      "Read(/00-meta/scripts/**/.env)",
+      "Edit(/.obsidian/**)",
+      "Edit(/00-meta/scripts/**/.env)",
+      "Write(/.obsidian/**)",
+      "Write(/00-meta/scripts/**/.env)"
+    ]
+  }
+}

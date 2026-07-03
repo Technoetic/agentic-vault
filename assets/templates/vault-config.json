@@ -1,0 +1,23 @@
+{
+  "vault_name": "{{VAULT_NAME}}",
+  "language": "ko",
+  "deny_zones": ["10-inbox/_processed", "20-knowledge/_archive", "50-projects/_completed", "90-assets", ".obsidian"],
+  "exclude_dirs": ["node_modules", ".venv", "venv", "__pycache__", ".git", ".trash", "step_archive"],
+  "required_keys": ["title", "type", "status", "ai_priority", "tags", "created", "updated"],
+  "enums": {
+    "type": ["concept", "guide", "reference", "tool", "pattern", "journal", "person", "organization", "meeting", "decision", "project"],
+    "status": ["active", "draft", "archive"],
+    "ai_priority": ["high", "medium", "low", "archive"]
+  },
+  "frontmatter_max_lines": 16,
+  "index_note": "00-meta/index.md",
+  "log_note": "00-meta/log.md",
+  "log_tags": ["ingest", "query", "lint", "build", "ops", "decision"],
+  "log_tag_epoch": "{{DATE}}",
+  "hot_note": "00-meta/hot.md",
+  "handoff_note": "",
+  "ssot_note": "",
+  "ssot_facts": [],
+  "health_report": "00-meta/health-report.md",
+  "backup_target": ""
+}
