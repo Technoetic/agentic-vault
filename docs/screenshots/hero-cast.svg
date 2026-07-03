@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" font-family="'Cascadia Code','JetBrains Mono',Consolas,'Courier New',monospace" font-size="15">
+  <!-- terminal window -->
+  <rect x="0" y="0" width="960" height="470" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+  <!-- title bar -->
+  <rect x="0" y="0" width="960" height="40" rx="12" fill="#161b22"/>
+  <rect x="0" y="28" width="960" height="12" fill="#161b22"/>
+  <circle cx="24" cy="20" r="6" fill="#ff5f56"/>
+  <circle cx="46" cy="20" r="6" fill="#ffbd2e"/>
+  <circle cx="68" cy="20" r="6" fill="#27c93f"/>
+  <text x="480" y="25" text-anchor="middle" fill="#8b949e" font-size="13">agentic-vault — 세션은 죽어도 기억은 파일로 산다</text>
+
+  <!-- line 1 -->
+  <text x="28" y="75" fill="#e6edf3" opacity="0">
+    <tspan fill="#3fb950">$</tspan> claude
+    <animate attributeName="opacity" from="0" to="1" begin="0.3s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- line 2 -->
+  <text x="28" y="105" fill="#e6edf3" opacity="0">
+    <tspan fill="#a855f7">&gt;</tspan> /vault-init 연구볼트
+    <animate attributeName="opacity" from="0" to="1" begin="1.0s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- line 3-5 -->
+  <text x="46" y="133" fill="#8b949e" opacity="0">
+    <tspan fill="#3fb950">✓</tspan> 표준 트리 19 디렉토리 — 00-meta … 90-assets
+    <animate attributeName="opacity" from="0" to="1" begin="1.8s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="161" fill="#8b949e" opacity="0">
+    <tspan fill="#3fb950">✓</tspan> vault-config.json + 템플릿 12종 + CLAUDE.md 행동 계약
+    <animate attributeName="opacity" from="0" to="1" begin="2.4s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="189" fill="#8b949e" opacity="0">
+    <tspan fill="#3fb950">✓</tspan> healthcheck exit 0 — 치명 0건
+    <animate attributeName="opacity" from="0" to="1" begin="3.0s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- line 6 -->
+  <text x="28" y="225" fill="#e6edf3" opacity="0">
+    <tspan fill="#a855f7">&gt;</tspan> /vault-session-start
+    <animate attributeName="opacity" from="0" to="1" begin="3.9s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="253" fill="#58a6ff" opacity="0">
+    === SESSION HANDOFF (직전 세션 인계) ===  <tspan fill="#8b949e">← SessionStart 훅 자동 주입</tspan>
+    <animate attributeName="opacity" from="0" to="1" begin="4.6s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="281" fill="#8b949e" opacity="0">
+    ▸ NEXT: 딥리서치 보고서 3건 ingest — 어제의 내가 남긴 지시
+    <animate attributeName="opacity" from="0" to="1" begin="5.2s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- line 9 -->
+  <text x="28" y="317" fill="#e6edf3" opacity="0">
+    <tspan fill="#a855f7">&gt;</tspan> /vault-ingest 10-inbox/web/보고서.md
+    <animate attributeName="opacity" from="0" to="1" begin="6.1s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="345" fill="#8b949e" opacity="0">
+    <tspan fill="#3fb950">✓</tspan> 원자 노트 3 생성 + 기존 노트 2 갱신 + index 등록 + [ingest] 로그
+    <animate attributeName="opacity" from="0" to="1" begin="6.9s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- line 11 -->
+  <text x="28" y="381" fill="#e6edf3" opacity="0">
+    <tspan fill="#a855f7">&gt;</tspan> /vault-session-end
+    <animate attributeName="opacity" from="0" to="1" begin="7.8s" dur="0.3s" fill="freeze"/>
+  </text>
+  <text x="46" y="409" fill="#8b949e" opacity="0">
+    <tspan fill="#3fb950">✓</tspan> handoff·hot·log 갱신 — <tspan fill="#e6edf3">다음 세션의 나에게 편지를 남겼다</tspan>
+    <animate attributeName="opacity" from="0" to="1" begin="8.6s" dur="0.3s" fill="freeze"/>
+  </text>
+  <!-- cursor -->
+  <text x="28" y="443" fill="#a855f7" opacity="0">
+    &gt; <tspan fill="#e6edf3">▍</tspan>
+    <animate attributeName="opacity" from="0" to="1" begin="9.4s" dur="0.3s" fill="freeze"/>
+  </text>
+  <rect x="47" y="431" width="10" height="16" fill="#e6edf3" opacity="0">
+    <animate attributeName="opacity" values="0;1;0" begin="9.8s" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+</svg>

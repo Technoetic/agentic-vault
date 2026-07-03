@@ -1,128 +1,448 @@
+<div align="center">
+
 # agentic-vault
 
-`v0.1.0` · MIT · Claude Code 플러그인
+### 옵시디언 볼트 = Claude Code의 영구 기억 — 파일 기반 에이전틱 메모리
 
-**파일 기반 에이전틱 메모리** — 옵시디언 볼트를 Claude Code의 영구 상태 계층(Persistent State Layer)으로 쓰는 플러그인.
+**세션은 죽는다. 기억은 파일로 산다.**<br/>
+컨텍스트 윈도우를 늘리는 대신 **기억을 사람이 읽을 수 있는 평문 마크다운에 내려놓는다**.
 
-컨텍스트 윈도우는 세션이 끝나면 휘발되지만, 평문 마크다운 볼트는 영속한다. 이 플러그인은 볼트를 **LLM Wiki**(위키링크 그래프) + **계층형 메모리**(hot/handoff/전체 페이징) + **제텔카스텐**(원자 노트·밀집 링크)으로 운영하는 데 필요한 기계 장치 일체 — 명령 8종, 세션 훅, 무결성 검사기, 백업 스크립트, 노트 템플릿 — 를 제공한다.
+<br/>
 
-**원칙: 플러그인 = 엔진, 볼트 = 데이터.** 볼트의 모든 정책(필수 프런트매터 키·deny zone·로그 태그·SSOT 사실)은 볼트 쪽의 `00-meta/vault-config.json` 하나로 선언하고, 플러그인은 그것을 읽어 동작한다. 볼트가 아닌 디렉토리에서는 모든 컴포넌트가 조용히 무동작한다.
+[![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
+[![Version](https://img.shields.io/badge/v0.1.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.1.0)
+[![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
+[![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-> **English summary** — *agentic-vault* is a Claude Code plugin that turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for AI agents. It combines four ideas: file-based memory (plain text as ground truth), an LLM Wiki (wikilink graph traversal), tiered memory (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and Zettelkasten discipline (atomic notes, dense linking). The plugin ships 8 slash commands, session hooks, a stdlib-only Python health checker with self-healing workflows, a backup script, and note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+[![Commands](https://img.shields.io/badge/Commands-8-F59E0B?style=for-the-badge)](commands/)
+[![Templates](https://img.shields.io/badge/Templates-12-22C55E?style=for-the-badge)](assets/templates/)
+[![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
+[![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
+[![Doctrine](https://img.shields.io/badge/플러그인=엔진_·_볼트=데이터-EC4E20?style=for-the-badge)](#-6개-핵심-철학)
 
-## 요구사항
+<br/>
 
-- Claude Code (플러그인 지원 버전)
-- Python 3.10+ — 표준 라이브러리만 사용, Windows/macOS/Linux 크로스 플랫폼
+<img src="docs/screenshots/hero-cast.svg" width="90%" alt="agentic-vault 세션 사이클 데모 — /vault-init로 볼트를 만들고, SessionStart 훅이 직전 세션 인계를 자동 주입하고, /vault-session-end가 다음 세션의 나에게 편지를 남기는 터미널 시뮬레이션"/>
 
-## 설치
+</div>
 
-**GitHub (권장):**
+---
+
+<div align="center">
+
+## ⚡ 30초 안에 이해하기
+
+</div>
+
+```text
+사용자 →  /vault-init 연구볼트
+                        ↓
+   19 디렉토리 표준 트리(00-meta … 90-assets) + vault-config.json + 템플릿 12종
+                        ↓
+   ┌─────────────────── 매 세션 사이클 ───────────────────┐
+   │                                                      │
+   │  SessionStart hook ──►  handoff + hot 자동 주입       │
+   │        ↓                (직전 세션의 기억 복원)         │
+   │  작업: /vault-ingest · /vault-day · /vault-trace      │
+   │        ↓                (원자 노트 + 위키링크 + 로그)    │
+   │  /vault-session-end ──► handoff·hot·log 갱신          │
+   │        ↓                (다음 세션의 나에게 편지)        │
+   └──────────────────────────────────────────────────────┘
+                        ↓
+   /vault-lint  ──►  fail-closed 무결성 게이트 (치명이면 exit 1 → 즉시 치유)
+```
+
+> [!IMPORTANT]
+> 기억의 원천은 모델도, 벡터 DB도 아니다 — **사람이 읽을 수 있는 마크다운 파일**이다.<br/>
+> 플러그인을 지워도 볼트는 온전한 옵시디언 볼트로 남는다.
+
+<details>
+<summary><b>🌐 English summary</b></summary>
+
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 8 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, a cross-platform backup script, and 12 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+
+</details>
+
+---
+
+<div align="center">
+
+## 🎯 무엇을 해주는가
+
+</div>
+
+| 입력 | 산출 |
+|:---|:---|
+| `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + CLAUDE.md 행동 계약 |
+| `/vault-session-start` | handoff → hot → index 순서로 직전 상태 복원 + 4항목 브리핑 |
+| `/vault-ingest 보고서.md` | 소스 1건 → 원자 노트 분해 + 위키링크 + 기존 노트 갱신 + index 등록 + `[ingest]` 로그 |
+| `/vault-process-inbox` | `10-inbox/` 대기열 정제 → 영구 지식 병합 → 원본 `_processed/` 격리 |
+| `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
+| `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
+| `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
+| `/vault-session-end` | handoff·hot·log 갱신 + git 커밋(로컬) + 백업 권고 — **다음 세션 예약** |
+
+---
+
+<div align="center">
+
+## 🏗️ 아키텍처 — 엔진과 데이터의 분리
+
+</div>
+
+```mermaid
+flowchart TB
+    subgraph user["👤 사용자"]
+        U["/vault-* 명령 · 일상 작업"]
+    end
+
+    subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
+        CMD["commands/<br/><i>슬래시 명령 8종</i>"]
+        HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
+        HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
+        BK["backup_vault.py<br/><i>미러 + git bundle</i>"]
+        TPL["assets/templates/<br/><i>노트 템플릿 12종</i>"]
+        SK["SKILL.md<br/><i>작업 규율</i>"]
+    end
+
+    subgraph vault["💾 볼트 = 데이터 (사용자 소유, 평문 마크다운)"]
+        CFG["00-meta/vault-config.json<br/><i>볼트 감지 마커 + 정책 단일 출처</i>"]
+        HOT["hot.md<br/><i>500단어 캐시</i>"]
+        HND["handoff.md<br/><i>세션 인계</i>"]
+        IDX["index.md · log.md"]
+        KNW["20-knowledge/<br/><i>원자 노트 + 위키링크 그래프</i>"]
+    end
+
+    U --> CMD
+    TPL -.vault-init 1회.-> vault
+    CMD -->|정책 룩업| CFG
+    CMD --> KNW
+    CMD --> IDX
+    HOOK -->|볼트 감지 시| HND
+    HOOK --> HOT
+    HOOK -.컨텍스트 주입.-> U
+    HC -->|검사| vault
+    BK -->|미러| vault
+
+    style CFG fill:#A855F7,color:#fff
+    style HOOK fill:#7C3AED,color:#fff
+    style HC fill:#EF4444,color:#fff
+    style HOT fill:#F59E0B,color:#000
+    style HND fill:#F59E0B,color:#000
+    style KNW fill:#0EA5E9,color:#fff
+```
+
+볼트의 모든 정책(deny zone·필수 프런트매터 키·Enum·로그 태그·SSOT 사실)은 볼트 쪽 `vault-config.json` **한 파일**로 선언된다.
+`00-meta/vault-config.json`이 없는 디렉토리에서 모든 컴포넌트는 **조용히 무동작**한다 — 훅도, 검사기도, 명령도.
+
+---
+
+<div align="center">
+
+## 🧠 계층형 메모리 — 전부 읽으면 터지고, 안 읽으면 기억상실
+
+</div>
+
+```mermaid
+flowchart LR
+    L0["CLAUDE.md<br/><i>상주 계약</i><br/>~1K 단어"] --> L1["hot.md<br/><i>핫 캐시</i><br/>500 단어"]
+    L1 --> L2["handoff.md<br/><i>세션 캐시</i><br/>직전 세션 인계"]
+    L2 --> L3["볼트 전체<br/><i>장기 저장소</i><br/>grep · index 페이징"]
+
+    style L0 fill:#EF4444,color:#fff
+    style L1 fill:#F59E0B,color:#000
+    style L2 fill:#A855F7,color:#fff
+    style L3 fill:#0EA5E9,color:#fff
+```
+
+OS 메모리 계층처럼 읽는다: **자주 쓰는 것일수록 위층, 필요한 만큼만, 위층부터.**
+SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부분의 세션은 시작 즉시 직전 상태를 이어받는다.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as 👤 사용자
+    participant Hook as 🪝 SessionStart
+    participant LLM as 🤖 Claude
+    participant Vault as 💾 볼트 (평문 파일)
+
+    User->>LLM: claude 시작
+    Hook->>Vault: vault-config.json 감지
+    rect rgb(124, 58, 237)
+    Hook-->>LLM: handoff + hot 자동 주입 (직전 세션의 기억)
+    end
+    User->>LLM: 작업 요청
+    LLM->>Vault: 원자 노트 생성 · 위키링크 · index 등록 · [태그] 로그
+    User->>LLM: /vault-session-end
+    rect rgb(16, 185, 129)
+    LLM->>Vault: handoff·hot·log 갱신 — 다음 세션의 나에게 편지
+    end
+    Note over Vault: 세션은 죽어도 기억은 파일로 남는다
+```
+
+---
+
+<div align="center">
+
+## 🧱 6개 핵심 철학
+
+</div>
+
+```mermaid
+graph TB
+    subgraph philosophy["하나의 명제"]
+        H["에이전트의 기억은 모델이 아니라<br/>파일에 있어야 하고,<br/>그 파일은 사람이 읽을 수 있어야 한다"]
+    end
+
+    subgraph six["6 기둥"]
+        P1["1️⃣ 컨텍스트는 필멸<br/>평문은 영속"]
+        P2["2️⃣ 엔진과 데이터의<br/>엄격한 분리"]
+        P3["3️⃣ 지식은 저장이 아니라<br/>연결로 복리"]
+        P4["4️⃣ 기억은<br/>계층으로 읽는다"]
+        P5["5️⃣ 자율 지침은 부패<br/>코드 강제만 산다"]
+        P6["6️⃣ 볼트가 아니면<br/>침묵한다"]
+    end
+
+    H --> P1
+    H --> P2
+    H --> P3
+    H --> P4
+    H --> P5
+    H --> P6
+
+    style H fill:#A855F7,color:#fff
+    style P1 fill:#0EA5E9,color:#fff
+    style P2 fill:#EC4E20,color:#fff
+    style P3 fill:#10B981,color:#fff
+    style P4 fill:#F59E0B,color:#000
+    style P5 fill:#EF4444,color:#fff
+    style P6 fill:#7C3AED,color:#fff
+```
+
+| # | 철학 | 한 줄 |
+|:---:|:---|:---|
+| 1 | **컨텍스트는 필멸, 평문은 영속** | handoff는 "다음 세션의 나에게 쓰는 편지". 10년 뒤에도 열리는 매체에 기억을 둔다 |
+| 2 | **엔진 ≠ 데이터** | 플러그인은 지식을 한 글자도 담지 않는다. 정책은 볼트의 `vault-config.json` 한 파일 |
+| 3 | **연결이 복리를 만든다** | 원자 노트 + 밀집 위키링크. **고아 링크는 오류가 아니라 미래 노트의 예약** |
+| 4 | **계층으로 읽는다** | hot 500단어(캐시) → handoff(인계) → index(지도) → grep(페이징) |
+| 5 | **자율 지침은 부패한다** | 스키마·태그·링크 무결성은 산문 규칙이 아니라 fail-closed 검사기로 강제. 증거는 서술이 아니라 exit code |
+| 6 | **볼트가 아니면 침묵** | config 없는 디렉토리에선 전 컴포넌트 무동작. 설정 키를 비우면 그 기능만 꺼진다(우아한 성능 저하) |
+
+이 플러그인은 새로운 발명이 아니라 **오래된 세 전통의 합류점**이다 — 제텔카스텐(1960년대 지식 관리), 유닉스 철학(평문·작은 도구·침묵), 에이전틱 메모리(2020년대 AI). 새것은 조합뿐이고, 그래서 오래간다.
+
+---
+
+<div align="center">
+
+## 📦 무엇이 들어 있나
+
+</div>
 
 ```
+agentic-vault/
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.1.0 · MIT)
+│
+├── commands/                          ← 8개 슬래시 커맨드
+│   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
+│   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
+│   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
+│   ├── vault-day.md                   ← 데일리 저널
+│   ├── vault-ingest.md                ← 소스 → 원자 노트 소화 (LLM Wiki 패턴)
+│   ├── vault-process-inbox.md         ← 인박스 정제 + _processed 격리
+│   ├── vault-lint.md                  ← 무결성 검증 + 자가 치유  🛡️
+│   └── vault-trace.md                 ← 키워드 시계열 횡단 추적
+│
+├── hooks/
+│   ├── hooks.json                     ← SessionStart 바인딩 (주입 + 비동기 검사)
+│   └── session_start.py               ← handoff·hot 자동 주입  🔥
+│
+├── skills/agentic-vault/
+│   ├── SKILL.md                       ← 작업 규율 (중복 grep → 스키마 → 링크 → 기록)
+│   ├── references/
+│   │   ├── linking-rules.md           ← 위키링크 규율 (고아 링크 철학 포함)
+│   │   └── memory-tiers.md            ← 계층형 메모리 + SSOT 룩업 설계
+│   └── scripts/
+│       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기  🛡️
+│       └── backup_vault.py            ← robocopy/rsync/shutil + git bundle
+│
+└── assets/templates/                  ← 12개 노트·시스템 템플릿
+    ├── vault-config.json              ← 볼트 정책 단일 출처
+    ├── hot.md · handoff.md · index.md · log.md
+    ├── context.md · tasks.md · decisions.md · mistakes.md
+    ├── frontmatter-schema.md · CLAUDE-vault-section.md
+    └── settings-permissions.json      ← deny zone Read 차단 블록
+```
+
+---
+
+<div align="center">
+
+## 🚀 설치
+
+</div>
+
+### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
+
+Claude Code 터미널에서 평소처럼 말 걸면 됩니다:
+
+```text
+agentic-vault 플러그인을 깔아줘. Technoetic/agentic-vault 레포에 있어.
+```
+
+Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
+
+```text
 /plugin marketplace add Technoetic/agentic-vault
 /plugin install agentic-vault@agentic-vault
-# Claude Code 재시작 (훅·명령 로드)
 ```
 
-**로컬 클론:**
+> [!IMPORTANT]
+> `/plugin` 슬래시 명령은 **사용자가 직접 입력**해야 적용됩니다. Claude가 Bash 도구로 대신 실행할 수 없습니다 (보안 제약). 설치 후 Claude Code를 재시작해야 훅·명령이 로드됩니다.
 
-```
-# 1. 이 저장소를 로컬에 두고 (예: D:\agentic-vault-plugin)
-/plugin marketplace add D:\agentic-vault-plugin
+### 방법 2 — 슬래시 명령 직접 입력
 
-# 2. 플러그인 설치
+```text
+/plugin marketplace add Technoetic/agentic-vault
 /plugin install agentic-vault@agentic-vault
-
-# 3. Claude Code 재시작 (훅·명령 로드)
 ```
 
-## 빠른 시작
+### 방법 3 — 로컬 클론 (개발 / 커스터마이즈)
 
+```text
+git clone https://github.com/Technoetic/agentic-vault D:\agentic-vault-plugin
+
+/plugin marketplace add D:\agentic-vault-plugin
+/plugin install agentic-vault@agentic-vault
 ```
-cd my-vault                # 볼트로 쓸 디렉토리 (기존 옵시디언 볼트도 가능)
+
+### 요구사항
+
+Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
+
+---
+
+<div align="center">
+
+## 📡 사용
+
+</div>
+
+### 볼트 만들기 (1회)
+
+```text
+cd my-vault            # 볼트로 쓸 디렉토리 (기존 옵시디언 볼트도 가능)
 claude
-/vault-init                # 디렉토리 골격 + vault-config.json + 템플릿 생성 (1회)
-/vault-session-start       # 세션 복원 — hot/handoff 브리핑
-... 작업 ...               # /vault-ingest, /vault-day, /vault-process-inbox 등
-/vault-session-end         # 세션 마감 — handoff/hot/log 갱신 (+백업)
+/vault-init 연구볼트
 ```
 
-이후 매 세션은 `/vault-session-start` → 작업 → `/vault-session-end` 사이클이다. SessionStart 훅이 볼트를 감지하면 핫 컨텍스트를 자동 주입하므로, 대부분의 경우 세션 시작 즉시 직전 상태를 이어받는다.
+### 매 세션 사이클
 
-## 명령 8종
+```text
+/vault-session-start   # 직전 상태 복원 (훅이 이미 주입했으면 브리핑만)
+... 작업 ...            # /vault-ingest · /vault-day · /vault-trace
+/vault-session-end     # 다음 세션 예약 — handoff·hot·log 갱신 + git 커밋
+```
 
-| 명령 | 설명 |
-|---|---|
-| `/vault-init` | 현재 디렉토리를 볼트로 초기화 — 표준 디렉토리 골격(00-meta/10-inbox/20-knowledge/30-journal/40-people/50-projects/90-assets)과 `vault-config.json`, 시스템 노트·템플릿 생성 |
-| `/vault-session-start` | 세션 복원 — hot·handoff·tasks를 읽고 현재 상태를 브리핑 |
-| `/vault-session-end` | 세션 마감 — handoff(완료/확인 필요/보류/다음 지시)·hot(500단어)·log 갱신, `backup_target` 설정 시 백업 실행 |
-| `/vault-day` | 오늘의 데일리 노트(`30-journal/YYYY/MM/`) 생성/추가 — 입력 텍스트를 위키링크와 함께 기록 |
-| `/vault-ingest` | 소스 문서 1건을 원자 노트로 분해해 `20-knowledge/`에 통합 (LLM Wiki 패턴) |
-| `/vault-process-inbox` | `10-inbox/` 수집 대기열을 정제해 영구 지식으로 병합하고 원본을 `_processed/`로 격리 |
-| `/vault-lint` | 무결성 검증 + 자가 치유 — 헬스체크 스크립트 실행 후 프런트매터 보완·데드링크 해소·고아 노드 연결·노화 문서 아카이브·SSOT 모순 보고·로그 태그 정비 |
-| `/vault-trace` | 키워드의 시계열 진화를 저널·미팅·지식·결정 노트 횡단으로 추적해 통찰 내러티브 생성 |
+### 볼트 정책 선언 — vault-config.json
 
-## vault-config.json — 볼트 정책 선언
-
-볼트의 루트 `00-meta/vault-config.json`이 볼트 감지 마커이자 정책의 단일 출처다. `/vault-init`이 기본값으로 생성하며, 이후 자유롭게 수정한다.
+<details>
+<summary><b>📋 19개 설정 키 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
-|---|---|
+|:---|:---|
 | `vault_name` | 볼트 표시 이름 |
 | `language` | 볼트 주 언어 (`ko`, `en` 등) — 생성 노트·브리핑 언어 |
 | `deny_zones` | 읽기·스캔 절대 금지 경로 목록 (격리·아카이브·바이너리 구역) |
 | `exclude_dirs` | 스캔 제외 디렉토리 (node_modules, .git 등 — 금지 구역은 아님) |
 | `required_keys` | 모든 노트 프런트매터의 필수 키 목록 |
-| `enums` | `type`·`status`·`ai_priority`의 허용 값 목록 — 임의 값 발명 차단 |
+| `enums` | `type`·`status`·`ai_priority`의 허용 값 — 임의 값 발명 차단 |
 | `frontmatter_max_lines` | 프런트매터 최대 줄 수 예산 |
 | `index_note` | 볼트 전체 지도 노트 경로 (노트 목록의 단일 원천) |
 | `log_note` | 작업 로그 노트 경로 (최상단 append, 1줄/작업) |
-| `log_tags` | 로그 연산 태그 허용 목록 — 로그를 grep 가능한 데이터로 유지 |
-| `log_tag_epoch` | 로그 태그 강제 시작일 — 이 날짜 이후 항목만 태그 검사(과거 소급 금지) |
+| `log_tags` | 로그 연산 태그 허용 목록 — 로그를 grep 가능한 데이터로 |
+| `log_tag_epoch` | 로그 태그 강제 시작일 — 이후 항목만 검사 (과거 소급 금지) |
 | `hot_note` | 핫 컨텍스트 노트 경로 (500단어 현재 상태 스냅숏) |
 | `handoff_note` | 세션 인계 노트 경로 — **빈 문자열이면 인계 기능 생략** |
 | `ssot_note` | 핵심 사실 SSOT 노트 경로 — **빈 문자열이면 SSOT 기능 생략** |
-| `ssot_facts` | `[{"label": "사실명", "pattern": "정규식"}]` — 볼트 전체에서 매치 값이 2종 이상이면 모순 보고 |
+| `ssot_facts` | `[{"label", "pattern"}]` — 볼트 전체에서 매치 값 2종 이상이면 모순 보고 |
 | `health_report` | 헬스체크 리포트 출력 경로 |
 | `backup_target` | 백업 대상 경로 — **빈 문자열이면 백업 생략** |
-| `stale_days` | (선택 확장) 노화 문서 검사 임계 일수 — 미설정 또는 0이면 검사 생략 |
-| `index_scopes` | (선택 확장) 인덱스 미등록 검사 대상 최상위 폴더 목록 — 미설정 시 기본 스코프(메타·구조 노트·저널 제외 전체) |
+| `stale_days` | (선택 확장) 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
+| `index_scopes` | (선택 확장) 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
 
 `handoff_note`·`ssot_note`·`backup_target`을 비워두면 해당 기능만 조용히 꺼진다(우아한 성능 저하) — 최소 구성으로 시작해 필요할 때 켜면 된다.
 
-## 훅 동작
+</details>
 
-- **SessionStart** — `CLAUDE_PROJECT_DIR`에 `00-meta/vault-config.json`이 존재하면(=볼트) hot/handoff 핫 컨텍스트를 세션에 자동 주입한다. 볼트가 아니면 아무 출력 없이 종료한다.
-- 훅 스크립트는 볼트 위치를 환경변수 `CLAUDE_PROJECT_DIR`에서 읽고, `hooks.json`의 경로는 `${CLAUDE_PLUGIN_ROOT}` 변수를 사용한다 — 설치 위치와 무관하게 동작한다.
-- 모든 훅·스크립트는 Python 표준 라이브러리만 사용한다 (PowerShell 등 셸 의존 없음).
+---
 
-## 구성 요소
+<div align="center">
 
-```
-agentic-vault/
-├── .claude-plugin/          # plugin.json · marketplace.json
-├── commands/                # vault-*.md 슬래시 명령 8종
-├── hooks/                   # hooks.json + 세션 훅 스크립트
-├── skills/agentic-vault/    # 볼트 작업 규율 스킬 (SKILL.md + references/)
-│   ├── SKILL.md             #   프런트매터·위키링크·SSOT·세션 인계 규율
-│   └── references/          #   linking-rules.md · memory-tiers.md
-└── assets/                  # 노트·시스템 파일 템플릿 12종 (/vault-init이 사용)
-```
+## 🧪 무결성 게이트 — fail-closed
 
-무결성 검사(헬스체크)와 백업은 플러그인 동봉 Python 스크립트가 수행하며 각각 `/vault-lint`, `/vault-session-end`가 호출한다.
+</div>
 
-## 스킬: 작업 규율
+`/vault-lint`와 SessionStart 훅이 실행하는 `vault_healthcheck.py`는 신호를 무의미하게 만드는 "매번 실패"를 배제한다 — **치명만 exit 1, 관리성은 리포트만**.
 
-`skills/agentic-vault/SKILL.md`는 볼트 디렉토리에서 작업할 때 Claude가 따르는 규율을 정의한다:
+| 등급 | 검사 항목 | 처리 |
+|:---:|:---|:---|
+| 🔴 **치명** (exit 1) | 프런트매터 붕괴 · 필수 키 누락 · Enum 위반 · **따옴표 없는 프런트매터 위키링크**(YAML 오파싱 = 메타데이터 계층 붕괴) · 로그 태그 누락·malformed 로그라인 | `/vault-lint`가 **즉시 치유** |
+| 🟡 **관리성** (exit 0) | 데드링크 · 고아/준고아 노드 · 인덱스 미등록 · 프런트매터 과대 · 노화 문서(선택) · SSOT 사실 모순(선택) | 리포트 누적 → **사용자 확인 후** 스텁 생성·링크 교정·아카이브 |
 
-1. **노트 생성 전 중복 grep** — index·대상 폴더 확인, 중복 생성 금지
-2. **프런트매터 스키마** — 필수 키·enum 준수, 프런트매터 내 위키링크는 이중 따옴표
-3. **원자 노트 + Aggressive Linking** — 고아 링크는 허용(다음 노트의 예약), 경로형 링크는 금지
-4. **index 등록 + log 태그 기록** — 작업의 기계 가독 흔적 남기기
-5. **SSOT 룩업** — 핵심 사실 값은 한 곳, 나머지는 위키링크 참조
-6. **계층형 메모리** — hot/handoff는 스냅숏, 모순 시 볼트 원본 우선
+> [!NOTE]
+> 이 등급 설계는 실제 볼트 운영 감사에서 얻은 교훈이다: **검사기가 감시하던 영역은 전부 건강했고, 감시 밖 영역만 예외 없이 부패해 있었다.** 자율 지침은 부패한다 — 코드로 강제된 규율만 살아남는다.
 
-## 라이선스
+---
 
-MIT — [LICENSE](LICENSE) 참조.
+<div align="center">
+
+## ⚠️ 한계 (정직성)
+
+</div>
+
+| # | 한계 | 대응 |
+|:---:|:---|:---|
+| 1 | `/plugin` 설치·제거는 사용자 직접 입력만 가능 (Claude 대행 불가) | README 안내 텍스트 복붙 |
+| 2 | SessionStart 훅 matcher는 `startup\|clear` — resume 세션엔 재주입 없음 | `/vault-session-start`를 수동 호출 |
+| 3 | 파일 **위치** 규율(볼트 루트 잡파일 등)은 healthcheck 검사 밖 | CLAUDE.md 행동 계약(산문)이 커버 — 향후 버전 후보 |
+| 4 | Python이 PATH에 없으면 훅·lint가 조용히 실패할 수 있음 | 요구사항 확인 (`python --version`) |
+| 5 | `backup_target`이 같은 물리 디스크면 디스크 장애는 미방어 | 외장·오프사이트 대상 별도 지정 권장 |
+
+---
+
+<div align="center">
+
+## 🧬 영감 / 출처
+
+</div>
+
+| 출처 | 무엇을 빌렸나 |
+|:---|:---|
+| [**Technoetic/harness107**](https://github.com/Technoetic/harness107) | **자매 레포** — harness107이 "실행"의 하네스라면 agentic-vault는 "기억"의 하네스. README 형식과 정직성 섹션 관행 공유 |
+| [Karpathy — LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) | 마크다운 리포를 LLM이 자가 관리하는 위키로 — index·log·ingest 사이클의 원형 |
+| 제텔카스텐 (Niklas Luhmann) | 원자 노트 · 밀집 링크 · "고아 링크는 미래 노트의 예약" 철학 |
+| MemGPT · A-MEM | OS 메모리 계층을 본뜬 티어드 메모리 — hot(캐시) → handoff(세션) → 볼트(디스크) |
+| [Anthropic — Effective context engineering](https://www.anthropic.com/engineering) | structured note-taking(파일 기반 에이전틱 메모리) 패턴의 공식 명명 |
+| [Obsidian](https://obsidian.md) | 위키링크 그래프 · 프런트매터 · 로컬 평문 소유권 |
+
+---
+
+<div align="center">
+
+## 📄 라이선스
+
+[![MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
+
+MIT License · Copyright (c) 2026 [전문준 (Technoetic)](https://github.com/Technoetic)
+
+<br/>
+
+**모델을 믿지 말고 파일을 믿어라.**
+
+<br/>
+
+[![Open in Claude Code](https://img.shields.io/badge/Open_in_Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
+[![Star this repo](https://img.shields.io/github/stars/Technoetic/agentic-vault?style=for-the-badge&color=F59E0B)](https://github.com/Technoetic/agentic-vault/stargazers)
+
+</div>
