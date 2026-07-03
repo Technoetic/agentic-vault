@@ -5,6 +5,8 @@
   "author": {
     "name": "전문준"
   },
+  "homepage": "https://github.com/Technoetic/agentic-vault",
+  "repository": "https://github.com/Technoetic/agentic-vault",
   "license": "MIT",
   "keywords": ["agentic-memory", "obsidian", "zettelkasten", "llm-wiki", "knowledge-vault", "context-engineering"]
 }

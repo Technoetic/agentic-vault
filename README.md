@@ -1,5 +1,7 @@
 # agentic-vault
 
+`v0.1.0` · MIT · Claude Code 플러그인
+
 **파일 기반 에이전틱 메모리** — 옵시디언 볼트를 Claude Code의 영구 상태 계층(Persistent State Layer)으로 쓰는 플러그인.
 
 컨텍스트 윈도우는 세션이 끝나면 휘발되지만, 평문 마크다운 볼트는 영속한다. 이 플러그인은 볼트를 **LLM Wiki**(위키링크 그래프) + **계층형 메모리**(hot/handoff/전체 페이징) + **제텔카스텐**(원자 노트·밀집 링크)으로 운영하는 데 필요한 기계 장치 일체 — 명령 8종, 세션 훅, 무결성 검사기, 백업 스크립트, 노트 템플릿 — 를 제공한다.
@@ -13,14 +15,24 @@
 - Claude Code (플러그인 지원 버전)
 - Python 3.10+ — 표준 라이브러리만 사용, Windows/macOS/Linux 크로스 플랫폼
 
-## 설치 (로컬 마켓플레이스)
+## 설치
+
+**GitHub (권장):**
+
+```
+/plugin marketplace add Technoetic/agentic-vault
+/plugin install agentic-vault@agentic-vault
+# Claude Code 재시작 (훅·명령 로드)
+```
+
+**로컬 클론:**
 
 ```
 # 1. 이 저장소를 로컬에 두고 (예: D:\agentic-vault-plugin)
 /plugin marketplace add D:\agentic-vault-plugin
 
 # 2. 플러그인 설치
-/plugin install agentic-vault@agentic-vault-dev
+/plugin install agentic-vault@agentic-vault
 
 # 3. Claude Code 재시작 (훅·명령 로드)
 ```
@@ -88,7 +100,7 @@ claude
 ## 구성 요소
 
 ```
-agentic-vault-plugin/
+agentic-vault/
 ├── .claude-plugin/          # plugin.json · marketplace.json
 ├── commands/                # vault-*.md 슬래시 명령 8종
 ├── hooks/                   # hooks.json + 세션 훅 스크립트

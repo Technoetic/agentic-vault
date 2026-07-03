@@ -1,8 +1,9 @@
 {
-  "name": "agentic-vault-dev",
-  "description": "agentic-vault 로컬 개발 마켓플레이스",
+  "name": "agentic-vault",
+  "description": "agentic-vault 플러그인 마켓플레이스 — 파일 기반 에이전틱 메모리",
   "owner": {
-    "name": "전문준"
+    "name": "전문준",
+    "url": "https://github.com/Technoetic"
   },
   "plugins": [
     {
