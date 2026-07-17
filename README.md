@@ -36,21 +36,21 @@
 </div>
 
 ```text
-사용자 →  /vault-init 연구볼트
-                        ↓
-   19 디렉토리 표준 트리(00-meta … 90-assets) + vault-config.json + 템플릿 12종
-                        ↓
-   ┌─────────────────── 매 세션 사이클 ───────────────────┐
-   │                                                      │
-   │  SessionStart hook ──►  handoff + hot 자동 주입       │
-   │        ↓                (직전 세션의 기억 복원)         │
-   │  작업: /vault-ingest · /vault-day · /vault-trace      │
-   │        ↓                (원자 노트 + 위키링크 + 로그)    │
-   │  /vault-session-end ──► handoff·hot·log 갱신          │
-   │        ↓                (다음 세션의 나에게 편지)        │
-   └──────────────────────────────────────────────────────┘
-                        ↓
-   /vault-lint  ──►  fail-closed 무결성 게이트 (치명이면 exit 1 → 즉시 치유)
+사용자 → /vault-init 연구볼트
+  ↓
+19 디렉토리 표준 트리(00-meta … 90-assets) + vault-config.json + 템플릿 12종
+  ↓
+┌─ 매 세션 사이클 ──────────────────────────
+│
+│  SessionStart hook ──► handoff + hot 자동 주입 (직전 세션의 기억 복원)
+│    ↓
+│  작업: /vault-ingest · /vault-day · /vault-trace (원자 노트 + 위키링크 + 로그)
+│    ↓
+│  /vault-session-end ──► handoff·hot·log 갱신 (다음 세션의 나에게 편지)
+│
+└──────────────────────────────────────────
+  ↓
+/vault-lint ──► fail-closed 무결성 게이트 (치명이면 exit 1 → 즉시 치유)
 ```
 
 > [!IMPORTANT]
