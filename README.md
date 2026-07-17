@@ -35,22 +35,22 @@
 
 </div>
 
-```text
-사용자 → /vault-init 연구볼트
-  ↓
-19 디렉토리 표준 트리(00-meta … 90-assets) + vault-config.json + 템플릿 12종
-  ↓
-┌─ 매 세션 사이클 ──────────────────────────
-│
-│  SessionStart hook ──► handoff + hot 자동 주입 (직전 세션의 기억 복원)
-│    ↓
-│  작업: /vault-ingest · /vault-day · /vault-trace (원자 노트 + 위키링크 + 로그)
-│    ↓
-│  /vault-session-end ──► handoff·hot·log 갱신 (다음 세션의 나에게 편지)
-│
-└──────────────────────────────────────────
-  ↓
-/vault-lint ──► fail-closed 무결성 게이트 (치명이면 exit 1 → 즉시 치유)
+```mermaid
+flowchart TB
+    U["👤 사용자"] -- "/vault-init 연구볼트" --> T["19 디렉토리 표준 트리(00-meta … 90-assets)<br/>+ vault-config.json + 템플릿 12종"]
+    subgraph CYCLE["🔄 매 세션 사이클"]
+        direction TB
+        H["🪝 SessionStart hook — handoff + hot 자동 주입<br/><i>직전 세션의 기억 복원</i>"]
+        W["작업: /vault-ingest · /vault-day · /vault-trace<br/><i>원자 노트 + 위키링크 + 로그</i>"]
+        E["/vault-session-end — handoff·hot·log 갱신<br/><i>다음 세션의 나에게 편지</i>"]
+        H --> W --> E
+    end
+    T --> CYCLE
+    CYCLE --> L["🛡️ /vault-lint — fail-closed 무결성 게이트<br/><i>치명이면 exit 1 → 즉시 치유</i>"]
+
+    style H fill:#7C3AED,color:#fff
+    style E fill:#F59E0B,color:#000
+    style L fill:#EF4444,color:#fff
 ```
 
 > [!IMPORTANT]
