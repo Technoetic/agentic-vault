@@ -88,6 +88,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 ```
 
 - **원격 push는 권하지 마라.** 볼트에는 기밀 노트가 쌓일 수 있으므로, 원격 도입은 사용자가 기밀 여부를 점검한 뒤 별도로 결정할 사안이라고 한 줄로만 안내하라(로컬 전용 권고).
+- **git 무결성 게이트 설치** (git을 켠 경우에만): `${CLAUDE_PLUGIN_ROOT}/assets/git-hooks/`의 `pre-commit`·`pre-push`를 볼트의 `00-meta/scripts/git-hooks/`로 복사하고(디렉토리 생성, 줄바꿈은 LF 유지) `git config core.hooksPath 00-meta/scripts/git-hooks`로 활성화하라. 효과를 한 줄로 안내하라: pre-commit은 지식 구역 노트의 프런트매터 누락·따옴표 없는 YAML 위키링크를 커밋 시점에 차단(fail-closed)하고, pre-push는 원격 push를 차단한다(우회는 `--no-verify` 명시로만).
 
 ## 7. 검증 (healthcheck)
 

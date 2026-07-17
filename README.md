@@ -60,7 +60,7 @@
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 8 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, a cross-platform backup script, and 12 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 8 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, a cross-platform backup script, and 12 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -81,7 +81,7 @@
 | `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
-| `/vault-session-end` | handoff·hot·log 갱신 + git 커밋(로컬) + 백업 권고 — **다음 세션 예약** |
+| `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + git 커밋(로컬) + 백업 권고 — **다음 세션 예약** |
 
 ---
 
@@ -243,7 +243,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.1.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.2.0 · MIT)
 │
 ├── commands/                          ← 8개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -268,12 +268,16 @@ agentic-vault/
 │       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기  🛡️
 │       └── backup_vault.py            ← robocopy/rsync/shutil + git bundle
 │
-└── assets/templates/                  ← 12개 노트·시스템 템플릿
-    ├── vault-config.json              ← 볼트 정책 단일 출처
-    ├── hot.md · handoff.md · index.md · log.md
-    ├── context.md · tasks.md · decisions.md · mistakes.md
-    ├── frontmatter-schema.md · CLAUDE-vault-section.md
-    └── settings-permissions.json      ← deny zone Read 차단 블록
+├── assets/templates/                  ← 12개 노트·시스템 템플릿
+│   ├── vault-config.json              ← 볼트 정책 단일 출처
+│   ├── hot.md · handoff.md · index.md · log.md
+│   ├── context.md · tasks.md · decisions.md · mistakes.md
+│   ├── frontmatter-schema.md · CLAUDE-vault-section.md
+│   └── settings-permissions.json      ← deny zone Read 차단 블록
+│
+└── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️
+    ├── pre-commit                     ← 커밋 시점 fail-closed 검증 (프런트매터·YAML 위키링크)
+    └── pre-push                       ← 원격 push 차단 (로컬 전용 기계 강제)
 ```
 
 ---
@@ -403,6 +407,10 @@ claude
 
 > [!NOTE]
 > 이 등급 설계는 실제 볼트 운영 감사에서 얻은 교훈이다: **검사기가 감시하던 영역은 전부 건강했고, 감시 밖 영역만 예외 없이 부패해 있었다.** 자율 지침은 부패한다 — 코드로 강제된 규율만 살아남는다.
+
+무결성 강제는 세 시점에 걸린다: **세션 시작**(SessionStart 훅의 비동기 검사) → **온디맨드**(`/vault-lint` 치유) → **커밋 순간**(git pre-commit 훅). 커밋 게이트는 `/vault-init`이 git을 켤 때 `assets/git-hooks/`의 훅을 볼트의 `00-meta/scripts/git-hooks/`에 설치하고 `core.hooksPath`로 활성화한다 — 스테이징된 노트의 프런트매터 누락·따옴표 없는 YAML 위키링크를 커밋 시점에 fail-closed로 차단하고, pre-push는 원격 push를 차단해 로컬 전용 정책을 기계 강제한다(우회는 `--no-verify` 명시로만). 오염이 리포지토리 이력에 들어가기 **전에** 막는 마지막 방어선이다.
+
+또한 handoff 상단의 **기준 커밋(anchor)** 줄이 "이 handoff가 반영하는 볼트 시점"을 git 해시로 고정한다 — `/vault-session-end`가 갱신하고, `/vault-session-start`가 `anchor..HEAD` 차이를 브리핑에 반영해 handoff의 point-in-time 어긋남을 결정론적으로 해소한다.
 
 ---
 

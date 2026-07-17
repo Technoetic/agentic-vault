@@ -1,0 +1,54 @@
+#!/bin/sh
+# agentic-vault pre-commit 무결성 게이트 (lint 축약판, fail-closed)
+#
+# 스테이징된 .md 파일만 검사한다:
+#   [규칙 A] 지식 구역(00-meta 직속·20-knowledge·30-journal·40-people·50-projects)
+#            노트는 YAML 프런트매터(첫 줄 '---')가 필수다.
+#   [규칙 B] 프런트매터 안의 위키링크는 반드시 이중 따옴표로 감싼다.
+#            따옴표 없는 [[ ]]는 YAML 오파싱으로 Dataview를 붕괴시킨다.
+#
+# 검사 대상은 워킹트리가 아니라 **스테이징된 내용**(git show :파일)이다.
+# 구역을 커스터마이즈하려면 아래 case 패턴을 수정하라.
+# 전체 검증: /vault-lint  /  명시 우회(비권장): git commit --no-verify
+
+files=$(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+[ -z "$files" ] && exit 0
+
+fail=0
+IFS='
+'
+for f in $files; do
+  # ---- 규칙 A: 프런트매터 필수 구역 판정 ----
+  need_fm=0
+  case "$f" in
+    00-meta/scratch/*|00-meta/scripts/*) need_fm=0 ;;
+    10-inbox/*) need_fm=0 ;;
+    00-meta/*|20-knowledge/*|30-journal/*|40-people/*|50-projects/*) need_fm=1 ;;
+  esac
+
+  first=$(git show ":$f" 2>/dev/null | head -n 1 | tr -d '\r' | sed 's/^\xef\xbb\xbf//')
+  if [ "$need_fm" = "1" ] && [ "$first" != "---" ]; then
+    echo "🚫 [pre-commit] 프런트매터 누락: $f" >&2
+    echo "   지식 구역의 모든 노트는 YAML 프런트매터로 시작해야 합니다 (스키마: 00-meta/schemas/frontmatter.md)." >&2
+    fail=1
+  fi
+
+  # ---- 규칙 B: 프런트매터 내 따옴표 없는 위키링크 ----
+  if [ "$first" = "---" ]; then
+    fm=$(git show ":$f" | tr -d '\r' | awk 'NR==1{next} /^---$/{exit} {print}')
+    bad=$(printf '%s\n' "$fm" | sed 's/"\[\[//g' | sed "s/'\[\[//g" | grep -n '\[\[')
+    if [ -n "$bad" ]; then
+      echo "🚫 [pre-commit] 프런트매터에 따옴표 없는 위키링크: $f" >&2
+      printf '%s\n' "$bad" | sed 's/^/   → 프런트매터 내부 /' >&2
+      echo '   반드시 related: ["[[노트 이름]]"] 형태로 감싸세요 — 따옴표 없으면 YAML 오파싱으로 시스템 붕괴.' >&2
+      fail=1
+    fi
+  fi
+done
+
+if [ "$fail" = "1" ]; then
+  echo "" >&2
+  echo "커밋이 차단되었습니다. 위 노트를 수정한 뒤 다시 커밋하세요. (전체 검증: /vault-lint, 명시 우회: --no-verify)" >&2
+  exit 1
+fi
+exit 0
