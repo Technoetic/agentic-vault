@@ -130,7 +130,9 @@ def run_claude(vault: Path, cfg: dict, prompt: str) -> str:
         f"(1) 탐색 순서 {cfg['_hot_note']} → 00-meta/index.md → Grep. "
         f"(2) 다음 경로는 절대 읽지 마라: {deny}, **/.env, 90-assets/. "
         f"(3) 볼트 내용만 근거로 {cfg['_language']} 언어로 간결히 답하고 근거 노트명을 인용하라. "
-        "(4) 볼트에 근거가 없으면 없다고 답하라. 파일 생성·수정·삭제는 절대 하지 마라."
+        "(4) 볼트에 근거가 없으면 없다고 답하라. 파일 생성·수정·삭제는 절대 하지 마라. "
+        "(5) 출력은 Telegram 메시지다 — 마크다운 표를 절대 쓰지 마라(렌더링 불가). "
+        "표가 필요한 내용은 항목별 불릿(·)으로 풀고, 제목은 짧은 굵은 줄로, 전체를 모바일 가독 길이로."
     )
     cmd = [exe, "-p", prompt,
            "--allowedTools", "Read", "Grep", "Glob",
@@ -222,6 +224,13 @@ def md_to_telegram_html(text: str) -> str:
     import re
     out_lines = []
     for line in text.splitlines():
+        # 마크다운 표 폴백: 구분선은 버리고, 행은 불릿으로 푼다 (Telegram은 표 렌더링 불가)
+        s = line.strip()
+        if s.startswith("|") and s.endswith("|"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if all(set(c) <= set("-: ") for c in cells):
+                continue  # |---|---| 구분선 제거
+            line = "• " + " · ".join(c for c in cells if c)
         esc = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         esc = re.sub(r"`([^`]+)`", r"<code>\1</code>", esc)
         esc = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", esc)
@@ -383,6 +392,9 @@ def self_test() -> int:
               "<b>굵게</b>" in html and "<code>코드</code>" in html
               and "<i>노트</i>" in html and "a&lt;b" in html)
         check("html: 줄단위 분할", len(_chunks_by_line("x\n" * 3000)) >= 2)
+        tbl = md_to_telegram_html("| 순위 | 방식 |\n|---|---|\n| 1위 | CLI 사내 |")
+        check("html: 표 → 불릿 변환·구분선 제거",
+              "• 순위 · 방식" in tbl and "• 1위 · CLI 사내" in tbl and "---" not in tbl)
         # ⑤ 환경 (실패 아닌 경고)
         check("env: claude CLI 탐지", shutil.which(DEFAULTS["claude_cmd"]) is not None, warn=True)
         check("env: JARVIS_TELEGRAM_TOKEN 설정", bool(os.environ.get("JARVIS_TELEGRAM_TOKEN")), warn=True)
