@@ -164,12 +164,14 @@ def do_brief(vault: Path, cfg: dict) -> str:
 
 
 def do_status(vault: Path, started: float) -> str:
-    head = _git(vault, "rev-parse", "--short", "HEAD") or "(git 없음)"
+    last = _git(vault, "log", "-1", "--date=format:%m-%d %H:%M", "--format=%ad — %s (%h)") \
+        or "(git 이력 없음)"
     inbox = vault / "10-inbox"
     pending = sum(1 for p in inbox.rglob("*.md") if "_processed" not in p.parts) if inbox.is_dir() else 0
     up_h = (time.time() - started) / 3600
-    return (f"🤖 상태\n· HEAD: {head}\n· 인박스 대기: {pending}건\n"
-            f"· 브리지 가동: {up_h:.1f}시간")
+    return (f"🤖 상태\n· 마지막 저장: {last}\n"
+            f"· 인박스 대기: {pending}건" + (" — 정제 권장" if pending >= 5 else "") +
+            f"\n· 브리지 가동: {up_h:.1f}시간")
 
 
 def do_butler(vault: Path, cfg: dict) -> str:
@@ -277,7 +279,8 @@ def serve(vault: Path, cfg: dict) -> None:
     qa_times: deque[float] = deque()
     offset_file = STATE_DIR / "offset"
     offset = int(offset_file.read_text()) if offset_file.is_file() else 0
-    last_butler = 0.0
+    butler_file = STATE_DIR / "last_butler"
+    last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
     brief_h, brief_m = map(int, cfg["briefing_time"].split(":"))
     # 기동 시각이 이미 브리핑 시각을 지났으면 오늘분은 발송하지 않는다(재기동 폭주 방지)
     _n = datetime.now()
@@ -295,6 +298,7 @@ def serve(vault: Path, cfg: dict) -> None:
                 tg_send(token, first, "🌅 아침 브리핑\n" + do_brief(vault, cfg))
             if time.time() - last_butler > cfg["butler_interval_hours"] * 3600:
                 last_butler = time.time()
+                butler_file.write_text(str(last_butler))
                 tg_send(token, first, do_butler(vault, cfg))
         # --- 수신 ---
         try:
