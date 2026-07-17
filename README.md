@@ -10,12 +10,12 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.1.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.1.0)
+[![Version](https://img.shields.io/badge/v0.3.1-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.3.1)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-8-F59E0B?style=for-the-badge)](commands/)
+[![Commands](https://img.shields.io/badge/Commands-9-F59E0B?style=for-the-badge)](commands/)
 [![Templates](https://img.shields.io/badge/Templates-12-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
