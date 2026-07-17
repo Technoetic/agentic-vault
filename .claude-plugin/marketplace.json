@@ -9,7 +9,7 @@
     {
       "name": "agentic-vault",
       "description": "파일 기반 에이전틱 메모리 — 옵시디언 볼트를 Claude Code의 영구 상태 계층으로",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "source": "./",
       "author": {
         "name": "전문준"

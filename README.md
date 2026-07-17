@@ -244,7 +244,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.3.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.3.1 · MIT)
 │
 ├── commands/                          ← 8개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
