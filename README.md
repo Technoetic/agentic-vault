@@ -10,12 +10,12 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.4.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.4.0)
+[![Version](https://img.shields.io/badge/v0.5.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.5.0)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-9-F59E0B?style=for-the-badge)](commands/)
+[![Commands](https://img.shields.io/badge/Commands-10-F59E0B?style=for-the-badge)](commands/)
 [![Templates](https://img.shields.io/badge/Templates-13-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
@@ -60,7 +60,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 9 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -83,6 +83,7 @@ flowchart TB
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
+| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장·jarvis 블록·git 훅·anchor를 멱등 설치(기존 값 불변) |
 
 ---
 
@@ -99,7 +100,7 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 9종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 10종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>미러 + git bundle</i>"]
@@ -249,9 +250,9 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.4.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.5.0 · MIT)
 │
-├── commands/                          ← 9개 슬래시 커맨드
+├── commands/                          ← 10개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
 │   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
@@ -260,7 +261,8 @@ agentic-vault/
 │   ├── vault-process-inbox.md         ← 인박스 정제 + _processed 격리
 │   ├── vault-lint.md                  ← 무결성 검증 + 자가 치유  🛡️
 │   ├── vault-trace.md                 ← 키워드 시계열 횡단 추적
-│   └── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
+│   ├── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
+│   └── vault-upgrade.md               ← 기존 볼트를 현재 엔진으로 (멱등)  ⬆️
 │
 ├── hooks/
 │   ├── hooks.json                     ← SessionStart 바인딩 (주입 + 비동기 검사)
