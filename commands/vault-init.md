@@ -39,6 +39,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 | `hot.md` | `00-meta/hot.md` | 항상 |
 | `index.md` | `00-meta/index.md` | 항상 |
 | `log.md` | `00-meta/log.md` | 항상 |
+| `lessons.md` | `00-meta/lessons.md` | 항상 (자기개선 루프 — 교훈 대장) |
 | `context.md` | `50-projects/<프로젝트명>/<프로젝트명> context.md` | 프로젝트명 있을 때만 |
 | `tasks.md` | `50-projects/<프로젝트명>/<프로젝트명> tasks.md` | 〃 |
 | `handoff.md` | `50-projects/<프로젝트명>/<프로젝트명> handoff.md` | 〃 |

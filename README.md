@@ -10,13 +10,13 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.3.1-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.3.1)
+[![Version](https://img.shields.io/badge/v0.4.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.4.0)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
 [![Commands](https://img.shields.io/badge/Commands-9-F59E0B?style=for-the-badge)](commands/)
-[![Templates](https://img.shields.io/badge/Templates-12-22C55E?style=for-the-badge)](assets/templates/)
+[![Templates](https://img.shields.io/badge/Templates-13-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
 [![Doctrine](https://img.shields.io/badge/플러그인=엔진_·_볼트=데이터-EC4E20?style=for-the-badge)](#-6개-핵심-철학)
@@ -37,7 +37,7 @@
 
 ```mermaid
 flowchart TB
-    U["👤 사용자"] -- "/vault-init 연구볼트" --> T["19 디렉토리 표준 트리(00-meta … 90-assets)<br/>+ vault-config.json + 템플릿 12종"]
+    U["👤 사용자"] -- "/vault-init 연구볼트" --> T["19 디렉토리 표준 트리(00-meta … 90-assets)<br/>+ vault-config.json + 템플릿 13종"]
     subgraph CYCLE["🔄 매 세션 사이클"]
         direction TB
         H["🪝 SessionStart hook — handoff + hot 자동 주입<br/><i>직전 세션의 기억 복원</i>"]
@@ -60,7 +60,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 9 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a cross-platform backup script, and 12 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 9 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -81,7 +81,7 @@ flowchart TB
 | `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
-| `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + git 커밋(로컬) + 백업 권고 — **다음 세션 예약** |
+| `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
 
 ---
@@ -104,7 +104,7 @@ flowchart TB
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>미러 + git bundle</i>"]
         JB["jarvis_bridge.py<br/><i>Telegram 자비스 🤖</i>"]
-        TPL["assets/templates/<br/><i>노트 템플릿 12종</i>"]
+        TPL["assets/templates/<br/><i>노트 템플릿 13종</i>"]
         SK["SKILL.md<br/><i>작업 규율</i>"]
     end
 
@@ -164,6 +164,8 @@ OS 메모리 계층처럼 읽는다: **자주 쓰는 것일수록 위층, 필요
 SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부분의 세션은 시작 즉시 직전 상태를 이어받는다.
 
 선택적으로 **장기 기억 MCP**(예: [memoryhub.ai](https://memoryhub.ai))를 세션 횡단 회상 계층으로 연결할 수 있다 — 단 역할 경계는 엄격하다: **볼트 = 진실의 원천(사람이 읽는 구조화 지식), 장기 기억 MCP = 기계 회상(세션 횡단 교훈·결정 원칙)**. 회상이 볼트와 모순되면 볼트가 우선한다.
+
+교훈도 계층을 탄다 — **자기개선 루프**: 매 세션의 교훈이 `00-meta/lessons.md` 대장에 축적되고, 같은 교훈이 **3회 반복**되면 `/vault-session-end`가 스킬 승격(CLAUDE.md 계약 조항 · 새 명령 · 기존 문서 보강)을 제안한다. **자동 승격은 없다 — 제안뿐이고 승인은 사람이 한다.** 잘못된 교훈이 규칙으로 굳는 오염을 구조로 차단한 것이다.
 
 ```mermaid
 sequenceDiagram
@@ -247,7 +249,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.3.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.4.0 · MIT)
 │
 ├── commands/                          ← 9개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -274,7 +276,7 @@ agentic-vault/
 │       ├── backup_vault.py            ← robocopy/rsync/shutil + git bundle
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
-├── assets/templates/                  ← 12개 노트·시스템 템플릿
+├── assets/templates/                  ← 13개 노트·시스템 템플릿
 │   ├── vault-config.json              ← 볼트 정책 단일 출처
 │   ├── hot.md · handoff.md · index.md · log.md
 │   ├── context.md · tasks.md · decisions.md · mistakes.md
@@ -472,7 +474,7 @@ claude
 | [Anthropic — Effective context engineering](https://www.anthropic.com/engineering) | structured note-taking(파일 기반 에이전틱 메모리) 패턴의 공식 명명 |
 | [MemoryHub](https://memoryhub.ai) | 기억 3계층 경계의 실전 원형 — 볼트(진실의 원천) vs 장기 기억 MCP(세션 횡단 기계 회상)의 역할 분리와 "모순 시 볼트 우선" 원칙 |
 | [OpenClaw](https://github.com/openclaw/openclaw) | 🤖 Jarvis 계층의 "몸통" 사상 — 메신저 편재성·상시 데몬·cron 선발화. 우리는 채널 20종 대신 **1채널 최소판**으로 흡수하고 몸통 인프라 재발명은 의도적으로 포기 |
-| [hermes-agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | 에이전트 **선별** 메모리 사상 — "아무거나 다 기억하지 않는다"를 캡처→인박스→사람 있는 세션 정제로 구현. 자기개선 스킬 루프는 2단계 흡수 예정(스펙 §8) |
+| [hermes-agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | 에이전트 **선별** 메모리 사상(캡처→인박스→사람 있는 세션 정제)과 **자기개선 스킬 루프** — 후자는 `lessons.md` 대장 + 반복 3회 승격 제안으로 파일 기반 흡수(자동 승격 없음, v0.4.0) |
 | [Obsidian](https://obsidian.md) | 위키링크 그래프 · 프런트매터 · 로컬 평문 소유권 |
 
 ---
