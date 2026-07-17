@@ -214,11 +214,50 @@ def tg_call(token: str, method: str, http_timeout: int = 65, **params) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def md_to_telegram_html(text: str) -> str:
+    """claude 출력 마크다운을 Telegram HTML로 결정론 변환.
+    지원: 헤더(#..)→굵게, **굵게**, `코드`, [[위키링크]]→기울임. 나머지는 이스케이프."""
+    import re
+    out_lines = []
+    for line in text.splitlines():
+        esc = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        esc = re.sub(r"`([^`]+)`", r"<code>\1</code>", esc)
+        esc = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", esc)
+        esc = re.sub(r"\[\[([^\]]+)\]\]", r"<i>\1</i>", esc)
+        m = re.match(r"^(#{1,6})\s+(.*)$", esc)
+        if m:
+            esc = f"<b>{m.group(2)}</b>"
+        out_lines.append(esc)
+    return "\n".join(out_lines)
+
+
+def _chunks_by_line(text: str, limit: int = 3500) -> list[str]:
+    """태그가 조각나지 않도록 줄 단위로 분할."""
+    chunks, cur = [], ""
+    for line in text.splitlines(keepends=True):
+        if len(cur) + len(line) > limit and cur:
+            chunks.append(cur)
+            cur = ""
+        cur += line
+    if cur:
+        chunks.append(cur)
+    return chunks or [""]
+
+
 def tg_send(token: str, chat_id: int, text: str) -> None:
-    for i in range(0, len(text), TG_CHUNK):
+    for chunk in _chunks_by_line(text):
+        html = md_to_telegram_html(chunk)
         try:
             tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
-                    text=text[i:i + TG_CHUNK])
+                    text=html, parse_mode="HTML")
+        except urllib.error.HTTPError as e:
+            log(f"HTML 전송 실패({e.code}) — 플레인 폴백")
+            try:
+                tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
+                        text=chunk)
+            except (urllib.error.URLError, OSError) as e2:
+                log(f"sendMessage 실패: {e2}")
+                return
         except (urllib.error.URLError, OSError) as e:
             log(f"sendMessage 실패: {e}")
             return
@@ -238,9 +277,11 @@ def serve(vault: Path, cfg: dict) -> None:
     qa_times: deque[float] = deque()
     offset_file = STATE_DIR / "offset"
     offset = int(offset_file.read_text()) if offset_file.is_file() else 0
-    last_brief: date | None = None
     last_butler = 0.0
     brief_h, brief_m = map(int, cfg["briefing_time"].split(":"))
+    # 기동 시각이 이미 브리핑 시각을 지났으면 오늘분은 발송하지 않는다(재기동 폭주 방지)
+    _n = datetime.now()
+    last_brief: date | None = _n.date() if (_n.hour, _n.minute) >= (brief_h, brief_m) else None
     log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}")
 
     while True:
@@ -271,7 +312,7 @@ def serve(vault: Path, cfg: dict) -> None:
             text = msg.get("text", "")
             frm = (msg.get("from") or {}).get("id")
             chat = (msg.get("chat") or {}).get("id")
-            if not text or frm is None:
+            if not text or frm is None or chat is None:
                 continue
             if frm not in whitelist:
                 log(f"미등재 발신자 폐기: from={frm}")
@@ -331,7 +372,14 @@ def self_test() -> int:
         name = do_capture(tv, "테스트 본문", "selftest")
         written = (tv / "10-inbox" / "jarvis" / name).read_text(encoding="utf-8")
         check("capture: 파일 생성·내용 일치", written.startswith("테스트 본문"))
-        # ④ 환경 (실패 아닌 경고)
+        # ④ Telegram HTML 변환
+        html = md_to_telegram_html("## 제목\n**굵게** `코드` [[노트]] a<b")
+        check("html: 헤더 → <b>", "<b>제목</b>" in html)
+        check("html: 굵게·코드·위키링크·이스케이프",
+              "<b>굵게</b>" in html and "<code>코드</code>" in html
+              and "<i>노트</i>" in html and "a&lt;b" in html)
+        check("html: 줄단위 분할", len(_chunks_by_line("x\n" * 3000)) >= 2)
+        # ⑤ 환경 (실패 아닌 경고)
         check("env: claude CLI 탐지", shutil.which(DEFAULTS["claude_cmd"]) is not None, warn=True)
         check("env: JARVIS_TELEGRAM_TOKEN 설정", bool(os.environ.get("JARVIS_TELEGRAM_TOKEN")), warn=True)
         # ⑤ 로그 쓰기
@@ -359,7 +407,10 @@ def self_test() -> int:
 
 def main() -> None:
     if sys.platform == "win32":
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except AttributeError:
+            pass
     ap = argparse.ArgumentParser(description="agentic-vault Jarvis Telegram bridge")
     ap.add_argument("--vault", default=".", help="볼트 루트 경로")
     ap.add_argument("--self-test", action="store_true", help="네트워크 없는 자체 검증")
