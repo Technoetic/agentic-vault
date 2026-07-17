@@ -19,5 +19,14 @@
   "ssot_note": "",
   "ssot_facts": [],
   "health_report": "00-meta/health-report.md",
-  "backup_target": ""
+  "backup_target": "",
+  "jarvis": {
+    "enabled": false,
+    "telegram_user_ids": [],
+    "briefing_time": "07:30",
+    "butler_interval_hours": 24,
+    "qa_hourly_limit": 6,
+    "qa_timeout_sec": 180,
+    "claude_cmd": "claude"
+  }
 }

@@ -82,6 +82,7 @@ flowchart TB
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + git 커밋(로컬) + 백업 권고 — **다음 세션 예약** |
+| `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
 
 ---
 
@@ -243,7 +244,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.2.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.3.0 · MIT)
 │
 ├── commands/                          ← 8개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -253,7 +254,8 @@ agentic-vault/
 │   ├── vault-ingest.md                ← 소스 → 원자 노트 소화 (LLM Wiki 패턴)
 │   ├── vault-process-inbox.md         ← 인박스 정제 + _processed 격리
 │   ├── vault-lint.md                  ← 무결성 검증 + 자가 치유  🛡️
-│   └── vault-trace.md                 ← 키워드 시계열 횡단 추적
+│   ├── vault-trace.md                 ← 키워드 시계열 횡단 추적
+│   └── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
 │
 ├── hooks/
 │   ├── hooks.json                     ← SessionStart 바인딩 (주입 + 비동기 검사)
@@ -266,7 +268,8 @@ agentic-vault/
 │   │   └── memory-tiers.md            ← 계층형 메모리 + SSOT 룩업 설계
 │   └── scripts/
 │       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기  🛡️
-│       └── backup_vault.py            ← robocopy/rsync/shutil + git bundle
+│       ├── backup_vault.py            ← robocopy/rsync/shutil + git bundle
+│       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
 ├── assets/templates/                  ← 12개 노트·시스템 템플릿
 │   ├── vault-config.json              ← 볼트 정책 단일 출처
@@ -389,6 +392,27 @@ claude
 `handoff_note`·`ssot_note`·`backup_target`을 비워두면 해당 기능만 조용히 꺼진다(우아한 성능 저하) — 최소 구성으로 시작해 필요할 때 켜면 된다.
 
 </details>
+
+---
+
+<div align="center">
+
+## 🤖 Jarvis 계층 — 먼저 말 걸고, 받아적고, 물으면 답하는 (선택)
+
+</div>
+
+`/vault-jarvis-setup`으로 Telegram 봇을 연결하면 볼트가 개인 비서가 된다 — 몸통은 최소(브리지 1개·채널 1개), 두뇌(기억·지식)는 볼트 4축이 담당한다.
+
+| 능력 | 동작 | LLM |
+|:---|:---|:---:|
+| 🌅 아침 브리핑 | 매일 지정 시각, hot·handoff·log·git 활동을 종합해 푸시 (`/brief`로 즉석 호출) | 읽기전용 |
+| 📝 원격 캡처 | `기억해: ...` → `10-inbox/jarvis/`에 저장, `/vault-process-inbox`로 정제 | **무관여** |
+| 💬 볼트 Q&A | 자유 질문 → hot→index→grep 탐색 후 근거 노트 인용 답변 | 읽기전용 |
+| 🧹 집사 보고 | 주기적으로 healthcheck·mirror push·인박스 현황 보고 (치유는 안 함) | 무관여 |
+
+**보안 경계 (하드 룰):** 숫자 user ID 화이트리스트 외 발신자는 무응답 폐기 · Q&A 세션 도구는 `Read Grep Glob`뿐(쓰기·Bash 영구 불허) · 자비스의 볼트 쓰기는 인박스 한 곳 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵.
+
+절충의 이유: 채널 20종·음성 같은 몸통 인프라는 OpenClaw의 영역이라 재발명하지 않는다 — 이 계층은 "볼트를 두뇌로 쓰는 최소 자비스"다.
 
 ---
 

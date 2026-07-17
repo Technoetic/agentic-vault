@@ -34,9 +34,9 @@
 - 메인 루프 — getUpdates(timeout=50) 롱폴링, private 챗 + 화이트리스트 필터, 라우팅·응답, `briefing_time` 1일 1회·`butler_interval_hours` 주기 스케줄, `qa_hourly_limit` 레이트리밋
 - `--self-test` — 네트워크 없이 임시 볼트 스캐폴드로 검증
 
-- [ ] **Step 1: 스크립트 작성** (계약 위 정의대로; Q&A 시스템 프롬프트 가드에 deny_zones·`.env` 금지·hot→index→grep 순서·언어 키 포함)
-- [ ] **Step 2: self-test 케이스** — ①config: 볼트 아님→None / 블록 없음→None / enabled false→None / 정상→dict ②route 5분기(기억해:·메모·remember·/brief·/status·일반 질문) ③capture 임시 인박스에 파일 생성·내용 일치 ④claude CLI 탐지(부재 시 WARN, FAIL 아님) ⑤로그 디렉토리 쓰기. PASS/FAIL 표 출력, FAIL>0이면 exit 1
-- [ ] **Step 3: `python jarvis_bridge.py --self-test` 실행 → 전 항목 PASS 확인**
+- [x] **Step 1: 스크립트 작성** (계약 위 정의대로; Q&A 시스템 프롬프트 가드에 deny_zones·`.env` 금지·hot→index→grep 순서·언어 키 포함)
+- [x] **Step 2: self-test 케이스** — ①config: 볼트 아님→None / 블록 없음→None / enabled false→None / 정상→dict ②route 5분기(기억해:·메모·remember·/brief·/status·일반 질문) ③capture 임시 인박스에 파일 생성·내용 일치 ④claude CLI 탐지(부재 시 WARN, FAIL 아님) ⑤로그 디렉토리 쓰기. PASS/FAIL 표 출력, FAIL>0이면 exit 1
+- [x] **Step 3: `python jarvis_bridge.py --self-test` 실행 → 전 항목 PASS 확인**
 - [ ] **Step 4: Commit** `feat: jarvis_bridge.py — Telegram 브리지 + self-test`
 
 ### Task 2: 설정 표면 — config 템플릿 + `/vault-jarvis-setup`
