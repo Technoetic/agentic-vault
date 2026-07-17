@@ -99,7 +99,7 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 8종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 9종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>미러 + git bundle</i>"]
@@ -246,7 +246,7 @@ graph TB
 agentic-vault/
 ├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.3.1 · MIT)
 │
-├── commands/                          ← 8개 슬래시 커맨드
+├── commands/                          ← 9개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
 │   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
