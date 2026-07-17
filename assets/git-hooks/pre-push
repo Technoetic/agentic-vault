@@ -3,10 +3,17 @@
 #
 # 개인 지식 볼트에는 기밀·개인정보 노트가 축적될 수 있다.
 # 이 훅은 사용자가 기밀 여부를 점검하고 명시적으로 결정하기 전까지
-# 모든 원격 push를 차단한다(로컬 전용 권고 — README '한계' 참조).
+# 네트워크 원격(https/ssh/git/UNC) push를 차단한다(로컬 전용 권고 — README '한계' 참조).
+#
+# 예외: 같은 머신 안의 로컬 경로 미러(bare 백업 리포)는 유출이 아니므로 허용한다.
 #
 # 정당한 원격 배포: 기밀 제거 브랜치를 만든 뒤 --no-verify로 명시 우회.
 # 훅 전체 비활성화: git config --unset core.hooksPath
+
+remote_url="$2"
+case "$remote_url" in
+  file://*|[A-Za-z]:*|/*) exit 0 ;;
+esac
 
 echo "" >&2
 echo "🚫 차단됨 — 이 볼트는 로컬 전용입니다(agentic-vault 기본 정책)." >&2
