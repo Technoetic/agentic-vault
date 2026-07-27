@@ -60,7 +60,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, local-only push blocking), a handoff commit anchor for deterministic session diffs, an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -151,7 +151,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    L0["CLAUDE.md<br/><i>상주 계약</i><br/>~1K 단어"] --> L1["hot.md<br/><i>핫 캐시</i><br/>500 단어"]
+    L0[".claude/rules/ 5종 + CLAUDE.md 스텁<br/><i>상주 계약 (3층)</i><br/>엔진 규칙 + 볼트 고유"] --> L1["hot.md<br/><i>핫 캐시</i><br/>500 단어"]
     L1 --> L2["handoff.md<br/><i>세션 캐시</i><br/>직전 세션 인계"]
     L2 --> L3["볼트 전체<br/><i>장기 저장소</i><br/>grep · index 페이징"]
 
@@ -163,6 +163,16 @@ flowchart LR
 
 OS 메모리 계층처럼 읽는다: **자주 쓰는 것일수록 위층, 필요한 만큼만, 위층부터.**
 SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부분의 세션은 시작 즉시 직전 상태를 이어받는다.
+
+상주 계약(L0)은 v0.6.0부터 **소유권으로 3층 분리**된다:
+
+| 층 | 파일 | 소유 | 업그레이드 |
+|---|---|---|---|
+| 엔진 규칙 | `.claude/rules/vault-*.md` 5종 (architecture·linking·frontmatter·workflow·collab) | 엔진 | `/vault-upgrade`가 `engine=` 스탬프 비교 후 **통째 교체** |
+| 볼트 정체성·고유 규칙 | `CLAUDE.md` (스텁 + 사용자 추가분) | 사용자 | 건드리지 않음 |
+| 타 에이전트 계약 | `AGENTS.md` | 생성 산출물 | rules에서 재생성 (Claude Code는 이 파일을 읽지 않는다) |
+
+`paths` 프런트매터 없는 rules는 세션 시작 시 CLAUDE.md와 **동등 우선순위로 무조건 로드**되고(공식 사양), 서브에이전트에도 동등 상속된다(headless 실측 검증). 분할의 목적은 토큰 절약이 아니라 **업그레이드를 병합에서 파일 교체로 바꾸는 것**이다 — 엔진 규칙과 사용자 편집이 한 파일에 섞이는 순간 모든 업그레이드가 diff 병합이 된다.
 
 선택적으로 **장기 기억 MCP**(예: [memoryhub.ai](https://memoryhub.ai))를 세션 횡단 회상 계층으로 연결할 수 있다 — 단 역할 경계는 엄격하다: **볼트 = 진실의 원천(사람이 읽는 구조화 지식), 장기 기억 MCP = 기계 회상(세션 횡단 교훈·결정 원칙)**. 회상이 볼트와 모순되면 볼트가 우선한다.
 
@@ -456,7 +466,7 @@ claude
 |:---:|:---|:---|
 | 1 | `/plugin` 설치·제거는 사용자 직접 입력만 가능 (Claude 대행 불가) | README 안내 텍스트 복붙 |
 | 2 | SessionStart 훅 matcher는 `startup\|clear` — resume 세션엔 재주입 없음 | `/vault-session-start`를 수동 호출 |
-| 3 | 파일 **위치** 규율(볼트 루트 잡파일 등)은 healthcheck 검사 밖 | CLAUDE.md 행동 계약(산문)이 커버 — 향후 버전 후보 |
+| 3 | 파일 **위치** 규율(볼트 루트 잡파일 등)은 healthcheck 검사 밖 | 행동 계약(`.claude/rules/` 산문)이 커버 — 향후 버전 후보 |
 | 4 | Python이 PATH에 없으면 훅·lint가 조용히 실패할 수 있음 | 요구사항 확인 (`python --version`) |
 | 5 | `backup_target`이 같은 물리 디스크면 디스크 장애는 미방어 | 외장·오프사이트 대상 별도 지정 권장 |
 
