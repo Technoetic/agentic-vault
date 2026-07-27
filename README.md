@@ -10,7 +10,7 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.6.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.6.0)
+[![Version](https://img.shields.io/badge/v0.7.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.7.0)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -260,7 +260,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.6.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.7.0 · MIT)
 │
 ├── commands/                          ← 10개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -284,7 +284,8 @@ agentic-vault/
 │   │   ├── linking-rules.md           ← 위키링크 규율 (고아 링크 철학 포함)
 │   │   └── memory-tiers.md            ← 계층형 메모리 + SSOT 룩업 설계
 │   └── scripts/
-│       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기  🛡️
+│       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기 (섹션 10: rules 무결성)  🛡️
+│       ├── test_rules_inheritance.py  ← rules 상속 회귀 테스트 (버전 업 시 1회)  🔬
 │       ├── backup_vault.py            ← robocopy/rsync/shutil + git bundle
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │

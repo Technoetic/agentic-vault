@@ -20,6 +20,8 @@
   "ssot_facts": [],
   "health_report": "00-meta/health-report.md",
   "backup_target": "",
+  "rules_dir": ".claude/rules",
+  "rules_max_lines": 120,
   "jarvis": {
     "enabled": false,
     "telegram_user_ids": [],

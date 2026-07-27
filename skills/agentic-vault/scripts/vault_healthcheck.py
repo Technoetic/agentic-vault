@@ -18,6 +18,9 @@
   7   노화 문서 — config에 stale_days > 0 설정 시만 (관리성, 선택)
   8   SSOT 사실 모순 — config에 ssot_facts 설정 시만 (관리성, 선택)
   9   로그 연산 태그 누락/형식오류 — log_tag_epoch 이후만 (치명)
+  10  rules 무결성 — .claude/rules/ 존재 시만 (관리성, v0.7):
+        10a 파일 크기 상한 초과 (절차성 장문 유입 경고)
+        10b 엔진 rules ↔ CLAUDE.md 규칙 제목 중복 (충돌 시 모델 임의선택 방지)
 
 종료 코드(fail-closed):
   0 = 볼트 아님(조용히 통과) 또는 치명 이슈 0건 (관리성 이슈는 리포트만)
@@ -76,6 +79,8 @@ DEFAULT_CONFIG: dict = {
     # --- 표준 스키마 외 선택 확장 키 (없으면 해당 검사는 기본 동작/생략) ---
     "stale_days": 0,      # >0 이면 updated 기준 노화 문서 검사를 켠다(관리성)
     "index_scopes": [],   # 인덱스 등록 검사 대상 최상위 폴더 목록. 비면 메타 폴더·journal 타입 제외 전체
+    "rules_dir": ".claude/rules",   # 행동 계약 rules 디렉토리(v0.6+). 없으면 섹션 10 생략
+    "rules_max_lines": 120,         # rules 파일 1개 권장 상한. 초과 시 절차성 장문 유입 경고(관리성)
 }
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#|][^\]]*)?\]\]")
@@ -241,6 +246,53 @@ def compile_fact_patterns(ssot_facts, warnings: list[str]) -> list[tuple[str, re
     return compiled
 
 
+RULE_HEADING_RE = re.compile(r"^#{1,3}\s+(.+?)\s*$")
+
+
+def _norm_heading(h: str) -> str:
+    """규칙 제목을 비교용으로 정규화 — 표기 차이(강조·번호·괄호주석)만 흡수하고
+    제목의 실질 내용은 보존한다(콜론 뒤 대상어를 함부로 버리지 않는다 — 한국어에서
+    콜론 뒤가 핵심인 경우가 많아 오판 위험)."""
+    h = re.sub(r"[*_`]", "", h)                       # 강조 기호 제거
+    h = re.sub(r"^\s*\d+(?:[.\-)]\d*)*[.\-)]?\s+", "", h)  # 선두 번호 접두사 제거 ("1. ", "2-3) " 등)
+    h = re.sub(r"\s*\([^)]*\)", "", h)                # 괄호 주석 제거 (예: "(위반 시 …)")
+    h = re.sub(r"\s*[—-]\s.*$", "", h)                # 대시 이후 부연 제거 ("— 절대 규칙" 등)
+    return " ".join(h.split()).strip().lower()
+
+
+def scan_rules_integrity(rules_dir: Path, claude_md: Path, max_lines: int
+                         ) -> tuple[list[tuple[str, int]], list[str]]:
+    """(크기 초과 rules 목록, CLAUDE.md와 제목이 겹치는 rules 목록)을 반환한다.
+    - 크기: rules 파일이 max_lines 초과 → 절차성 장문 유입 신호(rules는 상시 로드라 얇아야 함).
+    - 중복: 엔진 rules의 ## 제목이 CLAUDE.md 본문 제목과 겹치면, 같은 주제를 두 층이
+      다르게 서술할 위험 — 충돌 시 우선순위 규칙이 없어 모델이 임의 선택한다(v0.7 근거)."""
+    oversized: list[tuple[str, int]] = []
+    dup_headings: list[str] = []
+    rule_files = sorted(rules_dir.glob("*.md"))
+    # CLAUDE.md 본문(마커/주석 제외)의 규칙 제목 집합
+    claude_headings: set[str] = set()
+    if claude_md.is_file():
+        ctext = CODE_FENCE_RE.sub("", read_text(claude_md))
+        for line in ctext.splitlines():
+            m = RULE_HEADING_RE.match(line)
+            if m:
+                claude_headings.add(_norm_heading(m.group(1)))
+    for rf in rule_files:
+        rtext = read_text(rf)
+        # 코드펜스 내부는 예시 인용일 뿐 실제 규칙/제목이 아니므로 크기·제목 판정에서 제외
+        rclean = CODE_FENCE_RE.sub("", rtext)
+        body_lines = [ln for ln in rclean.splitlines()
+                      if not ln.strip().startswith("<!--")]  # 스탬프 주석 제외 실질 줄수
+        n = len([ln for ln in body_lines if ln.strip()])
+        if n > max_lines:
+            oversized.append((rf.name, n))
+        for line in rclean.splitlines():
+            m = RULE_HEADING_RE.match(line)
+            if m and _norm_heading(m.group(1)) in claude_headings:
+                dup_headings.append(f"{rf.name} → `{m.group(1).strip()}` (CLAUDE.md와 중복)")
+    return oversized, dup_headings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="볼트 무결성 검증 엔진 (agentic-vault)")
     ap.add_argument("--vault",
@@ -286,6 +338,22 @@ def main() -> int:
         stale_days = int(cfg.get("stale_days") or 0)
     except (TypeError, ValueError):
         stale_days = 0
+    try:
+        rules_max_lines = int(cfg.get("rules_max_lines") or 120)
+    except (TypeError, ValueError):
+        rules_max_lines = 120
+        warnings.append("rules_max_lines 값이 정수가 아님 — 기본값 120 사용.")
+    # 빈 문자열이면 섹션 10 끄기(다른 경로 옵션과 동일한 관례 — or 폴백 금지).
+    # 키 자체가 없을 때만 기본값 .claude/rules 적용.
+    rules_dir_rel = norm_cfg_path(
+        cfg.get("rules_dir") if "rules_dir" in user_cfg else ".claude/rules")
+    # 볼트 밖 스캔 방어: 절대경로·드라이브문자·상위참조는 무시(다른 경로 값과 달리
+    # rules_dir은 디렉토리를 통째 순회하므로 볼트 이탈 시 임의 위치 노출 위험).
+    if rules_dir_rel and (Path(rules_dir_rel).is_absolute()
+                          or re.match(r"^[A-Za-z]:", rules_dir_rel)
+                          or ".." in rules_dir_rel.split("/")):
+        warnings.append(f"rules_dir 값('{rules_dir_rel}')이 볼트 루트 밖을 가리킴 — 무시하고 섹션 10 생략.")
+        rules_dir_rel = ""
 
     index_rel = norm_cfg_path(cfg.get("index_note"))
     log_rel = norm_cfg_path(cfg.get("log_note"))
@@ -468,12 +536,24 @@ def main() -> int:
     else:
         log_skip_note = "- 검사 생략 (config의 log_note/log_tags 미설정 또는 파일 없음)"
 
+    # --- rules 무결성 (v0.7) — .claude/rules/ 존재 시만 ------------------------
+    rules_oversized: list[tuple[str, int]] = []
+    rules_dup: list[str] = []
+    rules_skip_note: str | None = None
+    rules_path = vault / rules_dir_rel if rules_dir_rel else None
+    if rules_path is not None and rules_path.is_dir() and any(rules_path.glob("*.md")):
+        rules_oversized, rules_dup = scan_rules_integrity(
+            rules_path, vault / "CLAUDE.md", rules_max_lines)
+    else:
+        rules_skip_note = f"- 검사 생략 ({rules_dir_rel}/ 없음 — v0.6+ 3층 계약 미설치 볼트)"
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
                     + len(dead_links) + len(orphans) + len(semi_orphans)
                     + len(unindexed) + len(stale) + len(fact_conflicts)
-                    + len(log_tag_missing) + len(log_tag_unknown))
+                    + len(log_tag_missing) + len(log_tag_unknown)
+                    + len(rules_oversized) + len(rules_dup))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
     #   Enum 위반 → type/status 오염
@@ -570,6 +650,22 @@ def main() -> int:
             f"도입일 이전 로그는 소급 대상 아님)",
             *([f"- 태그 없음: {x}" for x in log_tag_missing]
               + [f"- 미승인 태그: {x}" for x in log_tag_unknown] or ["- 없음"]),
+        ]
+    lines += [
+        "",
+        f"## 10. 행동 계약 rules 무결성 — {rules_dir_rel}/ — 관리성 "
+        f"(크기초과 {len(rules_oversized)} / CLAUDE.md 중복 {len(rules_dup)})",
+    ]
+    if rules_skip_note:
+        lines += [rules_skip_note]
+    else:
+        lines += [
+            f"  (rules는 상시 로드되는 엔진 계약 — 얇게 유지({rules_max_lines}줄 이하). "
+            f"긴 절차는 스킬/명령으로. CLAUDE.md와 같은 규칙 제목이 겹치면 충돌 시 모델 임의선택 위험)",
+            f"### 10a. 크기 초과 ({len(rules_oversized)})",
+            *([f"- {f} ({n}줄 — 절차성 장문 유입 의심)" for f, n in rules_oversized] or ["- 없음"]),
+            f"### 10b. CLAUDE.md 제목 중복 ({len(rules_dup)})",
+            *([f"- {x}" for x in rules_dup] or ["- 없음"]),
         ]
     lines += [""]
 
