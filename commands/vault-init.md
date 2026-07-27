@@ -60,7 +60,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 1. **rules 설치**: `.claude/rules/` 디렉토리를 만들고 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`의 `vault-*.md` 5개를 그대로 복사하라(치환 불필요 — 엔진 규칙은 의도적으로 볼트 무관 내용만 담는다). 각 파일 첫 줄의 `engine=` 스탬프는 유지하라(/vault-upgrade의 교체 판단 기준).
 2. **CLAUDE.md 스텁 append**: 루트 `CLAUDE.md`에 `agentic-vault:begin` 마커가 이미 있으면 건너뛰어라(중복 방지). `CLAUDE.md`가 존재하면 파일 끝에 빈 줄 하나를 두고 치환된 `${CLAUDE_PLUGIN_ROOT}/assets/templates/CLAUDE-vault-stub.md` 내용 전체를 append하라(Edit — 기존 내용을 절대 삭제·수정하지 마라). 존재하지 않으면 그 내용만으로 새로 생성하라(Write).
-3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라 — 최상단에 `<!-- agentic-vault:generated — .claude/rules/에서 생성된 파일. 직접 편집 금지, /vault-upgrade가 재생성. -->` 주석, 이어서 스텁 본문(마커 주석 제외)과 rules 5개 파일 본문(engine 주석 제외)을 순서대로 이어 붙인다. 이미 존재하면 건너뛰고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라. (Claude 외 에이전트는 `.claude/rules/`를 읽지 않으므로 이 파일이 그들의 단일 계약이다.)
+3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라 — 최상단에 `<!-- agentic-vault:generated — .claude/rules/에서 생성된 파일. 직접 편집 금지, /vault-upgrade가 재생성. Claude Code는 이 파일을 읽지 않는다(Claude의 원본은 .claude/rules/) — 타 에이전트 전용. -->` 주석, 이어서 스텁 본문(마커 주석 제외)과 rules 5개 파일 본문(engine 주석 제외)을 순서대로 이어 붙인다. 이미 존재하면 건너뛰고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라. (Claude 외 에이전트는 `.claude/rules/`를 읽지 않으므로 이 파일이 그들의 단일 계약이다.)
 
 ## 5. 권한 병합 (사용자 확인 후에만)
 
