@@ -83,7 +83,7 @@ flowchart TB
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
-| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장·jarvis 블록·git 훅·anchor를 멱등 설치(기존 값 불변) |
+| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장·jarvis 블록·git 훅·anchor 멱등 설치 + **`.claude/rules/` 3층 계약 마이그레이션**(사용자 값 불변, 엔진 소유 rules만 스탬프 비교 교체) |
 
 ---
 
