@@ -10,7 +10,7 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.5.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.5.0)
+[![Version](https://img.shields.io/badge/v0.6.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.6.0)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -74,7 +74,7 @@ flowchart TB
 
 | 입력 | 산출 |
 |:---|:---|
-| `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + CLAUDE.md 행동 계약 |
+| `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 5종 + CLAUDE.md 스텁 + AGENTS.md) |
 | `/vault-session-start` | handoff → hot → index 순서로 직전 상태 복원 + 4항목 브리핑 |
 | `/vault-ingest 보고서.md` | 소스 1건 → 원자 노트 분해 + 위키링크 + 기존 노트 갱신 + index 등록 + `[ingest]` 로그 |
 | `/vault-process-inbox` | `10-inbox/` 대기열 정제 → 영구 지식 병합 → 원본 `_processed/` 격리 |
@@ -250,7 +250,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.5.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.6.0 · MIT)
 │
 ├── commands/                          ← 10개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -278,11 +278,12 @@ agentic-vault/
 │       ├── backup_vault.py            ← robocopy/rsync/shutil + git bundle
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
-├── assets/templates/                  ← 13개 노트·시스템 템플릿
+├── assets/templates/                  ← 노트·시스템 템플릿 + 엔진 rules
 │   ├── vault-config.json              ← 볼트 정책 단일 출처
 │   ├── hot.md · handoff.md · index.md · log.md
 │   ├── context.md · tasks.md · decisions.md · mistakes.md
-│   ├── frontmatter-schema.md · CLAUDE-vault-section.md
+│   ├── frontmatter-schema.md · CLAUDE-vault-stub.md
+│   ├── rules/                         ← 엔진 소유 행동 규칙 5종 (.claude/rules/로 설치, upgrade가 통째 교체)
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
 │
 └── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️
