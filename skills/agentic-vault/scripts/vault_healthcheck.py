@@ -89,8 +89,16 @@ UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
 # 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
 CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
-# 로그 엄격 형식: '- YYYY-MM-DD HH:MM | 행위자 | 본문'
-LOG_ENTRY_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})\s+[\d:]+\s*\|[^|]*\|\s*(.*)$")
+# 로그 엄격 형식: '- YYYY-MM-DD [HH:MM] | 행위자 | 본문'
+# ⚠️시각(HH:MM)은 **선택**이다. 2026-08-05 정정:
+#   기존 정규식이 시각을 필수로 요구해, 날짜만 쓴 항목이 전부
+#   '형식오류→태그 없음'으로 오탐되고 그대로 치명 등급에 합산됐다.
+#   실측(운영 볼트): 치명 46건 중 44건이 이 오탐이었고, 태그는 멀쩡히 붙어 있었다.
+#   그 결과 healthcheck가 매 실행마다 치명 44건을 외쳤고 리포트는 17일간 방치됐다
+#   — 이 파일 하단의 "매번 exit 1이면 신호가 무의미해진다"가 경고한 바로 그 상태다.
+#   소급 적용하려면 없는 시각을 지어내야 하므로 데이터 오염이기도 하다.
+#   태그 규약의 목적은 grep 가능성이지 시각 기록이 아니다.
+LOG_ENTRY_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})(?:\s+[\d:]+)?\s*\|[^|]*\|\s*(.*)$")
 # 넓은 게이트: 불릿 + 어딘가에 날짜 → 로그형 라인 후보 (fail-closed의 핵심 —
 # 엄격 형식을 벗어난 로그형 라인이 조용히 감사를 회피하지 못하게 한다)
 LOG_LIKE_RE = re.compile(r"^\s*[-*]\s.*?(\d{4}-\d{2}-\d{2})")
@@ -428,13 +436,35 @@ def main() -> int:
     note_types: dict[str, str] = {}
     fact_hits: dict[str, dict[str, list[str]]] = {label: {} for label, _ in fact_patterns}
 
+    # 프런트매터 면제 구역 — 2026-08-05 신설.
+    # 구 버전이 하드코딩하던 면제('10-inbox/*', '00-meta/scratch/*' 등)가
+    # config 방식으로 전환되며 통째로 누락됐다. 그 결과 원시 캡처(수집 대기열)와
+    # 슬래시 명령 정의까지 '프런트매터 누락 — 치명'으로 잡혀 오탐이 쌓였다.
+    # 실측(운영 볼트): 이 누락만으로 치명 22건이 발생했고, 전부 노트가 아닌 파일이었다.
+    # config에 키가 없으면 아래 기본값을 쓴다(구 버전 동작과 호환).
+    fm_exempt = cfg.get("fm_exempt_zones", [
+        "10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude",
+    ])
+
+    def is_fm_exempt(rel_path: str) -> bool:
+        return any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
+                   for z in fm_exempt)
+
     for p in targets:
         rel = rel_posix(p, vault)
         text = read_text(p)
         fm, _body = split_frontmatter(text)
 
+        exempt = is_fm_exempt(rel)
+
         if fm is None:
-            missing_fm.append(rel)
+            if not exempt:
+                missing_fm.append(rel)
+        elif exempt:
+            # 면제 구역에 프런트매터가 있어도 볼트 노트 스키마를 강요하지 않는다.
+            # 예: .claude/commands/*.md 는 슬래시 명령 정의라 자체 스키마(description 등)를
+            # 쓴다. 노트 필수 키(title·type·tags…)를 요구하면 전량 오탐이 된다(실측 9건).
+            pass
         else:
             fm_lines = len(fm.splitlines())
             if fm_lines > fm_max_lines:
