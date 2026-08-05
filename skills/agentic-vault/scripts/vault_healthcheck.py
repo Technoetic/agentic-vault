@@ -81,7 +81,38 @@ DEFAULT_CONFIG: dict = {
     "index_scopes": [],   # 인덱스 등록 검사 대상 최상위 폴더 목록. 비면 메타 폴더·journal 타입 제외 전체
     "rules_dir": ".claude/rules",   # 행동 계약 rules 디렉토리(v0.6+). 없으면 섹션 10 생략
     "rules_max_lines": 120,         # rules 파일 1개 권장 상한. 초과 시 절차성 장문 유입 경고(관리성)
+    # 세션마다 주입되는 노트의 **토큰 예산** (2026-08-06 신설, 관리성).
+    # SessionStart 훅이 handoff_note·hot_note를 **통째로** 읽어 주입한다(자르지 않는다).
+    # 이 둘은 세션이 쌓일수록 커지는데 상한이 없었다 — 실측(NS): hot 1,785토큰 +
+    # handoff 3,991토큰 = 매 세션 약 5,800토큰이 예산 없이 들어갔다.
+    #
+    # ⚠️단위를 토큰으로 잡는 이유(단어·글자 예산이 둘 다 실패한다):
+    #   · 단어 수 — hot.md의 "500단어" 규약은 영어 기준 발상이다. 한국어 528단어가 1,785토큰이다.
+    #   · 글자 수 — 언어에 따라 5배 넘게 어긋난다. 한글 1자 ≈ 1.375토큰(Claude 실측),
+    #     영문은 대략 4자당 1토큰이라 1자 ≈ 0.25토큰. 같은 글자 수가 전혀 다른 비용이다.
+    #   · 바이트 — UTF-8에서 한글은 3바이트라 글자 수와도 어긋난다.
+    # 그래서 아래 estimate_tokens()로 문자 종류별 계수를 적용해 근사한다.
+    # 0이면 해당 검사를 끈다.
+    "hot_max_tokens": 2000,
+    "handoff_max_tokens": 4000,
 }
+
+HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+
+def estimate_tokens(text: str) -> int:
+    """문자 종류별 계수로 토큰 수를 근사한다(정확한 토크나이저 대체 아님).
+
+    예산 경보용 근사치이므로 오차 10~20%는 허용된다. 계수 근거:
+      · 한글 1자 ≈ 1.375토큰 (Claude gen5 count_tokens 실측)
+      · 그 외(영문·숫자·공백·기호) ≈ 0.3토큰/자 (영어 약 4자/토큰 기준)
+    언어에 무관하게 동작하는 것이 목적이다 — 글자 수·단어 수 예산은
+    한국어와 영어에서 5배 넘게 어긋난다(DEFAULT_CONFIG 주석 참조).
+    """
+    hangul = len(HANGUL_RE.findall(text))
+    other = len(text) - hangul
+    return int(hangul * 1.375 + other * 0.3)
+
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#|][^\]]*)?\]\]")
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
@@ -577,13 +608,37 @@ def main() -> int:
     else:
         rules_skip_note = f"- 검사 생략 ({rules_dir_rel}/ 없음 — v0.6+ 3층 계약 미설치 볼트)"
 
+    # --- 섹션 11: 세션 주입 예산 (2026-08-06 신설, 관리성) ------------------------
+    # SessionStart 훅이 통째로 주입하는 노트가 예산 없이 커지는 것을 감시한다.
+    # 글자 수 기준인 이유는 위 DEFAULT_CONFIG 주석 참조(한국어 토큰 비례).
+    injection_over: list[tuple[str, int, int]] = []
+    for cfg_key, budget_key in (("hot_note", "hot_max_tokens"),
+                                ("handoff_note", "handoff_max_tokens")):
+        rel = norm_cfg_path(cfg.get(cfg_key))
+        if not rel:
+            continue
+        try:
+            budget = int(cfg.get(budget_key) or 0)
+        except (TypeError, ValueError):
+            budget = 0
+            warnings.append(f"{budget_key} 값이 정수가 아님 — 검사 생략.")
+        if budget <= 0:
+            continue
+        note_path = vault / rel
+        if not note_path.is_file():
+            continue
+        n_tokens = estimate_tokens(read_text(note_path))
+        if n_tokens > budget:
+            injection_over.append((rel, n_tokens, budget))
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
                     + len(dead_links) + len(orphans) + len(semi_orphans)
                     + len(unindexed) + len(stale) + len(fact_conflicts)
                     + len(log_tag_missing) + len(log_tag_unknown)
-                    + len(rules_oversized) + len(rules_dup))
+                    + len(rules_oversized) + len(rules_dup)
+                    + len(injection_over))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
     #   Enum 위반 → type/status 오염
@@ -697,7 +752,16 @@ def main() -> int:
             f"### 10b. CLAUDE.md 제목 중복 ({len(rules_dup)})",
             *([f"- {x}" for x in rules_dup] or ["- 없음"]),
         ]
-    lines += [""]
+    lines += [
+        "",
+        f"## 11. 세션 주입 토큰 예산 초과 — 관리성 ({len(injection_over)})",
+        "  (SessionStart 훅이 handoff·hot을 **통째로** 주입한다 — 자르지 않는다. "
+        "세션마다 들어가므로 커질수록 매번 비용이다. 상세는 원문 노트에 두고 이 둘은 얇게 유지하라. "
+        "⚠️단어·글자가 아니라 **토큰 추정** 기준 — 한글 1자 ≈ 1.375토큰이라 글자 예산은 언어에 따라 크게 어긋난다)",
+        *([f"- {f} (약 {n:,}토큰 / 예산 {b:,} — {n - b:,} 초과)"
+           for f, n, b in injection_over] or ["- 없음"]),
+        "",
+    ]
 
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
