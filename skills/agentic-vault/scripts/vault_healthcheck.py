@@ -37,6 +37,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -95,9 +96,68 @@ DEFAULT_CONFIG: dict = {
     # 0이면 해당 검사를 끈다.
     "hot_max_tokens": 2000,
     "handoff_max_tokens": 4000,
+    # 세션 종료 누락 감지 (2026-08-14 신설, 관리성). handoff의 기준 커밋(anchor)은
+    # /session-end만 갱신하므로, git HEAD가 anchor보다 이 값 이상 앞서 있으면
+    # "세션이 닫혔는데 handoff·장기기억(remember)이 낡았다"는 신호다.
+    # 실사례(NS): remember 미실행 3주 공백을 어떤 계기판도 잡지 못했다.
+    # 1~2커밋은 활성 세션의 정상 누적이라 임계 기본 3. 0이면 검사를 끈다.
+    # handoff_note가 비어 있으면 자동 생략.
+    "anchor_drift_threshold": 3,
 }
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+# session-end 계약이 handoff 상단에 쓰는 앵커 줄 형식 (스킬 §anchor 참조)
+ANCHOR_RE = re.compile(r"\*\*기준 커밋\(anchor\):\*\*\s*`([0-9a-fA-F]{7,40})`")
+
+
+def _git(vault: Path, *args: str) -> str | None:
+    """git 명령 1회 실행. 실패(비리포·미설치·해석불가·타임아웃)면 None —
+    조용히 넘기지 않고 호출부가 리포트에 사유를 남긴다."""
+    try:
+        r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
+                           cwd=vault, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def scan_anchor_drift(vault: Path, handoff_rel: str,
+                      threshold: int) -> tuple[str | None, list[str]]:
+    """handoff anchor와 git HEAD의 커밋 거리로 /session-end 누락을 감지한다.
+    반환 (콘솔 요약 | None, 리포트 라인들). 요약이 있으면 이슈 1건으로 집계된다.
+    ⚠️한계: handoff만 손으로 갱신되고 remember만 빠진 경우는 못 잡는다."""
+    if threshold <= 0 or not handoff_rel:
+        return None, ["- 검사 생략 (anchor_drift_threshold=0 또는 handoff_note 미설정)"]
+    handoff = vault / handoff_rel
+    if not handoff.is_file():
+        return None, [f"- 판정 불가: handoff 없음 ({handoff_rel})"]
+    m = ANCHOR_RE.search(read_text(handoff))
+    if not m:
+        return ("handoff에 기준 커밋(anchor) 줄이 없음 — session-end 계약 위반",
+                ["- ⚠️ handoff에 `**기준 커밋(anchor):**` 줄이 없다. "
+                 "session-end가 갱신하는 줄이다."])
+    anchor = m.group(1)
+    if _git(vault, "rev-parse", "--is-inside-work-tree") is None:
+        return None, ["- 판정 불가: git 리포가 아니거나 git 실행 실패"]
+    count_s = _git(vault, "rev-list", "--count", f"{anchor}..HEAD")
+    if count_s is None:
+        return (f"anchor `{anchor}`를 git이 해석하지 못함 — 이력 재작성/오타 의심",
+                [f"- ⚠️ anchor `{anchor}` 해석 불가. handoff가 가리키는 시점이 리포에 없다."])
+    drift = int(count_s)
+    anchor_date = _git(vault, "log", "-1", "--format=%cs", anchor) or "?"
+    if drift >= threshold:
+        return (f"anchor drift {drift}커밋 — session-end 누락 의심 "
+                f"(anchor `{anchor}` {anchor_date} 이후 미갱신)",
+                [f"- ⚠️ **HEAD가 anchor `{anchor}`({anchor_date})보다 {drift}커밋 앞선다** "
+                 f"(임계 {threshold}).",
+                 "- 의미: 세션이 session-end 없이 닫혔을 개연성 — "
+                 "handoff·장기기억(remember)이 그만큼 낡았다.",
+                 f"- 조치: session-end 실행(anchor 갱신 + 교훈 커밋). "
+                 f"중간 확인: `git log --oneline {anchor}..HEAD`"])
+    return None, [f"- 정상: anchor `{anchor}`({anchor_date}) 대비 HEAD {drift}커밋 "
+                  f"(임계 {threshold} 미만)"]
 
 
 def estimate_tokens(text: str) -> int:
@@ -631,6 +691,15 @@ def main() -> int:
         if n_tokens > budget:
             injection_over.append((rel, n_tokens, budget))
 
+    # --- 섹션 12: 세션 종료 누락 의심 (anchor drift, 2026-08-14 신설, 관리성) -----
+    try:
+        drift_threshold = int(cfg.get("anchor_drift_threshold") or 0)
+    except (TypeError, ValueError):
+        drift_threshold = 0
+        warnings.append("anchor_drift_threshold 값이 정수가 아님 — 검사 생략.")
+    drift_summary, drift_lines = scan_anchor_drift(
+        vault, norm_cfg_path(cfg.get("handoff_note")) or "", drift_threshold)
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
@@ -638,7 +707,8 @@ def main() -> int:
                     + len(unindexed) + len(stale) + len(fact_conflicts)
                     + len(log_tag_missing) + len(log_tag_unknown)
                     + len(rules_oversized) + len(rules_dup)
-                    + len(injection_over))
+                    + len(injection_over)
+                    + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
     #   Enum 위반 → type/status 오염
@@ -761,6 +831,12 @@ def main() -> int:
         *([f"- {f} (약 {n:,}토큰 / 예산 {b:,} — {n - b:,} 초과)"
            for f, n, b in injection_over] or ["- 없음"]),
         "",
+        f"## 12. 세션 종료 누락 의심 — anchor drift — 관리성 ({1 if drift_summary else 0})",
+        "  (handoff의 기준 커밋(anchor)은 session-end만 갱신한다. HEAD가 anchor보다 "
+        "임계 이상 앞서면 세션이 닫혔는데 handoff·장기기억이 낡았다는 신호. "
+        "활성 세션 중간엔 커밋 누적이 정상이라 exit 코드에는 반영하지 않고 콘솔 요약에만 띄운다)",
+        *drift_lines,
+        "",
     ]
 
     try:
@@ -770,8 +846,9 @@ def main() -> int:
         print(f"[vault-healthcheck] 오류: 리포트 쓰기 실패({out}) — {e}", file=sys.stderr)
         return 1
 
+    drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
-          f"이슈 {total_issues}건(치명 {critical}건) → {out}")
+          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}")
     return 1 if critical > 0 else 0
 
 

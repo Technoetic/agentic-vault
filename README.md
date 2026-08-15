@@ -10,7 +10,7 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.8.0-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.0)
+[![Version](https://img.shields.io/badge/v0.8.1-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.1)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -166,6 +166,8 @@ SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부
 
 ⚠️ **주입되는 두 계층은 통째로 들어간다 — 자르지 않는다.** 그래서 v0.8.0부터 healthcheck 섹션 11이 **토큰 예산**(`hot_max_tokens` / `handoff_max_tokens`)으로 비대화를 감시한다.
 단위가 토큰인 이유는 단어·글자 예산이 언어에 따라 무너지기 때문이다 — **한글 1자 ≈ 1.375토큰**이라 "500단어" 규약은 영어와 한국어에서 5배 넘게 어긋난다.
+
+⚠️ **이 계층이 낡는 것도 감시 대상이다.** handoff의 기준 커밋(anchor)은 session-end만 갱신하므로, git HEAD가 anchor보다 임계(기본 3커밋, `anchor_drift_threshold`) 이상 앞서면 **세션이 session-end 없이 닫혔다**는 신호다 — v0.8.1부터 healthcheck 섹션 12가 이 거리를 재서 콘솔 요약에 띄운다(실사례: remember 미실행 3주 공백을 어떤 계기판도 못 잡았다).
 
 상주 계약(L0)은 v0.6.0부터 **소유권으로 3층 분리**된다:
 
