@@ -290,21 +290,30 @@ def serve(vault: Path, cfg: dict) -> None:
     offset = int(offset_file.read_text()) if offset_file.is_file() else 0
     butler_file = STATE_DIR / "last_butler"
     last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
-    brief_h, brief_m = map(int, cfg["briefing_time"].split(":"))
-    # 기동 시각이 이미 브리핑 시각을 지났으면 오늘분은 발송하지 않는다(재기동 폭주 방지)
+    # 브리핑 시각: briefing_times(복수) 우선, 없으면 briefing_time(단일) — 하위호환
+    _bt = cfg.get("briefing_times") or [cfg["briefing_time"]]
+    brief_slots = sorted(tuple(map(int, t.split(":"))) for t in _bt)
+    # 기동 시각이 이미 지난 슬롯은 오늘분 발송하지 않는다(재기동 폭주 방지)
     _n = datetime.now()
-    last_brief: date | None = _n.date() if (_n.hour, _n.minute) >= (brief_h, brief_m) else None
-    log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}")
+    fired_date: date = _n.date()
+    fired_slots = {s for s in brief_slots if (_n.hour, _n.minute) >= s}
+    log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}, "
+        f"브리핑 {['%02d:%02d' % s for s in brief_slots]}")
 
     while True:
         # --- 스케줄 ---
         now = datetime.now()
         if whitelist:
             first = sorted(whitelist)[0]
-            if last_brief != now.date() and (now.hour, now.minute) >= (brief_h, brief_m):
-                last_brief = now.date()
-                log("스케줄 브리핑 생성")
-                tg_send(token, first, "🌅 아침 브리핑\n" + do_brief(vault, cfg))
+            if fired_date != now.date():
+                fired_date = now.date()
+                fired_slots = set()
+            for s in brief_slots:
+                if s not in fired_slots and (now.hour, now.minute) >= s:
+                    fired_slots.add(s)
+                    label = "🌅 아침" if s[0] < 11 else ("🌞 점심" if s[0] < 17 else "🌆 저녁")
+                    log("스케줄 브리핑 생성(%s %02d:%02d)" % (label, s[0], s[1]))
+                    tg_send(token, first, label + " 브리핑\n" + do_brief(vault, cfg))
             if time.time() - last_butler > cfg["butler_interval_hours"] * 3600:
                 last_butler = time.time()
                 butler_file.write_text(str(last_butler))
