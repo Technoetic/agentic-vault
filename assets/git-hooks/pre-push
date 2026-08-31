@@ -15,6 +15,7 @@ remote_url="$2"
 case "$remote_url" in
   file:////*|//*) ;;
   file:///*%*|file:///*\\*) ;;
+  /*\\*) ;;
   file:///*|/*) exit 0 ;;
   [A-Za-z]:/*|[A-Za-z]:\\*)
     platform=$(uname -s 2>/dev/null) || platform=

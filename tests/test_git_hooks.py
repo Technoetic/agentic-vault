@@ -329,6 +329,8 @@ class HookAssetContractTests(unittest.TestCase):
         shell = find_shell()
         cases = (
             ("absolute POSIX path", "/var/backups/vault.git", 0),
+            ("slash-leading backslash UNC path", r"/\server\share\vault.git", 1),
+            ("mixed POSIX backslash path", r"/var\backups\vault.git", 1),
             ("local POSIX file URI", "file:///var/backups/vault.git", 0),
             ("local Windows file URI", "file:///C:/backups/vault.git", 0),
             ("encoded uppercase slash UNC file URI", "file:///%2F%2Fserver/share/vault.git", 1),
