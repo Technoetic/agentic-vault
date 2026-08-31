@@ -419,7 +419,6 @@ def load_jarvis_config(vault: Path) -> dict | None:
     cfg["_hot_note"] = vault_cfg.get("hot_note", "00-meta/hot.md")
     cfg["_handoff_note"] = vault_cfg.get("handoff_note", "")
     cfg["_log_note"] = vault_cfg.get("log_note", "00-meta/log.md")
-    cfg["_health_report"] = vault_cfg.get("health_report", "00-meta/health-report.md")
     return cfg
 
 
@@ -687,8 +686,7 @@ def do_butler(vault: Path, cfg: dict) -> str:
     lines = ["🧹 집사 보고"]
     hc = Path(__file__).parent / "vault_healthcheck.py"
     if hc.is_file():
-        r = subprocess.run([sys.executable, str(hc), "--vault", str(vault),
-                            "--output", cfg["_health_report"]],
+        r = subprocess.run([sys.executable, str(hc), "--vault", str(vault)],
                            cwd=str(vault), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=300,
                            env=child_process_env())

@@ -408,6 +408,23 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
 
         self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
 
+    def test_butler_healthcheck_preserves_config_report_provenance(self):
+        cached_report = "../outside/cached-health-report.md"
+        cfg = {"_health_report": cached_report}
+        completed = Mock(returncode=0, stdout="", stderr="")
+        healthcheck = Path(_BRIDGE.__file__).parent / "vault_healthcheck.py"
+        with patch.object(
+                _BRIDGE.subprocess, "run", return_value=completed) as runner, \
+                patch.object(_BRIDGE, "_git", return_value=""):
+            _BRIDGE.do_butler(self.vault, cfg)
+
+        command = runner.call_args.args[0]
+        self.assertEqual(command, [
+            sys.executable, str(healthcheck), "--vault", str(self.vault),
+        ])
+        self.assertNotIn("--output", command)
+        self.assertNotIn(cached_report, command)
+
     def test_git_process_receives_a_case_insensitively_scrubbed_environment(self):
         completed = Mock(returncode=0, stdout="ok\n", stderr="")
         with patch.object(_BRIDGE.os, "environ", self.parent_env), \
