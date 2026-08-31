@@ -1,0 +1,2248 @@
+"""Focused behavioral tests for Jarvis configuration and message authorization."""
+from __future__ import annotations
+
+import importlib.util
+import errno
+import http.client
+import io
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
+from datetime import date, datetime
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
+
+
+_ROOT = Path(__file__).parents[1]
+_BRIDGE_PATH = _ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py"
+_SPEC = importlib.util.spec_from_file_location("jarvis_bridge", _BRIDGE_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_BRIDGE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_BRIDGE)
+
+
+class JarvisConfigAuthorizationTests(unittest.TestCase):
+    def test_recipient_parser_accepts_only_positive_integers_and_ascii_decimals(self):
+        self.assertEqual(_BRIDGE.parse_telegram_user_ids([17, "002"]), [17, 2])
+
+        for invalid in (
+            "17", [True], [1.0], [1.5], [0], [-1], ["0"], ["-1"],
+            ["+1"], [" 1"], ["1 "], ["\u0661"], [""], [None],
+        ):
+            with self.subTest(value=invalid), self.assertRaises(
+                    _BRIDGE.JarvisConfigError):
+                _BRIDGE.parse_telegram_user_ids(invalid)
+
+    def test_token_parser_validates_the_complete_shape_without_echoing_input(self):
+        self.assertEqual(_BRIDGE.parse_telegram_token("1:x"), ("1", "x"))
+        self.assertEqual(
+            _BRIDGE.parse_telegram_token("12345:Abc_09-z"),
+            ("12345", "Abc_09-z"),
+        )
+
+        for invalid in (
+            "12345", "12345:", ":secret", "bot:secret", "123:two:parts",
+            "123:bad.secret", "\uff11\uff12\uff13:secret", "123:s\u00e9cret", None,
+        ):
+            with self.subTest(value=invalid), self.assertRaises(
+                    _BRIDGE.JarvisConfigError) as raised:
+                _BRIDGE.parse_telegram_token(invalid)
+            if isinstance(invalid, str):
+                self.assertNotIn(invalid, str(raised.exception))
+
+    def test_parse_briefing_slots_prefers_multiple_and_deduplicates(self):
+        block = {"briefing_time": "07:30", "briefing_times": ["19:30", "08:30", "08:30"]}
+        self.assertEqual(_BRIDGE.parse_briefing_slots(block), [(8, 30), (19, 30)])
+
+    def test_parse_briefing_slots_falls_back_only_when_key_absent(self):
+        self.assertEqual(_BRIDGE.parse_briefing_slots({"briefing_time": "07:30"}), [(7, 30)])
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.parse_briefing_slots({"briefing_time": "07:30", "briefing_times": []})
+
+    def test_parse_briefing_slots_rejects_bad_values(self):
+        for block in (
+            {"briefing_times": "08:30"},
+            {"briefing_times": ["24:00"]},
+            {"briefing_times": ["08:60"]},
+            {"briefing_times": [8]},
+        ):
+            with self.subTest(block=block), self.assertRaises(_BRIDGE.JarvisConfigError):
+                _BRIDGE.parse_briefing_slots(block)
+
+    def test_authorization_requires_private_self_chat_and_whitelist(self):
+        allowed = {111}
+        self.assertTrue(_BRIDGE.is_authorized_private_message(
+            {"from": {"id": 111}, "chat": {"id": 111, "type": "private"}}, allowed))
+        self.assertFalse(_BRIDGE.is_authorized_private_message(
+            {"from": {"id": 111}, "chat": {"id": -99, "type": "group"}}, allowed))
+        self.assertFalse(_BRIDGE.is_authorized_private_message(
+            {"from": {"id": 111}, "chat": {"id": 222, "type": "private"}}, allowed))
+
+
+class JarvisConfigLoadingTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.vault = Path(temporary.name)
+        (self.vault / "00-meta").mkdir()
+        self.path = self.vault / "00-meta" / "vault-config.json"
+        self.valid = {
+            "enabled": True,
+            "telegram_user_ids": [111],
+            "briefing_time": "07:30",
+            "butler_interval_hours": 24,
+            "qa_hourly_limit": 6,
+            "qa_timeout_sec": 180,
+            "claude_cmd": "claude",
+        }
+
+    def _write(self, root: object) -> None:
+        self.path.write_text(json.dumps(root), encoding="utf-8")
+
+    def test_only_missing_config_missing_block_and_exact_false_are_inactive(self):
+        self.assertIsNone(_BRIDGE.load_jarvis_config(self.vault))
+        self._write({"language": "ko"})
+        self.assertIsNone(_BRIDGE.load_jarvis_config(self.vault))
+        self._write({"jarvis": {"enabled": False}})
+        self.assertIsNone(_BRIDGE.load_jarvis_config(self.vault))
+
+    def test_malformed_read_root_block_and_enabled_values_are_configuration_errors(self):
+        raw_cases = ("{", "\ufeff{}")
+        for raw in raw_cases:
+            with self.subTest(raw=repr(raw)):
+                self.path.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    _BRIDGE.load_jarvis_config(self.vault)
+
+        for root in (
+            [], {"jarvis": None}, {"jarvis": []}, {"jarvis": {}},
+            {"jarvis": {"enabled": 1}}, {"jarvis": {"enabled": "false"}},
+        ):
+            with self.subTest(root=root):
+                self._write(root)
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    _BRIDGE.load_jarvis_config(self.vault)
+
+        self._write({"jarvis": self.valid})
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.load_jarvis_config(self.vault)
+
+    def test_enabled_settings_are_strictly_validated(self):
+        invalid_settings = (
+            ("telegram_user_ids", [-100]),
+            ("briefing_times", []),
+            ("butler_interval_hours", 0),
+            ("butler_interval_hours", -1),
+            ("butler_interval_hours", float("nan")),
+            ("butler_interval_hours", float("inf")),
+            ("butler_interval_hours", True),
+            ("qa_hourly_limit", 0),
+            ("qa_hourly_limit", -1),
+            ("qa_hourly_limit", 1.0),
+            ("qa_hourly_limit", True),
+            ("qa_timeout_sec", 0),
+            ("qa_timeout_sec", -1),
+            ("qa_timeout_sec", float("nan")),
+            ("qa_timeout_sec", float("inf")),
+            ("qa_timeout_sec", True),
+            ("claude_cmd", ""),
+            ("claude_cmd", "   "),
+            ("claude_cmd", 1),
+        )
+        for key, value in invalid_settings:
+            with self.subTest(key=key, value=value):
+                block = {**self.valid, key: value}
+                self._write({"jarvis": block})
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    _BRIDGE.load_jarvis_config(self.vault)
+
+    def test_valid_integer_settings_legacy_time_and_decimal_ids_remain_compatible(self):
+        block = {**self.valid, "telegram_user_ids": [9, "002"]}
+        self._write({"jarvis": block})
+
+        loaded = _BRIDGE.load_jarvis_config(self.vault)
+
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["telegram_user_ids"], [9, 2])
+        self.assertEqual(loaded["_briefing_slots"], [(7, 30)])
+        self.assertEqual(loaded["butler_interval_hours"], 24)
+        self.assertEqual(loaded["qa_hourly_limit"], 6)
+        self.assertEqual(loaded["qa_timeout_sec"], 180)
+
+
+class JarvisTelegramBoundaryTests(unittest.TestCase):
+    token = "12345:Secret_value-9"
+
+    @staticmethod
+    def _response(payload: object) -> MagicMock:
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode("utf-8")
+        return response
+
+    def test_tg_call_rejects_false_missing_and_non_object_protocol_roots(self):
+        cases = (
+            {"ok": False, "error_code": 400, "description": "CONTENT-SENTINEL"},
+            {"ok": 1, "result": []},
+            {"result": []},
+            ["not", "an", "object"],
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                with patch.object(
+                        _BRIDGE.urllib.request, "urlopen",
+                        return_value=self._response(payload)), self.assertRaises(
+                            _BRIDGE.TelegramAPIError) as raised:
+                    _BRIDGE.tg_call(self.token, "getUpdates")
+                rendered = str(raised.exception)
+                self.assertNotIn(self.token, rendered)
+                self.assertNotIn("CONTENT-SENTINEL", rendered)
+
+    def test_tg_call_normalizes_transport_url_json_and_unicode_failures(self):
+        http_error = _BRIDGE.urllib.error.HTTPError(
+            f"https://api.telegram.org/bot{self.token}/getUpdates", 502,
+            "CONTENT-SENTINEL", {}, None)
+        failures = (
+            ("getUpdates", http_error, None, 502),
+            ("getUpdates", _BRIDGE.urllib.error.URLError("CONTENT-SENTINEL"), None, None),
+            ("getUpdates", TypeError("CONTENT-SENTINEL"), None, None),
+            ("getUpdates", None, b"{", None),
+            ("getUpdates", None, b"\xff", None),
+            ("bad method", None, None, None),
+            (None, None, None, None),
+        )
+        for method, transport_error, raw, expected_code in failures:
+            with self.subTest(method=method, error=type(transport_error).__name__):
+                response = MagicMock()
+                response.__enter__.return_value.read.return_value = raw
+                replacement = (
+                    patch.object(_BRIDGE.urllib.request, "urlopen", side_effect=transport_error)
+                    if transport_error is not None else
+                    patch.object(_BRIDGE.urllib.request, "urlopen", return_value=response)
+                )
+                with replacement, self.assertRaises(
+                        _BRIDGE.TelegramAPIError) as raised:
+                    _BRIDGE.tg_call(self.token, method)
+                rendered = str(raised.exception)
+                self.assertNotIn(self.token, rendered)
+                self.assertNotIn("CONTENT-SENTINEL", rendered)
+                self.assertEqual(raised.exception.code, expected_code)
+                self.assertIsNone(raised.exception.__context__)
+
+    def test_tg_call_sanitizes_http_protocol_exceptions_without_context(self):
+        failures = (
+            http.client.IncompleteRead(b"CONTENT-SENTINEL", 99),
+            http.client.BadStatusLine("CONTENT-SENTINEL"),
+            http.client.LineTooLong("CONTENT-SENTINEL"),
+        )
+        for failure in failures:
+            response = MagicMock()
+            response.__enter__.return_value.read.side_effect = failure
+            replacement = (
+                patch.object(
+                    _BRIDGE.urllib.request, "urlopen", return_value=response)
+                if isinstance(failure, http.client.IncompleteRead) else
+                patch.object(_BRIDGE.urllib.request, "urlopen", side_effect=failure)
+            )
+            with self.subTest(error=type(failure).__name__), replacement:
+                with self.assertRaises(_BRIDGE.TelegramAPIError) as raised:
+                    _BRIDGE.tg_call(self.token, "getUpdates")
+
+                self.assertEqual(raised.exception.source, type(failure).__name__)
+                self.assertIsNone(raised.exception.code)
+                self.assertIsNone(raised.exception.__context__)
+                self.assertNotIn("CONTENT-SENTINEL", str(raised.exception))
+                self.assertNotIn(self.token, str(raised.exception))
+
+    def test_tg_send_falls_back_after_sanitized_http_protocol_failure(self):
+        ok_response = self._response({"ok": True})
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen",
+                side_effect=[
+                    http.client.BadStatusLine("CONTENT-SENTINEL"), ok_response,
+                ]) as opener, patch.object(_BRIDGE, "log") as logger:
+            sent = _BRIDGE.tg_send(self.token, 111, "message")
+
+        self.assertTrue(sent)
+        self.assertEqual(opener.call_count, 2)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(self.token, rendered)
+
+    def test_tg_send_rejects_real_ok_false_response_without_plain_retry(self):
+        response = self._response({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        })
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
+                patch.object(_BRIDGE, "log") as logger:
+            sent = _BRIDGE.tg_send(self.token, 111, "message")
+
+        self.assertFalse(sent)
+        self.assertEqual(opener.call_count, 1)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(self.token, rendered)
+
+    def test_chunks_bound_long_lines_and_reconstruct_exactly(self):
+        text = "x" * 23
+
+        chunks = _BRIDGE._chunks_by_line(text, limit=10)
+
+        self.assertEqual(chunks, ["x" * 10, "x" * 10, "x" * 3])
+        self.assertTrue(all(len(chunk) <= 10 for chunk in chunks))
+        self.assertEqual("".join(chunks), text)
+
+    def test_chunks_preserve_exact_boundary_and_newlines_when_possible(self):
+        self.assertEqual(_BRIDGE._chunks_by_line("x" * 10, limit=10), ["x" * 10])
+        text = "ab\ncd\n"
+        chunks = _BRIDGE._chunks_by_line(text, limit=3)
+        self.assertEqual(chunks, ["ab\n", "cd\n"])
+        self.assertEqual("".join(chunks), text)
+
+    def test_tg_send_uses_bounded_plain_text_when_rendered_html_is_oversized(self):
+        text = "&" * _BRIDGE.TG_CHUNK
+        with patch.object(_BRIDGE, "tg_call", return_value={"ok": True}) as caller:
+            sent = _BRIDGE.tg_send(self.token, 111, text)
+
+        self.assertTrue(sent)
+        caller.assert_called_once()
+        self.assertEqual(caller.call_args.kwargs["text"], text)
+        self.assertNotIn("parse_mode", caller.call_args.kwargs)
+        self.assertLessEqual(len(caller.call_args.kwargs["text"]), _BRIDGE.TG_CHUNK)
+
+    def test_html_failure_never_falls_back_to_an_oversized_plain_chunk(self):
+        calls = []
+
+        def fake_call(_token, _method, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get("parse_mode") == "HTML":
+                raise _BRIDGE.TelegramAPIError("HTTPError", 400)
+            return {"ok": True}
+
+        with patch.object(_BRIDGE, "tg_call", side_effect=fake_call), \
+                patch.object(_BRIDGE, "log"):
+            sent = _BRIDGE.tg_send(self.token, 111, "a" * 5000)
+
+        self.assertTrue(sent)
+        self.assertTrue(calls)
+        self.assertTrue(all(len(call["text"]) <= _BRIDGE.TG_CHUNK for call in calls))
+
+
+class JarvisSubprocessBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.vault = Path(temporary.name)
+        self.parent_env = {
+            "JARVIS_TELEGRAM_TOKEN": "UPPER-SECRET",
+            "jarvis_telegram_token": "lower-secret",
+            "Jarvis_Telegram_Token": "mixed-secret",
+            "KEEP_ME": "safe",
+        }
+        self.parent_snapshot = dict(self.parent_env)
+
+    def _assert_scrubbed_copy(self, child_env: dict[str, str]) -> None:
+        self.assertEqual(child_env, {"KEEP_ME": "safe"})
+        self.assertIsNot(child_env, self.parent_env)
+        self.assertEqual(self.parent_env, self.parent_snapshot)
+
+    def test_claude_process_receives_a_case_insensitively_scrubbed_environment(self):
+        cfg = {
+            "claude_cmd": "claude", "_deny_zones": [],
+            "_hot_note": "00-meta/hot.md", "_language": "ko",
+            "qa_timeout_sec": 30,
+        }
+        completed = Mock(returncode=0, stdout="answer", stderr="")
+        with patch.object(_BRIDGE.os, "environ", self.parent_env), \
+                patch.object(_BRIDGE.shutil, "which", return_value="claude"), \
+                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+            self.assertEqual(_BRIDGE.run_claude(self.vault, cfg, "question"), "answer")
+
+        self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
+
+    def test_claude_failure_log_contains_return_code_but_not_stderr(self):
+        cfg = {
+            "claude_cmd": "claude", "_deny_zones": [],
+            "_hot_note": "00-meta/hot.md", "_language": "ko",
+            "qa_timeout_sec": 30,
+        }
+        completed = Mock(
+            returncode=9, stdout="", stderr="CONTENT-SENTINEL UPPER-SECRET")
+        with patch.object(_BRIDGE.os, "environ", self.parent_env), \
+                patch.object(_BRIDGE.shutil, "which", return_value="claude"), \
+                patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                patch.object(_BRIDGE, "log") as logger:
+            _BRIDGE.run_claude(self.vault, cfg, "question")
+
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertIn("9", rendered)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn("UPPER-SECRET", rendered)
+
+    def test_user_facing_wrappers_preserve_generation_diagnostics(self):
+        cfg = {"unused": True}
+        diagnostic = "handled diagnostic"
+        with patch.object(
+                _BRIDGE, "generate_claude",
+                return_value=_BRIDGE.GenerationResult(False, diagnostic)):
+            self.assertEqual(
+                _BRIDGE.run_claude(self.vault, cfg, "question"), diagnostic)
+            self.assertEqual(
+                _BRIDGE.do_qa(self.vault, cfg, "question"), diagnostic)
+
+    def test_healthcheck_process_receives_a_case_insensitively_scrubbed_environment(self):
+        cfg = {"_health_report": "00-meta/health-report.md"}
+        completed = Mock(returncode=0, stdout="", stderr="")
+        with patch.object(_BRIDGE.os, "environ", self.parent_env), \
+                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner, \
+                patch.object(_BRIDGE, "_git", return_value=""):
+            _BRIDGE.do_butler(self.vault, cfg)
+
+        self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
+
+    def test_butler_healthcheck_preserves_config_report_provenance(self):
+        cached_report = "../outside/cached-health-report.md"
+        cfg = {"_health_report": cached_report}
+        completed = Mock(returncode=0, stdout="", stderr="")
+        healthcheck = Path(_BRIDGE.__file__).parent / "vault_healthcheck.py"
+        with patch.object(
+                _BRIDGE.subprocess, "run", return_value=completed) as runner, \
+                patch.object(_BRIDGE, "_git", return_value=""):
+            _BRIDGE.do_butler(self.vault, cfg)
+
+        command = runner.call_args.args[0]
+        self.assertEqual(command, [
+            sys.executable, str(healthcheck), "--vault", str(self.vault),
+        ])
+        self.assertNotIn("--output", command)
+        self.assertNotIn(cached_report, command)
+
+    def test_git_process_receives_a_case_insensitively_scrubbed_environment(self):
+        completed = Mock(returncode=0, stdout="ok\n", stderr="")
+        with patch.object(_BRIDGE.os, "environ", self.parent_env), \
+                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+            self.assertEqual(_BRIDGE._git(self.vault, "status"), "ok")
+
+        self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
+
+
+class JarvisMainTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.vault = self.root / "vault"
+        (self.vault / "00-meta").mkdir(parents=True)
+        self.config = self.vault / "00-meta" / "vault-config.json"
+        original_state_root = _BRIDGE.STATE_ROOT
+        _BRIDGE.STATE_ROOT = self.root / "state"
+        self.addCleanup(setattr, _BRIDGE, "STATE_ROOT", original_state_root)
+
+    def _run_main(self, env: dict[str, str]) -> tuple[int, str]:
+        output = io.StringIO()
+        argv = ["jarvis_bridge.py", "--vault", str(self.vault)]
+        with patch.object(sys, "argv", argv), patch.dict(os.environ, env, clear=True), \
+                redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            _BRIDGE.main()
+        return int(raised.exception.code), output.getvalue()
+
+    def _write_enabled(self) -> None:
+        self.config.write_text(json.dumps({
+            "jarvis": {"enabled": True, "telegram_user_ids": [111]}
+        }), encoding="utf-8")
+
+    def test_main_converts_malformed_config_to_one_nonzero_line_without_traceback(self):
+        self.config.write_text("{", encoding="utf-8")
+
+        code, output = self._run_main({"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertIn("configuration error", output.lower())
+        self.assertNotIn("traceback", output.lower())
+
+    def test_main_treats_missing_token_as_configuration_error(self):
+        self._write_enabled()
+
+        code, output = self._run_main({})
+
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertIn("configuration error", output.lower())
+        self.assertNotIn("traceback", output.lower())
+
+    def test_main_never_echoes_a_malformed_token(self):
+        self._write_enabled()
+        token = "12345:SECRET_SENTINEL:extra"
+
+        code, output = self._run_main({"JARVIS_TELEGRAM_TOKEN": token})
+
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertNotIn(token, output)
+        self.assertNotIn("SECRET_SENTINEL", output)
+
+    def test_main_normalizes_plain_json_value_error_without_traceback(self):
+        self.config.write_text("{}", encoding="utf-8")
+        with patch.object(
+                _BRIDGE.json, "loads", side_effect=ValueError("CONTENT-SENTINEL")):
+            code, output = self._run_main(
+                {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertIn("configuration error", output.lower())
+        self.assertNotIn("traceback", output.lower())
+        self.assertNotIn("CONTENT-SENTINEL", output)
+
+    def test_main_normalizes_supported_integer_digit_limit_failures(self):
+        get_limit = getattr(sys, "get_int_max_str_digits", None)
+        limit = get_limit() if get_limit is not None else 0
+        if limit <= 0:
+            self.skipTest("interpreter integer string digit limit is disabled")
+        digits = "9" * (limit + 1)
+        cases = (
+            '{"jarvis":{"enabled":true,"telegram_user_ids":["' + digits + '"]}}',
+            '{"jarvis":{"enabled":true,"telegram_user_ids":[1],'
+            '"qa_hourly_limit":' + digits + '}}',
+        )
+        for raw in cases:
+            with self.subTest(boundary="recipient" if '"' + digits + '"' in raw else "json"):
+                self.config.write_text(raw, encoding="utf-8")
+                code, output = self._run_main(
+                    {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+                self.assertNotEqual(code, 0)
+                self.assertEqual(len(output.splitlines()), 1)
+                self.assertIn("configuration error", output.lower())
+                self.assertNotIn("traceback", output.lower())
+                self.assertNotIn(digits, output)
+
+    def test_main_normalizes_roughly_400_digit_positive_numeric_settings(self):
+        digits = "9" * 400
+        for setting in ("butler_interval_hours", "qa_timeout_sec"):
+            with self.subTest(setting=setting):
+                self.config.write_text(
+                    '{"jarvis":{"enabled":true,"telegram_user_ids":[1],"' +
+                    setting + '":' + digits + '}}',
+                    encoding="utf-8")
+                code, output = self._run_main(
+                    {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+                self.assertNotEqual(code, 0)
+                self.assertEqual(len(output.splitlines()), 1)
+                self.assertIn("configuration error", output.lower())
+                self.assertNotIn("traceback", output.lower())
+                self.assertNotIn(digits, output)
+
+    def test_main_keeps_inactive_jarvis_as_success(self):
+        self.config.write_text(
+            json.dumps({"jarvis": {"enabled": False}}), encoding="utf-8")
+
+        code, _output = self._run_main({})
+
+        self.assertEqual(code, 0)
+
+
+class JarvisBriefingTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        self.cfg = {
+            "_hot_note": "00-meta/hot.md",
+            "_handoff_note": "",
+            "_log_note": "00-meta/log.md",
+            "butler_interval_hours": 24,
+        }
+        self.slots = [(7, 30), (13, 30), (19, 30)]
+        self.state_file = self.root / "state" / "last_brief"
+
+    def _load(self, started_at, slots=None):
+        return _BRIDGE.load_briefing_state(
+            self.state_file, slots or self.slots, started_at)
+
+    def _send(self, state, now, sender, slots=None):
+        return _BRIDGE.send_due_briefings(
+            self.vault, self.cfg, "12345:secret", 111, now,
+            slots or self.slots, state, self.state_file, sender,
+            lambda vault, cfg: _BRIDGE.GenerationResult(
+                True, _BRIDGE.do_brief(vault, cfg)))
+
+    def _disk_state(self):
+        return json.loads(self.state_file.read_text(encoding="utf-8"))
+
+    def test_do_brief_uses_neutral_recurring_prompt(self):
+        with patch.object(_BRIDGE, "_git", return_value="abc123 change"), \
+                patch.object(_BRIDGE, "run_claude", return_value="brief") as runner:
+            result = _BRIDGE.do_brief(self.vault, self.cfg)
+
+        self.assertEqual(result, "brief")
+        prompt = runner.call_args.args[2]
+        self.assertIn("정기 브리핑", prompt)
+        for time_of_day in ("아침 브리핑", "점심 브리핑", "저녁 브리핑"):
+            self.assertNotIn(time_of_day, prompt)
+
+    def test_briefing_label_maps_the_slot_only_for_telegram(self):
+        self.assertEqual(_BRIDGE.briefing_label((8, 30)), ("🌅", "아침"))
+        self.assertEqual(_BRIDGE.briefing_label((13, 30)), ("🌞", "점심"))
+        self.assertEqual(_BRIDGE.briefing_label((19, 30)), ("🌆", "저녁"))
+
+    def test_cold_start_skips_only_strictly_earlier_slots_in_memory(self):
+        state = self._load(datetime(2026, 9, 1, 13, 0))
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body") as generator:
+            state = self._send(state, datetime(2026, 9, 1, 13, 0), sender)
+
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.skipped, {(7, 30)})
+        self.assertEqual(state.pending, [])
+        sender.assert_not_called()
+        generator.assert_not_called()
+
+    def test_exact_current_minute_on_cold_start_remains_due(self):
+        slots = [(7, 30), (13, 30)]
+        now = datetime(2026, 9, 1, 13, 30)
+        state = self._load(now, slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(state, now, sender, slots)
+
+        self.assertEqual(state.skipped, {(7, 30)})
+        self.assertEqual(state.fired, {(13, 30)})
+        self.assertEqual(state.pending, [])
+        sender.assert_called_once()
+        self.assertIn("🌞 점심 브리핑", sender.call_args.args[2])
+
+    def test_failed_send_restarts_next_minute_from_persisted_pending(self):
+        slots = [(7, 30)]
+        first_now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(first_now, slots)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(state, first_now, Mock(return_value=False), slots)
+
+        self.assertEqual(self._disk_state(), {
+            "version": 1, "day": "2026-09-01", "fired": [],
+            "pending": ["07:30"],
+        })
+        restarted = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        retry_sender = Mock(return_value=True)
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            restarted = self._send(
+                restarted, datetime(2026, 9, 1, 7, 31), retry_sender, slots)
+
+        retry_sender.assert_called_once()
+        self.assertEqual(restarted.fired, {(7, 30)})
+        self.assertEqual(restarted.pending, [])
+
+    def test_generation_failures_remain_pending_and_restart_retries(self):
+        slots = [(7, 30)]
+        generation_cfg = {
+            **self.cfg,
+            "claude_cmd": "claude",
+            "_deny_zones": [],
+            "_language": "ko",
+            "qa_timeout_sec": 30,
+        }
+        failures = {
+            "missing-cli": (None, AssertionError("subprocess must not run")),
+            "timeout": (
+                "claude",
+                _BRIDGE.subprocess.TimeoutExpired(cmd=["claude"], timeout=30),
+            ),
+            "nonzero": ("claude", Mock(returncode=9, stdout="", stderr="secret")),
+            "empty": ("claude", Mock(returncode=0, stdout=" \n", stderr="")),
+        }
+        for name, (executable, subprocess_outcome) in failures.items():
+            with self.subTest(failure=name):
+                state_file = self.root / f"generation-{name}" / "last_brief"
+                now = datetime(2026, 9, 1, 7, 30)
+                state = _BRIDGE.load_briefing_state(state_file, slots, now)
+                sender = Mock(return_value=True)
+                run_patch = (
+                    patch.object(
+                        _BRIDGE.subprocess, "run", side_effect=subprocess_outcome)
+                    if isinstance(subprocess_outcome, BaseException)
+                    else patch.object(
+                        _BRIDGE.subprocess, "run", return_value=subprocess_outcome)
+                )
+
+                with patch.object(_BRIDGE.shutil, "which", return_value=executable), \
+                        run_patch, patch.object(_BRIDGE, "_git", return_value="git"), \
+                        patch.object(_BRIDGE, "log"):
+                    state = _BRIDGE.send_due_briefings(
+                        self.vault, generation_cfg, "12345:secret", 111, now,
+                        slots, state, state_file, sender)
+
+                sender.assert_not_called()
+                self.assertEqual(state.fired, set())
+                self.assertEqual(state.pending, [(7, 30)])
+                self.assertEqual(json.loads(
+                    state_file.read_text(encoding="utf-8"))["pending"], ["07:30"])
+
+                restarted = _BRIDGE.load_briefing_state(
+                    state_file, slots, datetime(2026, 9, 1, 7, 31))
+                retry_sender = Mock(return_value=True)
+                completed = Mock(returncode=0, stdout="recovered", stderr="")
+                with patch.object(_BRIDGE.shutil, "which", return_value="claude"), \
+                        patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                        patch.object(_BRIDGE, "_git", return_value="git"), \
+                        patch.object(_BRIDGE, "log"):
+                    restarted = _BRIDGE.send_due_briefings(
+                        self.vault, generation_cfg, "12345:secret", 111,
+                        datetime(2026, 9, 1, 7, 31), slots, restarted,
+                        state_file, retry_sender)
+
+                retry_sender.assert_called_once()
+                self.assertEqual(restarted.fired, {(7, 30)})
+                self.assertEqual(restarted.pending, [])
+
+    def test_successful_send_does_not_duplicate_after_restart(self):
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(state, now, Mock(return_value=True), slots)
+
+        restarted = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        sender = Mock(return_value=True)
+        with patch.object(_BRIDGE, "do_brief", return_value="body") as generator:
+            restarted = self._send(
+                restarted, datetime(2026, 9, 1, 7, 31), sender, slots)
+
+        self.assertEqual(restarted.fired, {(7, 30)})
+        sender.assert_not_called()
+        generator.assert_not_called()
+
+    def test_live_day_rollover_sends_slots_due_on_the_new_day(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01",
+            "fired": ["07:30", "13:30", "19:30"], "pending": [],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 20, 0))
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 2, 13, 30), sender)
+
+        self.assertEqual(state.day, date(2026, 9, 2))
+        self.assertEqual(state.fired, {(7, 30), (13, 30)})
+        self.assertEqual(sender.call_count, 2)
+
+    def test_rollover_state_write_failure_preserves_prior_day_in_memory(self):
+        slots = [(7, 30)]
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01",
+            "fired": ["07:30"], "pending": [],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 8, 0), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=OSError("disk full")), \
+                patch.object(_BRIDGE, "do_brief", return_value="body") as generator, \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 2, 7, 30), sender, slots)
+
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [])
+        sender.assert_not_called()
+        generator.assert_not_called()
+
+    def test_first_success_second_failure_preserves_ordered_remaining_pending(self):
+        state = self._load(datetime(2026, 9, 1, 6, 0))
+        sender = Mock(side_effect=[True, False])
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 1, 20, 0), sender)
+
+        self.assertEqual(sender.call_count, 2)
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [(13, 30), (19, 30)])
+        self.assertEqual(self._disk_state()["pending"], ["13:30", "19:30"])
+
+    def test_pending_write_failure_sends_and_generates_nothing(self):
+        slots = [(7, 30)]
+        state = self._load(datetime(2026, 9, 1, 7, 30), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=OSError("disk full")), \
+                patch.object(_BRIDGE, "do_brief", return_value="body") as generator, \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 1, 7, 30), sender, slots)
+
+        sender.assert_not_called()
+        generator.assert_not_called()
+        self.assertEqual(state.pending, [])
+        self.assertFalse(self.state_file.exists())
+
+    def test_fired_write_failure_leaves_sent_head_retryable(self):
+        slots = [(7, 30)]
+        state = self._load(datetime(2026, 9, 1, 7, 30), slots)
+        sender = Mock(return_value=True)
+        real_writer = _BRIDGE.atomic_write_text
+        write_count = 0
+
+        def fail_second_write(path, text):
+            nonlocal write_count
+            write_count += 1
+            if write_count == 2:
+                raise OSError("disk full")
+            return real_writer(path, text)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=fail_second_write), \
+                patch.object(_BRIDGE, "do_brief", return_value="body"), \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 1, 7, 30), sender, slots)
+
+        sender.assert_called_once()
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.pending, [(7, 30)])
+        self.assertEqual(self._disk_state()["pending"], ["07:30"])
+
+    def test_prior_day_pending_drains_before_same_clock_new_day_slot(self):
+        slots = [(7, 30)]
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01", "fired": [],
+            "pending": ["07:30"],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 2, 7, 30), sender, slots)
+
+        self.assertEqual(sender.call_count, 2)
+        self.assertEqual(state.day, date(2026, 9, 2))
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [])
+
+    def test_legacy_dates_migrate_globally_and_inside_namespace(self):
+        slots = [(7, 30)]
+        global_root = self.root / "global"
+        namespace = global_root / "vault-a-12345"
+        global_root.mkdir()
+        (global_root / "last_brief").write_text("2026-09-01", encoding="utf-8")
+        _BRIDGE.migrate_legacy_state(global_root, namespace, namespace.name)
+
+        global_state = _BRIDGE.load_briefing_state(
+            namespace / "last_brief", slots, datetime(2026, 9, 1, 9, 0))
+        self.assertEqual(global_state.fired, {(7, 30)})
+        self.assertEqual(json.loads(
+            (namespace / "last_brief").read_text(encoding="utf-8"))["version"], 1)
+
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-08-31", encoding="utf-8")
+        namespaced = self._load(datetime(2026, 9, 1, 13, 0))
+        self.assertEqual(namespaced.day, date(2026, 9, 1))
+        self.assertEqual(namespaced.fired, set())
+        self.assertEqual(namespaced.skipped, {(7, 30)})
+        self.assertEqual(self._disk_state(), {
+            "version": 1, "day": "2026-08-31", "fired": [], "pending": [],
+        })
+
+    def test_today_legacy_date_with_multiple_slots_is_actionably_ambiguous(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-09-01", encoding="utf-8")
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "multiple briefing slots"):
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_future_legacy_date_fails_closed(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-09-02", encoding="utf-8")
+
+        with self.assertRaisesRegex(_BRIDGE.JarvisConfigError, "future"):
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_invalid_briefing_state_variants_fail_closed(self):
+        valid_base = {
+            "version": 1, "day": "2026-09-01", "fired": [], "pending": [],
+        }
+        cases = {
+            "corrupt": "{",
+            "duplicate": json.dumps({
+                **valid_base, "fired": ["07:30", "07:30"]}),
+            "overlap": json.dumps({
+                **valid_base, "fired": ["07:30"], "pending": ["07:30"]}),
+            "out-of-order": json.dumps({
+                **valid_base, "pending": ["13:30", "07:30"]}),
+            "foreign": json.dumps({**valid_base, "pending": ["08:00"]}),
+            "unicode-digits": json.dumps({**valid_base, "pending": ["٠٧:٣٠"]}),
+            "future": json.dumps({**valid_base, "day": "2026-09-02"}),
+        }
+        self.state_file.parent.mkdir(parents=True)
+        for name, raw in cases.items():
+            with self.subTest(case=name):
+                self.state_file.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_duplicate_briefing_json_members_fail_closed(self):
+        self.state_file.parent.mkdir(parents=True)
+        duplicate_members = (
+            '{"version":1,"day":"2026-09-01","fired":[],'
+            '"pending":[],"pending":["07:30"]}',
+            '{"version":1,"version":1,"day":"2026-09-01",'
+            '"fired":[],"pending":[]}',
+        )
+        for raw in duplicate_members:
+            with self.subTest(raw=raw):
+                self.state_file.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_briefing_state_normalizes_plain_json_value_errors(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("{}", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.json, "loads", side_effect=ValueError("CONTENT-SENTINEL")), \
+                self.assertRaisesRegex(_BRIDGE.JarvisConfigError, "invalid JSON") as raised:
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+        self.assertNotIn("CONTENT-SENTINEL", str(raised.exception))
+
+    def test_manual_brief_wording_is_neutral(self):
+        sender = Mock(return_value=True)
+        update = {
+            "update_id": 7,
+            "message": {
+                "text": "/brief",
+                "date": 1_788_134_400,
+                "from": {"id": 111},
+                "chat": {"id": 111, "type": "private"},
+            },
+        }
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            handled = _BRIDGE.process_update(
+                self.vault, self.cfg, "12345:secret", {111}, update,
+                0.0, deque(), set(), sender)
+
+        self.assertTrue(handled)
+        message = sender.call_args.args[2]
+        self.assertEqual(message, "📋 정기 브리핑\nbody")
+
+    def test_butler_completion_is_success_only_and_atomic(self):
+        sender = Mock(side_effect=[False, True])
+        state_file = self.root / "state" / "last_butler"
+
+        with patch.object(_BRIDGE, "do_butler", return_value="report"), \
+                patch.object(
+                    _BRIDGE, "atomic_write_text",
+                    wraps=_BRIDGE.atomic_write_text) as writer:
+            last_butler = _BRIDGE.send_butler_if_due(
+                self.vault, self.cfg, "12345:secret", 111, 0.0,
+                state_file, 100_000.0, sender)
+            self.assertEqual(last_butler, 0.0)
+            self.assertFalse(state_file.exists())
+            writer.assert_not_called()
+
+            last_butler = _BRIDGE.send_butler_if_due(
+                self.vault, self.cfg, "12345:secret", 111, last_butler,
+                state_file, 100_000.0, sender)
+
+        self.assertEqual(last_butler, 100_000.0)
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "100000.0")
+        writer.assert_called_once_with(state_file, "100000.0")
+        self.assertEqual(list(state_file.parent.glob("*.tmp")), [])
+
+    def test_template_and_docs_describe_multi_slot_fallback_contract(self):
+        template = json.loads(
+            (_ROOT / "assets" / "templates" / "vault-config.json").read_text(
+                encoding="utf-8"))
+        self.assertEqual(template["jarvis"]["briefing_times"], ["07:30"])
+        self.assertNotIn("briefing_time", template["jarvis"])
+
+        for relative in (
+            "commands/vault-jarvis-setup.md",
+            "README.md",
+            "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md",
+        ):
+            with self.subTest(path=relative):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("`briefing_times`", text)
+                self.assertIn("`briefing_time`", text)
+                self.assertIn("없을 때만", text)
+
+    def test_user_docs_disclose_deny_zones_are_not_an_os_security_boundary(self):
+        disclosure = "deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다."
+        for relative in ("commands/vault-jarvis-setup.md", "README.md"):
+            with self.subTest(path=relative):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn(disclosure, text)
+
+    def test_module_and_user_docs_match_write_log_and_capture_contracts(self):
+        contracts = (
+            "메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.",
+            "예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.",
+            "거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 "
+            "`~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.",
+            "캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.",
+        )
+        sources = {
+            "jarvis_bridge.py docstring": _BRIDGE.__doc__ or "",
+            **{
+                relative: (_ROOT / relative).read_text(encoding="utf-8")
+                for relative in (
+                    "commands/vault-jarvis-setup.md",
+                    "README.md",
+                    "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md",
+                )
+            },
+        }
+        for source_name, text in sources.items():
+            for contract in contracts:
+                with self.subTest(source=source_name, contract=contract):
+                    self.assertIn(contract, text)
+
+    def test_user_docs_require_one_daemon_and_disclose_delivery_windows(self):
+        contracts = (
+            "볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다.",
+            "작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다.",
+            "예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다.",
+            "Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다.",
+            "`pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.",
+        )
+        for relative in (
+                "commands/vault-jarvis-setup.md",
+                "README.md",
+                "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md"):
+            text = (_ROOT / relative).read_text(encoding="utf-8")
+            for contract in contracts:
+                with self.subTest(path=relative, contract=contract):
+                    self.assertIn(contract, text)
+
+
+class JarvisStateTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        original_state_root = _BRIDGE.STATE_ROOT
+        _BRIDGE.STATE_ROOT = self.root
+        self.addCleanup(setattr, _BRIDGE, "STATE_ROOT", original_state_root)
+
+    def test_state_namespace_separates_vaults_and_bots_without_token_plaintext(self):
+        a = _BRIDGE.state_dir_for(Path("C:/vault-a"), "12345:secret", self.root)
+        b = _BRIDGE.state_dir_for(Path("C:/vault-b"), "12345:secret", self.root)
+        c = _BRIDGE.state_dir_for(Path("C:/vault-a"), "67890:other", self.root)
+
+        self.assertEqual(len({a, b, c}), 3)
+        self.assertEqual(a.parent, self.root)
+        self.assertTrue(a.name.endswith("-12345"))
+        self.assertNotIn("secret", str(a))
+
+    def test_state_namespace_rejects_malformed_bot_id_without_echoing_token(self):
+        token = "bot-name:secret-value"
+        with self.assertRaises(_BRIDGE.JarvisConfigError) as raised:
+            _BRIDGE.state_dir_for(self.vault, token, self.root)
+
+        self.assertNotIn(token, str(raised.exception))
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.state_dir_for(self.vault, "12345", self.root)
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.state_dir_for(self.vault, "１２３４５:secret", self.root)
+
+    def test_atomic_write_replaces_complete_value(self):
+        target = self.root / "offset"
+
+        _BRIDGE.atomic_write_text(target, "41")
+        _BRIDGE.atomic_write_text(target, "42")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "42")
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_concurrent_atomic_replacements_use_unique_complete_temporaries(self):
+        target = self.root / "offset"
+        barrier = threading.Barrier(2)
+        original_replace = Path.replace
+        temporary_names = []
+        names_lock = threading.Lock()
+        replace_lock = threading.Lock()
+
+        def synchronized_replace(source, destination):
+            if Path(destination) == target:
+                with names_lock:
+                    temporary_names.append(Path(source).name)
+                barrier.wait(timeout=5)
+            with replace_lock:
+                return original_replace(source, destination)
+
+        with patch.object(Path, "replace", synchronized_replace), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(
+                lambda text: _BRIDGE.atomic_write_text(target, text),
+                ("alpha", "beta"),
+            ))
+
+        self.assertIn(target.read_text(encoding="utf-8"), {"alpha", "beta"})
+        self.assertEqual(len(set(temporary_names)), 2)
+        self.assertEqual(list(self.root.glob(".*.tmp")), [])
+
+    def test_float_state_accepts_missing_default_and_finite_non_negative_values(self):
+        path = self.root / "last_butler"
+        self.assertEqual(_BRIDGE.read_float_state(path, default=7.5), 7.5)
+        for raw, expected in (("0", 0.0), ("12.5", 12.5)):
+            with self.subTest(raw=raw):
+                path.write_text(raw, encoding="utf-8")
+                self.assertEqual(_BRIDGE.read_float_state(path), expected)
+
+    def test_float_state_rejects_objects_unreadable_and_non_finite_values(self):
+        path = self.root / "last_butler"
+        path.mkdir()
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_float_state(path)
+        path.rmdir()
+
+        for raw in ("", "bad", "-0.1", "nan", "inf", "-inf"):
+            with self.subTest(raw=raw):
+                path.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    _BRIDGE.read_float_state(path)
+
+        path.write_text("1", encoding="utf-8")
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_float_state(path)
+
+    def test_first_owner_claims_legacy_state_and_second_owner_leaves_it_untouched(self):
+        first_namespace = self.root / "vault-a-12345"
+        second_namespace = self.root / "vault-b-67890"
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        _BRIDGE.migrate_legacy_state(self.root, first_namespace, "vault-a-12345")
+
+        self.assertEqual((first_namespace / "offset").read_text(encoding="utf-8"), "41")
+        self.assertFalse((self.root / "offset").exists())
+        (self.root / "last_brief").write_text("2026-08-31", encoding="utf-8")
+        warning = io.StringIO()
+        with redirect_stdout(warning):
+            _BRIDGE.migrate_legacy_state(self.root, second_namespace, "vault-b-67890")
+
+        self.assertTrue((self.root / "last_brief").exists())
+        self.assertFalse((second_namespace / "last_brief").exists())
+        self.assertIn("another owner", warning.getvalue().lower())
+
+    def test_owner_claim_is_observed_only_as_complete_valid_json(self):
+        namespace = self.root / "vault-a-12345"
+        owner_path = self.root / "legacy-owner.json"
+        observed = []
+        original_link = os.link
+
+        def observing_link(source, target):
+            if Path(target) == owner_path:
+                staged = Path(source).read_text(encoding="utf-8")
+                self.assertEqual(json.loads(staged), {"owner_key": namespace.name})
+                self.assertFalse(owner_path.exists())
+                result = original_link(source, target)
+                observed.append(owner_path.read_text(encoding="utf-8"))
+                return result
+            return original_link(source, target)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=observing_link):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, namespace.name)
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(json.loads(observed[0]), {"owner_key": namespace.name})
+        self.assertEqual(list(self.root.glob(".legacy-owner.json.*.tmp")), [])
+
+    def test_unreadable_owner_with_remaining_legacy_state_aborts(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text("{", encoding="utf-8")
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "legacy state owner.*unreadable"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
+        self.assertEqual(owner.read_text(encoding="utf-8"), "{")
+        self.assertTrue((self.root / "offset").exists())
+
+    def test_duplicate_owner_key_with_legacy_state_aborts(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text(
+            '{"owner_key":"vault-a-12345","owner_key":"vault-b-67890"}',
+            encoding="utf-8")
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-b-67890", "vault-b-67890")
+
+        self.assertEqual((self.root / "offset").read_text(encoding="utf-8"), "41")
+        self.assertFalse((self.root / "vault-b-67890" / "offset").exists())
+
+    def test_unreadable_owner_without_legacy_state_warns_and_continues(self):
+        owner = self.root / "legacy-owner.json"
+        owner.mkdir()
+        warning = io.StringIO()
+
+        with redirect_stdout(warning):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
+        self.assertTrue(owner.is_dir())
+        self.assertIn("unreadable", warning.getvalue().lower())
+
+    def test_simultaneous_different_owners_have_one_valid_winner(self):
+        namespaces = [self.root / "vault-a-12345", self.root / "vault-b-67890"]
+        (self.root / "offset").write_text("41", encoding="utf-8")
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_owner_link(source, target):
+            if Path(target).name == "legacy-owner.json":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_owner_link), \
+                patch.object(_BRIDGE, "log") as logger, \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(
+                lambda namespace: _BRIDGE.migrate_legacy_state(
+                    self.root, namespace, namespace.name),
+                namespaces,
+            ))
+
+        owner = json.loads(
+            (self.root / "legacy-owner.json").read_text(encoding="utf-8"))["owner_key"]
+        self.assertIn(owner, {namespace.name for namespace in namespaces})
+        winners = [namespace for namespace in namespaces if (namespace / "offset").exists()]
+        self.assertEqual([namespace.name for namespace in winners], [owner])
+        self.assertEqual((winners[0] / "offset").read_text(encoding="utf-8"), "41")
+        warnings = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertIn("another owner", warnings.lower())
+
+    def test_unsupported_owner_no_clobber_fails_closed_and_cleans_temp(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.os, "link",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "safely publish legacy state owner"):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, namespace.name)
+
+        self.assertFalse((self.root / "legacy-owner.json").exists())
+        self.assertEqual((self.root / "offset").read_text(encoding="utf-8"), "41")
+        self.assertEqual(list(self.root.glob(".legacy-owner.json.*.tmp")), [])
+
+    def test_same_owner_resumes_partial_migration_without_overwriting_target(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (namespace / "offset").write_text("99", encoding="utf-8")
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual((namespace / "offset").read_text(encoding="utf-8"), "99")
+        self.assertEqual((self.root / "offset").read_text(encoding="utf-8"), "41")
+        (self.root / "last_butler").write_text("12.5", encoding="utf-8")
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual((namespace / "last_butler").read_text(encoding="utf-8"), "12.5")
+        self.assertFalse((self.root / "last_butler").exists())
+
+    def test_new_legacy_link_fsyncs_namespace_before_root_unlink_then_root(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        source.write_text("41", encoding="utf-8")
+        events = []
+        original_link = os.link
+        original_unlink = Path.unlink
+
+        def recording_link(path, destination):
+            if Path(destination).name == "offset":
+                events.append("link")
+            return original_link(path, destination)
+
+        def recording_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                events.append("unlink-root")
+            return original_unlink(path, *args, **kwargs)
+
+        def recording_fsync(directory):
+            events.append(
+                "fsync-namespace" if Path(directory) == namespace else "fsync-root")
+
+        with patch.object(_BRIDGE.os, "link", side_effect=recording_link), \
+                patch.object(Path, "unlink", recording_unlink), \
+                patch.object(_BRIDGE, "_fsync_directory", side_effect=recording_fsync):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(events, [
+            "link", "fsync-namespace", "unlink-root", "fsync-root",
+        ])
+
+    def test_resume_samefile_fsyncs_namespace_before_unlink_then_root(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        os.link(source, target)
+        events = []
+        original_unlink = Path.unlink
+
+        def recording_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                events.append("unlink-root")
+            return original_unlink(path, *args, **kwargs)
+
+        def recording_fsync(directory):
+            events.append(
+                "fsync-namespace" if Path(directory) == namespace else "fsync-root")
+
+        with patch.object(Path, "unlink", recording_unlink), \
+                patch.object(_BRIDGE, "_fsync_directory", side_effect=recording_fsync):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(events, [
+            "fsync-namespace", "unlink-root", "fsync-root",
+        ])
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists())
+
+    def test_directory_fsync_unsupported_is_best_effort_during_migration(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        source.write_text("41", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.os, "open",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")) as opener:
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(opener.call_count, 2)
+        self.assertEqual((namespace / "offset").read_text(encoding="utf-8"), "41")
+        self.assertFalse(source.exists())
+
+    def test_legacy_state_lstat_error_is_not_treated_as_absent(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text("{", encoding="utf-8")
+        inaccessible = self.root / "offset"
+        original_lstat = Path.lstat
+
+        def guarded_lstat(path):
+            if Path(path) == inaccessible:
+                raise PermissionError("denied")
+            return original_lstat(path)
+
+        with patch.object(Path, "lstat", guarded_lstat), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
+    def test_migration_target_race_never_overwrites_competing_file(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        original_link = os.link
+        original_replace = Path.replace
+
+        def competing_rename(path, destination):
+            destination.write_text("competitor", encoding="utf-8")
+            return original_replace(path, destination)
+
+        def competing_link(path, destination):
+            destination.write_text("competitor", encoding="utf-8")
+            return original_link(path, destination)
+
+        with patch.object(Path, "rename", competing_rename), \
+                patch.object(_BRIDGE.os, "link", competing_link):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "competitor")
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+
+    def test_legacy_link_io_error_is_normalized_without_mutation(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_link = os.link
+
+        def failing_legacy_link(path, destination):
+            if Path(destination) == target:
+                raise PermissionError("denied")
+            return original_link(path, destination)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=failing_legacy_link), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot safely migrate legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertFalse(target.exists())
+
+    def test_existing_target_lstat_io_error_fails_closed(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.write_text("existing", encoding="utf-8")
+        original_lstat = Path.lstat
+
+        def failing_target_lstat(path):
+            if Path(path) == target:
+                raise PermissionError("denied")
+            return original_lstat(path)
+
+        with patch.object(
+                Path, "lstat", failing_target_lstat), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertEqual(target.read_text(encoding="utf-8"), "existing")
+
+    def test_following_equal_symlink_target_fails_closed_without_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.write_text("controlled symlink placeholder", encoding="utf-8")
+        original_lstat = Path.lstat
+        symlink_stat = os.stat_result((
+            _BRIDGE.stat.S_IFLNK | 0o777, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+        ))
+
+        def symlink_target_lstat(path):
+            if Path(path) == target:
+                return symlink_stat
+            return original_lstat(path)
+
+        with patch.object(Path, "lstat", symlink_target_lstat), \
+                patch.object(Path, "samefile", return_value=True), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertEqual(
+            target.read_text(encoding="utf-8"), "controlled symlink placeholder")
+
+    def test_non_regular_target_fails_closed_without_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.mkdir()
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertTrue(target.is_dir())
+
+    def test_legacy_unlink_io_error_is_normalized_after_safe_link(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_unlink = Path.unlink
+
+        def failing_source_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                raise PermissionError("denied")
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", failing_source_unlink), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot remove migrated legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertEqual(target.read_text(encoding="utf-8"), "41")
+
+    def test_legacy_link_missing_target_parent_with_source_present_fails_closed(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_link = os.link
+
+        def missing_target_parent(path, destination):
+            if Path(destination) == target:
+                namespace.rmdir()
+                raise FileNotFoundError(destination)
+            return original_link(path, destination)
+
+        with patch.object(
+                _BRIDGE.os, "link", side_effect=missing_target_parent), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot safely migrate legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertFalse(target.exists())
+
+    def test_migration_source_disappearance_race_is_handled(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+
+        def disappearing_source(path, destination):
+            path.unlink(missing_ok=True)
+            raise FileNotFoundError(path)
+
+        with patch.object(Path, "rename", disappearing_source), \
+                patch.object(_BRIDGE.os, "link", disappearing_source):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertFalse(source.exists())
+        self.assertFalse(target.exists())
+
+    def test_same_owner_resumes_after_link_before_source_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        os.link(source, target)
+
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "41")
+        self.assertFalse(source.exists())
+
+    def test_capture_id_makes_retry_idempotent_and_same_second_distinct(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+
+        first = _BRIDGE.do_capture(
+            self.vault, "A", "telegram", capture_id="100", received_at=received)
+        retry = _BRIDGE.do_capture(
+            self.vault, "A", "telegram", capture_id="100", received_at=received)
+        second = _BRIDGE.do_capture(
+            self.vault, "B", "telegram", capture_id="101", received_at=received)
+
+        self.assertEqual(first, retry)
+        self.assertNotEqual(first, second)
+
+    def test_capture_id_is_path_safe_and_conflicting_retry_is_rejected(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        name = _BRIDGE.do_capture(
+            self.vault, "A", "telegram", capture_id="100/../unsafe!?", received_at=received)
+
+        self.assertRegex(name, r"^2026-08-31 090000-[A-Za-z0-9_-]+\.md$")
+        with self.assertRaises(RuntimeError):
+            _BRIDGE.do_capture(
+                self.vault, "different", "telegram", capture_id="100/../unsafe!?",
+                received_at=received)
+
+    def test_capture_rechecks_resolved_parent_before_publishing(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        inbox = self.vault / "10-inbox" / "jarvis"
+        outside = self.root / "outside"
+        outside.mkdir()
+        original_resolve = Path.resolve
+        inbox_resolutions = 0
+
+        def redirected_resolve(path, strict=False):
+            nonlocal inbox_resolutions
+            if Path(path) == inbox:
+                inbox_resolutions += 1
+                if inbox_resolutions > 1:
+                    return outside
+            return original_resolve(path, strict=strict)
+
+        with patch.object(Path, "resolve", redirected_resolve), \
+                self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(list(inbox.glob("*.md")), [])
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_capture_rejects_real_outside_symlink_without_external_write(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        inbox_parent = self.vault / "10-inbox"
+        inbox_parent.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        inbox = inbox_parent / "jarvis"
+        try:
+            inbox.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314 or error.errno in {
+                    errno.EACCES, errno.EPERM}:
+                self.skipTest(f"real symlink creation requires OS privilege: {error}")
+            raise
+
+        with self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertTrue(inbox.is_symlink())
+
+    def test_concurrent_same_content_captures_converge_without_temp_residue(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_capture_link(source, target):
+            if Path(target).suffix == ".md":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        def capture():
+            return _BRIDGE.do_capture(
+                self.vault, "same", "telegram", capture_id="100",
+                received_at=received)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_capture_link), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            names = list(pool.map(lambda _item: capture(), range(2)))
+
+        self.assertEqual(names[0], names[1])
+        inbox = self.vault / "10-inbox" / "jarvis"
+        captures = list(inbox.glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("same", captures[0].read_text(encoding="utf-8"))
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_concurrent_conflicting_captures_keep_one_complete_winner(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_capture_link(source, target):
+            if Path(target).suffix == ".md":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        def capture(body):
+            try:
+                return _BRIDGE.do_capture(
+                    self.vault, body, "telegram", capture_id="100",
+                    received_at=received)
+            except Exception as error:  # outcome is asserted below
+                return error
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_capture_link), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(capture, ("alpha", "beta")))
+
+        self.assertEqual(sum(isinstance(value, str) for value in outcomes), 1)
+        errors = [value for value in outcomes if isinstance(value, Exception)]
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], RuntimeError)
+        inbox = self.vault / "10-inbox" / "jarvis"
+        captures = list(inbox.glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        content = captures[0].read_text(encoding="utf-8")
+        self.assertEqual(sum(body in content for body in ("alpha", "beta")), 1)
+        self.assertTrue(content.endswith("채널: telegram\n"))
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_unsupported_capture_no_clobber_fails_without_destination(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+
+        with patch.object(
+                _BRIDGE.os, "link",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")), \
+                self.assertRaisesRegex(RuntimeError, "safely publish capture"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        inbox = self.vault / "10-inbox" / "jarvis"
+        self.assertEqual(list(inbox.glob("*.md")), [])
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+
+class JarvisUpdateDurabilityTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        self.cfg = {"qa_hourly_limit": 6}
+        original_state_root = _BRIDGE.STATE_ROOT
+        _BRIDGE.STATE_ROOT = self.root / "state"
+        self.addCleanup(setattr, _BRIDGE, "STATE_ROOT", original_state_root)
+
+    @staticmethod
+    def _update(update_id: int, text: str | None = "/status", *,
+                sender_id: int = 111, chat_id: int = 111,
+                chat_type: str = "private") -> dict:
+        message = {
+            "date": 1_788_134_400,
+            "from": {"id": sender_id},
+            "chat": {"id": chat_id, "type": chat_type},
+        }
+        if text is not None:
+            message["text"] = text
+        return {"update_id": update_id, "message": message}
+
+    def test_batch_commits_offset_only_after_success(self):
+        saved = []
+
+        def handler(update):
+            return update["update_id"] != 11
+
+        offset, complete = _BRIDGE.process_update_batch(
+            [{"update_id": 10}, {"update_id": 11}, {"update_id": 12}],
+            9, handler, saved.append)
+
+        self.assertEqual((offset, complete), (10, False))
+        self.assertEqual(saved, [10])
+
+    def test_batch_processes_updates_in_update_id_order(self):
+        handled = []
+        saved = []
+
+        offset, complete = _BRIDGE.process_update_batch(
+            [{"update_id": 12}, {"update_id": 10}, {"update_id": 11}],
+            9, lambda update: handled.append(update["update_id"]) or True,
+            saved.append)
+
+        self.assertEqual((offset, complete), (12, True))
+        self.assertEqual(handled, [10, 11, 12])
+        self.assertEqual(saved, [10, 11, 12])
+
+    def test_group_update_is_discarded_without_response(self):
+        sender = Mock(return_value=True)
+        update = self._update(7, chat_id=-99, chat_type="group")
+
+        ok = _BRIDGE.process_update(
+            self.vault, self.cfg, "12345:secret", {111}, update,
+            0.0, deque(), set(), sender)
+
+        self.assertTrue(ok)
+        sender.assert_not_called()
+
+    def test_unwhitelisted_private_update_is_discarded_without_response(self):
+        sender = Mock(return_value=True)
+        update = self._update(9, sender_id=222, chat_id=222)
+
+        ok = _BRIDGE.process_update(
+            self.vault, self.cfg, "12345:secret", {111}, update,
+            0.0, deque(), set(), sender)
+
+        self.assertTrue(ok)
+        sender.assert_not_called()
+
+    def test_non_text_update_is_discarded_without_response(self):
+        sender = Mock(return_value=True)
+        update = self._update(8, text=None)
+
+        ok = _BRIDGE.process_update(
+            self.vault, self.cfg, "12345:secret", {111}, update,
+            0.0, deque(), set(), sender)
+
+        self.assertTrue(ok)
+        sender.assert_not_called()
+
+    def test_capture_send_failure_retries_same_update_without_duplicate_file(self):
+        sender = Mock(side_effect=[False, True])
+        update = self._update(77, "기억해: A")
+        args = (
+            self.vault, self.cfg, "12345:secret", {111}, update,
+            0.0, deque(), set(), sender,
+        )
+
+        self.assertFalse(_BRIDGE.process_update(*args))
+        self.assertTrue(_BRIDGE.process_update(*args))
+
+        captures = list((self.vault / "10-inbox" / "jarvis").glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertTrue(captures[0].name.endswith("-77.md"))
+        self.assertIn("수신: 2026-08", captures[0].read_text(encoding="utf-8"))
+
+    def test_corrupt_offset_aborts_startup(self):
+        path = self.vault / "offset"
+        path.write_text("not-an-int", encoding="utf-8")
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_int_state(path, default=0)
+
+    def test_missing_offset_uses_default(self):
+        self.assertEqual(_BRIDGE.read_int_state(self.vault / "offset", default=7), 7)
+
+    def test_offset_directory_aborts_instead_of_using_default(self):
+        path = self.vault / "offset"
+        path.mkdir()
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_int_state(path, default=0)
+
+    def test_negative_offset_aborts_instead_of_replaying_updates(self):
+        path = self.vault / "offset"
+        path.write_text("-1", encoding="utf-8")
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_int_state(path, default=0)
+
+    def test_invalid_last_butler_aborts_before_polling(self):
+        token = "12345:secret"
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        namespace.mkdir(parents=True)
+        (namespace / "last_butler").write_text("nan", encoding="utf-8")
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=AssertionError("polled")), \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.serve(self.vault, cfg)
+
+    def test_invalid_last_brief_aborts_before_polling(self):
+        token = "12345:secret"
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        namespace.mkdir(parents=True)
+        (namespace / "last_brief").write_text("{", encoding="utf-8")
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=AssertionError("polled")), \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.serve(self.vault, cfg)
+
+    def test_same_qa_update_consumes_quota_once_across_retry(self):
+        sender = Mock(side_effect=[False, True])
+        qa_times, attempted = deque(), set()
+        update = self._update(88, "질문")
+
+        with patch.object(_BRIDGE, "do_qa", return_value="답"):
+            for _ in range(2):
+                _BRIDGE.process_update(
+                    self.vault, self.cfg, "12345:secret", {111}, update,
+                    0.0, qa_times, attempted, sender)
+
+        self.assertEqual((len(qa_times), attempted), (1, {88}))
+
+    def test_authorized_inbound_logs_metadata_but_never_message_content(self):
+        cases = (
+            (91, "remember CONTENT-SENTINEL-CAPTURE", "capture"),
+            (92, "CONTENT-SENTINEL-QUESTION", "qa"),
+        )
+        for update_id, text, route_name in cases:
+            with self.subTest(route=route_name), patch.object(
+                    _BRIDGE, "do_qa", return_value="answer"), patch.object(
+                        _BRIDGE, "log") as logger:
+                handled = _BRIDGE.process_update(
+                    self.vault, self.cfg, "12345:secret", {111},
+                    self._update(update_id, text), 0.0, deque(), set(),
+                    Mock(return_value=True))
+
+            self.assertTrue(handled)
+            rendered = " ".join(call.args[0] for call in logger.call_args_list)
+            self.assertNotIn("CONTENT-SENTINEL", rendered)
+            self.assertIn(f"route={route_name}", rendered)
+            self.assertIn(f"update_id={update_id}", rendered)
+            self.assertIn("sender=111", rendered)
+            self.assertIn(f"length={len(text)}", rendered)
+
+    def test_qa_attempt_id_is_retained_on_failure_then_pruned_after_commit(self):
+        update = self._update(93, "question")
+        qa_times, attempted = deque(), set()
+        sender = Mock(side_effect=[False, True])
+        saved = []
+
+        def handler(item):
+            return _BRIDGE.process_update(
+                self.vault, self.cfg, "12345:secret", {111}, item,
+                0.0, qa_times, attempted, sender)
+
+        with patch.object(_BRIDGE, "do_qa", return_value="answer"):
+            offset, complete = _BRIDGE.process_update_batch(
+                [update], 0, handler, saved.append,
+                lambda item: attempted.discard(item["update_id"]))
+            self.assertEqual((offset, complete), (0, False))
+            self.assertEqual(attempted, {93})
+            self.assertEqual(saved, [])
+
+            offset, complete = _BRIDGE.process_update_batch(
+                [update], offset, handler, saved.append,
+                lambda item: attempted.discard(item["update_id"]))
+
+        self.assertEqual((offset, complete), (93, True))
+        self.assertEqual(saved, [93])
+        self.assertEqual(attempted, set())
+        self.assertEqual(len(qa_times), 1)
+
+    def test_qa_attempt_id_is_not_pruned_when_offset_write_fails(self):
+        update = self._update(94, "question")
+        qa_times, attempted = deque(), set()
+
+        def save_failure(_offset):
+            raise OSError("disk full")
+
+        with patch.object(_BRIDGE, "do_qa", return_value="answer"), \
+                self.assertRaises(OSError):
+            _BRIDGE.process_update_batch(
+                [update], 0,
+                lambda item: _BRIDGE.process_update(
+                    self.vault, self.cfg, "12345:secret", {111}, item,
+                    0.0, qa_times, attempted, Mock(return_value=True)),
+                save_failure,
+                lambda item: attempted.discard(item["update_id"]))
+
+        self.assertEqual(attempted, {94})
+
+    def test_tg_send_returns_true_only_after_all_chunks_send(self):
+        with patch.object(_BRIDGE, "_chunks_by_line", return_value=["one", "two"]), \
+                patch.object(_BRIDGE, "tg_call", return_value={"ok": True}) as call:
+            sent = _BRIDGE.tg_send("12345:secret", 111, "message")
+
+        self.assertTrue(sent)
+        self.assertEqual(call.call_count, 2)
+
+    def test_tg_send_returns_false_and_redacts_token_when_fallback_fails(self):
+        token = "12345:secret-value"
+        html_error = _BRIDGE.urllib.error.HTTPError(
+            f"https://api.telegram.org/bot{token}/sendMessage", 400,
+            "bad html", {}, None)
+        plain_error = _BRIDGE.urllib.error.URLError(
+            f"https://api.telegram.org/bot{token}/sendMessage")
+
+        with patch.object(_BRIDGE, "tg_call", side_effect=[html_error, plain_error]), \
+                patch.object(_BRIDGE, "log") as logger:
+            sent = _BRIDGE.tg_send(token, 111, "message")
+
+        self.assertFalse(sent)
+        logged = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn(token, logged)
+        self.assertIn("400", logged)
+
+    def test_get_updates_failure_log_does_not_expose_token(self):
+        token = "12345:secret-value"
+        get_error = _BRIDGE.urllib.error.HTTPError(
+            f"https://api.telegram.org/bot{token}/getUpdates", 502,
+            "bad gateway", {}, None)
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=get_error), \
+                patch.object(_BRIDGE.time, "sleep", side_effect=KeyboardInterrupt), \
+                patch.object(_BRIDGE, "log") as logger, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        logged = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn(token, logged)
+        self.assertNotIn("bad gateway", logged)
+        self.assertIn("HTTPError", logged)
+        self.assertIn("502", logged)
+
+    def test_protocol_poll_failure_retries_without_advancing_offset(self):
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+        failure = _BRIDGE.TelegramAPIError("TelegramResponseError", 502)
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=[failure, KeyboardInterrupt]), \
+                patch.object(_BRIDGE.time, "sleep") as sleeper, \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        sleeper.assert_called_once_with(5)
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        self.assertFalse((namespace / "offset").exists())
+
+    def test_http_protocol_poll_failure_is_sanitized_and_retried(self):
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(
+                    _BRIDGE.urllib.request, "urlopen",
+                    side_effect=[
+                        http.client.BadStatusLine("CONTENT-SENTINEL"),
+                        KeyboardInterrupt,
+                    ]) as opener, \
+                patch.object(_BRIDGE.time, "sleep") as sleeper, \
+                patch.object(_BRIDGE, "log") as logger, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(opener.call_count, 2)
+        sleeper.assert_called_once_with(5)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(token, rendered)
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        self.assertFalse((namespace / "offset").exists())
+
+    def test_incomplete_batch_backs_off_then_retries_same_qa_update(self):
+        token = "12345:secret-value"
+        update = self._update(96, "CONTENT-SENTINEL-QUESTION")
+        cfg = {
+            "telegram_user_ids": [111],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+            "qa_hourly_limit": 6,
+        }
+        events: list[tuple[object, ...]] = []
+        responses = iter(
+            [
+                {"ok": True, "result": [update]},
+                {"ok": True, "result": [update]},
+            ]
+        )
+        send_results = iter([False, True])
+        observed_qa_times: deque[float] | None = None
+        observed_attempt_ids: set[int] | None = None
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        offset_file = namespace / "offset"
+        real_process_update = _BRIDGE.process_update
+        real_atomic_write = _BRIDGE.atomic_write_text
+
+        def poll(_token, _method, **kwargs):
+            events.append(("poll", kwargs["offset"]))
+            try:
+                return next(responses)
+            except StopIteration:
+                raise KeyboardInterrupt
+
+        def generate(_vault, _cfg, _body):
+            events.append(("generate",))
+            return "answer"
+
+        def send(_token, _chat_id, _message):
+            result = next(send_results)
+            events.append(("send", result))
+            return result
+
+        def record_process(*args, **kwargs):
+            nonlocal observed_qa_times, observed_attempt_ids
+            observed_qa_times = args[6]
+            observed_attempt_ids = args[7]
+            result = real_process_update(*args, **kwargs)
+            events.append(
+                (
+                    "handled",
+                    result,
+                    len(observed_qa_times),
+                    tuple(sorted(observed_attempt_ids)),
+                )
+            )
+            return result
+
+        def record_write(path, text):
+            if path == offset_file:
+                events.append(("commit", int(text)))
+            real_atomic_write(path, text)
+
+        def backoff(seconds):
+            events.append(("sleep", seconds))
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=poll), \
+                patch.object(_BRIDGE, "do_qa", side_effect=generate), \
+                patch.object(_BRIDGE, "tg_send", side_effect=send), \
+                patch.object(_BRIDGE, "process_update", side_effect=record_process), \
+                patch.object(_BRIDGE, "atomic_write_text", side_effect=record_write), \
+                patch.object(_BRIDGE.time, "sleep", side_effect=backoff), \
+                patch.object(
+                    _BRIDGE,
+                    "send_due_briefings",
+                    side_effect=lambda *args, **_kwargs: args[6],
+                ), \
+                patch.object(
+                    _BRIDGE,
+                    "send_butler_if_due",
+                    side_effect=lambda *args, **_kwargs: args[4],
+                ), \
+                patch.object(_BRIDGE, "log") as logger, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(
+            events,
+            [
+                ("poll", 1),
+                ("generate",),
+                ("send", False),
+                ("handled", False, 1, (96,)),
+                ("sleep", 5),
+                ("poll", 1),
+                ("generate",),
+                ("send", True),
+                ("handled", True, 1, (96,)),
+                ("commit", 96),
+                ("poll", 97),
+            ],
+        )
+        self.assertEqual(offset_file.read_text(encoding="utf-8"), "96")
+        self.assertIsNotNone(observed_qa_times)
+        self.assertIsNotNone(observed_attempt_ids)
+        self.assertEqual(len(observed_qa_times), 1)
+        self.assertEqual(observed_attempt_ids, set())
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertIn("재시도", rendered)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+
+    def test_scheduled_work_uses_the_smallest_validated_positive_recipient(self):
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [17, 2],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(
+                    _BRIDGE, "send_due_briefings", side_effect=KeyboardInterrupt) as sender, \
+                patch.object(_BRIDGE, "log"), self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(sender.call_args.args[3], 2)
+        self.assertGreater(sender.call_args.args[3], 0)
+
+    def test_serve_rejects_a_negative_scheduled_recipient_at_its_boundary(self):
+        cfg = {
+            "telegram_user_ids": [-100, 111],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": "12345:secret"}), \
+                patch.object(
+                    _BRIDGE, "send_due_briefings", side_effect=AssertionError("scheduled")), \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.serve(self.vault, cfg)
+
+    def test_protocol_send_failure_does_not_mark_scheduled_completion(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        }).encode("utf-8")
+        state_file = self.root / "brief-state" / "last_brief"
+        state = _BRIDGE.load_briefing_state(
+            state_file, [(7, 30)], datetime(2026, 9, 1, 7, 30))
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
+                patch.object(_BRIDGE, "do_brief", return_value="body"), \
+                patch.object(_BRIDGE, "log"):
+            state = _BRIDGE.send_due_briefings(
+                self.vault, self.cfg, "12345:secret", 111,
+                datetime(2026, 9, 1, 7, 30), [(7, 30)],
+                state, state_file, _BRIDGE.tg_send,
+                lambda vault, cfg: _BRIDGE.GenerationResult(True, "body"))
+
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.pending, [(7, 30)])
+        self.assertEqual(opener.call_count, 1)
+
+    def test_protocol_send_failure_does_not_advance_inbound_offset(self):
+        update = self._update(95, "/status")
+        saved = []
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        }).encode("utf-8")
+
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
+                patch.object(_BRIDGE, "log"):
+            offset, complete = _BRIDGE.process_update_batch(
+                [update], 0,
+                lambda item: _BRIDGE.process_update(
+                    self.vault, self.cfg, "12345:secret", {111}, item,
+                    0.0, deque(), set(), _BRIDGE.tg_send),
+                saved.append)
+
+        self.assertEqual((offset, complete), (0, False))
+        self.assertEqual(saved, [])
+        self.assertEqual(opener.call_count, 1)

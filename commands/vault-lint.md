@@ -17,8 +17,21 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py"
 ```
 
 - 볼트 경로는 스크립트가 `CLAUDE_PROJECT_DIR`(없으면 cwd)에서 자동으로 읽는다. 다른 볼트를 검사하려면 `--vault <경로>`를 붙인다.
+- 이 명령은 **full 리포트 모드**다. 현재 워킹트리의 활성 노트 전체를 검사하고 config의 `health_report`에 리포트를 쓴다. 외부 임시 경로가 필요하면 `--output <경로>`를 명시할 수 있다.
 - exit 0 + 리포트 = 치명 이슈 없음(관리성만 있을 수 있음), exit 1 = 치명 이슈 존재 또는 설정 오류.
 - 설정 오류(config 파싱 실패, 검사 대상 0개 등)가 출력되면 치유를 시작하지 말고 원인을 사용자에게 보고하라.
+
+### full 리포트 모드와 staged 차단 모드
+
+| 모드 | 용도 | 판정 입력 | 리포트 |
+|---|---|---|---|
+| 기본 full | `/vault-lint`, SessionStart, 전체 상태 점검·치유 | 현재 워킹트리와 config | `health_report` 또는 `--output`에 작성 |
+| `--staged` | pre-commit의 이번 커밋 차단 | Git index의 config·파일만 사용 | 쓰지 않음. 진단은 stderr, 위반·검사 오류는 exit 1 |
+
+`--staged`는 커밋 직전 변경 표면만 검사하므로 기존 볼트 전체의 관리성 부채를 대신 보고하지 않는다. 반대로 `/vault-lint`에서는 `--staged`를 붙이지 마라.
+
+> [!WARNING]
+> Git 훅은 로컬 운영 게이트이며 보안 샌드박스가 아니다. 저장소를 제어하는 사용자는 `--no-verify`를 쓰거나 `core.hooksPath`를 바꿔 훅을 우회할 수 있다. 우회 불가능한 강제가 필요하면 별도의 원격 CI·서버 정책이 필요하다.
 
 ## 2. 리포트 해석
 

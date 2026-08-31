@@ -27,14 +27,16 @@ description: Vault Jarvis 설정 — Telegram 봇 연동으로 브리핑·캡처
 
 ## 3. 본인 숫자 ID 확인 → 화이트리스트
 
-1. 브리지를 임시 실행: `python .../jarvis_bridge.py --vault .` — 화이트리스트가 비어 있으면 모든 메시지를 폐기하며 **발신자 숫자 ID를 콘솔에만 표시**한다.
-2. 사용자가 자신의 봇에게 아무 메시지나 1통 전송 → 콘솔의 `미등재 발신자 폐기: from=<숫자>`에서 ID 확보.
-3. `00-meta/vault-config.json`의 `jarvis` 블록을 Edit하라: `"enabled": true`, `"telegram_user_ids": [<확보한 숫자>]`. 블록이 없으면 템플릿(`${CLAUDE_PLUGIN_ROOT}/assets/templates/vault-config.json`의 `jarvis` 키)을 참고해 추가하라.
+1. 브리지를 임시 실행: `python .../jarvis_bridge.py --vault .` — 화이트리스트가 비어 있으면 모든 메시지를 폐기하며 발신자 숫자 ID만 로그에 표시한다.
+2. 사용자가 자신의 봇에게 아무 텍스트 메시지나 1통 전송 → 콘솔의 `미승인 또는 비공개 아닌 발신자 폐기: from=<숫자>`에서 ID 확보.
+3. `00-meta/vault-config.json`의 `jarvis` 블록을 Edit하라: `"enabled": true`, `"telegram_user_ids": [<확보한 숫자>]`, `"briefing_times": ["07:30"]`. `briefing_times`에는 하루 한 개 이상의 `HH:MM` 시각을 배열로 지정한다. 블록이 없으면 템플릿(`${CLAUDE_PLUGIN_ROOT}/assets/templates/vault-config.json`의 `jarvis` 키)을 참고해 추가하라. 기존 볼트의 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 4. 브리지 재시작.
 
 ## 4. 상시 실행 등록 (Windows 권장 경로)
 
 작업 스케줄러에 로그온 시 자동 시작으로 등록하도록 안내하라 (사용자 확인 후 실행):
+
+볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.
 
 ```
 schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경로> --vault <볼트 절대경로>" /F
@@ -53,9 +55,14 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 
 4종 통과 시 설정 완료를 보고하고, 볼트가 git 저장소면 `vault-config.json` 변경을 커밋하라. `log_note`에 `[ops]` 태그로 1줄 기록하라.
 
-## 보안 경계 (사용자에게 요약 고지)
+## 접근 정책과 잔여 위험 (사용자에게 요약 고지)
 
 - 화이트리스트 숫자 ID 외 발신자는 무응답 폐기된다.
 - Q&A·브리핑 세션은 읽기 전용(Read·Grep·Glob) — 볼트 변경·명령 실행 불가.
-- 자비스의 볼트 쓰기는 `10-inbox/jarvis/` 한 곳뿐이며 정제는 `/vault-process-inbox`가 담당.
+- 메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
+- 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
+- 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
+- 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
+- 캡처 정제는 `/vault-process-inbox`가 담당한다.
 - deny zone·`.env`·`90-assets/`는 Q&A 탐색에서 금지된다.
+- deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# agentic-vault:healthcheck engine=0.8.2
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -34,6 +35,8 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -49,7 +52,45 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+ENGINE_VERSION = "0.8.2"
 CONFIG_RELPATH = "00-meta/vault-config.json"
+DEFAULT_FRONTMATTER_ROOTS = (
+    "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
+)
+DEFAULT_FRONTMATTER_EXEMPT_PATHS = (
+    "00-meta/scratch", "00-meta/scripts", "10-inbox",
+)
+
+
+class HealthcheckError(RuntimeError):
+    """A policy or Git-index error that must fail the commit gate closed."""
+
+
+@dataclass(frozen=True)
+class VaultPolicy:
+    """The staged-only path policy derived from a validated config mapping."""
+
+    frontmatter_roots: tuple[str, ...]
+    frontmatter_exempt_paths: tuple[str, ...]
+
+    @classmethod
+    def from_config(cls, config: dict) -> "VaultPolicy":
+        roots = config.get("frontmatter_roots")
+        if roots is None:
+            roots = DEFAULT_FRONTMATTER_ROOTS
+        exempt = config.get("frontmatter_exempt_paths")
+        if exempt is None:
+            exempt = config.get("fm_exempt_zones")
+        if exempt is None:
+            exempt = DEFAULT_FRONTMATTER_EXEMPT_PATHS
+        return cls(tuple(roots), tuple(exempt))
+
+
+@dataclass(frozen=True)
+class StagedChange:
+    status: str
+    path: str
+    old_path: str | None = None
 
 # 표준 스키마 기본값 — vault-config.json 에 없는 키는 이 값으로 동작한다.
 DEFAULT_CONFIG: dict = {
@@ -104,6 +145,300 @@ DEFAULT_CONFIG: dict = {
     # handoff_note가 비어 있으면 자동 생략.
     "anchor_drift_threshold": 3,
 }
+
+_PATH_KEYS = {
+    "index_note", "log_note", "hot_note", "handoff_note", "ssot_note",
+    "health_report", "rules_dir",
+}
+_PATH_LIST_KEYS = {
+    "deny_zones", "exclude_dirs", "frontmatter_roots",
+    "frontmatter_exempt_paths", "fm_exempt_zones", "index_scopes",
+}
+_STRING_LIST_KEYS = {"required_keys", "log_tags"}
+_STRING_KEYS = {"vault_name", "language", "log_tag_epoch", "backup_target"}
+_INTEGER_KEYS = {
+    "frontmatter_max_lines", "stale_days", "rules_max_lines",
+    "hot_max_tokens", "handoff_max_tokens", "anchor_drift_threshold",
+}
+
+
+def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) -> str:
+    if not isinstance(value, str):
+        raise HealthcheckError(f"{label} must be a string path")
+    raw = value.strip()
+    if not raw:
+        if allow_empty:
+            return ""
+        raise HealthcheckError(f"{label} must not be empty")
+    if raw.startswith(("//", "\\\\")):
+        raise HealthcheckError(f"{label} must stay inside the vault (UNC path rejected)")
+    if re.match(r"^[A-Za-z]:", raw):
+        raise HealthcheckError(f"{label} must stay inside the vault (drive path rejected)")
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/"):
+        raise HealthcheckError(f"{label} must stay inside the vault (absolute path rejected)")
+    segments = normalized.split("/")
+    if any(segment == "" for segment in segments):
+        raise HealthcheckError(f"{label} contains an empty path segment")
+    if any(segment == ".." for segment in segments):
+        raise HealthcheckError(f"{label} must stay inside the vault ('..' rejected)")
+    return normalized
+
+
+def _validate_string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise HealthcheckError(f"{label} must be a list")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise HealthcheckError(f"{label}[{index}] must be a string")
+        if not item.strip():
+            raise HealthcheckError(f"{label}[{index}] must not be empty")
+        result.append(item)
+    return result
+
+
+def validate_config(raw: object) -> dict:
+    """Validate untrusted JSON config and return a normalized independent mapping."""
+    if not isinstance(raw, dict):
+        raise HealthcheckError("vault config top level must be a JSON object")
+
+    config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
+
+    for key in _STRING_KEYS:
+        value = config.get(key)
+        if not isinstance(value, str):
+            raise HealthcheckError(f"{key} must be a string")
+
+    for key in _INTEGER_KEYS:
+        value = config.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise HealthcheckError(f"{key} must be an integer")
+
+    for key in _STRING_LIST_KEYS:
+        config[key] = _validate_string_list(config.get(key), key)
+
+    for key in _PATH_KEYS:
+        if key in config:
+            config[key] = _normalize_relative_path(config[key], key, allow_empty=True)
+
+    for key in _PATH_LIST_KEYS:
+        if key not in config:
+            continue
+        values = config[key]
+        if not isinstance(values, list):
+            raise HealthcheckError(f"{key} must be a list")
+        config[key] = [
+            _normalize_relative_path(item, f"{key}[{index}]", allow_empty=False)
+            for index, item in enumerate(values)
+        ]
+
+    enums = config.get("enums")
+    if not isinstance(enums, dict):
+        raise HealthcheckError("enums must be an object")
+    normalized_enums: dict[str, list[str]] = {}
+    for field, allowed in enums.items():
+        if not isinstance(field, str) or not field.strip():
+            raise HealthcheckError("enums keys must be non-empty strings")
+        normalized_allowed = _validate_string_list(allowed, f"enums.{field}")
+        if not normalized_allowed:
+            raise HealthcheckError(f"enums.{field} must not be empty")
+        normalized_enums[field] = normalized_allowed
+    config["enums"] = normalized_enums
+
+    facts = config.get("ssot_facts")
+    if not isinstance(facts, list):
+        raise HealthcheckError("ssot_facts must be a list")
+    normalized_facts: list[dict] = []
+    for index, fact in enumerate(facts):
+        if not isinstance(fact, dict):
+            raise HealthcheckError(f"ssot_facts[{index}] must be an object")
+        label = fact.get("label")
+        pattern = fact.get("pattern")
+        if not isinstance(label, str) or not label.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].label must be a non-empty string")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].pattern must be a non-empty string")
+        normalized_facts.append(deepcopy(fact))
+    config["ssot_facts"] = normalized_facts
+
+    if "jarvis" in config and not isinstance(config["jarvis"], dict):
+        raise HealthcheckError("jarvis must be an object")
+
+    if "frontmatter_exempt_paths" not in raw and "fm_exempt_zones" in raw:
+        config["frontmatter_exempt_paths"] = list(config["fm_exempt_zones"])
+
+    # Deliberately do not inject frontmatter_roots into legacy config mappings.
+    # Full mode uses absence as the compatibility marker for "all active notes";
+    # VaultPolicy supplies the five staged defaults without erasing that marker.
+    return config
+
+
+def _ensure_config_health_report_contained(vault: Path, output: Path) -> Path:
+    """Resolve a config-derived report path and require it to stay in the vault."""
+    try:
+        resolved_vault = vault.resolve()
+        resolved_output = output.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HealthcheckError(f"health_report 경로 확인 실패: {exc}") from exc
+    try:
+        resolved_output.relative_to(resolved_vault)
+    except ValueError as exc:
+        raise HealthcheckError(
+            f"health_report must stay inside the vault: {resolved_output}"
+        ) from exc
+    return resolved_output
+
+
+def _run_git_bytes(
+    vault: Path,
+    *args: str,
+    allowed_returncodes: tuple[int, ...] = (0,),
+) -> bytes:
+    command = ["git", "-c", "core.quotepath=false", *args]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=vault,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HealthcheckError(f"git command timed out: {' '.join(args)}") from exc
+    except OSError as exc:
+        raise HealthcheckError(f"git command could not run: {exc}") from exc
+    if result.returncode not in allowed_returncodes:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        detail = f": {stderr}" if stderr else ""
+        raise HealthcheckError(f"git {' '.join(args)} failed ({result.returncode}){detail}")
+    return result.stdout
+
+
+def _escape_git_glob(value: str) -> str:
+    """Escape config text embedded in a Git `glob` pathspec."""
+    return re.sub(r"([\\*?\[])", r"\\\1", value)
+
+
+def staged_markdown_pathspecs(
+    config: dict,
+    *,
+    exclude_generated_referrers: bool = False,
+) -> tuple[str, ...]:
+    """Return index-only Markdown pathspecs with policy zones pruned by Git."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    pathspecs = [":(top,glob,icase)**/*.md"]
+    deny_zones = sorted(set(config.get("deny_zones") or ()))
+    exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
+    for path in deny_zones:
+        if "/" in path:
+            pathspecs.append(
+                f":(exclude,top,glob){_escape_git_glob(path)}/**"
+            )
+        else:
+            pathspecs.append(
+                f":(exclude,glob)**/{_escape_git_glob(path)}/**"
+            )
+    pathspecs.extend(
+        f":(exclude,glob)**/{_escape_git_glob(name)}/**"
+        for name in exclude_dirs
+    )
+
+    if exclude_generated_referrers:
+        effective_health_report = (
+            config.get("health_report") or DEFAULT_CONFIG["health_report"]
+        )
+        generated = {
+            config.get("log_note") or "",
+            effective_health_report,
+        }
+        pathspecs.extend(
+            f":(exclude,top,literal){path}"
+            for path in sorted(generated)
+            if path
+        )
+    return tuple(pathspecs)
+
+
+def _decode_git_path(value: bytes, label: str) -> str:
+    try:
+        decoded = value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"{label} is not valid UTF-8") from exc
+    if not decoded:
+        raise HealthcheckError(f"{label} must not be empty")
+    # Git already returns repository-relative paths. Do not run config-path
+    # normalization here: on POSIX a backslash is a valid literal filename byte.
+    return decoded
+
+
+def load_staged_config(vault: Path) -> dict:
+    data = _run_git_bytes(vault, "show", f":{CONFIG_RELPATH}")
+    try:
+        raw = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HealthcheckError(f"staged {CONFIG_RELPATH} is invalid: {exc}") from exc
+    return validate_config(raw)
+
+
+def list_staged_changes(vault: Path, config: dict) -> list[StagedChange]:
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+    data = _run_git_bytes(
+        vault,
+        "diff", "--cached", "--name-status", "-z", "--find-renames",
+        "--diff-filter=ACMRD", "--", *staged_markdown_pathspecs(config),
+    )
+    if not data:
+        return []
+    records = data.split(b"\0")
+    if records[-1] != b"":
+        raise HealthcheckError("git name-status output is not NUL terminated")
+    records.pop()
+
+    changes: list[StagedChange] = []
+    index = 0
+    while index < len(records):
+        try:
+            raw_status = records[index].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise HealthcheckError("git name-status record has a non-ASCII status") from exc
+        index += 1
+        if not raw_status:
+            raise HealthcheckError("git name-status record has an empty status")
+        status = raw_status[0]
+        if status not in "ACMRD":
+            raise HealthcheckError(f"unsupported git name-status record: {raw_status}")
+        needed = 2 if status in "CR" else 1
+        if index + needed > len(records):
+            raise HealthcheckError(f"truncated git name-status record: {raw_status}")
+        if status in "CR":
+            old_path = _decode_git_path(records[index], "old staged path")
+            new_path = _decode_git_path(records[index + 1], "staged path")
+            changes.append(StagedChange(status, new_path, old_path))
+            index += 2
+        else:
+            path = _decode_git_path(records[index], "staged path")
+            changes.append(StagedChange(status, path))
+            index += 1
+    return changes
+
+
+def read_index_text(vault: Path, path: str) -> str:
+    if not isinstance(path, str) or not path:
+        raise HealthcheckError("index path must be a non-empty string")
+    if "\0" in path:
+        raise HealthcheckError("index path must not contain NUL")
+    # `path` originates from Git's NUL-delimited index output. It is already
+    # repository-relative, so preserve every filename character exactly.
+    data = _run_git_bytes(vault, "show", f":{path}")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"staged file is not valid UTF-8: {path}") from exc
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 
@@ -174,7 +509,9 @@ def estimate_tokens(text: str) -> int:
     return int(hangul * 1.375 + other * 0.3)
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#|][^\]]*)?\]\]")
+WIKILINK_RE = re.compile(
+    r"\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]"
+)
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
 UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
 # 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
@@ -282,6 +619,151 @@ def normalize_link_target(raw: str) -> str | None:
             return base[:-3].strip() or None
         return None
     return base
+
+
+def _decode_nul_paths(data: bytes, label: str) -> list[str]:
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise HealthcheckError(f"{label} output is not NUL terminated")
+    return [
+        _decode_git_path(raw_path, label)
+        for raw_path in data[:-1].split(b"\0")
+    ]
+
+
+def _index_markdown_paths(vault: Path, config: dict) -> list[str]:
+    data = _run_git_bytes(
+        vault,
+        "ls-files", "-z", "--cached", "--",
+        *staged_markdown_pathspecs(config),
+    )
+    return _decode_nul_paths(data, "staged Markdown path")
+
+
+def _posix_markdown_stem(path: str) -> str:
+    """Derive a stem without rewriting Git-originated path characters."""
+    filename = path.rsplit("/", 1)[-1]
+    if filename.lower().endswith(".md"):
+        return filename[:-3]
+    return filename
+
+
+def _is_at_or_below(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
+    policy = VaultPolicy.from_config(config)
+    if not any(_is_at_or_below(path, root) for root in policy.frontmatter_roots):
+        return []
+    if any(_is_at_or_below(path, exempt) for exempt in policy.frontmatter_exempt_paths):
+        return []
+
+    fm, _body = split_frontmatter(text)
+    if fm is None:
+        return [f"스테이징 차단: {path} — 프런트매터 누락"]
+
+    errors: list[str] = []
+    keys = parse_simple_yaml_keys(fm)
+    absent = [key for key in config.get("required_keys", ()) if key not in keys]
+    if absent:
+        errors.append(
+            f"스테이징 차단: {path} — 필수 키 누락: {', '.join(sorted(absent))}"
+        )
+    for field, allowed in sorted((config.get("enums") or {}).items()):
+        value = keys.get(field)
+        if value is not None and value not in allowed:
+            errors.append(f"스테이징 차단: {path} — Enum 위반: {field}={value}")
+    for line in fm.splitlines():
+        if UNQUOTED_FM_LINK_RE.match(line):
+            errors.append(
+                f"스테이징 차단: {path} — 프런트매터 내 따옴표 없는 위키링크: "
+                f"{line.strip()}"
+            )
+    return errors
+
+
+def _grep_index_backlink_paths(vault: Path, config: dict) -> list[str]:
+    """Conservatively list index blobs containing any wikilink opener."""
+    data = _run_git_bytes(
+        vault,
+        "grep", "--cached", "-z", "-l", "-I", "-F", "-e", "[[",
+        "--", *staged_markdown_pathspecs(config, exclude_generated_referrers=True),
+        allowed_returncodes=(0, 1),
+    )
+    return _decode_nul_paths(data, "staged backlink path")
+
+
+def _index_blob_wikilink_targets(
+    vault: Path,
+    path: str,
+    note_stem_candidates: set[str],
+) -> set[str]:
+    """Return staged note targets from one index blob, excluding code contexts."""
+    text = read_index_text(vault, path)
+    clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
+    targets: set[str] = set()
+    for raw_target in WIKILINK_RE.findall(clean_text):
+        raw_stem = raw_target.split("/")[-1].strip()
+        if raw_stem.lower().endswith(".md"):
+            raw_stem = raw_stem[:-3].strip()
+        target = (
+            raw_stem
+            if raw_stem in note_stem_candidates
+            else normalize_link_target(raw_target)
+        )
+        if target is not None:
+            targets.add(target)
+    return targets
+
+
+def validate_staged(vault: Path, config: dict) -> list[str]:
+    """Validate only the staged Markdown change surface without writing a report."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    changes = list_staged_changes(vault, config)
+    errors: list[str] = []
+    deleted_stems: set[str] = set()
+
+    for change in changes:
+        if change.status in "ACMR":
+            text = read_index_text(vault, change.path)
+            errors.extend(_staged_schema_errors(change.path, text, config))
+
+        if change.status == "D":
+            deleted_stems.add(_posix_markdown_stem(change.path))
+        elif change.status == "R" and change.old_path is not None:
+            old_stem = _posix_markdown_stem(change.old_path)
+            if old_stem != _posix_markdown_stem(change.path):
+                deleted_stems.add(old_stem)
+
+    if deleted_stems:
+        result_stems = {
+            _posix_markdown_stem(path)
+            for path in _index_markdown_paths(vault, config)
+        }
+        note_stem_candidates = deleted_stems | result_stems
+        stems_to_check = sorted(
+            stem for stem in deleted_stems
+            if stem and stem not in result_stems
+        )
+        referrers_by_target: dict[str, set[str]] = {}
+        if stems_to_check:
+            for referrer in _grep_index_backlink_paths(vault, config):
+                for target in _index_blob_wikilink_targets(
+                    vault, referrer, note_stem_candidates
+                ):
+                    referrers_by_target.setdefault(target, set()).add(referrer)
+        for stem in stems_to_check:
+            for referrer in sorted(referrers_by_target.get(stem, ())):
+                errors.append(
+                    f"스테이징 차단: {referrer} — 삭제·개명된 노트 '{stem}' "
+                    "백링크가 남아 있음"
+                )
+
+    return sorted(set(errors))
 
 
 def scan_log_tag_gaps(log_path: Path, valid_ops: set[str],
@@ -397,11 +879,25 @@ def main() -> int:
     ap.add_argument("--vault",
                     default=os.environ.get("CLAUDE_PROJECT_DIR") or ".",
                     help="볼트 루트 경로 (기본: $CLAUDE_PROJECT_DIR, 없으면 cwd)")
-    ap.add_argument("--output", default=None,
-                    help="리포트 출력 경로 (기본: config의 health_report)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--staged", action="store_true",
+                      help="Git index의 커밋 대상만 검사하고 리포트는 쓰지 않음")
+    mode.add_argument("--output", default=None,
+                      help="full 모드 리포트 출력 경로 (기본: config의 health_report)")
     args = ap.parse_args()
 
     vault = Path(args.vault).resolve()
+
+    if args.staged:
+        try:
+            cfg = load_staged_config(vault)
+            diagnostics = validate_staged(vault, cfg)
+        except (OSError, ValueError, HealthcheckError) as e:
+            print(f"[vault-healthcheck] staged 오류: {e}", file=sys.stderr)
+            return 1
+        for diagnostic in diagnostics:
+            print(diagnostic, file=sys.stderr)
+        return 1 if diagnostics else 0
 
     # --- 볼트 감지: 00-meta/vault-config.json 이 없으면 조용히·정중히 무동작 ---
     cfg_path = vault / CONFIG_RELPATH
@@ -413,12 +909,10 @@ def main() -> int:
         return 0
     try:
         user_cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
-        if not isinstance(user_cfg, dict):
-            raise ValueError("최상위가 JSON 객체가 아님")
-    except (OSError, ValueError) as e:
+        cfg = validate_config(user_cfg)
+    except (OSError, ValueError, HealthcheckError) as e:
         print(f"[vault-healthcheck] 오류: {CONFIG_RELPATH} 파싱 실패 — {e}", file=sys.stderr)
         return 1
-    cfg = {**DEFAULT_CONFIG, **user_cfg}
     warnings: list[str] = []
 
     # --- 설정 해석 -----------------------------------------------------------
@@ -472,12 +966,20 @@ def main() -> int:
 
     fact_patterns = compile_fact_patterns(cfg.get("ssot_facts"), warnings)
 
+    config_derived_output = not args.output
     out_rel = args.output or norm_cfg_path(cfg.get("health_report")) or "00-meta/health-report.md"
     out = vault / out_rel  # out_rel 이 절대경로면 pathlib 이 그대로 절대경로를 취한다
-    try:
-        out_resolved = out.resolve()
-    except OSError:
-        out_resolved = out
+    if config_derived_output:
+        try:
+            out_resolved = _ensure_config_health_report_contained(vault, out)
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            out_resolved = out.resolve()
+        except OSError:
+            out_resolved = out
 
     # 허브/구조 파일(설정이 가리키는 노트)은 지식 그래프 노드가 아니므로 고아 판정에서 제외
     special_rels: set[str] = set()
@@ -533,13 +1035,22 @@ def main() -> int:
     # 슬래시 명령 정의까지 '프런트매터 누락 — 치명'으로 잡혀 오탐이 쌓였다.
     # 실측(운영 볼트): 이 누락만으로 치명 22건이 발생했고, 전부 노트가 아닌 파일이었다.
     # config에 키가 없으면 아래 기본값을 쓴다(구 버전 동작과 호환).
-    fm_exempt = cfg.get("fm_exempt_zones", [
-        "10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude",
-    ])
+    if "frontmatter_exempt_paths" in cfg:
+        fm_exempt = cfg["frontmatter_exempt_paths"]
+    elif "fm_exempt_zones" in cfg:
+        fm_exempt = cfg["fm_exempt_zones"]
+    else:
+        fm_exempt = ["10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude"]
+
+    full_fm_roots = tuple(cfg["frontmatter_roots"]) if "frontmatter_roots" in user_cfg else None
 
     def is_fm_exempt(rel_path: str) -> bool:
-        return any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
-                   for z in fm_exempt)
+        if any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
+               for z in fm_exempt):
+            return True
+        if full_fm_roots is not None:
+            return not any(_is_at_or_below(rel_path, root) for root in full_fm_roots)
+        return False
 
     for p in targets:
         rel = rel_posix(p, vault)
@@ -567,7 +1078,7 @@ def main() -> int:
                 missing_keys.append((rel, absent))
             for field, allowed in enum_sets.items():
                 v = keys.get(field)
-                if v and v not in allowed:
+                if v is not None and v not in allowed:
                     enum_violations.append((rel, field, v))
             for line in fm.splitlines():
                 if UNQUOTED_FM_LINK_RE.match(line):
@@ -841,8 +1352,10 @@ def main() -> int:
 
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
+        if config_derived_output:
+            _ensure_config_health_report_contained(vault, out)
         out.write_text("\n".join(lines), encoding="utf-8")
-    except OSError as e:
+    except (OSError, HealthcheckError) as e:
         print(f"[vault-healthcheck] 오류: 리포트 쓰기 실패({out}) — {e}", file=sys.stderr)
         return 1
 

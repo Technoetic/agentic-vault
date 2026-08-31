@@ -31,10 +31,14 @@ Telegram ⟷ jarvis_bridge.py(상시 데몬) ─┬─ 캡처: 10-inbox/jarvis/ 
 - **화이트리스트**: `vault-config.json`의 `jarvis.telegram_user_ids`(숫자 ID 배열)에 없는 발신자의 메시지는 **응답 없이 폐기**(로그만). 화이트리스트가 비어 있으면 모든 메시지를 폐기하되 콘솔 로그에 발신자 ID를 출력해 최초 설정을 돕는다.
 - **라우팅**: ① `기억해`/`메모`/`remember` 접두 → 캡처 ② `/brief` → 즉석 브리핑 ③ `/status` → 무LLM 상태 응답(HEAD·인박스 건수·마지막 브리핑 시각) ④ 그 외 텍스트 → Q&A.
 - 스케줄러 내장(브리핑 시각·집사 주기) — 외부 스케줄러 불요. Windows 상시 실행은 작업 스케줄러 등록(설정 명령이 안내).
+- 메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
+- 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
+- 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
+- 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
 
-### 3.2 캡처 경로 (쓰기 유일 경로)
+### 3.2 메시지 기반 캡처 경로
 
-- 브리지가 `10-inbox/jarvis/YYYY-MM-DD HHMMSS.md`에 **결정론적으로** 저장(본문 + 수신 시각·채널 메타 1줄). LLM이 쓰기 경로에 개입하지 않는다.
+- 브리지가 `10-inbox/jarvis/YYYY-MM-DD HHMMSS-<정제된-update_id>.md`에 **결정론적으로** 저장(본문 + 수신 시각·채널 메타 1줄). LLM이 쓰기 경로에 개입하지 않는다.
 - 지식 레이어(20-knowledge 등)에는 절대 쓰지 않는다 — 정제는 기존 `/vault-process-inbox`가 담당. pre-commit 훅의 10-inbox 프런트매터 면제와 정합.
 - 응답: "적어뒀습니다 → 10-inbox/jarvis/<파일명>".
 
@@ -47,12 +51,14 @@ Telegram ⟷ jarvis_bridge.py(상시 데몬) ─┬─ 캡처: 10-inbox/jarvis/ 
 
 ### 3.4 브리핑·집사
 
-- **브리핑**(기본 07:30, `jarvis.briefing_time`): Q&A와 동일한 읽기 전용 `claude -p` 세션으로 hot·handoff·tasks·`git log <anchor>..HEAD`를 종합한 아침 브리핑을 생성해 전송. `/brief`로 즉석 호출 가능.
+- **브리핑**(기본 `["07:30"]`, `jarvis.briefing_times`): `HH:MM` 배열의 각 시각에 Q&A와 동일한 읽기 전용 `claude -p` 세션으로 hot·handoff·tasks·`git log <anchor>..HEAD`를 종합한 정기 브리핑을 생성해 전송. 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다. `/brief`로 즉석 호출 가능.
 - **집사**(기본 24시간, `jarvis.butler_interval_hours`): **LLM 없이** ① `vault_healthcheck.py` 실행 → 치명/관리성 건수 보고(자가 치유는 하지 않음 — 사람 세션의 몫) ② `mirror` 원격이 있으면 `git push mirror` ③ 인박스 대기 건수 보고. 결과를 Telegram 1메시지로.
+
+볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.
 
 ## 4. 설정과 비밀
 
-- `vault-config.json`에 `jarvis` 블록(선택): `enabled`, `telegram_user_ids`, `briefing_time`, `butler_interval_hours`, `qa_hourly_limit`, `claude_cmd`. **블록이 없거나 `enabled: false`면 전 기능 침묵** — 우아한 성능 저하 유지.
+- `vault-config.json`에 `jarvis` 블록(선택): `enabled`, `telegram_user_ids`, `briefing_times`, `butler_interval_hours`, `qa_hourly_limit`, `claude_cmd`. `briefing_times`는 중복 제거·시간순 정렬되는 비어 있지 않은 `HH:MM` 문자열 배열이다. 기존 `briefing_time`은 `briefing_times`가 없을 때만 사용한다. **블록이 없거나 `enabled: false`면 전 기능 침묵** — 우아한 성능 저하 유지.
 - 봇 토큰은 볼트에 절대 넣지 않는다: 환경변수 `JARVIS_TELEGRAM_TOKEN` (memoryhub `.env` 패턴과 동일 원칙).
 - 로그는 볼트 밖 `~/.vault-jarvis/jarvis.log`(회전 1MB) — 볼트 오염 방지.
 

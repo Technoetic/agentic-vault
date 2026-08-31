@@ -1,4 +1,5 @@
 #!/bin/sh
+# agentic-vault:hook engine=0.8.2
 # agentic-vault git 원격 정책 가드 — 로컬 전용 기계 강제
 #
 # 개인 지식 볼트에는 기밀·개인정보 노트가 축적될 수 있다.
@@ -12,7 +13,16 @@
 
 remote_url="$2"
 case "$remote_url" in
-  file://*|[A-Za-z]:*|/*) exit 0 ;;
+  file:////*|//*) ;;
+  file:///*%*|file:///*\\*) ;;
+  /*\\*) ;;
+  file:///*|/*) exit 0 ;;
+  [A-Za-z]:/*|[A-Za-z]:\\*)
+    platform=$(uname -s 2>/dev/null) || platform=
+    case "$platform" in
+      MINGW*_NT-*|MSYS_NT-*) exit 0 ;;
+    esac
+    ;;
 esac
 
 echo "" >&2

@@ -10,7 +10,7 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.8.1-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.1)
+[![Version](https://img.shields.io/badge/v0.8.2-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.2)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -265,7 +265,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.8.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.8.2 · MIT)
 │
 ├── commands/                          ← 10개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -389,7 +389,7 @@ claude
 ### 볼트 정책 선언 — vault-config.json
 
 <details>
-<summary><b>📋 19개 설정 키 전체 — 클릭하여 펼치기</b></summary>
+<summary><b>📋 기본 템플릿 설정 키 24개 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
 |:---|:---|
@@ -397,8 +397,10 @@ claude
 | `language` | 볼트 주 언어 (`ko`, `en` 등) — 생성 노트·브리핑 언어 |
 | `deny_zones` | 읽기·스캔 절대 금지 경로 목록 (격리·아카이브·바이너리 구역) |
 | `exclude_dirs` | 스캔 제외 디렉토리 (node_modules, .git 등 — 금지 구역은 아님) |
-| `required_keys` | 모든 노트 프런트매터의 필수 키 목록 |
-| `enums` | `type`·`status`·`ai_priority`의 허용 값 — 임의 값 발명 차단 |
+| `frontmatter_roots` | 프런트매터 스키마 검사를 적용할 루트 경로 목록 |
+| `frontmatter_exempt_paths` | 위 루트 안에서도 프런트매터 스키마 검사를 면제할 경로 목록 |
+| `required_keys` | 설정된 프런트매터 루트 안 노트의 필수 키 목록 |
+| `enums` | 설정된 프런트매터 루트 안 `type`·`status`·`ai_priority`의 허용 값 — 임의 값 발명 차단 |
 | `frontmatter_max_lines` | 프런트매터 최대 줄 수 예산 |
 | `index_note` | 볼트 전체 지도 노트 경로 (노트 목록의 단일 원천) |
 | `log_note` | 작업 로그 노트 경로 (최상단 append, 1줄/작업) |
@@ -410,10 +412,25 @@ claude
 | `ssot_facts` | `[{"label", "pattern"}]` — 볼트 전체에서 매치 값 2종 이상이면 모순 보고 |
 | `health_report` | 헬스체크 리포트 출력 경로 |
 | `backup_target` | 백업 대상 경로 — **빈 문자열이면 백업 생략** |
-| `stale_days` | (선택 확장) 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
-| `index_scopes` | (선택 확장) 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
+| `rules_dir` | 엔진 소유 행동 계약 rules 디렉토리 |
+| `rules_max_lines` | rules 파일별 권장 최대 줄 수 |
+| `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
+| `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
+| `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체 |
+
+`required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다. `frontmatter_exempt_paths`는 그 안의 원시 캡처·도구 파일 등을 면제한다. `frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다. staged 차단 모드는 키가 없을 때 표준 5개 루트(`00-meta`·`20-knowledge`·`30-journal`·`40-people`·`50-projects`)를 사용한다.
 
 `handoff_note`·`ssot_note`·`backup_target`을 비워두면 해당 기능만 조용히 꺼진다(우아한 성능 저하) — 최소 구성으로 시작해 필요할 때 켜면 된다.
+
+#### 선택 확장(기본 템플릿 미포함)
+
+아래 키는 엔진이 지원하지만 새 볼트의 기본 `vault-config.json`에는 넣지 않는다. 필요할 때 명시적으로 추가한다.
+
+| 키 | 설명 |
+|:---|:---|
+| `stale_days` | 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
+| `index_scopes` | 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
+| `anchor_drift_threshold` | handoff 기준 커밋과 HEAD 간 세션 종료 누락 의심 임계 — 미설정 시 기본 3커밋 |
 
 </details>
 
@@ -429,12 +446,20 @@ claude
 
 | 능력 | 동작 | LLM |
 |:---|:---|:---:|
-| 🌅 아침 브리핑 | 매일 지정 시각, hot·handoff·log·git 활동을 종합해 푸시 (`/brief`로 즉석 호출) | 읽기전용 |
+| 📋 정기 브리핑 | 매일 지정한 하나 이상의 시각, hot·handoff·log·git 활동을 종합해 푸시 (`/brief`로 즉석 호출) | 읽기전용 |
 | 📝 원격 캡처 | `기억해: ...` → `10-inbox/jarvis/`에 저장, `/vault-process-inbox`로 정제 | **무관여** |
 | 💬 볼트 Q&A | 자유 질문 → hot→index→grep 탐색 후 근거 노트 인용 답변 | 읽기전용 |
 | 🧹 집사 보고 | 주기적으로 healthcheck·mirror push·인박스 현황 보고 (치유는 안 함) | 무관여 |
 
-**보안 경계 (하드 룰):** 숫자 user ID 화이트리스트 외 발신자는 무응답 폐기 · Q&A 세션 도구는 `Read Grep Glob`뿐(쓰기·Bash 영구 불허) · 자비스의 볼트 쓰기는 인박스 한 곳 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵.
+메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다. 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다. 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다. 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
+
+수신 업데이트는 `process-then-ack` 순서를 지킨다. 라우팅·저장·응답이 성공한 뒤에만 `offset`을 원자적으로 전진시키며, 실패하면 그 업데이트부터 다음 poll에서 재시도한다. 따라서 손실보다 중복을 택하는 at-least-once 전달이고, 동일 `update_id` 캡처는 같은 파일로 수렴한다.
+
+**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · Q&A 세션 도구는 `Read Grep Glob`뿐(쓰기·Bash 영구 불허) · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.
+
+브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
+
+볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.
 
 절충의 이유: 채널 20종·음성 같은 몸통 인프라는 OpenClaw의 영역이라 재발명하지 않는다 — 이 계층은 "볼트를 두뇌로 쓰는 최소 자비스"다.
 
@@ -446,17 +471,26 @@ claude
 
 </div>
 
-`/vault-lint`와 SessionStart 훅이 실행하는 `vault_healthcheck.py`는 신호를 무의미하게 만드는 "매번 실패"를 배제한다 — **치명만 exit 1, 관리성은 리포트만**.
+`/vault-lint`와 SessionStart 훅이 실행하는 `vault_healthcheck.py`의 기본 **full 리포트 모드**는 신호를 무의미하게 만드는 "매번 실패"를 배제한다 — **치명만 exit 1, 관리성은 리포트만**.
 
 | 등급 | 검사 항목 | 처리 |
 |:---:|:---|:---|
 | 🔴 **치명** (exit 1) | 프런트매터 붕괴 · 필수 키 누락 · Enum 위반 · **따옴표 없는 프런트매터 위키링크**(YAML 오파싱 = 메타데이터 계층 붕괴) · 로그 태그 누락·malformed 로그라인 | `/vault-lint`가 **즉시 치유** |
 | 🟡 **관리성** (exit 0) | 데드링크 · 고아/준고아 노드 · 인덱스 미등록 · 프런트매터 과대 · rules 무결성 · **세션 주입 토큰 예산 초과** · 노화 문서(선택) · SSOT 사실 모순(선택) | 리포트 누적 → **사용자 확인 후** 스텁 생성·링크 교정·아카이브 |
 
+검사 엔진의 두 모드는 목적과 입출력이 다르다.
+
+| 모드 | 입력 기준 | 범위 | 출력 |
+|:---|:---|:---|:---|
+| **full 리포트** (기본, `/vault-lint`) | 현재 워킹트리와 config | 활성 볼트 전체 | config의 `health_report` 또는 명시적 `--output`에 리포트 작성 |
+| **staged 차단** (`--staged`, pre-commit) | Git index의 config·파일 | 이번 커밋의 변경 표면과 삭제·개명 백링크 | 리포트를 쓰지 않고 차단 진단만 stderr에 출력 |
+
 > [!NOTE]
 > 이 등급 설계는 실제 볼트 운영 감사에서 얻은 교훈이다: **검사기가 감시하던 영역은 전부 건강했고, 감시 밖 영역만 예외 없이 부패해 있었다.** 자율 지침은 부패한다 — 코드로 강제된 규율만 살아남는다.
 
-무결성 강제는 세 시점에 걸린다: **세션 시작**(SessionStart 훅의 비동기 검사) → **온디맨드**(`/vault-lint` 치유) → **커밋 순간**(git pre-commit 훅). 커밋 게이트는 `/vault-init`이 git을 켤 때 `assets/git-hooks/`의 훅을 볼트의 `00-meta/scripts/git-hooks/`에 설치하고 `core.hooksPath`로 활성화한다 — 스테이징된 노트의 프런트매터 누락·따옴표 없는 YAML 위키링크를 커밋 시점에 fail-closed로 차단하고, pre-push는 네트워크 원격(https/ssh) push를 차단해 로컬 전용 정책을 기계 강제한다 — 같은 머신의 bare 미러 등 로컬 경로 원격은 허용하므로 로컬 백업 push는 막히지 않는다(우회는 `--no-verify` 명시로만). 오염이 리포지토리 이력에 들어가기 **전에** 막는 마지막 방어선이다.
+무결성 강제는 세 시점에 걸린다: **세션 시작**(SessionStart 훅의 비동기 full 검사) → **온디맨드**(`/vault-lint` full 검사·치유) → **커밋 순간**(git pre-commit의 staged 검사). 커밋 게이트는 `/vault-init`이 git을 켤 때 `assets/git-hooks/`의 훅을 볼트의 `00-meta/scripts/git-hooks/`에 설치하고 `core.hooksPath`로 활성화한다. pre-commit은 스테이징된 노트의 프런트매터·필수 키·Enum·YAML 위키링크와 삭제·개명 백링크를 Git index 기준으로 검사하며, Python이나 설치된 검사기가 없거나 검사 중 오류가 나도 fail-closed로 차단한다. pre-push는 네트워크 원격(https/ssh) push를 차단하되 같은 머신의 bare 미러 등 로컬 경로 원격은 허용한다.
+
+이 훅은 협업 규율을 돕는 **로컬 게이트이지 보안 샌드박스가 아니다.** 저장소를 제어하는 사용자는 `git commit --no-verify`·`git push --no-verify`를 쓰거나 `core.hooksPath`를 바꿔 우회할 수 있다. 우회 불가능한 강제가 필요하면 별도의 원격 CI·서버 정책이 필요하다.
 
 또한 handoff 상단의 **기준 커밋(anchor)** 줄이 "이 handoff가 반영하는 볼트 시점"을 git 해시로 고정한다 — `/vault-session-end`가 갱신하고, `/vault-session-start`가 `anchor..HEAD` 차이를 브리핑에 반영해 handoff의 point-in-time 어긋남을 결정론적으로 해소한다. 같은 anchor 패턴이 장기 기억 MCP에도 적용된다: remember 커밋 끝에 `[anchor: <해시>]`를 붙여, 다음 세션이 낡은 회상을 볼트 이력과 대조해 걸러낸다. `/vault-trace`도 `git log -S`로 키워드의 커밋 이력을 병행 수집해, 노트가 말하는 날짜와 실제 기록된 날짜의 어긋남을 모순 신호로 잡는다.
 

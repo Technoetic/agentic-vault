@@ -37,7 +37,7 @@
 
 `--staged`는 커밋 직전 변경 표면만 차단하며 health report를 쓰지 않는다. 인덱스 전체의 기존 관리성 부채는 기존 full mode가 리포트한다. 동일한 config 검증기와 프런트매터 파서를 공유해 두 모드의 규칙 의미가 갈라지지 않게 한다.
 
-기존 config의 `fm_exempt_zones`는 `frontmatter_exempt_paths`의 호환 alias로 읽는다. `frontmatter_roots`가 없는 legacy config에서 full mode는 기존처럼 활성 노트 전체에 스키마를 적용하고, staged mode만 기존 pre-commit과 같은 기본 5개 root를 사용한다. 새 템플릿과 `/vault-upgrade`가 명시적 roots를 추가한 뒤에는 두 모드가 같은 roots를 사용한다.
+기존 config의 `fm_exempt_zones`는 `frontmatter_exempt_paths`의 호환 alias로 읽는다. `frontmatter_roots`가 없는 legacy config에서 full mode는 기존처럼 활성 노트 전체에 스키마를 적용하고, staged mode만 기존 pre-commit과 같은 기본 5개 root를 사용한다. 새 템플릿은 명시적 roots를 포함하므로 새 볼트의 두 모드는 같은 roots를 사용한다. `/vault-upgrade`는 legacy config의 기존 full mode 범위와 alias를 보존하며, 두 모드의 범위를 맞추는 마이그레이션은 사용자가 별도로 명시적으로 승인한 경우에만 수행한다.
 
 ## 6. 테스트
 
