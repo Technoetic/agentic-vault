@@ -389,7 +389,7 @@ claude
 ### 볼트 정책 선언 — vault-config.json
 
 <details>
-<summary><b>📋 19개 설정 키 전체 — 클릭하여 펼치기</b></summary>
+<summary><b>📋 21개 설정 키 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
 |:---|:---|
@@ -397,8 +397,10 @@ claude
 | `language` | 볼트 주 언어 (`ko`, `en` 등) — 생성 노트·브리핑 언어 |
 | `deny_zones` | 읽기·스캔 절대 금지 경로 목록 (격리·아카이브·바이너리 구역) |
 | `exclude_dirs` | 스캔 제외 디렉토리 (node_modules, .git 등 — 금지 구역은 아님) |
-| `required_keys` | 모든 노트 프런트매터의 필수 키 목록 |
-| `enums` | `type`·`status`·`ai_priority`의 허용 값 — 임의 값 발명 차단 |
+| `frontmatter_roots` | 프런트매터 스키마 검사를 적용할 루트 경로 목록 |
+| `frontmatter_exempt_paths` | 위 루트 안에서도 프런트매터 스키마 검사를 면제할 경로 목록 |
+| `required_keys` | 설정된 프런트매터 루트 안 노트의 필수 키 목록 |
+| `enums` | 설정된 프런트매터 루트 안 `type`·`status`·`ai_priority`의 허용 값 — 임의 값 발명 차단 |
 | `frontmatter_max_lines` | 프런트매터 최대 줄 수 예산 |
 | `index_note` | 볼트 전체 지도 노트 경로 (노트 목록의 단일 원천) |
 | `log_note` | 작업 로그 노트 경로 (최상단 append, 1줄/작업) |
@@ -412,6 +414,8 @@ claude
 | `backup_target` | 백업 대상 경로 — **빈 문자열이면 백업 생략** |
 | `stale_days` | (선택 확장) 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
 | `index_scopes` | (선택 확장) 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
+
+`required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다. `frontmatter_exempt_paths`는 그 안의 원시 캡처·도구 파일 등을 면제한다. `frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다. staged 차단 모드는 키가 없을 때 표준 5개 루트(`00-meta`·`20-knowledge`·`30-journal`·`40-people`·`50-projects`)를 사용한다.
 
 `handoff_note`·`ssot_note`·`backup_target`을 비워두면 해당 기능만 조용히 꺼진다(우아한 성능 저하) — 최소 구성으로 시작해 필요할 때 켜면 된다.
 

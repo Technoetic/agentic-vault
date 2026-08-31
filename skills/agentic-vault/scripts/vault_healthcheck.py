@@ -240,7 +240,10 @@ def validate_config(raw: object) -> dict:
     for field, allowed in enums.items():
         if not isinstance(field, str) or not field.strip():
             raise HealthcheckError("enums keys must be non-empty strings")
-        normalized_enums[field] = _validate_string_list(allowed, f"enums.{field}")
+        normalized_allowed = _validate_string_list(allowed, f"enums.{field}")
+        if not normalized_allowed:
+            raise HealthcheckError(f"enums.{field} must not be empty")
+        normalized_enums[field] = normalized_allowed
     config["enums"] = normalized_enums
 
     facts = config.get("ssot_facts")
@@ -269,6 +272,22 @@ def validate_config(raw: object) -> dict:
     # Full mode uses absence as the compatibility marker for "all active notes";
     # VaultPolicy supplies the five staged defaults without erasing that marker.
     return config
+
+
+def _ensure_config_health_report_contained(vault: Path, output: Path) -> Path:
+    """Resolve a config-derived report path and require it to stay in the vault."""
+    try:
+        resolved_vault = vault.resolve()
+        resolved_output = output.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HealthcheckError(f"health_report 경로 확인 실패: {exc}") from exc
+    try:
+        resolved_output.relative_to(resolved_vault)
+    except ValueError as exc:
+        raise HealthcheckError(
+            f"health_report must stay inside the vault: {resolved_output}"
+        ) from exc
+    return resolved_output
 
 
 def _run_git_bytes(
@@ -658,19 +677,29 @@ def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
     return errors
 
 
-def _grep_index_backlink_paths(vault: Path, config: dict, stem: str) -> list[str]:
+def _backlink_pattern(stem: str) -> str:
     escaped_stem = re.escape(stem)
-    pattern = (
+    return (
         r"\[\[([^]|#]*/)*" + escaped_stem
         + r"(\.md)?([|#][^]]*)?\]\]"
     )
+
+
+def _grep_index_backlink_paths(vault: Path, config: dict, stem: str) -> list[str]:
     data = _run_git_bytes(
         vault,
-        "grep", "--cached", "-z", "-l", "-I", "-E", "-e", pattern,
+        "grep", "--cached", "-z", "-l", "-I", "-E", "-e", _backlink_pattern(stem),
         "--", *staged_markdown_pathspecs(config, exclude_generated_referrers=True),
         allowed_returncodes=(0, 1),
     )
     return _decode_nul_paths(data, "staged backlink path")
+
+
+def _index_blob_has_wikilink_to_stem(vault: Path, path: str, stem: str) -> bool:
+    """Confirm a grep candidate contains a real wikilink outside code contexts."""
+    text = read_index_text(vault, path)
+    clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
+    return re.search(_backlink_pattern(stem), clean_text) is not None
 
 
 def validate_staged(vault: Path, config: dict) -> list[str]:
@@ -703,6 +732,8 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
             if not stem or stem in result_stems:
                 continue
             for referrer in _grep_index_backlink_paths(vault, config, stem):
+                if not _index_blob_has_wikilink_to_stem(vault, referrer, stem):
+                    continue
                 errors.append(
                     f"스테이징 차단: {referrer} — 삭제·개명된 노트 '{stem}' "
                     "백링크가 남아 있음"
@@ -911,12 +942,20 @@ def main() -> int:
 
     fact_patterns = compile_fact_patterns(cfg.get("ssot_facts"), warnings)
 
+    config_derived_output = not args.output
     out_rel = args.output or norm_cfg_path(cfg.get("health_report")) or "00-meta/health-report.md"
     out = vault / out_rel  # out_rel 이 절대경로면 pathlib 이 그대로 절대경로를 취한다
-    try:
-        out_resolved = out.resolve()
-    except OSError:
-        out_resolved = out
+    if config_derived_output:
+        try:
+            out_resolved = _ensure_config_health_report_contained(vault, out)
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            out_resolved = out.resolve()
+        except OSError:
+            out_resolved = out
 
     # 허브/구조 파일(설정이 가리키는 노트)은 지식 그래프 노드가 아니므로 고아 판정에서 제외
     special_rels: set[str] = set()
@@ -1289,8 +1328,10 @@ def main() -> int:
 
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
+        if config_derived_output:
+            _ensure_config_health_report_contained(vault, out)
         out.write_text("\n".join(lines), encoding="utf-8")
-    except OSError as e:
+    except (OSError, HealthcheckError) as e:
         print(f"[vault-healthcheck] 오류: 리포트 쓰기 실패({out}) — {e}", file=sys.stderr)
         return 1
 

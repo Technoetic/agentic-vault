@@ -4,12 +4,19 @@
 
 SCRIPT="$(dirname "$0")/../vault_healthcheck.py"
 
-if command -v python >/dev/null 2>&1; then
-  PYTHON=python
-elif command -v python3 >/dev/null 2>&1; then
-  PYTHON=python3
+supports_python() {
+  "$@" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+    >/dev/null 2>&1
+}
+
+if command -v python >/dev/null 2>&1 && supports_python python; then
+  PYTHON_KIND=python
+elif command -v python3 >/dev/null 2>&1 && supports_python python3; then
+  PYTHON_KIND=python3
+elif command -v py >/dev/null 2>&1 && supports_python py -3; then
+  PYTHON_KIND=py
 else
-  echo "🚫 [pre-commit] python을 찾을 수 없습니다." >&2
+  echo "🚫 [pre-commit] python을 찾을 수 없습니다 — 작동하는 Python 3.10+ 필요." >&2
   exit 1
 fi
 
@@ -18,5 +25,9 @@ fi
   exit 1
 }
 
-"$PYTHON" "$SCRIPT" --vault . --staged
+case "$PYTHON_KIND" in
+  python) python "$SCRIPT" --vault . --staged ;;
+  python3) python3 "$SCRIPT" --vault . --staged ;;
+  py) py -3 "$SCRIPT" --vault . --staged ;;
+esac
 exit $?

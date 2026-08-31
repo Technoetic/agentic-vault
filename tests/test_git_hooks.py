@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,7 @@ INIT_COMMAND = REPO_ROOT / "commands" / "vault-init.md"
 UPGRADE_COMMAND = REPO_ROOT / "commands" / "vault-upgrade.md"
 CONFIG_TEMPLATE = REPO_ROOT / "assets" / "templates" / "vault-config.json"
 HEALTHCHECK_ENGINE = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
+README = REPO_ROOT / "README.md"
 
 
 def find_shell() -> Path:
@@ -72,6 +74,20 @@ class PreCommitHookTests(unittest.TestCase):
             newline="\n",
         )
         dirname.chmod(0o755)
+
+    @staticmethod
+    def install_fake_command(fake_bin: Path, name: str, source: str) -> Path:
+        command = fake_bin / name
+        command.write_text(source, encoding="utf-8", newline="\n")
+        command.chmod(0o755)
+        return command
+
+    def install_working_python(self, fake_bin: Path, name: str = "python3") -> Path:
+        return self.install_fake_command(
+            fake_bin,
+            name,
+            f"#!/bin/sh\nexec \"{shell_path(Path(sys.executable))}\" \"$@\"\n",
+        )
 
     def run_hook(self, *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -139,6 +155,101 @@ class PreCommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         argv = json.loads(argv_log.read_text(encoding="utf-8"))
         self.assertEqual(argv[-3:], ["--vault", ".", "--staged"])
+
+    def test_precommit_falls_through_broken_python_to_working_python3(self) -> None:
+        argv_log = self.vault / "checker-argv.json"
+        self.install_checker(
+            "import json, os, sys\n"
+            "with open(os.environ['ARGV_LOG'], 'w', encoding='utf-8') as stream:\n"
+            "    json.dump(sys.argv, stream, ensure_ascii=False)\n"
+        )
+        fake_bin = self.vault / "fake-bin"
+        fake_bin.mkdir()
+        self.install_fake_dirname(fake_bin)
+        self.install_fake_command(fake_bin, "python", "#!/bin/sh\nexit 127\n")
+        self.install_working_python(fake_bin)
+        env = os.environ.copy()
+        env["PATH"] = shell_path(fake_bin)
+        env["ARGV_LOG"] = str(argv_log)
+
+        result = self.run_hook(env=env)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = json.loads(argv_log.read_text(encoding="utf-8"))
+        self.assertEqual(argv[1:], ["--vault", ".", "--staged"])
+
+    def test_precommit_falls_through_python_older_than_310(self) -> None:
+        argv_log = self.vault / "checker-argv.json"
+        self.install_checker(
+            "import json, os, sys\n"
+            "with open(os.environ['ARGV_LOG'], 'w', encoding='utf-8') as stream:\n"
+            "    json.dump(sys.argv, stream, ensure_ascii=False)\n"
+        )
+        fake_bin = self.vault / "fake-bin"
+        fake_bin.mkdir()
+        self.install_fake_dirname(fake_bin)
+        self.install_fake_command(
+            fake_bin,
+            "python",
+            "#!/bin/sh\n"
+            "if [ \"$1\" = \"-c\" ]; then\n"
+            "  case \"$2\" in *\"3, 10\"*) exit 1 ;; *) exit 0 ;; esac\n"
+            "fi\n"
+            "exit 72\n",
+        )
+        self.install_working_python(fake_bin)
+        env = os.environ.copy()
+        env["PATH"] = shell_path(fake_bin)
+        env["ARGV_LOG"] = str(argv_log)
+
+        result = self.run_hook(env=env)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = json.loads(argv_log.read_text(encoding="utf-8"))
+        self.assertEqual(argv[1:], ["--vault", ".", "--staged"])
+
+    def test_precommit_uses_windows_py_3_fallback_with_exact_checker_arguments(self) -> None:
+        argv_log = self.vault / "checker-argv.json"
+        self.install_checker(
+            "import json, os, sys\n"
+            "with open(os.environ['ARGV_LOG'], 'w', encoding='utf-8') as stream:\n"
+            "    json.dump(sys.argv, stream, ensure_ascii=False)\n"
+        )
+        fake_bin = self.vault / "fake-bin"
+        fake_bin.mkdir()
+        self.install_fake_dirname(fake_bin)
+        self.install_fake_command(
+            fake_bin,
+            "py",
+            "#!/bin/sh\n"
+            "[ \"$1\" = \"-3\" ] || exit 73\n"
+            "shift\n"
+            f"exec \"{shell_path(Path(sys.executable))}\" \"$@\"\n",
+        )
+        env = os.environ.copy()
+        env["PATH"] = shell_path(fake_bin)
+        env["ARGV_LOG"] = str(argv_log)
+
+        result = self.run_hook(env=env)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = json.loads(argv_log.read_text(encoding="utf-8"))
+        self.assertEqual(argv[1:], ["--vault", ".", "--staged"])
+
+    def test_precommit_fails_closed_when_all_interpreters_are_broken(self) -> None:
+        self.install_checker("raise AssertionError('checker must not run')\n")
+        fake_bin = self.vault / "fake-bin"
+        fake_bin.mkdir()
+        self.install_fake_dirname(fake_bin)
+        for name in ("python", "python3", "py"):
+            self.install_fake_command(fake_bin, name, "#!/bin/sh\nexit 74\n")
+        env = os.environ.copy()
+        env["PATH"] = shell_path(fake_bin)
+
+        result = self.run_hook(env=env)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Python 3.10+", result.stderr)
 
     def test_real_precommit_blocks_invalid_staged_note_with_shipped_engine(self) -> None:
         shutil.copyfile(HEALTHCHECK_ENGINE, self.vault / "00-meta" / "scripts" / "vault_healthcheck.py")
@@ -241,6 +352,25 @@ class HookAssetContractTests(unittest.TestCase):
         self.assertIn("다른 값", command)
         self.assertIn("명시적 확인", command)
         self.assertIn("유지", command)
+
+    def test_readme_lists_21_config_keys_and_frontmatter_scope(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        marker = "📋 21개 설정 키 전체"
+        self.assertIn(marker, readme)
+        table = readme.split(marker, 1)[1].split("</details>", 1)[0]
+        documented_keys = re.findall(r"^\| `([^`]+)` \|", table, flags=re.MULTILINE)
+
+        self.assertEqual(len(documented_keys), 21)
+        self.assertIn("frontmatter_roots", documented_keys)
+        self.assertIn("frontmatter_exempt_paths", documented_keys)
+        self.assertIn(
+            "`required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다",
+            readme,
+        )
+        self.assertIn(
+            "`frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다",
+            readme,
+        )
 
 
 if __name__ == "__main__":

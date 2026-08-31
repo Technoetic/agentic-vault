@@ -218,6 +218,13 @@ class ConfigAndGitIndexTests(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(HealthcheckError):
                 validate_config(self.base_config(**overrides))
 
+    def test_staged_config_rejects_empty_enum_allowlist(self) -> None:
+        self.write_config({"enums": {"status": []}})
+        self.git("add", "00-meta/vault-config.json")
+
+        with self.assertRaisesRegex(HealthcheckError, "enums.status must not be empty"):
+            load_staged_config(self.repo)
+
     def test_legacy_exempt_alias_and_staged_policy_defaults(self) -> None:
         config = validate_config(self.base_config(fm_exempt_zones=["legacy/raw"]))
         policy = VaultPolicy.from_config(config)
@@ -271,6 +278,30 @@ class ConfigAndGitIndexTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(outside.is_file())
 
+    def test_config_health_report_containment_helper_rejects_outside_path(self) -> None:
+        outside = Path(self._tmp.name) / "outside" / "report.md"
+
+        with self.assertRaisesRegex(HealthcheckError, "health_report"):
+            healthcheck._ensure_config_health_report_contained(self.repo, outside)
+
+    def test_config_health_report_is_rechecked_immediately_before_write(self) -> None:
+        self.write_config()
+        report = self.repo / "00-meta" / "health-report.md"
+
+        with mock.patch.object(
+            healthcheck,
+            "_ensure_config_health_report_contained",
+            side_effect=[report.resolve(), HealthcheckError("health_report escaped")],
+        ), mock.patch.object(
+            sys,
+            "argv",
+            ["vault_healthcheck.py", "--vault", str(self.repo)],
+        ):
+            exit_code = healthcheck.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(report.exists())
+
 
 class CliModeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -303,7 +334,12 @@ class CliModeTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def write_config(self, *, frontmatter_roots: list[str] | None = None) -> Path:
+    def write_config(
+        self,
+        *,
+        frontmatter_roots: list[str] | None = None,
+        overrides: dict[str, object] | None = None,
+    ) -> Path:
         config: dict[str, object] = {
             "vault_name": "CLI 테스트 볼트",
             "required_keys": ["title"],
@@ -322,6 +358,7 @@ class CliModeTests(unittest.TestCase):
         }
         if frontmatter_roots is not None:
             config["frontmatter_roots"] = frontmatter_roots
+        config.update(overrides or {})
         return self.write(
             "00-meta/vault-config.json",
             json.dumps(config, ensure_ascii=False),
@@ -343,6 +380,18 @@ class CliModeTests(unittest.TestCase):
             check=False,
             timeout=30,
         )
+
+    def symlink_or_skip(
+        self,
+        link: Path,
+        target: Path,
+        *,
+        target_is_directory: bool = False,
+    ) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=target_is_directory)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"real symlink creation is unsupported: {exc}")
 
     def test_staged_mode_reads_index_config_and_never_writes_report(self) -> None:
         config_path = self.write_config(frontmatter_roots=["20-knowledge"])
@@ -382,6 +431,18 @@ class CliModeTests(unittest.TestCase):
         self.assertIn("00-meta/vault-config.json", result.stderr)
         self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
 
+    def test_full_mode_rejects_empty_enum_allowlist_consistently(self) -> None:
+        self.write_config(
+            frontmatter_roots=["20-knowledge"],
+            overrides={"enums": {"status": []}},
+        )
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("enums.status must not be empty", result.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
     def test_full_mode_honors_explicit_frontmatter_roots_and_writes_report(self) -> None:
         self.write_config(frontmatter_roots=["20-knowledge"])
         self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
@@ -417,6 +478,41 @@ class CliModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("not allowed with argument --staged", result.stderr)
         self.assertFalse(outside.exists())
+
+    def test_config_health_report_file_symlink_outside_is_rejected_without_write(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        outside = Path(self._tmp.name) / "outside-file.md"
+        sentinel = "external sentinel\n"
+        outside.write_text(sentinel, encoding="utf-8")
+        self.symlink_or_skip(self.repo / "00-meta" / "cli-health.md", outside)
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("health_report", result.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"), sentinel)
+
+    def test_config_health_report_parent_symlink_outside_is_rejected_without_write(self) -> None:
+        config_path = self.write_config(frontmatter_roots=["20-knowledge"])
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["health_report"] = "reports/cli-health.md"
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        outside_dir = Path(self._tmp.name) / "outside-directory"
+        outside_dir.mkdir()
+        outside = outside_dir / "cli-health.md"
+        sentinel = "external parent sentinel\n"
+        outside.write_text(sentinel, encoding="utf-8")
+        self.symlink_or_skip(
+            self.repo / "reports",
+            outside_dir,
+            target_is_directory=True,
+        )
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("health_report", result.stderr)
+        self.assertEqual(outside.read_text(encoding="utf-8"), sentinel)
 
 
 class StagedGateTests(unittest.TestCase):
@@ -656,6 +752,27 @@ class StagedGateTests(unittest.TestCase):
         errors = self.staged_errors()
 
         self.assertTrue(any("Ref.md" in error and "A" in error for error in errors))
+
+    def test_deletion_backlinks_ignore_code_but_still_block_real_link_in_index_blob(self) -> None:
+        code_only = "```markdown\n[[A]]\n```\n\n`inline [[A]] example`"
+        self.seed_notes(
+            {
+                "20-knowledge/A.md": self.valid_note("A"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", code_only),
+            }
+        )
+        self.git("rm", "20-knowledge/A.md")
+
+        self.assertEqual(self.staged_errors(), [])
+
+        self.write(
+            "20-knowledge/Ref.md",
+            self.valid_note("Ref", f"{code_only}\n\nactual: [[A]]"),
+        )
+        self.git("add", "20-knowledge/Ref.md")
+
+        errors = self.staged_errors()
+        self.assertTrue(any("Ref.md" in error and "'A'" in error for error in errors))
 
     def test_another_result_index_note_with_same_stem_keeps_links_valid(self) -> None:
         self.seed_notes(
