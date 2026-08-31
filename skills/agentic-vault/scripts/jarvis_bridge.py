@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,31 @@ DEFAULTS = {
     "qa_timeout_sec": 180,
     "claude_cmd": "claude",
 }
+
+
+class JarvisConfigError(ValueError):
+    pass
+
+
+def parse_briefing_slots(block: dict) -> list[tuple[int, int]]:
+    raw = block["briefing_times"] if "briefing_times" in block else [block.get("briefing_time", "07:30")]
+    if not isinstance(raw, list) or not raw:
+        raise JarvisConfigError("briefing_times must be a non-empty HH:MM string list")
+    slots = set()
+    for value in raw:
+        if not isinstance(value, str) or not re.fullmatch(r"\d{2}:\d{2}", value):
+            raise JarvisConfigError(f"invalid briefing time format: {value!r}")
+        hour, minute = map(int, value.split(":"))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise JarvisConfigError(f"briefing time out of range: {value}")
+        slots.add((hour, minute))
+    return sorted(slots)
+
+
+def is_authorized_private_message(message: dict, whitelist: set[int]) -> bool:
+    sender = (message.get("from") or {}).get("id")
+    chat = message.get("chat") or {}
+    return sender in whitelist and chat.get("type") == "private" and chat.get("id") == sender
 
 
 # ---------------------------------------------------------------- 로그
@@ -79,6 +105,7 @@ def load_jarvis_config(vault: Path) -> dict | None:
         return None
     cfg = {**DEFAULTS, **block}
     cfg["telegram_user_ids"] = [int(x) for x in cfg.get("telegram_user_ids", [])]
+    cfg["_briefing_slots"] = parse_briefing_slots(block)
     # Q&A 가드에 필요한 볼트 수준 키를 함께 전달
     cfg["_deny_zones"] = vault_cfg.get("deny_zones", [])
     cfg["_language"] = vault_cfg.get("language", "ko")
