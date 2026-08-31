@@ -77,12 +77,15 @@ def atomic_write_text(path: Path, text: str) -> None:
 
 
 def read_int_state(path: Path, default: int = 0) -> int:
-    if not path.is_file():
-        return default
     try:
-        return int(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
+        value = int(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except (OSError, TypeError, ValueError) as error:
         raise JarvisConfigError(f"invalid integer state: {path.name}") from error
+    if value < 0:
+        raise JarvisConfigError(f"invalid integer state: {path.name}")
+    return value
 
 
 def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:

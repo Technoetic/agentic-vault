@@ -315,6 +315,20 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
     def test_missing_offset_uses_default(self):
         self.assertEqual(_BRIDGE.read_int_state(self.vault / "offset", default=7), 7)
 
+    def test_offset_directory_aborts_instead_of_using_default(self):
+        path = self.vault / "offset"
+        path.mkdir()
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_int_state(path, default=0)
+
+    def test_negative_offset_aborts_instead_of_replaying_updates(self):
+        path = self.vault / "offset"
+        path.write_text("-1", encoding="utf-8")
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.read_int_state(path, default=0)
+
     def test_same_qa_update_consumes_quota_once_across_retry(self):
         sender = Mock(side_effect=[False, True])
         qa_times, attempted = deque(), set()
