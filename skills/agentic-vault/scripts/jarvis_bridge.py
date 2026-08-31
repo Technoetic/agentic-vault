@@ -1020,13 +1020,17 @@ def serve(vault: Path, cfg: dict) -> None:
             log(f"getUpdates 오류(재시도): {_telegram_error_label(error)}")
             time.sleep(5)
             continue
-        offset, _complete = process_update_batch(
+        offset, complete = process_update_batch(
             resp.get("result", []), offset,
             lambda update: process_update(
                 vault, cfg, token, whitelist, update, started, qa_times,
                 qa_attempt_ids, tg_send),
             lambda committed: atomic_write_text(offset_file, str(committed)),
             lambda update: qa_attempt_ids.discard(update["update_id"]))
+        if not complete:
+            log("수신 업데이트 처리 미완료 — offset 유지 후 재시도")
+            time.sleep(5)
+            continue
 
 
 # ---------------------------------------------------------------- self-test

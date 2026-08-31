@@ -333,10 +333,15 @@ def staged_markdown_pathspecs(
     pathspecs = [":(top,glob,icase)**/*.md"]
     deny_zones = sorted(set(config.get("deny_zones") or ()))
     exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
-    pathspecs.extend(
-        f":(exclude,top,glob){_escape_git_glob(path)}/**"
-        for path in deny_zones
-    )
+    for path in deny_zones:
+        if "/" in path:
+            pathspecs.append(
+                f":(exclude,top,glob){_escape_git_glob(path)}/**"
+            )
+        else:
+            pathspecs.append(
+                f":(exclude,glob)**/{_escape_git_glob(path)}/**"
+            )
     pathspecs.extend(
         f":(exclude,glob)**/{_escape_git_glob(name)}/**"
         for name in exclude_dirs
@@ -668,7 +673,7 @@ def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
         )
     for field, allowed in sorted((config.get("enums") or {}).items()):
         value = keys.get(field)
-        if value and value not in allowed:
+        if value is not None and value not in allowed:
             errors.append(f"스테이징 차단: {path} — Enum 위반: {field}={value}")
     for line in fm.splitlines():
         if UNQUOTED_FM_LINK_RE.match(line):
@@ -1073,7 +1078,7 @@ def main() -> int:
                 missing_keys.append((rel, absent))
             for field, allowed in enum_sets.items():
                 v = keys.get(field)
-                if v and v not in allowed:
+                if v is not None and v not in allowed:
                     enum_violations.append((rel, field, v))
             for line in fm.splitlines():
                 if UNQUOTED_FM_LINK_RE.match(line):

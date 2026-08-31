@@ -443,6 +443,34 @@ class CliModeTests(unittest.TestCase):
         self.assertIn("enums.status must not be empty", result.stderr)
         self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
 
+    def test_full_mode_rejects_present_empty_enum_but_allows_absent_optional_enum(
+        self,
+    ) -> None:
+        self.write_config(
+            frontmatter_roots=["20-knowledge"],
+            overrides={"enums": {"status": ["active", "draft"]}},
+        )
+        self.write(
+            "20-knowledge/Empty.md",
+            '---\ntitle: "Empty"\nstatus:\n---\n',
+        )
+        self.write(
+            "20-knowledge/Absent.md",
+            '---\ntitle: "Absent"\n---\n',
+        )
+
+        result = self.run_cli()
+
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("## 3. Enum 위반 — 치명 (1)", report)
+        enum_section = report.split("## 3. Enum 위반 — 치명 (1)", 1)[1].split(
+            "\n## 4.", 1
+        )[0]
+        self.assertIn("20-knowledge/Empty.md", enum_section)
+        self.assertIn("status: ``", enum_section)
+        self.assertNotIn("20-knowledge/Absent.md", enum_section)
+
     def test_full_mode_honors_explicit_frontmatter_roots_and_writes_report(self) -> None:
         self.write_config(frontmatter_roots=["20-knowledge"])
         self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
@@ -626,6 +654,27 @@ class StagedGateTests(unittest.TestCase):
         self.assertTrue(
             any("Bad.MD" in error and "프런트매터 누락" in error for error in errors)
         )
+
+    def test_present_empty_enum_is_rejected_but_absent_optional_enum_is_allowed(
+        self,
+    ) -> None:
+        self.seed_notes({})
+        self.write(
+            "20-knowledge/Empty.md",
+            '---\ntitle: "Empty"\nstatus:\n---\n',
+        )
+        self.write(
+            "20-knowledge/Absent.md",
+            '---\ntitle: "Absent"\n---\n',
+        )
+        self.git("add", "20-knowledge/Empty.md", "20-knowledge/Absent.md")
+
+        errors = self.staged_errors()
+        joined = "\n".join(errors)
+
+        self.assertIn("20-knowledge/Empty.md", joined)
+        self.assertIn("Enum 위반: status=", joined)
+        self.assertNotIn("20-knowledge/Absent.md", joined)
 
     def test_schema_rules_apply_only_to_configured_non_exempt_roots(self) -> None:
         self.seed_notes(
@@ -1134,6 +1183,41 @@ class StagedGateTests(unittest.TestCase):
             ":(exclude,top,literal)00-meta/health-report.md", flattened
         )
         self.assertFalse(any("_archive" in path or "node_modules" in path for path in read_paths))
+
+    def test_name_deny_is_any_depth_but_path_deny_stays_root_relative(self) -> None:
+        self.seed_notes(
+            {},
+            {"deny_zones": ["20-knowledge/_archive", ".obsidian"]},
+        )
+        excluded_paths = {
+            ".obsidian/Root.md",
+            "20-knowledge/.obsidian/Nested.md",
+            "20-knowledge/_archive/RootRelative.md",
+        }
+        visible_path = "20-knowledge/nested/20-knowledge/_archive/Visible.md"
+        for path in excluded_paths:
+            self.write(path, "invalid excluded note\n")
+        self.write(visible_path, "invalid visible note\n")
+        self.git("add", "-A")
+
+        config = load_staged_config(self.repo)
+        index_paths = healthcheck._index_markdown_paths(self.repo, config)
+        read_paths: list[str] = []
+        real_read = healthcheck.read_index_text
+
+        def record_read(vault: Path, path: str) -> str:
+            read_paths.append(path)
+            return real_read(vault, path)
+
+        with mock.patch.object(healthcheck, "read_index_text", side_effect=record_read):
+            errors = validate_staged(self.repo, config)
+
+        self.assertTrue(excluded_paths.isdisjoint(index_paths))
+        self.assertIn(visible_path, index_paths)
+        self.assertTrue(excluded_paths.isdisjoint(read_paths))
+        self.assertEqual(read_paths, [visible_path])
+        self.assertEqual(len(errors), 1)
+        self.assertIn(visible_path, errors[0])
 
     def test_non_markdown_commit_still_rejects_invalid_staged_config(self) -> None:
         self.seed_notes({})

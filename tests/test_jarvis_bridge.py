@@ -2011,6 +2011,115 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
         self.assertFalse((namespace / "offset").exists())
 
+    def test_incomplete_batch_backs_off_then_retries_same_qa_update(self):
+        token = "12345:secret-value"
+        update = self._update(96, "CONTENT-SENTINEL-QUESTION")
+        cfg = {
+            "telegram_user_ids": [111],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+            "qa_hourly_limit": 6,
+        }
+        events: list[tuple[object, ...]] = []
+        responses = iter(
+            [
+                {"ok": True, "result": [update]},
+                {"ok": True, "result": [update]},
+            ]
+        )
+        send_results = iter([False, True])
+        observed_qa_times: deque[float] | None = None
+        observed_attempt_ids: set[int] | None = None
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        offset_file = namespace / "offset"
+        real_process_update = _BRIDGE.process_update
+        real_atomic_write = _BRIDGE.atomic_write_text
+
+        def poll(_token, _method, **kwargs):
+            events.append(("poll", kwargs["offset"]))
+            try:
+                return next(responses)
+            except StopIteration:
+                raise KeyboardInterrupt
+
+        def generate(_vault, _cfg, _body):
+            events.append(("generate",))
+            return "answer"
+
+        def send(_token, _chat_id, _message):
+            result = next(send_results)
+            events.append(("send", result))
+            return result
+
+        def record_process(*args, **kwargs):
+            nonlocal observed_qa_times, observed_attempt_ids
+            observed_qa_times = args[6]
+            observed_attempt_ids = args[7]
+            result = real_process_update(*args, **kwargs)
+            events.append(
+                (
+                    "handled",
+                    result,
+                    len(observed_qa_times),
+                    tuple(sorted(observed_attempt_ids)),
+                )
+            )
+            return result
+
+        def record_write(path, text):
+            if path == offset_file:
+                events.append(("commit", int(text)))
+            real_atomic_write(path, text)
+
+        def backoff(seconds):
+            events.append(("sleep", seconds))
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=poll), \
+                patch.object(_BRIDGE, "do_qa", side_effect=generate), \
+                patch.object(_BRIDGE, "tg_send", side_effect=send), \
+                patch.object(_BRIDGE, "process_update", side_effect=record_process), \
+                patch.object(_BRIDGE, "atomic_write_text", side_effect=record_write), \
+                patch.object(_BRIDGE.time, "sleep", side_effect=backoff), \
+                patch.object(
+                    _BRIDGE,
+                    "send_due_briefings",
+                    side_effect=lambda *args, **_kwargs: args[6],
+                ), \
+                patch.object(
+                    _BRIDGE,
+                    "send_butler_if_due",
+                    side_effect=lambda *args, **_kwargs: args[4],
+                ), \
+                patch.object(_BRIDGE, "log") as logger, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(
+            events,
+            [
+                ("poll", 1),
+                ("generate",),
+                ("send", False),
+                ("handled", False, 1, (96,)),
+                ("sleep", 5),
+                ("poll", 1),
+                ("generate",),
+                ("send", True),
+                ("handled", True, 1, (96,)),
+                ("commit", 96),
+                ("poll", 97),
+            ],
+        )
+        self.assertEqual(offset_file.read_text(encoding="utf-8"), "96")
+        self.assertIsNotNone(observed_qa_times)
+        self.assertIsNotNone(observed_attempt_ids)
+        self.assertEqual(len(observed_qa_times), 1)
+        self.assertEqual(observed_attempt_ids, set())
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertIn("재시도", rendered)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+
     def test_scheduled_work_uses_the_smallest_validated_positive_recipient(self):
         token = "12345:secret-value"
         cfg = {
