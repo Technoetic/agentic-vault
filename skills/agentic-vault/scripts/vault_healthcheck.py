@@ -504,7 +504,9 @@ def estimate_tokens(text: str) -> int:
     return int(hangul * 1.375 + other * 0.3)
 
 
-WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#|][^\]]*)?\]\]")
+WIKILINK_RE = re.compile(
+    r"\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]"
+)
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
 UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
 # 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
@@ -677,18 +679,11 @@ def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
     return errors
 
 
-def _backlink_pattern(stem: str) -> str:
-    escaped_stem = re.escape(stem)
-    return (
-        r"\[\[([^]|#]*/)*" + escaped_stem
-        + r"(\.md)?([|#][^]]*)?\]\]"
-    )
-
-
-def _grep_index_backlink_paths(vault: Path, config: dict, stem: str) -> list[str]:
+def _grep_index_backlink_paths(vault: Path, config: dict) -> list[str]:
+    """Conservatively list index blobs containing any wikilink opener."""
     data = _run_git_bytes(
         vault,
-        "grep", "--cached", "-z", "-l", "-I", "-E", "-e", _backlink_pattern(stem),
+        "grep", "--cached", "-z", "-l", "-I", "-F", "-e", "[[",
         "--", *staged_markdown_pathspecs(config, exclude_generated_referrers=True),
         allowed_returncodes=(0, 1),
     )
@@ -699,7 +694,10 @@ def _index_blob_has_wikilink_to_stem(vault: Path, path: str, stem: str) -> bool:
     """Confirm a grep candidate contains a real wikilink outside code contexts."""
     text = read_index_text(vault, path)
     clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
-    return re.search(_backlink_pattern(stem), clean_text) is not None
+    return any(
+        normalize_link_target(raw_target) == stem
+        for raw_target in WIKILINK_RE.findall(clean_text)
+    )
 
 
 def validate_staged(vault: Path, config: dict) -> list[str]:
@@ -728,10 +726,11 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
             _posix_markdown_stem(path)
             for path in _index_markdown_paths(vault, config)
         }
+        backlink_paths = _grep_index_backlink_paths(vault, config)
         for stem in sorted(deleted_stems):
             if not stem or stem in result_stems:
                 continue
-            for referrer in _grep_index_backlink_paths(vault, config, stem):
+            for referrer in backlink_paths:
                 if not _index_blob_has_wikilink_to_stem(vault, referrer, stem):
                     continue
                 errors.append(

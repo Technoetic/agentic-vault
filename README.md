@@ -389,7 +389,7 @@ claude
 ### 볼트 정책 선언 — vault-config.json
 
 <details>
-<summary><b>📋 21개 설정 키 전체 — 클릭하여 펼치기</b></summary>
+<summary><b>📋 기본 템플릿 설정 키 24개 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
 |:---|:---|
@@ -412,12 +412,25 @@ claude
 | `ssot_facts` | `[{"label", "pattern"}]` — 볼트 전체에서 매치 값 2종 이상이면 모순 보고 |
 | `health_report` | 헬스체크 리포트 출력 경로 |
 | `backup_target` | 백업 대상 경로 — **빈 문자열이면 백업 생략** |
-| `stale_days` | (선택 확장) 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
-| `index_scopes` | (선택 확장) 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
+| `rules_dir` | 엔진 소유 행동 계약 rules 디렉토리 |
+| `rules_max_lines` | rules 파일별 권장 최대 줄 수 |
+| `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
+| `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
+| `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체 |
 
 `required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다. `frontmatter_exempt_paths`는 그 안의 원시 캡처·도구 파일 등을 면제한다. `frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다. staged 차단 모드는 키가 없을 때 표준 5개 루트(`00-meta`·`20-knowledge`·`30-journal`·`40-people`·`50-projects`)를 사용한다.
 
 `handoff_note`·`ssot_note`·`backup_target`을 비워두면 해당 기능만 조용히 꺼진다(우아한 성능 저하) — 최소 구성으로 시작해 필요할 때 켜면 된다.
+
+#### 선택 확장(기본 템플릿 미포함)
+
+아래 키는 엔진이 지원하지만 새 볼트의 기본 `vault-config.json`에는 넣지 않는다. 필요할 때 명시적으로 추가한다.
+
+| 키 | 설명 |
+|:---|:---|
+| `stale_days` | 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
+| `index_scopes` | 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
+| `anchor_drift_threshold` | handoff 기준 커밋과 HEAD 간 세션 종료 누락 의심 임계 — 미설정 시 기본 3커밋 |
 
 </details>
 

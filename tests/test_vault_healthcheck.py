@@ -774,6 +774,40 @@ class StagedGateTests(unittest.TestCase):
         errors = self.staged_errors()
         self.assertTrue(any("Ref.md" in error and "'A'" in error for error in errors))
 
+    def test_deletion_backlinks_follow_uppercase_md_and_whitespace_normalization(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.md": self.valid_note("A"),
+                "20-knowledge/Upper.md": self.valid_note("Upper", "[[A.MD]]"),
+                "20-knowledge/Whitespace.md": self.valid_note("Whitespace", "[[  A  ]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/A.md")
+
+        joined = "\n".join(self.staged_errors())
+
+        self.assertIn("Upper.md", joined)
+        self.assertIn("Whitespace.md", joined)
+
+    def test_deletion_backlinks_ignore_extension_like_non_note_targets(self) -> None:
+        assets = " ".join(
+            (
+                "[[A.png]]",
+                "[[A.MD.png]]",
+                "[[folder/A.tar.gz|asset]]",
+                "[[A.abcdefghi]]",
+            )
+        )
+        self.seed_notes(
+            {
+                "20-knowledge/A.md": self.valid_note("A"),
+                "20-knowledge/Assets.md": self.valid_note("Assets", assets),
+            }
+        )
+        self.git("rm", "20-knowledge/A.md")
+
+        self.assertEqual(self.staged_errors(), [])
+
     def test_another_result_index_note_with_same_stem_keeps_links_valid(self) -> None:
         self.seed_notes(
             {

@@ -353,16 +353,29 @@ class HookAssetContractTests(unittest.TestCase):
         self.assertIn("명시적 확인", command)
         self.assertIn("유지", command)
 
-    def test_readme_lists_21_config_keys_and_frontmatter_scope(self) -> None:
+    def test_readme_documents_complete_template_keys_and_separates_extensions(self) -> None:
         readme = README.read_text(encoding="utf-8")
-        marker = "📋 21개 설정 키 전체"
+        template = json.loads(CONFIG_TEMPLATE.read_text(encoding="utf-8"))
+        marker = f"📋 기본 템플릿 설정 키 {len(template)}개 전체"
         self.assertIn(marker, readme)
-        table = readme.split(marker, 1)[1].split("</details>", 1)[0]
-        documented_keys = re.findall(r"^\| `([^`]+)` \|", table, flags=re.MULTILINE)
+        details = readme.split(marker, 1)[1].split("</details>", 1)[0]
+        extension_marker = "#### 선택 확장(기본 템플릿 미포함)"
+        self.assertIn(extension_marker, details)
+        template_table, extension_table = details.split(extension_marker, 1)
+        documented_keys = re.findall(
+            r"^\| `([^`]+)` \|", template_table, flags=re.MULTILINE
+        )
+        extension_keys = re.findall(
+            r"^\| `([^`]+)` \|", extension_table, flags=re.MULTILINE
+        )
 
-        self.assertEqual(len(documented_keys), 21)
-        self.assertIn("frontmatter_roots", documented_keys)
-        self.assertIn("frontmatter_exempt_paths", documented_keys)
+        self.assertEqual(len(documented_keys), len(template))
+        self.assertEqual(set(documented_keys), set(template))
+        self.assertTrue(
+            {"stale_days", "index_scopes", "anchor_drift_threshold"}.issubset(
+                extension_keys
+            )
+        )
         self.assertIn(
             "`required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다",
             readme,
