@@ -452,17 +452,26 @@ claude
 
 </div>
 
-`/vault-lint`와 SessionStart 훅이 실행하는 `vault_healthcheck.py`는 신호를 무의미하게 만드는 "매번 실패"를 배제한다 — **치명만 exit 1, 관리성은 리포트만**.
+`/vault-lint`와 SessionStart 훅이 실행하는 `vault_healthcheck.py`의 기본 **full 리포트 모드**는 신호를 무의미하게 만드는 "매번 실패"를 배제한다 — **치명만 exit 1, 관리성은 리포트만**.
 
 | 등급 | 검사 항목 | 처리 |
 |:---:|:---|:---|
 | 🔴 **치명** (exit 1) | 프런트매터 붕괴 · 필수 키 누락 · Enum 위반 · **따옴표 없는 프런트매터 위키링크**(YAML 오파싱 = 메타데이터 계층 붕괴) · 로그 태그 누락·malformed 로그라인 | `/vault-lint`가 **즉시 치유** |
 | 🟡 **관리성** (exit 0) | 데드링크 · 고아/준고아 노드 · 인덱스 미등록 · 프런트매터 과대 · rules 무결성 · **세션 주입 토큰 예산 초과** · 노화 문서(선택) · SSOT 사실 모순(선택) | 리포트 누적 → **사용자 확인 후** 스텁 생성·링크 교정·아카이브 |
 
+검사 엔진의 두 모드는 목적과 입출력이 다르다.
+
+| 모드 | 입력 기준 | 범위 | 출력 |
+|:---|:---|:---|:---|
+| **full 리포트** (기본, `/vault-lint`) | 현재 워킹트리와 config | 활성 볼트 전체 | config의 `health_report` 또는 명시적 `--output`에 리포트 작성 |
+| **staged 차단** (`--staged`, pre-commit) | Git index의 config·파일 | 이번 커밋의 변경 표면과 삭제·개명 백링크 | 리포트를 쓰지 않고 차단 진단만 stderr에 출력 |
+
 > [!NOTE]
 > 이 등급 설계는 실제 볼트 운영 감사에서 얻은 교훈이다: **검사기가 감시하던 영역은 전부 건강했고, 감시 밖 영역만 예외 없이 부패해 있었다.** 자율 지침은 부패한다 — 코드로 강제된 규율만 살아남는다.
 
-무결성 강제는 세 시점에 걸린다: **세션 시작**(SessionStart 훅의 비동기 검사) → **온디맨드**(`/vault-lint` 치유) → **커밋 순간**(git pre-commit 훅). 커밋 게이트는 `/vault-init`이 git을 켤 때 `assets/git-hooks/`의 훅을 볼트의 `00-meta/scripts/git-hooks/`에 설치하고 `core.hooksPath`로 활성화한다 — 스테이징된 노트의 프런트매터 누락·따옴표 없는 YAML 위키링크를 커밋 시점에 fail-closed로 차단하고, pre-push는 네트워크 원격(https/ssh) push를 차단해 로컬 전용 정책을 기계 강제한다 — 같은 머신의 bare 미러 등 로컬 경로 원격은 허용하므로 로컬 백업 push는 막히지 않는다(우회는 `--no-verify` 명시로만). 오염이 리포지토리 이력에 들어가기 **전에** 막는 마지막 방어선이다.
+무결성 강제는 세 시점에 걸린다: **세션 시작**(SessionStart 훅의 비동기 full 검사) → **온디맨드**(`/vault-lint` full 검사·치유) → **커밋 순간**(git pre-commit의 staged 검사). 커밋 게이트는 `/vault-init`이 git을 켤 때 `assets/git-hooks/`의 훅을 볼트의 `00-meta/scripts/git-hooks/`에 설치하고 `core.hooksPath`로 활성화한다. pre-commit은 스테이징된 노트의 프런트매터·필수 키·Enum·YAML 위키링크와 삭제·개명 백링크를 Git index 기준으로 검사하며, Python이나 설치된 검사기가 없거나 검사 중 오류가 나도 fail-closed로 차단한다. pre-push는 네트워크 원격(https/ssh) push를 차단하되 같은 머신의 bare 미러 등 로컬 경로 원격은 허용한다.
+
+이 훅은 협업 규율을 돕는 **로컬 게이트이지 보안 샌드박스가 아니다.** 저장소를 제어하는 사용자는 `git commit --no-verify`·`git push --no-verify`를 쓰거나 `core.hooksPath`를 바꿔 우회할 수 있다. 우회 불가능한 강제가 필요하면 별도의 원격 CI·서버 정책이 필요하다.
 
 또한 handoff 상단의 **기준 커밋(anchor)** 줄이 "이 handoff가 반영하는 볼트 시점"을 git 해시로 고정한다 — `/vault-session-end`가 갱신하고, `/vault-session-start`가 `anchor..HEAD` 차이를 브리핑에 반영해 handoff의 point-in-time 어긋남을 결정론적으로 해소한다. 같은 anchor 패턴이 장기 기억 MCP에도 적용된다: remember 커밋 끝에 `[anchor: <해시>]`를 붙여, 다음 세션이 낡은 회상을 볼트 이력과 대조해 걸러낸다. `/vault-trace`도 `git log -S`로 키워드의 커밋 이력을 병행 수집해, 노트가 말하는 날짜와 실제 기록된 날짜의 어긋남을 모순 신호로 잡는다.
 

@@ -824,11 +824,25 @@ def main() -> int:
     ap.add_argument("--vault",
                     default=os.environ.get("CLAUDE_PROJECT_DIR") or ".",
                     help="볼트 루트 경로 (기본: $CLAUDE_PROJECT_DIR, 없으면 cwd)")
-    ap.add_argument("--output", default=None,
-                    help="리포트 출력 경로 (기본: config의 health_report)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--staged", action="store_true",
+                      help="Git index의 커밋 대상만 검사하고 리포트는 쓰지 않음")
+    mode.add_argument("--output", default=None,
+                      help="full 모드 리포트 출력 경로 (기본: config의 health_report)")
     args = ap.parse_args()
 
     vault = Path(args.vault).resolve()
+
+    if args.staged:
+        try:
+            cfg = load_staged_config(vault)
+            diagnostics = validate_staged(vault, cfg)
+        except (OSError, ValueError, HealthcheckError) as e:
+            print(f"[vault-healthcheck] staged 오류: {e}", file=sys.stderr)
+            return 1
+        for diagnostic in diagnostics:
+            print(diagnostic, file=sys.stderr)
+        return 1 if diagnostics else 0
 
     # --- 볼트 감지: 00-meta/vault-config.json 이 없으면 조용히·정중히 무동작 ---
     cfg_path = vault / CONFIG_RELPATH
@@ -965,9 +979,15 @@ def main() -> int:
     else:
         fm_exempt = ["10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude"]
 
+    full_fm_roots = tuple(cfg["frontmatter_roots"]) if "frontmatter_roots" in user_cfg else None
+
     def is_fm_exempt(rel_path: str) -> bool:
-        return any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
-                   for z in fm_exempt)
+        if any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
+               for z in fm_exempt):
+            return True
+        if full_fm_roots is not None:
+            return not any(_is_at_or_below(rel_path, root) for root in full_fm_roots)
+        return False
 
     for p in targets:
         rel = rel_posix(p, vault)

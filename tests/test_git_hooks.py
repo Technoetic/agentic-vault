@@ -17,6 +17,7 @@ PRE_PUSH = HOOK_DIR / "pre-push"
 INIT_COMMAND = REPO_ROOT / "commands" / "vault-init.md"
 UPGRADE_COMMAND = REPO_ROOT / "commands" / "vault-upgrade.md"
 CONFIG_TEMPLATE = REPO_ROOT / "assets" / "templates" / "vault-config.json"
+HEALTHCHECK_ENGINE = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 
 
 def find_shell() -> Path:
@@ -138,6 +139,46 @@ class PreCommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         argv = json.loads(argv_log.read_text(encoding="utf-8"))
         self.assertEqual(argv[-3:], ["--vault", ".", "--staged"])
+
+    def test_real_precommit_blocks_invalid_staged_note_with_shipped_engine(self) -> None:
+        shutil.copyfile(HEALTHCHECK_ENGINE, self.vault / "00-meta" / "scripts" / "vault_healthcheck.py")
+        subprocess.run(["git", "init", "-q"], cwd=self.vault, check=True)
+        config = {
+            "vault_name": "실제 훅 테스트",
+            "required_keys": ["title"],
+            "enums": {},
+            "deny_zones": [],
+            "exclude_dirs": [".git"],
+            "index_note": "",
+            "log_note": "",
+            "log_tags": [],
+            "hot_note": "",
+            "handoff_note": "",
+            "ssot_note": "",
+            "health_report": "00-meta/hook-health.md",
+            "rules_dir": "",
+            "frontmatter_roots": ["20-knowledge"],
+            "frontmatter_exempt_paths": [],
+        }
+        config_path = self.vault / "00-meta" / "vault-config.json"
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+        invalid = self.vault / "20-knowledge" / "Invalid.md"
+        invalid.parent.mkdir(parents=True)
+        invalid.write_text("missing frontmatter\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "00-meta/vault-config.json", "20-knowledge/Invalid.md"],
+            cwd=self.vault,
+            check=True,
+        )
+
+        result = self.run_hook()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(
+            "스테이징 차단: 20-knowledge/Invalid.md — 프런트매터 누락",
+            result.stderr,
+        )
+        self.assertFalse((self.vault / "00-meta" / "hook-health.md").exists())
 
 
 class HookAssetContractTests(unittest.TestCase):

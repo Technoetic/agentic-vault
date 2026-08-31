@@ -272,6 +272,153 @@ class ConfigAndGitIndexTests(unittest.TestCase):
         self.assertTrue(outside.is_file())
 
 
+class CliModeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name) / "CLI vault"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        self.git("config", "user.name", "CLI Mode Test")
+        self.git("config", "user.email", "cli-mode@example.invalid")
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            self.fail(f"git {' '.join(args)} failed: {result.stderr}")
+        return result
+
+    def write(self, relpath: str, text: str) -> Path:
+        path = self.repo / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def write_config(self, *, frontmatter_roots: list[str] | None = None) -> Path:
+        config: dict[str, object] = {
+            "vault_name": "CLI 테스트 볼트",
+            "required_keys": ["title"],
+            "enums": {},
+            "frontmatter_max_lines": 16,
+            "deny_zones": [],
+            "exclude_dirs": [".git"],
+            "index_note": "",
+            "log_note": "",
+            "log_tags": [],
+            "hot_note": "",
+            "handoff_note": "",
+            "ssot_note": "",
+            "health_report": "00-meta/cli-health.md",
+            "rules_dir": "",
+        }
+        if frontmatter_roots is not None:
+            config["frontmatter_roots"] = frontmatter_roots
+        return self.write(
+            "00-meta/vault-config.json",
+            json.dumps(config, ensure_ascii=False),
+        )
+
+    @staticmethod
+    def valid_note(title: str) -> str:
+        return f'---\ntitle: "{title}"\n---\n'
+
+    def run_cli(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--vault", str(self.repo), *args],
+            cwd=self.repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=30,
+        )
+
+    def test_staged_mode_reads_index_config_and_never_writes_report(self) -> None:
+        config_path = self.write_config(frontmatter_roots=["20-knowledge"])
+        self.write("20-knowledge/Note.md", self.valid_note("Note"))
+        self.git("add", "00-meta/vault-config.json", "20-knowledge/Note.md")
+        config_path.unlink()
+
+        clean = self.run_cli("--staged")
+
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+        self.write("20-knowledge/Note.md", "staged without frontmatter\n")
+        self.git("add", "20-knowledge/Note.md")
+
+        blocked = self.run_cli("--staged")
+
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertIn(
+            "스테이징 차단: 20-knowledge/Note.md — 프런트매터 누락",
+            blocked.stderr,
+        )
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+    def test_staged_mode_fails_closed_on_invalid_index_config(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        self.git("add", "00-meta/vault-config.json")
+        self.git("commit", "-q", "-m", "seed config")
+        self.write("notes.txt", "ordinary staged change\n")
+        self.write("00-meta/vault-config.json", "{not valid json")
+        self.git("add", "notes.txt", "00-meta/vault-config.json")
+
+        result = self.run_cli("--staged")
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("[vault-healthcheck] staged 오류:", result.stderr)
+        self.assertIn("00-meta/vault-config.json", result.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+    def test_full_mode_honors_explicit_frontmatter_roots_and_writes_report(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
+        self.write("custom/Outside.md", "legacy content without frontmatter\n")
+
+        result = self.run_cli()
+
+        report = self.repo / "00-meta/cli-health.md"
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(report.is_file())
+        self.assertIn("## 1. 프런트매터 누락 — 치명 (0)", report.read_text(encoding="utf-8"))
+
+    def test_full_mode_without_frontmatter_roots_preserves_legacy_all_notes_scope(self) -> None:
+        self.write_config()
+        self.write("custom/Legacy.md", "legacy content without frontmatter\n")
+
+        result = self.run_cli()
+
+        report = self.repo / "00-meta/cli-health.md"
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(report.is_file())
+        report_text = report.read_text(encoding="utf-8")
+        self.assertIn("## 1. 프런트매터 누락 — 치명 (1)", report_text)
+        self.assertIn("custom/Legacy.md", report_text)
+
+    def test_staged_mode_rejects_report_output_argument(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        self.git("add", "00-meta/vault-config.json")
+        outside = Path(self._tmp.name) / "must-not-exist.md"
+
+        result = self.run_cli("--staged", "--output", str(outside))
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("not allowed with argument --staged", result.stderr)
+        self.assertFalse(outside.exists())
+
+
 class StagedGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
