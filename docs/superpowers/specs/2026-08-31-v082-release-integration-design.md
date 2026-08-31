@@ -11,7 +11,7 @@ v0.8.2는 [Jarvis 보강 설계](2026-08-31-jarvis-v082-hardening-design.md)와 
 - `.claude-plugin/plugin.json`과 `.claude-plugin/marketplace.json` 버전을 모두 `0.8.2`로 맞춘다.
 - README 버전 배지와 트리 설명을 `0.8.2`로 맞추고, 복수 브리핑·private-chat 강제·내구성 있는 offset·index-only commit gate를 실제 동작 수준으로 설명한다.
 - `docs/releases/v0.8.2.md`에 변경점, 하위호환, 업그레이드 단계, 보안 경계, 검증 명령을 기록한다.
-- `/vault-upgrade`는 새 설정 키를 기존 값 비파괴 방식으로 보충하고 엔진 소유 검사기·훅을 스탬프 기준으로 갱신한다.
+- `/vault-upgrade`는 일반 새 설정 키를 기존 값 비파괴 방식으로 보충하되, legacy config의 기존 full mode 범위와 alias는 보존한다. 검사 범위 마이그레이션은 사용자가 별도로 명시적으로 승인한 경우에만 수행하고, 엔진 소유 검사기·훅은 스탬프 기준으로 갱신한다.
 
 ## 3. 호환성
 
