@@ -358,12 +358,17 @@ def list_staged_changes(vault: Path, config: dict) -> list[StagedChange]:
 
 
 def read_index_text(vault: Path, path: str) -> str:
-    normalized = _normalize_relative_path(path, "index path", allow_empty=False)
-    data = _run_git_bytes(vault, "show", f":{normalized}")
+    if not isinstance(path, str) or not path:
+        raise HealthcheckError("index path must be a non-empty string")
+    if "\0" in path:
+        raise HealthcheckError("index path must not contain NUL")
+    # `path` originates from Git's NUL-delimited index output. It is already
+    # repository-relative, so preserve every filename character exactly.
+    data = _run_git_bytes(vault, "show", f":{path}")
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise HealthcheckError(f"staged file is not valid UTF-8: {normalized}") from exc
+        raise HealthcheckError(f"staged file is not valid UTF-8: {path}") from exc
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 

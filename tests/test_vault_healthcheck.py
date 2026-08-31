@@ -118,6 +118,23 @@ class ConfigAndGitIndexTests(unittest.TestCase):
 
         self.assertEqual(read_index_text(self.repo, "20-knowledge/새 노트.md"), "staged 내용\n")
 
+    def test_read_index_text_preserves_git_path_in_show_argument(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["git"], 0, stdout=b"staged content\n", stderr=b""
+        )
+        paths = (
+            r"20-knowledge/literal\name.md",
+            " leading directory/note with trailing space.md ",
+        )
+
+        for path in paths:
+            with self.subTest(path=path), mock.patch.object(
+                healthcheck.subprocess, "run", return_value=completed
+            ) as run:
+                self.assertEqual(read_index_text(self.repo, path), "staged content\n")
+                command = run.call_args.args[0]
+                self.assertEqual(command[-2:], ["show", f":{path}"])
+
     def test_name_status_z_parses_actual_add_modify_rename_delete(self) -> None:
         self.write_config()
         self.write("20-knowledge/수정 노트.md", self.valid_note("수정 노트", "before"))
