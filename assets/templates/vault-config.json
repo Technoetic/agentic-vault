@@ -3,6 +3,8 @@
   "language": "ko",
   "deny_zones": ["10-inbox/_processed", "20-knowledge/_archive", "50-projects/_completed", "90-assets", ".obsidian"],
   "exclude_dirs": ["node_modules", ".venv", "venv", "__pycache__", ".git", ".trash", "step_archive"],
+  "frontmatter_roots": ["00-meta", "20-knowledge", "30-journal", "40-people", "50-projects"],
+  "frontmatter_exempt_paths": ["00-meta/scratch", "00-meta/scripts", "10-inbox"],
   "required_keys": ["title", "type", "status", "ai_priority", "tags", "created", "updated"],
   "enums": {
     "type": ["concept", "guide", "reference", "tool", "pattern", "journal", "person", "organization", "meeting", "decision", "project"],

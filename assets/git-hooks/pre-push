@@ -1,4 +1,5 @@
 #!/bin/sh
+# agentic-vault:hook engine=0.8.2
 # agentic-vault git 원격 정책 가드 — 로컬 전용 기계 강제
 #
 # 개인 지식 볼트에는 기밀·개인정보 노트가 축적될 수 있다.

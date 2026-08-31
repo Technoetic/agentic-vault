@@ -91,7 +91,11 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 ```
 
 - **원격 push는 권하지 마라.** 볼트에는 기밀 노트가 쌓일 수 있으므로, 원격 도입은 사용자가 기밀 여부를 점검한 뒤 별도로 결정할 사안이라고 한 줄로만 안내하라(로컬 전용 권고).
-- **git 무결성 게이트 설치** (git을 켠 경우에만): `${CLAUDE_PLUGIN_ROOT}/assets/git-hooks/`의 `pre-commit`·`pre-push`를 볼트의 `00-meta/scripts/git-hooks/`로 복사하고(디렉토리 생성, 줄바꿈은 LF 유지) `git config core.hooksPath 00-meta/scripts/git-hooks`로 활성화하라. 효과를 한 줄로 안내하라: pre-commit은 지식 구역 노트의 프런트매터 누락·따옴표 없는 YAML 위키링크를 커밋 시점에 차단(fail-closed)하고, pre-push는 원격 push를 차단한다(우회는 `--no-verify` 명시로만).
+- **git 무결성 게이트 설치** (git을 켠 경우에만): 아래 순서를 지켜 엔진과 훅을 설치하라. 세 파일의 `engine=0.8.2` 스탬프와 LF 줄바꿈, 훅의 실행 권한을 유지한다.
+  1. `00-meta/scripts/git-hooks/`를 만든 뒤 `${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py`를 먼저 `00-meta/scripts/vault_healthcheck.py`로 복사한다.
+  2. 엔진 복사가 성공한 뒤에만 `${CLAUDE_PLUGIN_ROOT}/assets/git-hooks/`의 `pre-commit`·`pre-push`를 `00-meta/scripts/git-hooks/`로 복사한다. 어느 복사든 실패하면 활성화하지 말고 fail-closed로 중단한다.
+  3. `git config --get core.hooksPath`의 유효 설정을 확인한다. 값이 없으면 `git config core.hooksPath 00-meta/scripts/git-hooks`로 활성화하고, 이미 같은 값이면 유지한다. **다른 `core.hooksPath` 값**이 있으면 그 값을 보여주고 교체해도 되는지 **명시적 확인**을 받은 경우에만 위 활성화 명령을 실행한다. 거부하거나 답이 불명확하면 기존 값을 유지한다.
+- 설치 효과를 한 줄로 안내하라: pre-commit은 설치된 Python staged 검사기로 Git index의 프런트매터·YAML 위키링크·삭제 백링크를 검사하고 검사기의 종료 코드를 그대로 반환하며, 검사기나 Python이 없으면 fail-closed로 차단한다. pre-push는 기존 로컬 전용 정책대로 원격 push를 차단한다(두 훅 모두 `--no-verify` 명시 우회 가능).
 
 ## 7. 검증 (healthcheck)
 
