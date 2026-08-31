@@ -293,12 +293,42 @@ class PreCommitHookTests(unittest.TestCase):
 
 
 class HookAssetContractTests(unittest.TestCase):
-    def test_prepush_classifies_remote_locality(self) -> None:
+    @staticmethod
+    def run_prepush(
+        shell: Path,
+        remote_url: str,
+        *,
+        env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        run_env = env.copy()
+        run_env["PREPUSH_PATH_UNDER_TEST"] = env["PATH"]
+        run_env["PREPUSH_REMOTE_UNDER_TEST"] = remote_url
+        return subprocess.run(
+            [
+                str(shell),
+                "-c",
+                (
+                    "PATH=$PREPUSH_PATH_UNDER_TEST; export PATH; "
+                    "hook=$1; set -- origin \"$PREPUSH_REMOTE_UNDER_TEST\"; "
+                    '. "$hook"'
+                ),
+                "pre-push-test",
+                shell_path(PRE_PUSH),
+            ],
+            env=run_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=30,
+        )
+
+    def test_prepush_classifies_platform_independent_remotes_without_uname(self) -> None:
         shell = find_shell()
         cases = (
             ("absolute POSIX path", "/var/backups/vault.git", 0),
-            ("Windows path with forward slashes", "C:/backups/vault.git", 0),
-            ("Windows path with backslashes", r"C:\backups\vault.git", 0),
             ("local POSIX file URI", "file:///var/backups/vault.git", 0),
             ("local Windows file URI", "file:///C:/backups/vault.git", 0),
             ("slash UNC path", "//server/share/vault.git", 1),
@@ -317,19 +347,65 @@ class HookAssetContractTests(unittest.TestCase):
             ("relative path", "backups/vault.git", 1),
         )
 
-        for label, remote_url, expected_status in cases:
-            with self.subTest(label=label, remote_url=remote_url):
-                result = subprocess.run(
-                    [str(shell), shell_path(PRE_PUSH), "origin", remote_url],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    check=False,
-                    timeout=30,
-                )
-                self.assertEqual(result.returncode, expected_status, result.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            env = os.environ.copy()
+            env["PATH"] = shell_path(Path(directory))
+            for label, remote_url, expected_status in cases:
+                with self.subTest(label=label, remote_url=remote_url):
+                    result = self.run_prepush(shell, remote_url, env=env)
+                    self.assertEqual(result.returncode, expected_status, result.stderr)
+
+    def test_prepush_allows_raw_drive_paths_only_on_confirmed_windows_shells(self) -> None:
+        shell = find_shell()
+        platforms = (
+            ("MINGW64", "MINGW64_NT-10.0-22631", 0, 0),
+            ("MSYS", "MSYS_NT-10.0-22631", 0, 0),
+            ("Linux", "Linux", 0, 1),
+            ("Darwin", "Darwin", 0, 1),
+            ("Cygwin", "CYGWIN_NT-10.0-22631", 0, 1),
+            ("unknown", "Plan9", 0, 1),
+            ("MINGW-like unknown", "MINGW_NOT_WINDOWS", 0, 1),
+            ("MSYS-like unknown", "MSYS_NOT_WINDOWS", 0, 1),
+            ("uname failure", None, 71, 1),
+            ("uname missing", None, None, 1),
+        )
+        drive_paths = (
+            ("uppercase forward-slash root", "C:/"),
+            ("uppercase backslash root", "C:\\"),
+            ("lowercase forward-slash path", "x:/path"),
+            ("lowercase backslash path", r"x:\path"),
+        )
+
+        for platform, uname_output, uname_status, expected_status in platforms:
+            with tempfile.TemporaryDirectory() as directory:
+                fake_bin = Path(directory)
+                if uname_status is not None:
+                    uname = fake_bin / "uname"
+                    if uname_status:
+                        source = f"#!/bin/sh\nexit {uname_status}\n"
+                    else:
+                        source = (
+                            "#!/bin/sh\n"
+                            "[ \"$1\" = \"-s\" ] || exit 64\n"
+                            f"printf '%s\\n' '{uname_output}'\n"
+                        )
+                    uname.write_text(source, encoding="utf-8", newline="\n")
+                    uname.chmod(0o755)
+
+                env = os.environ.copy()
+                env["PATH"] = shell_path(fake_bin)
+                for path_label, remote_url in drive_paths:
+                    with self.subTest(
+                        platform=platform,
+                        path=path_label,
+                        remote_url=remote_url,
+                    ):
+                        result = self.run_prepush(shell, remote_url, env=env)
+                        self.assertEqual(
+                            result.returncode,
+                            expected_status,
+                            result.stderr,
+                        )
 
     def test_hook_files_have_engine_stamp_and_shell_syntax(self) -> None:
         shell = find_shell()
