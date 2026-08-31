@@ -66,6 +66,13 @@ EXPECTED_SCOPE_UPGRADE_LINES = (
     "3. 두 범위 키를 추가하려면 full 모드 검사 범위가 어떻게 바뀌는지 "
     "먼저 확인하고, 별도의 검사 범위 마이그레이션으로 명시적으로 승인한다.",
 )
+EXPECTED_LEGACY_BRIEFING_UPGRADE_LINE = (
+    "5. 기존 `jarvis.briefing_time`만 있는 볼트에는 일반 누락 키 보충으로 "
+    "`briefing_times`를 추가하지 않는다. 별도 브리핑 일정 마이그레이션을 "
+    "승인하면 기존 단일 시각을 배열의 유일한 값으로 옮기며, 템플릿 기본 "
+    "`07:30`으로 바꾸지 않는다. 새 config나 `jarvis` 블록이 없는 config는 "
+    "계속 새 템플릿의 `briefing_times` 기본값을 사용한다."
+)
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -109,3 +116,4 @@ class ReleaseMetadataTests(unittest.TestCase):
         for line in EXPECTED_SCOPE_UPGRADE_LINES:
             with self.subTest(line=line):
                 self.assertIn(line, release_lines)
+        self.assertIn(EXPECTED_LEGACY_BRIEFING_UPGRADE_LINE, release_lines)

@@ -16,6 +16,9 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 각 항목을 검사하고 상태를 기록하라: `이미 있음(건너뜀)` / `추가함` / `사용자 거부`.
 
 1. **vault-config 일반 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `jarvis` 블록(기본 `enabled: false`), `stale_days`, `index_scopes`.
+   - 기존 config에 `jarvis` 블록 자체가 없으면 새 블록 전체를 템플릿 기본값으로 추가하는 기존 동작을 유지하라.
+   - **레거시 단일 브리핑 예외**: 기존 `jarvis` 블록에 `briefing_time`이 있고 `briefing_times`가 없으면, 일반 누락 키 보충에서 `briefing_times`를 제외해 단일 시각 fallback 일정을 그대로 보존하라.
+   - `briefing_times` 추가는 별도 **브리핑 일정 마이그레이션**이다. 기존 `briefing_time` 값을 배열의 유일한 값으로 사용하는 변경안을 보여주고, 사용자가 명시적으로 승인한 경우에만 추가하라. 템플릿 기본값 `07:30`으로 대체하지 마라.
    - **호환 범위 키 예외**: `frontmatter_roots`와 `frontmatter_exempt_paths`는 단순 기본값이 아니라 레거시 full 모드의 검사 범위를 선택하는 부재 marker다. 두 키를 일반 누락 키 보충에서 제외하라. 기존 config에 둘 중 하나라도 없으면 그 부재를 그대로 보존하고, 다른 키가 이미 있더라도 빠진 키를 자동 추가하지 마라.
    - `frontmatter_exempt_paths`가 없고 `fm_exempt_zones`가 있으면 기존 키가 호환 alias로 계속 적용된다. 템플릿 기본 `frontmatter_exempt_paths`를 넣어 alias를 가리지 마라.
    - 두 키 중 빠진 키를 추가하는 작업은 별도 **검사 범위 마이그레이션**이다. 추가 전 현재 full 모드의 유효 범위와 템플릿 값을 적용한 뒤의 범위를 비교해 보여주고, 범위가 넓어지거나 좁아지는 경로와 기존 alias 대체 여부를 설명하라. 그 뒤 사용자가 해당 키 추가를 명시적으로 승인한 경우에만 추가하고, 거부하거나 답이 없으면 config를 그대로 유지하라.

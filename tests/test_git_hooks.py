@@ -488,6 +488,25 @@ class HookAssetContractTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, command)
 
+    def test_upgrade_preserves_legacy_single_briefing_schedule(self) -> None:
+        command_lines = UPGRADE_COMMAND.read_text(encoding="utf-8").splitlines()
+
+        expected_lines = (
+            "   - **레거시 단일 브리핑 예외**: 기존 `jarvis` 블록에 "
+            "`briefing_time`이 있고 `briefing_times`가 없으면, 일반 누락 키 "
+            "보충에서 `briefing_times`를 제외해 단일 시각 fallback 일정을 그대로 "
+            "보존하라.",
+            "   - `briefing_times` 추가는 별도 **브리핑 일정 마이그레이션**이다. "
+            "기존 `briefing_time` 값을 배열의 유일한 값으로 사용하는 변경안을 "
+            "보여주고, 사용자가 명시적으로 승인한 경우에만 추가하라. 템플릿 "
+            "기본값 `07:30`으로 대체하지 마라.",
+            "   - 기존 config에 `jarvis` 블록 자체가 없으면 새 블록 전체를 템플릿 "
+            "기본값으로 추가하는 기존 동작을 유지하라.",
+        )
+        for line in expected_lines:
+            with self.subTest(line=line):
+                self.assertIn(line, command_lines)
+
     def test_upgrade_requires_confirmation_for_unrelated_hooks_path(self) -> None:
         command = UPGRADE_COMMAND.read_text(encoding="utf-8")
 
