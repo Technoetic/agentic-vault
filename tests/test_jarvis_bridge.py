@@ -387,6 +387,17 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
         self.assertNotIn("CONTENT-SENTINEL", rendered)
         self.assertNotIn("UPPER-SECRET", rendered)
 
+    def test_user_facing_wrappers_preserve_generation_diagnostics(self):
+        cfg = {"unused": True}
+        diagnostic = "handled diagnostic"
+        with patch.object(
+                _BRIDGE, "generate_claude",
+                return_value=_BRIDGE.GenerationResult(False, diagnostic)):
+            self.assertEqual(
+                _BRIDGE.run_claude(self.vault, cfg, "question"), diagnostic)
+            self.assertEqual(
+                _BRIDGE.do_qa(self.vault, cfg, "question"), diagnostic)
+
     def test_healthcheck_process_receives_a_case_insensitively_scrubbed_environment(self):
         cfg = {"_health_report": "00-meta/health-report.md"}
         completed = Mock(returncode=0, stdout="", stderr="")
@@ -547,7 +558,9 @@ class JarvisBriefingTests(unittest.TestCase):
     def _send(self, state, now, sender, slots=None):
         return _BRIDGE.send_due_briefings(
             self.vault, self.cfg, "12345:secret", 111, now,
-            slots or self.slots, state, self.state_file, sender)
+            slots or self.slots, state, self.state_file, sender,
+            lambda vault, cfg: _BRIDGE.GenerationResult(
+                True, _BRIDGE.do_brief(vault, cfg)))
 
     def _disk_state(self):
         return json.loads(self.state_file.read_text(encoding="utf-8"))
@@ -618,6 +631,68 @@ class JarvisBriefingTests(unittest.TestCase):
         retry_sender.assert_called_once()
         self.assertEqual(restarted.fired, {(7, 30)})
         self.assertEqual(restarted.pending, [])
+
+    def test_generation_failures_remain_pending_and_restart_retries(self):
+        slots = [(7, 30)]
+        generation_cfg = {
+            **self.cfg,
+            "claude_cmd": "claude",
+            "_deny_zones": [],
+            "_language": "ko",
+            "qa_timeout_sec": 30,
+        }
+        failures = {
+            "missing-cli": (None, AssertionError("subprocess must not run")),
+            "timeout": (
+                "claude",
+                _BRIDGE.subprocess.TimeoutExpired(cmd=["claude"], timeout=30),
+            ),
+            "nonzero": ("claude", Mock(returncode=9, stdout="", stderr="secret")),
+            "empty": ("claude", Mock(returncode=0, stdout=" \n", stderr="")),
+        }
+        for name, (executable, subprocess_outcome) in failures.items():
+            with self.subTest(failure=name):
+                state_file = self.root / f"generation-{name}" / "last_brief"
+                now = datetime(2026, 9, 1, 7, 30)
+                state = _BRIDGE.load_briefing_state(state_file, slots, now)
+                sender = Mock(return_value=True)
+                run_patch = (
+                    patch.object(
+                        _BRIDGE.subprocess, "run", side_effect=subprocess_outcome)
+                    if isinstance(subprocess_outcome, BaseException)
+                    else patch.object(
+                        _BRIDGE.subprocess, "run", return_value=subprocess_outcome)
+                )
+
+                with patch.object(_BRIDGE.shutil, "which", return_value=executable), \
+                        run_patch, patch.object(_BRIDGE, "_git", return_value="git"), \
+                        patch.object(_BRIDGE, "log"):
+                    state = _BRIDGE.send_due_briefings(
+                        self.vault, generation_cfg, "12345:secret", 111, now,
+                        slots, state, state_file, sender)
+
+                sender.assert_not_called()
+                self.assertEqual(state.fired, set())
+                self.assertEqual(state.pending, [(7, 30)])
+                self.assertEqual(json.loads(
+                    state_file.read_text(encoding="utf-8"))["pending"], ["07:30"])
+
+                restarted = _BRIDGE.load_briefing_state(
+                    state_file, slots, datetime(2026, 9, 1, 7, 31))
+                retry_sender = Mock(return_value=True)
+                completed = Mock(returncode=0, stdout="recovered", stderr="")
+                with patch.object(_BRIDGE.shutil, "which", return_value="claude"), \
+                        patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                        patch.object(_BRIDGE, "_git", return_value="git"), \
+                        patch.object(_BRIDGE, "log"):
+                    restarted = _BRIDGE.send_due_briefings(
+                        self.vault, generation_cfg, "12345:secret", 111,
+                        datetime(2026, 9, 1, 7, 31), slots, restarted,
+                        state_file, retry_sender)
+
+                retry_sender.assert_called_once()
+                self.assertEqual(restarted.fired, {(7, 30)})
+                self.assertEqual(restarted.pending, [])
 
     def test_successful_send_does_not_duplicate_after_restart(self):
         slots = [(7, 30)]
@@ -813,6 +888,20 @@ class JarvisBriefingTests(unittest.TestCase):
                 with self.assertRaises(_BRIDGE.JarvisConfigError):
                     self._load(datetime(2026, 9, 1, 9, 0))
 
+    def test_duplicate_briefing_json_members_fail_closed(self):
+        self.state_file.parent.mkdir(parents=True)
+        duplicate_members = (
+            '{"version":1,"day":"2026-09-01","fired":[],'
+            '"pending":[],"pending":["07:30"]}',
+            '{"version":1,"version":1,"day":"2026-09-01",'
+            '"fired":[],"pending":[]}',
+        )
+        for raw in duplicate_members:
+            with self.subTest(raw=raw):
+                self.state_file.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    self._load(datetime(2026, 9, 1, 9, 0))
+
     def test_briefing_state_normalizes_plain_json_value_errors(self):
         self.state_file.parent.mkdir(parents=True)
         self.state_file.write_text("{}", encoding="utf-8")
@@ -916,6 +1005,23 @@ class JarvisBriefingTests(unittest.TestCase):
         for source_name, text in sources.items():
             for contract in contracts:
                 with self.subTest(source=source_name, contract=contract):
+                    self.assertIn(contract, text)
+
+    def test_user_docs_require_one_daemon_and_disclose_delivery_windows(self):
+        contracts = (
+            "볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다.",
+            "작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다.",
+            "예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다.",
+            "Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다.",
+            "`pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.",
+        )
+        for relative in (
+                "commands/vault-jarvis-setup.md",
+                "README.md",
+                "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md"):
+            text = (_ROOT / relative).read_text(encoding="utf-8")
+            for contract in contracts:
+                with self.subTest(path=relative, contract=contract):
                     self.assertIn(contract, text)
 
 
@@ -1067,6 +1173,20 @@ class JarvisStateTests(unittest.TestCase):
         self.assertEqual(owner.read_text(encoding="utf-8"), "{")
         self.assertTrue((self.root / "offset").exists())
 
+    def test_duplicate_owner_key_with_legacy_state_aborts(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text(
+            '{"owner_key":"vault-a-12345","owner_key":"vault-b-67890"}',
+            encoding="utf-8")
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-b-67890", "vault-b-67890")
+
+        self.assertEqual((self.root / "offset").read_text(encoding="utf-8"), "41")
+        self.assertFalse((self.root / "vault-b-67890" / "offset").exists())
+
     def test_unreadable_owner_without_legacy_state_warns_and_continues(self):
         owner = self.root / "legacy-owner.json"
         owner.mkdir()
@@ -1139,6 +1259,105 @@ class JarvisStateTests(unittest.TestCase):
         self.assertEqual((namespace / "last_butler").read_text(encoding="utf-8"), "12.5")
         self.assertFalse((self.root / "last_butler").exists())
 
+    def test_new_legacy_link_fsyncs_namespace_before_root_unlink_then_root(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        source.write_text("41", encoding="utf-8")
+        events = []
+        original_link = os.link
+        original_unlink = Path.unlink
+
+        def recording_link(path, destination):
+            if Path(destination).name == "offset":
+                events.append("link")
+            return original_link(path, destination)
+
+        def recording_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                events.append("unlink-root")
+            return original_unlink(path, *args, **kwargs)
+
+        def recording_fsync(directory):
+            events.append(
+                "fsync-namespace" if Path(directory) == namespace else "fsync-root")
+
+        with patch.object(_BRIDGE.os, "link", side_effect=recording_link), \
+                patch.object(Path, "unlink", recording_unlink), \
+                patch.object(_BRIDGE, "_fsync_directory", side_effect=recording_fsync):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(events, [
+            "link", "fsync-namespace", "unlink-root", "fsync-root",
+        ])
+
+    def test_resume_samefile_fsyncs_namespace_before_unlink_then_root(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        os.link(source, target)
+        events = []
+        original_unlink = Path.unlink
+
+        def recording_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                events.append("unlink-root")
+            return original_unlink(path, *args, **kwargs)
+
+        def recording_fsync(directory):
+            events.append(
+                "fsync-namespace" if Path(directory) == namespace else "fsync-root")
+
+        with patch.object(Path, "unlink", recording_unlink), \
+                patch.object(_BRIDGE, "_fsync_directory", side_effect=recording_fsync):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(events, [
+            "fsync-namespace", "unlink-root", "fsync-root",
+        ])
+        self.assertTrue(target.exists())
+        self.assertFalse(source.exists())
+
+    def test_directory_fsync_unsupported_is_best_effort_during_migration(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        source.write_text("41", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.os, "open",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")) as opener:
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(opener.call_count, 2)
+        self.assertEqual((namespace / "offset").read_text(encoding="utf-8"), "41")
+        self.assertFalse(source.exists())
+
+    def test_legacy_state_lstat_error_is_not_treated_as_absent(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text("{", encoding="utf-8")
+        inaccessible = self.root / "offset"
+        original_lstat = Path.lstat
+
+        def guarded_lstat(path):
+            if Path(path) == inaccessible:
+                raise PermissionError("denied")
+            return original_lstat(path)
+
+        with patch.object(Path, "lstat", guarded_lstat), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
     def test_migration_target_race_never_overwrites_competing_file(self):
         namespace = self.root / "vault-a-12345"
         _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
@@ -1162,6 +1381,72 @@ class JarvisStateTests(unittest.TestCase):
 
         self.assertEqual(target.read_text(encoding="utf-8"), "competitor")
         self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+
+    def test_legacy_link_io_error_is_normalized_without_mutation(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_link = os.link
+
+        def failing_legacy_link(path, destination):
+            if Path(destination) == target:
+                raise PermissionError("denied")
+            return original_link(path, destination)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=failing_legacy_link), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot safely migrate legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertFalse(target.exists())
+
+    def test_existing_target_samefile_io_error_fails_closed(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.write_text("existing", encoding="utf-8")
+
+        with patch.object(
+                Path, "samefile", side_effect=PermissionError("denied")), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertEqual(target.read_text(encoding="utf-8"), "existing")
+
+    def test_legacy_unlink_io_error_is_normalized_after_safe_link(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_unlink = Path.unlink
+
+        def failing_source_unlink(path, *args, **kwargs):
+            if Path(path) == source:
+                raise PermissionError("denied")
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", failing_source_unlink), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot remove migrated legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertEqual(target.read_text(encoding="utf-8"), "41")
 
     def test_migration_source_disappearance_race_is_handled(self):
         namespace = self.root / "vault-a-12345"
@@ -1677,7 +1962,8 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
             state = _BRIDGE.send_due_briefings(
                 self.vault, self.cfg, "12345:secret", 111,
                 datetime(2026, 9, 1, 7, 30), [(7, 30)],
-                state, state_file, _BRIDGE.tg_send)
+                state, state_file, _BRIDGE.tg_send,
+                lambda vault, cfg: _BRIDGE.GenerationResult(True, "body"))
 
         self.assertEqual(state.day, date(2026, 9, 1))
         self.assertEqual(state.fired, set())

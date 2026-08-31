@@ -54,6 +54,8 @@ Telegram ⟷ jarvis_bridge.py(상시 데몬) ─┬─ 캡처: 10-inbox/jarvis/ 
 - **브리핑**(기본 `["07:30"]`, `jarvis.briefing_times`): `HH:MM` 배열의 각 시각에 Q&A와 동일한 읽기 전용 `claude -p` 세션으로 hot·handoff·tasks·`git log <anchor>..HEAD`를 종합한 정기 브리핑을 생성해 전송. 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다. `/brief`로 즉석 호출 가능.
 - **집사**(기본 24시간, `jarvis.butler_interval_hours`): **LLM 없이** ① `vault_healthcheck.py` 실행 → 치명/관리성 건수 보고(자가 치유는 하지 않음 — 사람 세션의 몫) ② `mirror` 원격이 있으면 `git push mirror` ③ 인박스 대기 건수 보고. 결과를 Telegram 1메시지로.
 
+볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.
+
 ## 4. 설정과 비밀
 
 - `vault-config.json`에 `jarvis` 블록(선택): `enabled`, `telegram_user_ids`, `briefing_times`, `butler_interval_hours`, `qa_hourly_limit`, `claude_cmd`. `briefing_times`는 중복 제거·시간순 정렬되는 비어 있지 않은 `HH:MM` 문자열 배열이다. 기존 `briefing_time`은 `briefing_times`가 없을 때만 사용한다. **블록이 없거나 `enabled: false`면 전 기능 침묵** — 우아한 성능 저하 유지.

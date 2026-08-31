@@ -84,6 +84,12 @@ class BriefingState:
         self.started_at = started_at
 
 
+class GenerationResult:
+    def __init__(self, ok: bool, text: str) -> None:
+        self.ok = ok
+        self.text = text
+
+
 def parse_telegram_user_ids(value: object) -> list[int]:
     if not isinstance(value, list):
         raise JarvisConfigError("telegram_user_ids must be a list of positive integers")
@@ -190,6 +196,29 @@ def _publish_text_no_clobber(path: Path, text: str) -> bool:
         temporary.unlink(missing_ok=True)
 
 
+def _reject_duplicate_json_members(pairs: list[tuple[str, object]]) -> dict:
+    record = {}
+    for key, value in pairs:
+        if key in record:
+            raise ValueError("duplicate JSON member")
+        record[key] = value
+    return record
+
+
+def _lstat_or_missing(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise JarvisConfigError(
+            f"cannot inspect legacy state path: {path.name}") from None
+
+
+def _legacy_state_remains(root: Path, names: tuple[str, ...]) -> bool:
+    return any(_lstat_or_missing(root / name) is not None for name in names)
+
+
 def read_int_state(path: Path, default: int = 0) -> int:
     try:
         value = int(path.read_text(encoding="utf-8"))
@@ -218,27 +247,29 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
     root.mkdir(parents=True, exist_ok=True)
     owner_path = root / "legacy-owner.json"
     legacy_names = ("offset", "last_butler", "last_brief")
-    if not os.path.lexists(owner_path):
+    if _lstat_or_missing(owner_path) is None:
         owner_payload = json.dumps(
             {"owner_key": owner_key}, ensure_ascii=False, separators=(",", ":"))
         try:
             _publish_text_no_clobber(owner_path, owner_payload)
         except OSError:
-            if not os.path.lexists(owner_path):
+            if _lstat_or_missing(owner_path) is None:
                 raise JarvisConfigError(
                     "cannot safely publish legacy state owner") from None
     try:
-        owner_stat = owner_path.lstat()
-        if not stat.S_ISREG(owner_stat.st_mode):
+        owner_stat = _lstat_or_missing(owner_path)
+        if owner_stat is None or not stat.S_ISREG(owner_stat.st_mode):
             raise ValueError("owner is not a regular file")
-        owner_record = json.loads(owner_path.read_text(encoding="utf-8"))
+        owner_record = json.loads(
+            owner_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_json_members)
         if not isinstance(owner_record, dict):
             raise ValueError("owner root is not an object")
         stored_owner = owner_record.get("owner_key")
         if not isinstance(stored_owner, str) or not stored_owner:
             raise ValueError("owner_key is missing or invalid")
     except (OSError, UnicodeError, ValueError):
-        if any(os.path.lexists(root / name) for name in legacy_names):
+        if _legacy_state_remains(root, legacy_names):
             raise JarvisConfigError(
                 "legacy state owner is unreadable while legacy state remains") from None
         log("warning: legacy state owner is unreadable; leaving legacy files untouched")
@@ -255,17 +286,40 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
             os.link(source, target)
         except FileExistsError:
             try:
-                if source.samefile(target):
-                    source.unlink()
+                same_file = source.samefile(target)
+            except FileNotFoundError:
+                if _lstat_or_missing(source) is None:
+                    continue
+                raise JarvisConfigError(
+                    f"cannot verify legacy migration target: {name}") from None
             except OSError:
-                pass
+                raise JarvisConfigError(
+                    f"cannot verify legacy migration target: {name}") from None
+            if same_file:
+                _fsync_directory(namespace)
+                try:
+                    source.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    raise JarvisConfigError(
+                        f"cannot remove migrated legacy state: {name}") from None
+                _fsync_directory(root)
             continue
         except FileNotFoundError:
             continue
+        except OSError:
+            raise JarvisConfigError(
+                f"cannot safely migrate legacy state: {name}") from None
+        _fsync_directory(namespace)
         try:
             source.unlink()
         except FileNotFoundError:
             pass
+        except OSError:
+            raise JarvisConfigError(
+                f"cannot remove migrated legacy state: {name}") from None
+        _fsync_directory(root)
 
 
 def parse_briefing_slots(block: dict) -> list[tuple[int, int]]:
@@ -409,11 +463,12 @@ def do_capture(
     return name
 
 
-def run_claude(vault: Path, cfg: dict, prompt: str) -> str:
-    """읽기 전용 claude -p 세션. 실패·타임아웃 시 사람이 읽을 안내문 반환."""
+def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
+    """Run one read-only generation and preserve success separately from text."""
     exe = shutil.which(cfg["claude_cmd"])
     if not exe:
-        return "⚠️ claude CLI를 찾을 수 없습니다. PATH를 확인하세요."
+        return GenerationResult(
+            False, "⚠️ claude CLI를 찾을 수 없습니다. PATH를 확인하세요.")
     deny = ", ".join(cfg["_deny_zones"]) or "(없음)"
     guard = (
         "너는 이 옵시디언 볼트의 개인 비서다. 규칙: "
@@ -432,11 +487,20 @@ def run_claude(vault: Path, cfg: dict, prompt: str) -> str:
                            encoding="utf-8", errors="replace",
                            timeout=cfg["qa_timeout_sec"], env=child_process_env())
     except subprocess.TimeoutExpired:
-        return "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요."
+        return GenerationResult(
+            False, "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요.")
     if r.returncode != 0:
         log(f"claude 실패 rc={r.returncode}")
-        return "⚠️ 응답 생성에 실패했습니다. 로그를 확인하세요."
-    return r.stdout.strip() or "(빈 응답)"
+        return GenerationResult(False, "⚠️ 응답 생성에 실패했습니다. 로그를 확인하세요.")
+    output = r.stdout.strip()
+    if not output:
+        return GenerationResult(False, "(빈 응답)")
+    return GenerationResult(True, output)
+
+
+def run_claude(vault: Path, cfg: dict, prompt: str) -> str:
+    """User-facing wrapper that renders handled generation failures as diagnostics."""
+    return generate_claude(vault, cfg, prompt).text
 
 
 def do_qa(vault: Path, cfg: dict, question: str) -> str:
@@ -531,7 +595,7 @@ def _read_briefing_disk_state(
         return legacy_day, fired, []
 
     try:
-        record = json.loads(raw)
+        record = json.loads(raw, object_pairs_hook=_reject_duplicate_json_members)
     except (ValueError, UnicodeError):
         raise JarvisConfigError("last_brief state is invalid JSON") from None
     if not isinstance(record, dict) or set(record) != {
@@ -577,7 +641,7 @@ def load_briefing_state(
         skipped=skipped, started_at=started_at)
 
 
-def do_brief(vault: Path, cfg: dict) -> str:
+def _briefing_prompt(vault: Path, cfg: dict) -> str:
     git_lines = _git(vault, "log", "--oneline", "--date=short", "-10") or "(git 이력 없음)"
     parts = [f"오늘({date.today().isoformat()}) 정기 브리핑을 만들어라.",
              f"다음 노트를 읽어라: {cfg['_hot_note']}"]
@@ -586,7 +650,15 @@ def do_brief(vault: Path, cfg: dict) -> str:
     parts.append(f"그리고 {cfg['_log_note']} 최상단 10줄.")
     parts.append("아래는 브리지가 수집한 최근 git 활동이다(참고용 — 직접 git 실행 불가):\n" + git_lines)
     parts.append("형식: ① 지금 상태(2줄) ② 최우선 미결(최대 3개) ③ 오늘의 제안(1개). 전체 12줄 이내.")
-    return run_claude(vault, cfg, "\n".join(parts))
+    return "\n".join(parts)
+
+
+def generate_brief(vault: Path, cfg: dict) -> GenerationResult:
+    return generate_claude(vault, cfg, _briefing_prompt(vault, cfg))
+
+
+def do_brief(vault: Path, cfg: dict) -> str:
+    return run_claude(vault, cfg, _briefing_prompt(vault, cfg))
 
 
 def do_status(vault: Path, started: float) -> str:
@@ -817,6 +889,7 @@ def send_due_briefings(
         vault: Path, cfg: dict, token: str, chat_id: int, now: datetime,
         slots: list[tuple[int, int]], state: BriefingState, state_file: Path,
         sender: Callable[[str, int, str], bool],
+        generator: Callable[[Path, dict], GenerationResult] = generate_brief,
         ) -> BriefingState:
     """Persist due work before generation and acknowledge one delivered head at a time."""
     if state.day > now.date():
@@ -828,9 +901,13 @@ def send_due_briefings(
             emoji, name = briefing_label(slot)
             log("스케줄 브리핑 생성(%s %02d:%02d)" % (
                 name, slot[0], slot[1]))
+            generated = generator(vault, cfg)
+            if not generated.ok:
+                log("스케줄 브리핑 생성 실패 — pending 유지")
+                return False
             if not sender(
                     token, chat_id,
-                    f"{emoji} {name} 브리핑\n" + do_brief(vault, cfg)):
+                    f"{emoji} {name} 브리핑\n" + generated.text):
                 return False
             next_fired = set(state.fired)
             next_fired.add(slot)
