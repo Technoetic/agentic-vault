@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# agentic-vault:healthcheck engine=0.8.2
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -34,6 +35,8 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -49,7 +52,45 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+ENGINE_VERSION = "0.8.2"
 CONFIG_RELPATH = "00-meta/vault-config.json"
+DEFAULT_FRONTMATTER_ROOTS = (
+    "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
+)
+DEFAULT_FRONTMATTER_EXEMPT_PATHS = (
+    "00-meta/scratch", "00-meta/scripts", "10-inbox",
+)
+
+
+class HealthcheckError(RuntimeError):
+    """A policy or Git-index error that must fail the commit gate closed."""
+
+
+@dataclass(frozen=True)
+class VaultPolicy:
+    """The staged-only path policy derived from a validated config mapping."""
+
+    frontmatter_roots: tuple[str, ...]
+    frontmatter_exempt_paths: tuple[str, ...]
+
+    @classmethod
+    def from_config(cls, config: dict) -> "VaultPolicy":
+        roots = config.get("frontmatter_roots")
+        if roots is None:
+            roots = DEFAULT_FRONTMATTER_ROOTS
+        exempt = config.get("frontmatter_exempt_paths")
+        if exempt is None:
+            exempt = config.get("fm_exempt_zones")
+        if exempt is None:
+            exempt = DEFAULT_FRONTMATTER_EXEMPT_PATHS
+        return cls(tuple(roots), tuple(exempt))
+
+
+@dataclass(frozen=True)
+class StagedChange:
+    status: str
+    path: str
+    old_path: str | None = None
 
 # 표준 스키마 기본값 — vault-config.json 에 없는 키는 이 값으로 동작한다.
 DEFAULT_CONFIG: dict = {
@@ -104,6 +145,225 @@ DEFAULT_CONFIG: dict = {
     # handoff_note가 비어 있으면 자동 생략.
     "anchor_drift_threshold": 3,
 }
+
+_PATH_KEYS = {
+    "index_note", "log_note", "hot_note", "handoff_note", "ssot_note",
+    "health_report", "rules_dir",
+}
+_PATH_LIST_KEYS = {
+    "deny_zones", "exclude_dirs", "frontmatter_roots",
+    "frontmatter_exempt_paths", "fm_exempt_zones", "index_scopes",
+}
+_STRING_LIST_KEYS = {"required_keys", "log_tags"}
+_STRING_KEYS = {"vault_name", "language", "log_tag_epoch", "backup_target"}
+_INTEGER_KEYS = {
+    "frontmatter_max_lines", "stale_days", "rules_max_lines",
+    "hot_max_tokens", "handoff_max_tokens", "anchor_drift_threshold",
+}
+
+
+def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) -> str:
+    if not isinstance(value, str):
+        raise HealthcheckError(f"{label} must be a string path")
+    raw = value.strip()
+    if not raw:
+        if allow_empty:
+            return ""
+        raise HealthcheckError(f"{label} must not be empty")
+    if raw.startswith(("//", "\\\\")):
+        raise HealthcheckError(f"{label} must stay inside the vault (UNC path rejected)")
+    if re.match(r"^[A-Za-z]:", raw):
+        raise HealthcheckError(f"{label} must stay inside the vault (drive path rejected)")
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/"):
+        raise HealthcheckError(f"{label} must stay inside the vault (absolute path rejected)")
+    segments = normalized.split("/")
+    if any(segment == "" for segment in segments):
+        raise HealthcheckError(f"{label} contains an empty path segment")
+    if any(segment == ".." for segment in segments):
+        raise HealthcheckError(f"{label} must stay inside the vault ('..' rejected)")
+    return normalized
+
+
+def _validate_string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise HealthcheckError(f"{label} must be a list")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise HealthcheckError(f"{label}[{index}] must be a string")
+        if not item.strip():
+            raise HealthcheckError(f"{label}[{index}] must not be empty")
+        result.append(item)
+    return result
+
+
+def validate_config(raw: object) -> dict:
+    """Validate untrusted JSON config and return a normalized independent mapping."""
+    if not isinstance(raw, dict):
+        raise HealthcheckError("vault config top level must be a JSON object")
+
+    config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
+
+    for key in _STRING_KEYS:
+        value = config.get(key)
+        if not isinstance(value, str):
+            raise HealthcheckError(f"{key} must be a string")
+
+    for key in _INTEGER_KEYS:
+        value = config.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise HealthcheckError(f"{key} must be an integer")
+
+    for key in _STRING_LIST_KEYS:
+        config[key] = _validate_string_list(config.get(key), key)
+
+    for key in _PATH_KEYS:
+        if key in config:
+            config[key] = _normalize_relative_path(config[key], key, allow_empty=True)
+
+    for key in _PATH_LIST_KEYS:
+        if key not in config:
+            continue
+        values = config[key]
+        if not isinstance(values, list):
+            raise HealthcheckError(f"{key} must be a list")
+        config[key] = [
+            _normalize_relative_path(item, f"{key}[{index}]", allow_empty=False)
+            for index, item in enumerate(values)
+        ]
+
+    enums = config.get("enums")
+    if not isinstance(enums, dict):
+        raise HealthcheckError("enums must be an object")
+    normalized_enums: dict[str, list[str]] = {}
+    for field, allowed in enums.items():
+        if not isinstance(field, str) or not field.strip():
+            raise HealthcheckError("enums keys must be non-empty strings")
+        normalized_enums[field] = _validate_string_list(allowed, f"enums.{field}")
+    config["enums"] = normalized_enums
+
+    facts = config.get("ssot_facts")
+    if not isinstance(facts, list):
+        raise HealthcheckError("ssot_facts must be a list")
+    normalized_facts: list[dict] = []
+    for index, fact in enumerate(facts):
+        if not isinstance(fact, dict):
+            raise HealthcheckError(f"ssot_facts[{index}] must be an object")
+        label = fact.get("label")
+        pattern = fact.get("pattern")
+        if not isinstance(label, str) or not label.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].label must be a non-empty string")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].pattern must be a non-empty string")
+        normalized_facts.append(deepcopy(fact))
+    config["ssot_facts"] = normalized_facts
+
+    if "jarvis" in config and not isinstance(config["jarvis"], dict):
+        raise HealthcheckError("jarvis must be an object")
+
+    if "frontmatter_exempt_paths" not in raw and "fm_exempt_zones" in raw:
+        config["frontmatter_exempt_paths"] = list(config["fm_exempt_zones"])
+
+    # Deliberately do not inject frontmatter_roots into legacy config mappings.
+    # Full mode uses absence as the compatibility marker for "all active notes";
+    # VaultPolicy supplies the five staged defaults without erasing that marker.
+    return config
+
+
+def _run_git_bytes(vault: Path, *args: str) -> bytes:
+    command = ["git", "-c", "core.quotepath=false", *args]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=vault,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HealthcheckError(f"git command timed out: {' '.join(args)}") from exc
+    except OSError as exc:
+        raise HealthcheckError(f"git command could not run: {exc}") from exc
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        detail = f": {stderr}" if stderr else ""
+        raise HealthcheckError(f"git {' '.join(args)} failed ({result.returncode}){detail}")
+    return result.stdout
+
+
+def _decode_git_path(value: bytes, label: str) -> str:
+    try:
+        decoded = value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"{label} is not valid UTF-8") from exc
+    if not decoded:
+        raise HealthcheckError(f"{label} must not be empty")
+    # Git already returns repository-relative paths. Do not run config-path
+    # normalization here: on POSIX a backslash is a valid literal filename byte.
+    return decoded
+
+
+def load_staged_config(vault: Path) -> dict:
+    data = _run_git_bytes(vault, "show", f":{CONFIG_RELPATH}")
+    try:
+        raw = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HealthcheckError(f"staged {CONFIG_RELPATH} is invalid: {exc}") from exc
+    return validate_config(raw)
+
+
+def list_staged_changes(vault: Path, config: dict) -> list[StagedChange]:
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+    data = _run_git_bytes(
+        vault,
+        "diff", "--cached", "--name-status", "-z", "--find-renames",
+        "--diff-filter=ACMRD", "--",
+    )
+    if not data:
+        return []
+    records = data.split(b"\0")
+    if records[-1] != b"":
+        raise HealthcheckError("git name-status output is not NUL terminated")
+    records.pop()
+
+    changes: list[StagedChange] = []
+    index = 0
+    while index < len(records):
+        try:
+            raw_status = records[index].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise HealthcheckError("git name-status record has a non-ASCII status") from exc
+        index += 1
+        if not raw_status:
+            raise HealthcheckError("git name-status record has an empty status")
+        status = raw_status[0]
+        if status not in "ACMRD":
+            raise HealthcheckError(f"unsupported git name-status record: {raw_status}")
+        needed = 2 if status in "CR" else 1
+        if index + needed > len(records):
+            raise HealthcheckError(f"truncated git name-status record: {raw_status}")
+        if status in "CR":
+            old_path = _decode_git_path(records[index], "old staged path")
+            new_path = _decode_git_path(records[index + 1], "staged path")
+            changes.append(StagedChange(status, new_path, old_path))
+            index += 2
+        else:
+            path = _decode_git_path(records[index], "staged path")
+            changes.append(StagedChange(status, path))
+            index += 1
+    return changes
+
+
+def read_index_text(vault: Path, path: str) -> str:
+    normalized = _normalize_relative_path(path, "index path", allow_empty=False)
+    data = _run_git_bytes(vault, "show", f":{normalized}")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"staged file is not valid UTF-8: {normalized}") from exc
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 
@@ -413,12 +673,10 @@ def main() -> int:
         return 0
     try:
         user_cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
-        if not isinstance(user_cfg, dict):
-            raise ValueError("최상위가 JSON 객체가 아님")
-    except (OSError, ValueError) as e:
+        cfg = validate_config(user_cfg)
+    except (OSError, ValueError, HealthcheckError) as e:
         print(f"[vault-healthcheck] 오류: {CONFIG_RELPATH} 파싱 실패 — {e}", file=sys.stderr)
         return 1
-    cfg = {**DEFAULT_CONFIG, **user_cfg}
     warnings: list[str] = []
 
     # --- 설정 해석 -----------------------------------------------------------
@@ -533,9 +791,12 @@ def main() -> int:
     # 슬래시 명령 정의까지 '프런트매터 누락 — 치명'으로 잡혀 오탐이 쌓였다.
     # 실측(운영 볼트): 이 누락만으로 치명 22건이 발생했고, 전부 노트가 아닌 파일이었다.
     # config에 키가 없으면 아래 기본값을 쓴다(구 버전 동작과 호환).
-    fm_exempt = cfg.get("fm_exempt_zones", [
-        "10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude",
-    ])
+    if "frontmatter_exempt_paths" in cfg:
+        fm_exempt = cfg["frontmatter_exempt_paths"]
+    elif "fm_exempt_zones" in cfg:
+        fm_exempt = cfg["fm_exempt_zones"]
+    else:
+        fm_exempt = ["10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude"]
 
     def is_fm_exempt(rel_path: str) -> bool:
         return any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
