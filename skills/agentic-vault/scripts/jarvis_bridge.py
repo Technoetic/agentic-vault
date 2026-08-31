@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -74,7 +75,11 @@ def parse_telegram_user_ids(value: object) -> list[int]:
         if type(item) is int:
             user_id = item
         elif isinstance(item, str) and re.fullmatch(r"[0-9]+", item, re.ASCII):
-            user_id = int(item)
+            try:
+                user_id = int(item)
+            except ValueError as error:
+                raise JarvisConfigError(
+                    "telegram_user_ids must contain only positive integers") from error
         else:
             raise JarvisConfigError(
                 "telegram_user_ids must contain only positive integers")
@@ -234,7 +239,7 @@ def load_jarvis_config(vault: Path) -> dict | None:
         vault_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
-    except (json.JSONDecodeError, OSError, UnicodeError) as error:
+    except (ValueError, OSError, UnicodeError) as error:
         raise JarvisConfigError("vault configuration is unreadable or invalid JSON") from error
     if not isinstance(vault_cfg, dict):
         raise JarvisConfigError("vault configuration root must be an object")
@@ -253,8 +258,14 @@ def load_jarvis_config(vault: Path) -> dict | None:
     cfg["_briefing_slots"] = parse_briefing_slots(block)
     for name in ("butler_interval_hours", "qa_timeout_sec"):
         value = cfg[name]
-        if (type(value) not in (int, float) or
-                not math.isfinite(float(value)) or value <= 0):
+        if type(value) not in (int, float):
+            raise JarvisConfigError(f"jarvis.{name} must be a finite positive number")
+        try:
+            finite = math.isfinite(float(value))
+        except (OverflowError, ValueError) as error:
+            raise JarvisConfigError(
+                f"jarvis.{name} must be a finite positive number") from error
+        if not finite or value <= 0:
             raise JarvisConfigError(f"jarvis.{name} must be a finite positive number")
     hourly_limit = cfg["qa_hourly_limit"]
     if type(hourly_limit) is not int or hourly_limit <= 0:
@@ -449,8 +460,8 @@ def tg_call(token: str, method: str, http_timeout: int = 65, **params) -> dict:
             payload = json.loads(resp.read().decode("utf-8"))
     except TelegramAPIError:
         raise
-    except (urllib.error.URLError, OSError, TypeError, ValueError,
-            UnicodeError) as error:
+    except (http.client.HTTPException, urllib.error.URLError, OSError,
+            TypeError, ValueError, UnicodeError) as error:
         failure = (type(error).__name__, getattr(error, "code", None))
     if failure is not None:
         raise TelegramAPIError(*failure)

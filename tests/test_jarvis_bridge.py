@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import io
 import json
 import os
@@ -36,6 +37,7 @@ class JarvisConfigAuthorizationTests(unittest.TestCase):
                 _BRIDGE.parse_telegram_user_ids(invalid)
 
     def test_token_parser_validates_the_complete_shape_without_echoing_input(self):
+        self.assertEqual(_BRIDGE.parse_telegram_token("1:x"), ("1", "x"))
         self.assertEqual(
             _BRIDGE.parse_telegram_token("12345:Abc_09-z"),
             ("12345", "Abc_09-z"),
@@ -184,18 +186,20 @@ class JarvisTelegramBoundaryTests(unittest.TestCase):
     def test_tg_call_rejects_false_missing_and_non_object_protocol_roots(self):
         cases = (
             {"ok": False, "error_code": 400, "description": "CONTENT-SENTINEL"},
+            {"ok": 1, "result": []},
             {"result": []},
             ["not", "an", "object"],
         )
         for payload in cases:
-            with self.subTest(payload=payload), patch.object(
-                    _BRIDGE.urllib.request, "urlopen",
-                    return_value=self._response(payload)), self.assertRaises(
-                        _BRIDGE.TelegramAPIError) as raised:
-                _BRIDGE.tg_call(self.token, "getUpdates")
-            rendered = str(raised.exception)
-            self.assertNotIn(self.token, rendered)
-            self.assertNotIn("CONTENT-SENTINEL", rendered)
+            with self.subTest(payload=payload):
+                with patch.object(
+                        _BRIDGE.urllib.request, "urlopen",
+                        return_value=self._response(payload)), self.assertRaises(
+                            _BRIDGE.TelegramAPIError) as raised:
+                    _BRIDGE.tg_call(self.token, "getUpdates")
+                rendered = str(raised.exception)
+                self.assertNotIn(self.token, rendered)
+                self.assertNotIn("CONTENT-SENTINEL", rendered)
 
     def test_tg_call_normalizes_transport_url_json_and_unicode_failures(self):
         http_error = _BRIDGE.urllib.error.HTTPError(
@@ -228,15 +232,61 @@ class JarvisTelegramBoundaryTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, expected_code)
                 self.assertIsNone(raised.exception.__context__)
 
-    def test_tg_send_never_turns_ok_false_into_success_via_plain_retry(self):
-        failure = _BRIDGE.TelegramAPIError("TelegramResponseError", 400)
+    def test_tg_call_sanitizes_http_protocol_exceptions_without_context(self):
+        failures = (
+            http.client.IncompleteRead(b"CONTENT-SENTINEL", 99),
+            http.client.BadStatusLine("CONTENT-SENTINEL"),
+            http.client.LineTooLong("CONTENT-SENTINEL"),
+        )
+        for failure in failures:
+            response = MagicMock()
+            response.__enter__.return_value.read.side_effect = failure
+            replacement = (
+                patch.object(
+                    _BRIDGE.urllib.request, "urlopen", return_value=response)
+                if isinstance(failure, http.client.IncompleteRead) else
+                patch.object(_BRIDGE.urllib.request, "urlopen", side_effect=failure)
+            )
+            with self.subTest(error=type(failure).__name__), replacement:
+                with self.assertRaises(_BRIDGE.TelegramAPIError) as raised:
+                    _BRIDGE.tg_call(self.token, "getUpdates")
+
+                self.assertEqual(raised.exception.source, type(failure).__name__)
+                self.assertIsNone(raised.exception.code)
+                self.assertIsNone(raised.exception.__context__)
+                self.assertNotIn("CONTENT-SENTINEL", str(raised.exception))
+                self.assertNotIn(self.token, str(raised.exception))
+
+    def test_tg_send_falls_back_after_sanitized_http_protocol_failure(self):
+        ok_response = self._response({"ok": True})
         with patch.object(
-                _BRIDGE, "tg_call", side_effect=[failure, {"ok": True}]) as caller, \
-                patch.object(_BRIDGE, "log"):
+                _BRIDGE.urllib.request, "urlopen",
+                side_effect=[
+                    http.client.BadStatusLine("CONTENT-SENTINEL"), ok_response,
+                ]) as opener, patch.object(_BRIDGE, "log") as logger:
+            sent = _BRIDGE.tg_send(self.token, 111, "message")
+
+        self.assertTrue(sent)
+        self.assertEqual(opener.call_count, 2)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(self.token, rendered)
+
+    def test_tg_send_rejects_real_ok_false_response_without_plain_retry(self):
+        response = self._response({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        })
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
+                patch.object(_BRIDGE, "log") as logger:
             sent = _BRIDGE.tg_send(self.token, 111, "message")
 
         self.assertFalse(sent)
-        self.assertEqual(caller.call_count, 1)
+        self.assertEqual(opener.call_count, 1)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(self.token, rendered)
 
     def test_chunks_bound_long_lines_and_reconstruct_exactly(self):
         text = "x" * 23
@@ -294,11 +344,12 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
             "Jarvis_Telegram_Token": "mixed-secret",
             "KEEP_ME": "safe",
         }
+        self.parent_snapshot = dict(self.parent_env)
 
     def _assert_scrubbed_copy(self, child_env: dict[str, str]) -> None:
         self.assertEqual(child_env, {"KEEP_ME": "safe"})
         self.assertIsNot(child_env, self.parent_env)
-        self.assertEqual(len(self.parent_env), 4)
+        self.assertEqual(self.parent_env, self.parent_snapshot)
 
     def test_claude_process_receives_a_case_insensitively_scrubbed_environment(self):
         cfg = {
@@ -407,6 +458,59 @@ class JarvisMainTests(unittest.TestCase):
         self.assertEqual(len(output.splitlines()), 1)
         self.assertNotIn(token, output)
         self.assertNotIn("SECRET_SENTINEL", output)
+
+    def test_main_normalizes_plain_json_value_error_without_traceback(self):
+        self.config.write_text("{}", encoding="utf-8")
+        with patch.object(
+                _BRIDGE.json, "loads", side_effect=ValueError("CONTENT-SENTINEL")):
+            code, output = self._run_main(
+                {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+        self.assertNotEqual(code, 0)
+        self.assertEqual(len(output.splitlines()), 1)
+        self.assertIn("configuration error", output.lower())
+        self.assertNotIn("traceback", output.lower())
+        self.assertNotIn("CONTENT-SENTINEL", output)
+
+    def test_main_normalizes_supported_integer_digit_limit_failures(self):
+        get_limit = getattr(sys, "get_int_max_str_digits", None)
+        limit = get_limit() if get_limit is not None else 0
+        if limit <= 0:
+            self.skipTest("interpreter integer string digit limit is disabled")
+        digits = "9" * (limit + 1)
+        cases = (
+            '{"jarvis":{"enabled":true,"telegram_user_ids":["' + digits + '"]}}',
+            '{"jarvis":{"enabled":true,"telegram_user_ids":[1],'
+            '"qa_hourly_limit":' + digits + '}}',
+        )
+        for raw in cases:
+            with self.subTest(boundary="recipient" if '"' + digits + '"' in raw else "json"):
+                self.config.write_text(raw, encoding="utf-8")
+                code, output = self._run_main(
+                    {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+                self.assertNotEqual(code, 0)
+                self.assertEqual(len(output.splitlines()), 1)
+                self.assertIn("configuration error", output.lower())
+                self.assertNotIn("traceback", output.lower())
+                self.assertNotIn(digits, output)
+
+    def test_main_normalizes_roughly_400_digit_positive_numeric_settings(self):
+        digits = "9" * 400
+        for setting in ("butler_interval_hours", "qa_timeout_sec"):
+            with self.subTest(setting=setting):
+                self.config.write_text(
+                    '{"jarvis":{"enabled":true,"telegram_user_ids":[1],"' +
+                    setting + '":' + digits + '}}',
+                    encoding="utf-8")
+                code, output = self._run_main(
+                    {"JARVIS_TELEGRAM_TOKEN": "12345:secret"})
+
+                self.assertNotEqual(code, 0)
+                self.assertEqual(len(output.splitlines()), 1)
+                self.assertIn("configuration error", output.lower())
+                self.assertNotIn("traceback", output.lower())
+                self.assertNotIn(digits, output)
 
     def test_main_keeps_inactive_jarvis_as_success(self):
         self.config.write_text(
@@ -1063,6 +1167,33 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
         self.assertFalse((namespace / "offset").exists())
 
+    def test_http_protocol_poll_failure_is_sanitized_and_retried(self):
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(
+                    _BRIDGE.urllib.request, "urlopen",
+                    side_effect=[
+                        http.client.BadStatusLine("CONTENT-SENTINEL"),
+                        KeyboardInterrupt,
+                    ]) as opener, \
+                patch.object(_BRIDGE.time, "sleep") as sleeper, \
+                patch.object(_BRIDGE, "log") as logger, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(opener.call_count, 2)
+        sleeper.assert_called_once_with(5)
+        rendered = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertNotIn("CONTENT-SENTINEL", rendered)
+        self.assertNotIn(token, rendered)
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        self.assertFalse((namespace / "offset").exists())
+
     def test_scheduled_work_uses_the_smallest_validated_positive_recipient(self):
         token = "12345:secret-value"
         cfg = {
@@ -1095,8 +1226,13 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
             _BRIDGE.serve(self.vault, cfg)
 
     def test_protocol_send_failure_does_not_mark_scheduled_completion(self):
-        failure = _BRIDGE.TelegramAPIError("TelegramResponseError", 400)
-        with patch.object(_BRIDGE, "tg_call", side_effect=failure), \
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        }).encode("utf-8")
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
                 patch.object(_BRIDGE, "do_brief", return_value="body"), \
                 patch.object(_BRIDGE, "log"):
             fired_date, fired = _BRIDGE.send_due_briefings(
@@ -1106,13 +1242,19 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
 
         self.assertEqual(fired_date, date(2026, 9, 1))
         self.assertEqual(fired, set())
+        self.assertEqual(opener.call_count, 1)
 
     def test_protocol_send_failure_does_not_advance_inbound_offset(self):
         update = self._update(95, "/status")
         saved = []
-        failure = _BRIDGE.TelegramAPIError("TelegramResponseError", 400)
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "ok": False, "error_code": 400,
+            "description": "CONTENT-SENTINEL",
+        }).encode("utf-8")
 
-        with patch.object(_BRIDGE, "tg_call", side_effect=failure), \
+        with patch.object(
+                _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
                 patch.object(_BRIDGE, "log"):
             offset, complete = _BRIDGE.process_update_batch(
                 [update], 0,
@@ -1123,3 +1265,4 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
 
         self.assertEqual((offset, complete), (0, False))
         self.assertEqual(saved, [])
+        self.assertEqual(opener.call_count, 1)
