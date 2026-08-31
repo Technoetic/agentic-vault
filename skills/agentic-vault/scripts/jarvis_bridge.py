@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -54,10 +55,56 @@ class JarvisConfigError(ValueError):
     pass
 
 
+class TelegramAPIError(RuntimeError):
+    def __init__(self, source: str, code: object = None):
+        safe_source = (
+            source if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", source)
+            else "TelegramError")
+        self.source = safe_source
+        self.code = code if type(code) is int else None
+        suffix = f" code={self.code}" if self.code is not None else ""
+        super().__init__(f"Telegram API failure: {self.source}{suffix}")
+
+
+def parse_telegram_user_ids(value: object) -> list[int]:
+    if not isinstance(value, list):
+        raise JarvisConfigError("telegram_user_ids must be a list of positive integers")
+    parsed: list[int] = []
+    for item in value:
+        if type(item) is int:
+            user_id = item
+        elif isinstance(item, str) and re.fullmatch(r"[0-9]+", item, re.ASCII):
+            user_id = int(item)
+        else:
+            raise JarvisConfigError(
+                "telegram_user_ids must contain only positive integers")
+        if user_id <= 0:
+            raise JarvisConfigError(
+                "telegram_user_ids must contain only positive integers")
+        parsed.append(user_id)
+    return parsed
+
+
+def parse_telegram_token(token: object) -> tuple[str, str]:
+    if not isinstance(token, str):
+        raise JarvisConfigError("invalid Telegram bot token")
+    match = re.fullmatch(
+        r"([0-9]+):([A-Za-z0-9_-]+)", token, flags=re.ASCII)
+    if match is None:
+        raise JarvisConfigError("invalid Telegram bot token")
+    return match.group(1), match.group(2)
+
+
+def child_process_env() -> dict[str, str]:
+    token_key = "JARVIS_TELEGRAM_TOKEN".casefold()
+    return {
+        key: value for key, value in os.environ.items()
+        if key.casefold() != token_key
+    }
+
+
 def state_dir_for(vault: Path, token: str, root: Path = STATE_ROOT) -> Path:
-    bot_id, separator, _secret = token.partition(":")
-    if not separator or not re.fullmatch(r"[0-9]+", bot_id):
-        raise JarvisConfigError("Telegram token must start with a numeric bot ID")
+    bot_id, _secret = parse_telegram_token(token)
     normalized_vault = os.path.normcase(str(vault.resolve(strict=False)))
     vault_id = hashlib.sha256(normalized_vault.encode("utf-8")).hexdigest()[:12]
     return root / f"{vault_id}-{bot_id}"
@@ -85,6 +132,18 @@ def read_int_state(path: Path, default: int = 0) -> int:
         raise JarvisConfigError(f"invalid integer state: {path.name}") from error
     if value < 0:
         raise JarvisConfigError(f"invalid integer state: {path.name}")
+    return value
+
+
+def read_float_state(path: Path, default: float = 0.0) -> float:
+    try:
+        value = float(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except (OSError, TypeError, ValueError) as error:
+        raise JarvisConfigError(f"invalid numeric state: {path.name}") from error
+    if not math.isfinite(value) or value < 0:
+        raise JarvisConfigError(f"invalid numeric state: {path.name}")
     return value
 
 
@@ -171,18 +230,38 @@ def log(msg: str) -> None:
 def load_jarvis_config(vault: Path) -> dict | None:
     """볼트가 아니거나 jarvis 블록이 없거나 enabled=false면 None."""
     cfg_path = vault / "00-meta" / "vault-config.json"
-    if not cfg_path.is_file():
-        return None
     try:
         vault_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except FileNotFoundError:
         return None
-    block = vault_cfg.get("jarvis")
-    if not isinstance(block, dict) or not block.get("enabled"):
+    except (json.JSONDecodeError, OSError, UnicodeError) as error:
+        raise JarvisConfigError("vault configuration is unreadable or invalid JSON") from error
+    if not isinstance(vault_cfg, dict):
+        raise JarvisConfigError("vault configuration root must be an object")
+    if "jarvis" not in vault_cfg:
+        return None
+    block = vault_cfg["jarvis"]
+    if not isinstance(block, dict):
+        raise JarvisConfigError("jarvis configuration must be an object")
+    if type(block.get("enabled")) is not bool:
+        raise JarvisConfigError("jarvis.enabled must be a boolean")
+    if block["enabled"] is False:
         return None
     cfg = {**DEFAULTS, **block}
-    cfg["telegram_user_ids"] = [int(x) for x in cfg.get("telegram_user_ids", [])]
+    cfg["telegram_user_ids"] = parse_telegram_user_ids(
+        cfg.get("telegram_user_ids", []))
     cfg["_briefing_slots"] = parse_briefing_slots(block)
+    for name in ("butler_interval_hours", "qa_timeout_sec"):
+        value = cfg[name]
+        if (type(value) not in (int, float) or
+                not math.isfinite(float(value)) or value <= 0):
+            raise JarvisConfigError(f"jarvis.{name} must be a finite positive number")
+    hourly_limit = cfg["qa_hourly_limit"]
+    if type(hourly_limit) is not int or hourly_limit <= 0:
+        raise JarvisConfigError("jarvis.qa_hourly_limit must be a positive integer")
+    claude_cmd = cfg["claude_cmd"]
+    if not isinstance(claude_cmd, str) or not claude_cmd.strip():
+        raise JarvisConfigError("jarvis.claude_cmd must be a non-empty string")
     # Q&A 가드에 필요한 볼트 수준 키를 함께 전달
     cfg["_deny_zones"] = vault_cfg.get("deny_zones", [])
     cfg["_language"] = vault_cfg.get("language", "ko")
@@ -257,11 +336,11 @@ def run_claude(vault: Path, cfg: dict, prompt: str) -> str:
     try:
         r = subprocess.run(cmd, cwd=str(vault), capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
-                           timeout=cfg["qa_timeout_sec"])
+                           timeout=cfg["qa_timeout_sec"], env=child_process_env())
     except subprocess.TimeoutExpired:
         return "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요."
     if r.returncode != 0:
-        log(f"claude 실패 rc={r.returncode}: {r.stderr[:300]}")
+        log(f"claude 실패 rc={r.returncode}")
         return "⚠️ 응답 생성에 실패했습니다. 로그를 확인하세요."
     return r.stdout.strip() or "(빈 응답)"
 
@@ -327,7 +406,8 @@ def do_butler(vault: Path, cfg: dict) -> str:
         r = subprocess.run([sys.executable, str(hc), "--vault", str(vault),
                             "--output", cfg["_health_report"]],
                            cwd=str(vault), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=300)
+                           encoding="utf-8", errors="replace", timeout=300,
+                           env=child_process_env())
         lines.append("· healthcheck: " + ("치명 없음 ✅" if r.returncode == 0
                      else "치명 위반 감지 🚨 — 세션에서 /vault-lint 필요"))
     else:
@@ -345,7 +425,8 @@ def do_butler(vault: Path, cfg: dict) -> str:
 def _git(vault: Path, *args: str) -> str | None:
     try:
         r = subprocess.run(["git", *args], cwd=str(vault), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=120)
+                           text=True, encoding="utf-8", errors="replace", timeout=120,
+                           env=child_process_env())
         return r.stdout.strip() if r.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -355,11 +436,28 @@ def _git(vault: Path, *args: str) -> str | None:
 
 def tg_call(token: str, method: str, http_timeout: int = 65, **params) -> dict:
     """params는 그대로 Telegram API로 간다 — urllib 타임아웃과 이름 충돌 금지."""
-    url = API_BASE.format(token=token, method=method)
-    data = urllib.parse.urlencode(params).encode()
-    req = urllib.request.Request(url, data=data)
-    with urllib.request.urlopen(req, timeout=http_timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    parse_telegram_token(token)
+    failure: tuple[str, object] | None = None
+    try:
+        if (not isinstance(method, str) or
+                not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", method, re.ASCII)):
+            raise TelegramAPIError("URLValidationError")
+        url = API_BASE.format(token=token, method=method)
+        data = urllib.parse.urlencode(params).encode()
+        req = urllib.request.Request(url, data=data)
+        with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except TelegramAPIError:
+        raise
+    except (urllib.error.URLError, OSError, TypeError, ValueError,
+            UnicodeError) as error:
+        failure = (type(error).__name__, getattr(error, "code", None))
+    if failure is not None:
+        raise TelegramAPIError(*failure)
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        code = payload.get("error_code") if isinstance(payload, dict) else None
+        raise TelegramAPIError("TelegramResponseError", code)
+    return payload
 
 
 def md_to_telegram_html(text: str) -> str:
@@ -386,14 +484,28 @@ def md_to_telegram_html(text: str) -> str:
     return "\n".join(out_lines)
 
 
-def _chunks_by_line(text: str, limit: int = 3500) -> list[str]:
+def _chunks_by_line(text: str, limit: int = TG_CHUNK) -> list[str]:
     """태그가 조각나지 않도록 줄 단위로 분할."""
+    if limit <= 0:
+        raise ValueError("chunk limit must be positive")
     chunks, cur = [], ""
     for line in text.splitlines(keepends=True):
-        if len(cur) + len(line) > limit and cur:
+        if len(line) <= limit:
+            if cur and len(cur) + len(line) > limit:
+                chunks.append(cur)
+                cur = ""
+            cur += line
+            if len(cur) == limit:
+                chunks.append(cur)
+                cur = ""
+            continue
+        if cur:
             chunks.append(cur)
             cur = ""
-        cur += line
+        while len(line) > limit:
+            chunks.append(line[:limit])
+            line = line[limit:]
+        cur = line
     if cur:
         chunks.append(cur)
     return chunks or [""]
@@ -407,15 +519,29 @@ def _telegram_error_label(error: BaseException) -> str:
 def tg_send(token: str, chat_id: int, text: str) -> bool:
     for chunk in _chunks_by_line(text):
         html = md_to_telegram_html(chunk)
+        if len(html) > TG_CHUNK:
+            try:
+                tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
+                        text=chunk)
+            except (TelegramAPIError, urllib.error.URLError, OSError,
+                    json.JSONDecodeError) as error:
+                log(f"sendMessage 실패({_telegram_error_label(error)})")
+                return False
+            continue
         try:
             tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
                     text=html, parse_mode="HTML")
-        except urllib.error.HTTPError as error:
+        except (TelegramAPIError, urllib.error.HTTPError) as error:
+            if (isinstance(error, TelegramAPIError) and
+                    error.source == "TelegramResponseError"):
+                log(f"sendMessage 실패({_telegram_error_label(error)})")
+                return False
             log(f"HTML 전송 실패({_telegram_error_label(error)}) — 플레인 폴백")
             try:
                 tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
                         text=chunk)
-            except (urllib.error.URLError, OSError, json.JSONDecodeError) as fallback_error:
+            except (TelegramAPIError, urllib.error.URLError, OSError,
+                    json.JSONDecodeError) as fallback_error:
                 log(f"sendMessage 실패({_telegram_error_label(fallback_error)})")
                 return False
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
@@ -440,7 +566,9 @@ def process_update(
     update_id = update["update_id"]
     chat_id = message["chat"]["id"]
     kind, body = route(text)
-    log(f"수신[{kind}] from={chat_id}: {text[:80]}")
+    log(
+        f"inbound route={kind} update_id={update_id} "
+        f"sender={chat_id} length={len(text)}")
     if kind == "capture":
         received_at = datetime.fromtimestamp(message["date"])
         name = do_capture(
@@ -470,13 +598,17 @@ def process_update(
 
 def process_update_batch(
         updates: list[dict], offset: int, handler: Callable[[dict], bool],
-        save_offset: Callable[[int], None]) -> tuple[int, bool]:
+        save_offset: Callable[[int], None],
+        after_commit: Callable[[dict], None] | None = None,
+        ) -> tuple[int, bool]:
     committed = offset
     for update in sorted(updates, key=lambda item: item["update_id"]):
         if not handler(update):
             return committed, False
         committed = update["update_id"]
         save_offset(committed)
+        if after_commit is not None:
+            after_commit(update)
     return committed, True
 
 
@@ -518,9 +650,9 @@ def send_butler_if_due(
 def serve(vault: Path, cfg: dict) -> None:
     token = os.environ.get("JARVIS_TELEGRAM_TOKEN", "")
     if not token:
-        log("JARVIS_TELEGRAM_TOKEN 미설정 — 종료")
-        sys.exit(1)
-    whitelist = set(cfg["telegram_user_ids"])
+        raise JarvisConfigError("JARVIS_TELEGRAM_TOKEN is required")
+    parse_telegram_token(token)
+    whitelist = set(parse_telegram_user_ids(cfg["telegram_user_ids"]))
     if not whitelist:
         log("⚠️ 화이트리스트가 비어 있음 — 모든 메시지를 폐기하며, 발신자 ID만 콘솔에 표시합니다.")
     started = time.time()
@@ -531,7 +663,7 @@ def serve(vault: Path, cfg: dict) -> None:
     offset_file = state_dir / "offset"
     offset = read_int_state(offset_file, default=0)
     butler_file = state_dir / "last_butler"
-    last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
+    last_butler = read_float_state(butler_file, default=0.0)
     brief_slots = cfg["_briefing_slots"]
     # 기동 전에 이미 지난 슬롯은 오늘분 발송하지 않는다(재기동 폭주 방지).
     fired_date, fired_slots, _due = due_briefing_slots(
@@ -554,7 +686,8 @@ def serve(vault: Path, cfg: dict) -> None:
         try:
             resp = tg_call(token, "getUpdates", http_timeout=65, offset=offset + 1,
                            timeout=50, allowed_updates='["message"]')
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+        except (TelegramAPIError, urllib.error.URLError, OSError,
+                json.JSONDecodeError) as error:
             log(f"getUpdates 오류(재시도): {_telegram_error_label(error)}")
             time.sleep(5)
             continue
@@ -563,7 +696,8 @@ def serve(vault: Path, cfg: dict) -> None:
             lambda update: process_update(
                 vault, cfg, token, whitelist, update, started, qa_times,
                 qa_attempt_ids, tg_send),
-            lambda committed: atomic_write_text(offset_file, str(committed)))
+            lambda committed: atomic_write_text(offset_file, str(committed)),
+            lambda update: qa_attempt_ids.discard(update["update_id"]))
 
 
 # ---------------------------------------------------------------- self-test
@@ -649,12 +783,16 @@ def main() -> None:
     args = ap.parse_args()
     if args.self_test:
         sys.exit(self_test())
-    vault = Path(args.vault).resolve()
-    cfg = load_jarvis_config(vault)
-    if cfg is None:
-        log(f"jarvis 비활성(볼트 아님 / jarvis 블록 없음 / enabled=false): {vault} — 침묵 종료")
-        sys.exit(0)
-    serve(vault, cfg)
+    try:
+        vault = Path(args.vault).resolve()
+        cfg = load_jarvis_config(vault)
+        if cfg is None:
+            log(f"jarvis 비활성(볼트 아님 / jarvis 블록 없음 / enabled=false): {vault} — 침묵 종료")
+            sys.exit(0)
+        serve(vault, cfg)
+    except JarvisConfigError as error:
+        log(f"configuration error: {error}")
+        sys.exit(2)
 
 
 if __name__ == "__main__":
