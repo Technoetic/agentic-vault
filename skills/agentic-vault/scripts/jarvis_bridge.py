@@ -248,9 +248,14 @@ def do_qa(vault: Path, cfg: dict, question: str) -> str:
     return run_claude(vault, cfg, question)
 
 
-def do_brief(vault: Path, cfg: dict) -> str:
+def _slot(hour: int) -> tuple[str, str]:
+    """시각 → (이모지, 시간대명). 스케줄 라벨과 브리핑 프롬프트가 같은 슬롯을 쓰게 하는 단일 출처."""
+    return ("🌅", "아침") if hour < 11 else (("🌞", "점심") if hour < 17 else ("🌆", "저녁"))
+
+
+def do_brief(vault: Path, cfg: dict, slot: str = "아침") -> str:
     git_lines = _git(vault, "log", "--oneline", "--date=short", "-10") or "(git 이력 없음)"
-    parts = [f"오늘({date.today().isoformat()}) 아침 브리핑을 만들어라.",
+    parts = [f"오늘({date.today().isoformat()}) {slot} 브리핑을 만들어라.",
              f"다음 노트를 읽어라: {cfg['_hot_note']}"]
     if cfg["_handoff_note"]:
         parts.append(f"그리고 {cfg['_handoff_note']} (직전 세션 인계·NEXT 섹션 주목)")
@@ -406,9 +411,9 @@ def serve(vault: Path, cfg: dict) -> None:
             for s in brief_slots:
                 if s not in fired_slots and (now.hour, now.minute) >= s:
                     fired_slots.add(s)
-                    label = "🌅 아침" if s[0] < 11 else ("🌞 점심" if s[0] < 17 else "🌆 저녁")
-                    log("스케줄 브리핑 생성(%s %02d:%02d)" % (label, s[0], s[1]))
-                    tg_send(token, first, label + " 브리핑\n" + do_brief(vault, cfg))
+                    emo, name = _slot(s[0])
+                    log("스케줄 브리핑 생성(%s %s %02d:%02d)" % (emo, name, s[0], s[1]))
+                    tg_send(token, first, f"{emo} {name} 브리핑\n" + do_brief(vault, cfg, name))
             if time.time() - last_butler > cfg["butler_interval_hours"] * 3600:
                 last_butler = time.time()
                 butler_file.write_text(str(last_butler))
@@ -442,7 +447,8 @@ def serve(vault: Path, cfg: dict) -> None:
             elif kind == "status":
                 tg_send(token, chat, do_status(vault, started))
             elif kind == "brief":
-                tg_send(token, chat, "🌅 브리핑\n" + do_brief(vault, cfg))
+                emo, name = _slot(datetime.now().hour)
+                tg_send(token, chat, f"{emo} {name} 브리핑\n" + do_brief(vault, cfg, name))
             else:  # qa
                 cutoff = time.time() - 3600
                 while qa_times and qa_times[0] < cutoff:
