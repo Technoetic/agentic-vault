@@ -334,11 +334,11 @@ def staged_markdown_pathspecs(
     deny_zones = sorted(set(config.get("deny_zones") or ()))
     exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
     pathspecs.extend(
-        f":(exclude,top,glob,icase){_escape_git_glob(path)}/**"
+        f":(exclude,top,glob){_escape_git_glob(path)}/**"
         for path in deny_zones
     )
     pathspecs.extend(
-        f":(exclude,glob,icase)**/{_escape_git_glob(name)}/**"
+        f":(exclude,glob)**/{_escape_git_glob(name)}/**"
         for name in exclude_dirs
     )
 
@@ -351,7 +351,7 @@ def staged_markdown_pathspecs(
             effective_health_report,
         }
         pathspecs.extend(
-            f":(exclude,top,literal,icase){path}"
+            f":(exclude,top,literal){path}"
             for path in sorted(generated)
             if path
         )

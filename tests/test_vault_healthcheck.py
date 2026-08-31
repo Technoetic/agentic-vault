@@ -1004,6 +1004,67 @@ class StagedGateTests(unittest.TestCase):
 
         self.assertEqual(self.staged_errors(), [])
 
+    def test_exact_configured_exclusions_stay_excluded(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.MD": self.valid_note("A"),
+                "20-knowledge/_archive/Exact.MD": self.valid_note(
+                    "Exact deny", "[[A]]"
+                ),
+                "20-knowledge/node_modules/Exact.MD": self.valid_note(
+                    "Exact exclude", "[[A]]"
+                ),
+                "00-meta/log.md": self.valid_note("Log", "[[A]]"),
+                "00-meta/health-report.md": self.valid_note("Health", "[[A]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/A.MD")
+        self.write("20-knowledge/_archive/Exact.MD", "invalid exact deny [[A]]\n")
+        self.write(
+            "20-knowledge/node_modules/Exact.MD",
+            "invalid exact exclude [[A]]\n",
+        )
+        self.git(
+            "add",
+            "20-knowledge/_archive/Exact.MD",
+            "20-knowledge/node_modules/Exact.MD",
+        )
+
+        self.assertEqual(self.staged_errors(), [])
+
+    def test_case_variant_policy_zones_are_scanned_for_schema_errors(self) -> None:
+        self.seed_notes({})
+        self.write("20-knowledge/_ARCHIVE/Variant.MD", "invalid deny variant\n")
+        self.write(
+            "20-knowledge/NODE_MODULES/Variant.MD",
+            "invalid exclude variant\n",
+        )
+        self.git("add", "-A")
+
+        joined = "\n".join(self.staged_errors())
+
+        self.assertIn("20-knowledge/_ARCHIVE/Variant.MD", joined)
+        self.assertIn("20-knowledge/NODE_MODULES/Variant.MD", joined)
+        self.assertGreaterEqual(joined.count("프런트매터 누락"), 2)
+
+    def test_case_variant_generated_referrers_are_scanned_for_backlinks(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.MD": self.valid_note("A"),
+                "00-meta/LOG.MD": self.valid_note("Variant Log", "[[A]]"),
+                "00-meta/HEALTH-REPORT.MD": self.valid_note(
+                    "Variant Health", "[[A]]"
+                ),
+            }
+        )
+        self.git("rm", "20-knowledge/A.MD")
+
+        joined = "\n".join(self.staged_errors())
+
+        self.assertIn("00-meta/LOG.MD", joined)
+        self.assertIn("00-meta/HEALTH-REPORT.MD", joined)
+        self.assertGreaterEqual(joined.count("삭제·개명된 노트 'A'"), 2)
+
     def test_empty_health_report_excludes_effective_default_referrer(self) -> None:
         self.seed_notes(
             {
@@ -1054,11 +1115,11 @@ class StagedGateTests(unittest.TestCase):
         self.assertEqual(errors, [])
         flattened = [arg for call in calls for arg in call]
         self.assertIn(":(top,glob,icase)**/*.md", flattened)
-        self.assertIn(":(exclude,top,glob,icase)20-knowledge/_archive/**", flattened)
-        self.assertIn(":(exclude,glob,icase)**/node_modules/**", flattened)
-        self.assertIn(":(exclude,top,literal,icase)00-meta/log.md", flattened)
+        self.assertIn(":(exclude,top,glob)20-knowledge/_archive/**", flattened)
+        self.assertIn(":(exclude,glob)**/node_modules/**", flattened)
+        self.assertIn(":(exclude,top,literal)00-meta/log.md", flattened)
         self.assertIn(
-            ":(exclude,top,literal,icase)00-meta/health-report.md", flattened
+            ":(exclude,top,literal)00-meta/health-report.md", flattened
         )
         self.assertFalse(any("_archive" in path or "node_modules" in path for path in read_paths))
 
