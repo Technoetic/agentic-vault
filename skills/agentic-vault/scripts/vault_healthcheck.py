@@ -271,7 +271,11 @@ def validate_config(raw: object) -> dict:
     return config
 
 
-def _run_git_bytes(vault: Path, *args: str) -> bytes:
+def _run_git_bytes(
+    vault: Path,
+    *args: str,
+    allowed_returncodes: tuple[int, ...] = (0,),
+) -> bytes:
     command = ["git", "-c", "core.quotepath=false", *args]
     try:
         result = subprocess.run(
@@ -286,11 +290,50 @@ def _run_git_bytes(vault: Path, *args: str) -> bytes:
         raise HealthcheckError(f"git command timed out: {' '.join(args)}") from exc
     except OSError as exc:
         raise HealthcheckError(f"git command could not run: {exc}") from exc
-    if result.returncode != 0:
+    if result.returncode not in allowed_returncodes:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
         detail = f": {stderr}" if stderr else ""
         raise HealthcheckError(f"git {' '.join(args)} failed ({result.returncode}){detail}")
     return result.stdout
+
+
+def _escape_git_glob(value: str) -> str:
+    """Escape config text embedded in a Git `glob` pathspec."""
+    return re.sub(r"([\\*?\[])", r"\\\1", value)
+
+
+def staged_markdown_pathspecs(
+    config: dict,
+    *,
+    exclude_generated_referrers: bool = False,
+) -> tuple[str, ...]:
+    """Return index-only Markdown pathspecs with policy zones pruned by Git."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    pathspecs = [":(top,glob)**/*.md"]
+    deny_zones = sorted(set(config.get("deny_zones") or ()))
+    exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
+    pathspecs.extend(
+        f":(exclude,top,glob){_escape_git_glob(path)}/**"
+        for path in deny_zones
+    )
+    pathspecs.extend(
+        f":(exclude,glob)**/{_escape_git_glob(name)}/**"
+        for name in exclude_dirs
+    )
+
+    if exclude_generated_referrers:
+        generated = {
+            config.get("log_note") or "",
+            config.get("health_report") or "",
+        }
+        pathspecs.extend(
+            f":(exclude,top,literal){path}"
+            for path in sorted(generated)
+            if path
+        )
+    return tuple(pathspecs)
 
 
 def _decode_git_path(value: bytes, label: str) -> str:
@@ -320,7 +363,7 @@ def list_staged_changes(vault: Path, config: dict) -> list[StagedChange]:
     data = _run_git_bytes(
         vault,
         "diff", "--cached", "--name-status", "-z", "--find-renames",
-        "--diff-filter=ACMRD", "--",
+        "--diff-filter=ACMRD", "--", *staged_markdown_pathspecs(config),
     )
     if not data:
         return []
@@ -547,6 +590,122 @@ def normalize_link_target(raw: str) -> str | None:
             return base[:-3].strip() or None
         return None
     return base
+
+
+def _decode_nul_paths(data: bytes, label: str) -> list[str]:
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise HealthcheckError(f"{label} output is not NUL terminated")
+    return [
+        _decode_git_path(raw_path, label)
+        for raw_path in data[:-1].split(b"\0")
+    ]
+
+
+def _index_markdown_paths(vault: Path, config: dict) -> list[str]:
+    data = _run_git_bytes(
+        vault,
+        "ls-files", "-z", "--cached", "--",
+        *staged_markdown_pathspecs(config),
+    )
+    return _decode_nul_paths(data, "staged Markdown path")
+
+
+def _posix_markdown_stem(path: str) -> str:
+    """Derive a stem without rewriting Git-originated path characters."""
+    filename = path.rsplit("/", 1)[-1]
+    if filename.lower().endswith(".md"):
+        return filename[:-3]
+    return filename
+
+
+def _is_at_or_below(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
+    policy = VaultPolicy.from_config(config)
+    if not any(_is_at_or_below(path, root) for root in policy.frontmatter_roots):
+        return []
+    if any(_is_at_or_below(path, exempt) for exempt in policy.frontmatter_exempt_paths):
+        return []
+
+    fm, _body = split_frontmatter(text)
+    if fm is None:
+        return [f"스테이징 차단: {path} — 프런트매터 누락"]
+
+    errors: list[str] = []
+    keys = parse_simple_yaml_keys(fm)
+    absent = [key for key in config.get("required_keys", ()) if key not in keys]
+    if absent:
+        errors.append(
+            f"스테이징 차단: {path} — 필수 키 누락: {', '.join(sorted(absent))}"
+        )
+    for field, allowed in sorted((config.get("enums") or {}).items()):
+        value = keys.get(field)
+        if value and value not in allowed:
+            errors.append(f"스테이징 차단: {path} — Enum 위반: {field}={value}")
+    for line in fm.splitlines():
+        if UNQUOTED_FM_LINK_RE.match(line):
+            errors.append(
+                f"스테이징 차단: {path} — 프런트매터 내 따옴표 없는 위키링크: "
+                f"{line.strip()}"
+            )
+    return errors
+
+
+def _grep_index_backlink_paths(vault: Path, config: dict, stem: str) -> list[str]:
+    escaped_stem = re.escape(stem)
+    pattern = (
+        r"\[\[([^]|#]*/)*" + escaped_stem
+        + r"(\.md)?([|#][^]]*)?\]\]"
+    )
+    data = _run_git_bytes(
+        vault,
+        "grep", "--cached", "-z", "-l", "-I", "-E", "-e", pattern,
+        "--", *staged_markdown_pathspecs(config, exclude_generated_referrers=True),
+        allowed_returncodes=(0, 1),
+    )
+    return _decode_nul_paths(data, "staged backlink path")
+
+
+def validate_staged(vault: Path, config: dict) -> list[str]:
+    """Validate only the staged Markdown change surface without writing a report."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    changes = list_staged_changes(vault, config)
+    errors: list[str] = []
+    deleted_stems: set[str] = set()
+
+    for change in changes:
+        if change.status in "ACMR":
+            text = read_index_text(vault, change.path)
+            errors.extend(_staged_schema_errors(change.path, text, config))
+
+        if change.status == "D":
+            deleted_stems.add(_posix_markdown_stem(change.path))
+        elif change.status == "R" and change.old_path is not None:
+            old_stem = _posix_markdown_stem(change.old_path)
+            if old_stem != _posix_markdown_stem(change.path):
+                deleted_stems.add(old_stem)
+
+    if deleted_stems:
+        result_stems = {
+            _posix_markdown_stem(path)
+            for path in _index_markdown_paths(vault, config)
+        }
+        for stem in sorted(deleted_stems):
+            if not stem or stem in result_stems:
+                continue
+            for referrer in _grep_index_backlink_paths(vault, config, stem):
+                errors.append(
+                    f"스테이징 차단: {referrer} — 삭제·개명된 노트 '{stem}' "
+                    "백링크가 남아 있음"
+                )
+
+    return sorted(set(errors))
 
 
 def scan_log_tag_gaps(log_path: Path, valid_ops: set[str],
