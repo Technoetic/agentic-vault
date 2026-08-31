@@ -690,14 +690,16 @@ def _grep_index_backlink_paths(vault: Path, config: dict) -> list[str]:
     return _decode_nul_paths(data, "staged backlink path")
 
 
-def _index_blob_has_wikilink_to_stem(vault: Path, path: str, stem: str) -> bool:
-    """Confirm a grep candidate contains a real wikilink outside code contexts."""
+def _index_blob_wikilink_targets(vault: Path, path: str) -> set[str]:
+    """Return normalized note targets from one index blob, excluding code contexts."""
     text = read_index_text(vault, path)
     clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
-    return any(
-        normalize_link_target(raw_target) == stem
-        for raw_target in WIKILINK_RE.findall(clean_text)
-    )
+    targets: set[str] = set()
+    for raw_target in WIKILINK_RE.findall(clean_text):
+        target = normalize_link_target(raw_target)
+        if target is not None:
+            targets.add(target)
+    return targets
 
 
 def validate_staged(vault: Path, config: dict) -> list[str]:
@@ -726,13 +728,17 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
             _posix_markdown_stem(path)
             for path in _index_markdown_paths(vault, config)
         }
-        backlink_paths = _grep_index_backlink_paths(vault, config)
-        for stem in sorted(deleted_stems):
-            if not stem or stem in result_stems:
-                continue
-            for referrer in backlink_paths:
-                if not _index_blob_has_wikilink_to_stem(vault, referrer, stem):
-                    continue
+        stems_to_check = sorted(
+            stem for stem in deleted_stems
+            if stem and stem not in result_stems
+        )
+        referrers_by_target: dict[str, set[str]] = {}
+        if stems_to_check:
+            for referrer in _grep_index_backlink_paths(vault, config):
+                for target in _index_blob_wikilink_targets(vault, referrer):
+                    referrers_by_target.setdefault(target, set()).add(referrer)
+        for stem in stems_to_check:
+            for referrer in sorted(referrers_by_target.get(stem, ())):
                 errors.append(
                     f"스테이징 차단: {referrer} — 삭제·개명된 노트 '{stem}' "
                     "백링크가 남아 있음"

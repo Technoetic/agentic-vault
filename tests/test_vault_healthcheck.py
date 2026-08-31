@@ -820,6 +820,76 @@ class StagedGateTests(unittest.TestCase):
 
         self.assertEqual(self.staged_errors(), [])
 
+    def test_surviving_duplicate_stems_skip_backlink_grep_and_blob_reads(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/one/A.md": self.valid_note("A one"),
+                "30-journal/two/A.md": self.valid_note("A two"),
+                "20-knowledge/one/B.md": self.valid_note("B one"),
+                "30-journal/two/B.md": self.valid_note("B two"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", "[[A]] [[B]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/one/A.md", "20-knowledge/one/B.md")
+        git_calls: list[tuple[str, ...]] = []
+        read_paths: list[str] = []
+        real_run = healthcheck._run_git_bytes
+        real_read = healthcheck.read_index_text
+
+        def record_git(vault: Path, *args: str, **kwargs: object) -> bytes:
+            git_calls.append(args)
+            return real_run(vault, *args, **kwargs)
+
+        def record_read(vault: Path, path: str) -> str:
+            read_paths.append(path)
+            return real_read(vault, path)
+
+        with mock.patch.object(healthcheck, "_run_git_bytes", side_effect=record_git), \
+             mock.patch.object(healthcheck, "read_index_text", side_effect=record_read):
+            errors = self.staged_errors()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            [call for call in git_calls if call and call[0] == "grep"],
+            [],
+        )
+        self.assertEqual(read_paths, [])
+
+    def test_multiple_deleted_stems_read_each_backlink_candidate_once(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.md": self.valid_note("A"),
+                "20-knowledge/B.md": self.valid_note("B"),
+                "20-knowledge/RefOne.md": self.valid_note("RefOne", "[[A]] [[B]]"),
+                "20-knowledge/RefTwo.md": self.valid_note("RefTwo", "[[A]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/A.md", "20-knowledge/B.md")
+        read_paths: list[str] = []
+        real_read = healthcheck.read_index_text
+
+        def record_read(vault: Path, path: str) -> str:
+            read_paths.append(path)
+            return real_read(vault, path)
+
+        with mock.patch.object(healthcheck, "read_index_text", side_effect=record_read):
+            errors = self.staged_errors()
+
+        self.assertEqual(
+            errors,
+            sorted(
+                [
+                    "스테이징 차단: 20-knowledge/RefOne.md — 삭제·개명된 노트 'A' 백링크가 남아 있음",
+                    "스테이징 차단: 20-knowledge/RefOne.md — 삭제·개명된 노트 'B' 백링크가 남아 있음",
+                    "스테이징 차단: 20-knowledge/RefTwo.md — 삭제·개명된 노트 'A' 백링크가 남아 있음",
+                ]
+            ),
+        )
+        self.assertEqual(
+            sorted(read_paths),
+            ["20-knowledge/RefOne.md", "20-knowledge/RefTwo.md"],
+        )
+
     def test_log_and_health_report_referrers_are_excluded(self) -> None:
         self.seed_notes(
             {
