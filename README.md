@@ -434,7 +434,9 @@ claude
 | 💬 볼트 Q&A | 자유 질문 → hot→index→grep 탐색 후 근거 노트 인용 답변 | 읽기전용 |
 | 🧹 집사 보고 | 주기적으로 healthcheck·mirror push·인박스 현황 보고 (치유는 안 함) | 무관여 |
 
-**접근·운영 정책:** 숫자 user ID 화이트리스트 외 발신자는 무응답 폐기 · Q&A 세션 도구는 `Read Grep Glob`뿐(쓰기·Bash 영구 불허) · 자비스의 볼트 쓰기는 인박스 한 곳 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.
+메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다. 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다. 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다. 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
+
+**접근·운영 정책:** 숫자 user ID 화이트리스트 외 발신자는 무응답 폐기 · Q&A 세션 도구는 `Read Grep Glob`뿐(쓰기·Bash 영구 불허) · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.
 
 브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 

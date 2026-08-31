@@ -2,8 +2,11 @@
 """agentic-vault Jarvis bridge — Telegram 단일 채널 상시 데몬 (stdlib-only).
 
 역할: 롱폴링 수신 → 화이트리스트 필터 → 라우팅(캡처/브리핑/상태/Q&A) → 스케줄(브리핑·집사).
-쓰기 경로는 10-inbox/jarvis/ 결정론적 저장뿐이며, LLM 호출은 전부 읽기 전용
-`claude -p --allowedTools Read Grep Glob` 세션이다.
+메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
+예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
+거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
+캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
+LLM 호출은 전부 읽기 전용 `claude -p --allowedTools Read Grep Glob` 세션이다.
 
 사용:
   python jarvis_bridge.py --vault D:/NS            # 상시 실행
@@ -22,6 +25,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -31,7 +35,7 @@ import urllib.parse
 import urllib.request
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
 
 API_BASE = "https://api.telegram.org/bot{token}/{method}"
@@ -65,6 +69,19 @@ class TelegramAPIError(RuntimeError):
         self.code = code if type(code) is int else None
         suffix = f" code={self.code}" if self.code is not None else ""
         super().__init__(f"Telegram API failure: {self.source}{suffix}")
+
+
+class BriefingState:
+    def __init__(
+            self, day: date, fired: set[tuple[int, int]],
+            pending: list[tuple[int, int]], skipped: set[tuple[int, int]],
+            started_at: datetime,
+            ) -> None:
+        self.day = day
+        self.fired = fired
+        self.pending = pending
+        self.skipped = skipped
+        self.started_at = started_at
 
 
 def parse_telegram_user_ids(value: object) -> list[int]:
@@ -116,14 +133,59 @@ def state_dir_for(vault: Path, token: str, root: Path = STATE_ROOT) -> Path:
 
 
 def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temporary = _write_unique_fsynced_temp(path, text)
     try:
-        with temporary.open("w", encoding="utf-8") as handle:
+        temporary.replace(path)
+        _fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort durability for the directory entry published by a link."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _write_unique_fsynced_temp(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(raw_path)
+    try:
+        handle = os.fdopen(descriptor, "w", encoding="utf-8", newline="")
+        descriptor = -1
+        with handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.replace(path)
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def _publish_text_no_clobber(path: Path, text: str) -> bool:
+    """Publish complete UTF-8 text atomically, returning False if target won."""
+    temporary = _write_unique_fsynced_temp(path, text)
+    try:
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        _fsync_directory(path.parent)
+        return True
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -155,17 +217,30 @@ def read_float_state(path: Path, default: float = 0.0) -> float:
 def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
     root.mkdir(parents=True, exist_ok=True)
     owner_path = root / "legacy-owner.json"
+    legacy_names = ("offset", "last_butler", "last_brief")
+    if not os.path.lexists(owner_path):
+        owner_payload = json.dumps(
+            {"owner_key": owner_key}, ensure_ascii=False, separators=(",", ":"))
+        try:
+            _publish_text_no_clobber(owner_path, owner_payload)
+        except OSError:
+            if not os.path.lexists(owner_path):
+                raise JarvisConfigError(
+                    "cannot safely publish legacy state owner") from None
     try:
-        with owner_path.open("x", encoding="utf-8") as handle:
-            json.dump({"owner_key": owner_key}, handle)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except FileExistsError:
-        pass
-
-    try:
-        stored_owner = json.loads(owner_path.read_text(encoding="utf-8"))["owner_key"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        owner_stat = owner_path.lstat()
+        if not stat.S_ISREG(owner_stat.st_mode):
+            raise ValueError("owner is not a regular file")
+        owner_record = json.loads(owner_path.read_text(encoding="utf-8"))
+        if not isinstance(owner_record, dict):
+            raise ValueError("owner root is not an object")
+        stored_owner = owner_record.get("owner_key")
+        if not isinstance(stored_owner, str) or not stored_owner:
+            raise ValueError("owner_key is missing or invalid")
+    except (OSError, UnicodeError, ValueError):
+        if any(os.path.lexists(root / name) for name in legacy_names):
+            raise JarvisConfigError(
+                "legacy state owner is unreadable while legacy state remains") from None
         log("warning: legacy state owner is unreadable; leaving legacy files untouched")
         return
     if stored_owner != owner_key:
@@ -173,7 +248,7 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
         return
 
     namespace.mkdir(parents=True, exist_ok=True)
-    for name in ("offset", "last_butler", "last_brief"):
+    for name in legacy_names:
         source = root / name
         target = namespace / name
         try:
@@ -316,13 +391,21 @@ def do_capture(
     name = now.strftime("%Y-%m-%d %H%M%S") + suffix + ".md"
     content = f"{body}\n\n---\n수신: {now.strftime('%Y-%m-%d %H:%M:%S')} · 채널: {source}\n"
     target = inbox / name
-    if target.exists():
-        existing = target.read_text(encoding="utf-8")
+    try:
+        published = _publish_text_no_clobber(target, content)
+    except OSError:
+        raise RuntimeError("cannot safely publish capture") from None
+    if not published:
+        try:
+            if not stat.S_ISREG(target.lstat().st_mode):
+                raise OSError("capture target is not a regular file")
+            existing = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            raise RuntimeError("cannot safely inspect existing capture") from None
         if existing == content:
             return name
-        if capture_id is not None:
-            raise RuntimeError(f"conflicting capture content for ID {safe_capture_id}")
-    atomic_write_text(target, content)
+        capture_label = safe_capture_id if capture_id is not None else "timestamp"
+        raise RuntimeError(f"conflicting capture content for ID {capture_label}")
     return name
 
 
@@ -366,25 +449,132 @@ def briefing_label(slot: tuple[int, int]) -> tuple[str, str]:
     return ("🌅", "아침") if hour < 11 else (("🌞", "점심") if hour < 17 else ("🌆", "저녁"))
 
 
-def due_briefing_slots(
-        now: datetime, slots: list[tuple[int, int]], fired_date: date | None,
-        fired_slots: set[tuple[int, int]],
-        ) -> tuple[date, set[tuple[int, int]], list[tuple[int, int]]]:
-    """현재 날짜의 발송 상태와 지금 발송할 슬롯을 부작용 없이 계산한다.
+def _format_briefing_slot(slot: tuple[int, int]) -> str:
+    return "%02d:%02d" % slot
 
-    ``fired_date is None``은 프로세스 기동을 뜻한다. 이때 이미 지난 슬롯만
-    소비해 재기동 폭주를 막고, 정확히 현재 분인 슬롯은 다음 루프에서 발송한다.
-    """
-    today = now.date()
-    current_clock = (now.hour, now.minute)
-    if fired_date is None:
-        consumed = {slot for slot in slots if slot < current_clock}
-        return today, consumed, []
-    active_fired = set() if fired_date != today else set(fired_slots)
-    due = sorted(
-        slot for slot in slots
-        if slot <= current_clock and slot not in active_fired)
-    return today, active_fired, due
+
+def _parse_briefing_day(value: object) -> date:
+    if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise JarvisConfigError("invalid last_brief day")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise JarvisConfigError("invalid last_brief day") from None
+    if parsed.isoformat() != value:
+        raise JarvisConfigError("invalid last_brief day")
+    return parsed
+
+
+def _parse_briefing_state_slots(
+        value: object, name: str, configured: set[tuple[int, int]],
+        ) -> list[tuple[int, int]]:
+    if not isinstance(value, list):
+        raise JarvisConfigError(f"invalid last_brief {name}")
+    parsed: list[tuple[int, int]] = []
+    for item in value:
+        if not isinstance(item, str) or not re.fullmatch(
+                r"[0-9]{2}:[0-9]{2}", item):
+            raise JarvisConfigError(f"invalid last_brief {name}")
+        hour, minute = map(int, item.split(":"))
+        slot = (hour, minute)
+        if slot not in configured:
+            raise JarvisConfigError(f"last_brief {name} contains an unconfigured slot")
+        parsed.append(slot)
+    if len(set(parsed)) != len(parsed):
+        raise JarvisConfigError(f"last_brief {name} contains duplicate slots")
+    if parsed != sorted(parsed):
+        raise JarvisConfigError(f"last_brief {name} is out of order")
+    return parsed
+
+
+def _write_briefing_state(
+        path: Path, day_value: date, fired: set[tuple[int, int]],
+        pending: list[tuple[int, int]],
+        ) -> None:
+    payload = {
+        "version": 1,
+        "day": day_value.isoformat(),
+        "fired": [_format_briefing_slot(slot) for slot in sorted(fired)],
+        "pending": [_format_briefing_slot(slot) for slot in pending],
+    }
+    atomic_write_text(
+        path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+
+
+def _read_briefing_disk_state(
+        path: Path, slots: list[tuple[int, int]], today: date,
+        ) -> tuple[date, set[tuple[int, int]], list[tuple[int, int]]] | None:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError):
+        raise JarvisConfigError("last_brief state is unreadable") from None
+
+    legacy_match = re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", raw)
+    if legacy_match is not None:
+        legacy_day = _parse_briefing_day(raw)
+        if legacy_day > today:
+            raise JarvisConfigError("last_brief day is in the future")
+        if legacy_day == today:
+            if len(slots) != 1:
+                raise JarvisConfigError(
+                    "legacy last_brief for today is ambiguous with multiple briefing slots")
+            fired = {slots[0]}
+        else:
+            fired = set()
+        try:
+            _write_briefing_state(path, legacy_day, fired, [])
+        except OSError:
+            raise JarvisConfigError("cannot migrate legacy last_brief state") from None
+        return legacy_day, fired, []
+
+    try:
+        record = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise JarvisConfigError("last_brief state is invalid JSON") from None
+    if not isinstance(record, dict) or set(record) != {
+            "version", "day", "fired", "pending"}:
+        raise JarvisConfigError("last_brief state has an invalid schema")
+    if type(record["version"]) is not int or record["version"] != 1:
+        raise JarvisConfigError("last_brief state has an unsupported version")
+    state_day = _parse_briefing_day(record["day"])
+    if state_day > today:
+        raise JarvisConfigError("last_brief day is in the future")
+    configured = set(slots)
+    fired_list = _parse_briefing_state_slots(
+        record["fired"], "fired", configured)
+    pending = _parse_briefing_state_slots(
+        record["pending"], "pending", configured)
+    fired = set(fired_list)
+    if fired.intersection(pending):
+        raise JarvisConfigError("last_brief fired and pending slots overlap")
+    return state_day, fired, pending
+
+
+def load_briefing_state(
+        path: Path, slots: list[tuple[int, int]], started_at: datetime,
+        ) -> BriefingState:
+    """Validate persisted state and initialize cold-start-only skipped slots."""
+    persisted = _read_briefing_disk_state(path, slots, started_at.date())
+    clock = (started_at.hour, started_at.minute)
+    if persisted is None:
+        day_value, fired, pending = started_at.date(), set(), []
+    else:
+        day_value, fired, pending = persisted
+        if day_value < started_at.date() and not pending:
+            day_value, fired = started_at.date(), set()
+    if day_value == started_at.date():
+        skipped = {
+            slot for slot in slots
+            if slot < clock and slot not in fired and slot not in pending
+        }
+    else:
+        skipped = set()
+    return BriefingState(
+        day=day_value, fired=set(fired), pending=list(pending),
+        skipped=skipped, started_at=started_at)
 
 
 def do_brief(vault: Path, cfg: dict) -> str:
@@ -625,22 +815,64 @@ def process_update_batch(
 
 def send_due_briefings(
         vault: Path, cfg: dict, token: str, chat_id: int, now: datetime,
-        slots: list[tuple[int, int]], fired_date: date | None,
-        fired_slots: set[tuple[int, int]],
+        slots: list[tuple[int, int]], state: BriefingState, state_file: Path,
         sender: Callable[[str, int, str], bool],
-        ) -> tuple[date, set[tuple[int, int]]]:
-    active_date, active_fired, due = due_briefing_slots(
-        now, slots, fired_date, fired_slots)
-    for slot in due:
-        emoji, name = briefing_label(slot)
-        log("스케줄 브리핑 생성(%s %02d:%02d)" % (
-            name, slot[0], slot[1]))
-        if not sender(
-                token, chat_id,
-                f"{emoji} {name} 브리핑\n" + do_brief(vault, cfg)):
-            break
-        active_fired.add(slot)
-    return active_date, active_fired
+        ) -> BriefingState:
+    """Persist due work before generation and acknowledge one delivered head at a time."""
+    if state.day > now.date():
+        raise JarvisConfigError("last_brief day is in the future")
+
+    def drain_pending() -> bool:
+        while state.pending:
+            slot = state.pending[0]
+            emoji, name = briefing_label(slot)
+            log("스케줄 브리핑 생성(%s %02d:%02d)" % (
+                name, slot[0], slot[1]))
+            if not sender(
+                    token, chat_id,
+                    f"{emoji} {name} 브리핑\n" + do_brief(vault, cfg)):
+                return False
+            next_fired = set(state.fired)
+            next_fired.add(slot)
+            next_pending = state.pending[1:]
+            _write_briefing_state(
+                state_file, state.day, next_fired, next_pending)
+            state.fired = next_fired
+            state.pending = next_pending
+        return True
+
+    if state.day < now.date():
+        if state.pending and not drain_pending():
+            return state
+        cold_activation = state.started_at.date() == now.date()
+        if cold_activation:
+            startup_clock = (state.started_at.hour, state.started_at.minute)
+            next_skipped = {slot for slot in slots if slot < startup_clock}
+        else:
+            next_skipped = set()
+        _write_briefing_state(
+            state_file, now.date(), set(), [])
+        state.day = now.date()
+        state.fired = set()
+        state.pending = []
+        state.skipped = next_skipped
+
+    current_clock = (now.hour, now.minute)
+    newly_due = [
+        slot for slot in slots
+        if slot <= current_clock
+        and slot not in state.fired
+        and slot not in state.pending
+        and slot not in state.skipped
+    ]
+    if newly_due:
+        complete_pending = [*state.pending, *newly_due]
+        _write_briefing_state(
+            state_file, state.day, state.fired, complete_pending)
+        state.pending = complete_pending
+
+    drain_pending()
+    return state
 
 
 def send_butler_if_due(
@@ -676,9 +908,9 @@ def serve(vault: Path, cfg: dict) -> None:
     butler_file = state_dir / "last_butler"
     last_butler = read_float_state(butler_file, default=0.0)
     brief_slots = cfg["_briefing_slots"]
-    # 기동 전에 이미 지난 슬롯은 오늘분 발송하지 않는다(재기동 폭주 방지).
-    fired_date, fired_slots, _due = due_briefing_slots(
-        datetime.now(), brief_slots, None, set())
+    brief_file = state_dir / "last_brief"
+    briefing_state = load_briefing_state(
+        brief_file, brief_slots, datetime.now())
     log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}, "
         f"브리핑 {['%02d:%02d' % s for s in brief_slots]}")
 
@@ -687,9 +919,9 @@ def serve(vault: Path, cfg: dict) -> None:
         now = datetime.now()
         if whitelist:
             first = sorted(whitelist)[0]
-            fired_date, fired_slots = send_due_briefings(
-                vault, cfg, token, first, now, brief_slots, fired_date,
-                fired_slots, tg_send)
+            briefing_state = send_due_briefings(
+                vault, cfg, token, first, now, brief_slots, briefing_state,
+                brief_file, tg_send)
             last_butler = send_butler_if_due(
                 vault, cfg, token, first, last_butler, butler_file,
                 time.time(), tg_send)

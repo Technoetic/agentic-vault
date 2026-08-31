@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import importlib.util
+import errno
 import http.client
 import io
 import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from datetime import date, datetime
 from pathlib import Path
@@ -534,6 +537,20 @@ class JarvisBriefingTests(unittest.TestCase):
             "_log_note": "00-meta/log.md",
             "butler_interval_hours": 24,
         }
+        self.slots = [(7, 30), (13, 30), (19, 30)]
+        self.state_file = self.root / "state" / "last_brief"
+
+    def _load(self, started_at, slots=None):
+        return _BRIDGE.load_briefing_state(
+            self.state_file, slots or self.slots, started_at)
+
+    def _send(self, state, now, sender, slots=None):
+        return _BRIDGE.send_due_briefings(
+            self.vault, self.cfg, "12345:secret", 111, now,
+            slots or self.slots, state, self.state_file, sender)
+
+    def _disk_state(self):
+        return json.loads(self.state_file.read_text(encoding="utf-8"))
 
     def test_do_brief_uses_neutral_recurring_prompt(self):
         with patch.object(_BRIDGE, "_git", return_value="abc123 change"), \
@@ -551,77 +568,261 @@ class JarvisBriefingTests(unittest.TestCase):
         self.assertEqual(_BRIDGE.briefing_label((13, 30)), ("🌞", "점심"))
         self.assertEqual(_BRIDGE.briefing_label((19, 30)), ("🌆", "저녁"))
 
-    def test_startup_consumes_only_already_passed_slots(self):
-        current_date, fired, due = _BRIDGE.due_briefing_slots(
-            datetime(2026, 9, 1, 12, 0),
-            [(7, 30), (12, 0), (13, 30), (19, 30)],
-            None,
-            set(),
-        )
+    def test_cold_start_skips_only_strictly_earlier_slots_in_memory(self):
+        state = self._load(datetime(2026, 9, 1, 13, 0))
+        sender = Mock(return_value=True)
 
-        self.assertEqual(current_date, date(2026, 9, 1))
-        self.assertEqual(fired, {(7, 30)})
-        self.assertEqual(due, [])
+        with patch.object(_BRIDGE, "do_brief", return_value="body") as generator:
+            state = self._send(state, datetime(2026, 9, 1, 13, 0), sender)
 
-    def test_exact_current_startup_slot_is_due_on_next_evaluation(self):
-        now = datetime(2026, 9, 1, 12, 0)
-        slots = [(7, 30), (12, 0), (13, 30)]
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.skipped, {(7, 30)})
+        self.assertEqual(state.pending, [])
+        sender.assert_not_called()
+        generator.assert_not_called()
 
-        current_date, fired, due = _BRIDGE.due_briefing_slots(
-            now, slots, None, set())
-        self.assertEqual((fired, due), ({(7, 30)}, []))
-
-        current_date, fired, due = _BRIDGE.due_briefing_slots(
-            now, slots, current_date, fired)
-
-        self.assertEqual(fired, {(7, 30)})
-        self.assertEqual(due, [(12, 0)])
-
-    def test_new_day_resets_fired_slots_and_exposes_due_slots(self):
-        current_date, fired, due = _BRIDGE.due_briefing_slots(
-            datetime(2026, 9, 1, 12, 0),
-            [(7, 30), (13, 30)],
-            date(2026, 8, 31),
-            {(7, 30), (13, 30)},
-        )
-
-        self.assertEqual(current_date, date(2026, 9, 1))
-        self.assertEqual(fired, set())
-        self.assertEqual(due, [(7, 30)])
-
-    def test_scheduled_briefing_is_marked_only_after_successful_send(self):
-        sender = Mock(side_effect=[False, True])
-        now = datetime(2026, 9, 1, 7, 30)
-        slots = [(7, 30)]
+    def test_exact_current_minute_on_cold_start_remains_due(self):
+        slots = [(7, 30), (13, 30)]
+        now = datetime(2026, 9, 1, 13, 30)
+        state = self._load(now, slots)
+        sender = Mock(return_value=True)
 
         with patch.object(_BRIDGE, "do_brief", return_value="body"):
-            fired_date, fired = _BRIDGE.send_due_briefings(
-                self.vault, self.cfg, "12345:secret", 111, now, slots,
-                date(2026, 8, 31), set(), sender)
-            self.assertEqual((fired_date, fired), (date(2026, 9, 1), set()))
+            state = self._send(state, now, sender, slots)
 
-            fired_date, fired = _BRIDGE.send_due_briefings(
-                self.vault, self.cfg, "12345:secret", 111, now, slots,
-                fired_date, fired, sender)
-
-        self.assertEqual(fired, {(7, 30)})
-        self.assertEqual(sender.call_count, 2)
-        self.assertIn("🌅 아침 브리핑", sender.call_args.args[2])
-
-    def test_first_send_failure_does_not_call_or_mark_later_due_slots(self):
-        sender = Mock(return_value=False)
-
-        with patch.object(_BRIDGE, "do_brief", return_value="body"):
-            fired_date, fired = _BRIDGE.send_due_briefings(
-                self.vault, self.cfg, "12345:secret", 111,
-                datetime(2026, 9, 1, 20, 0),
-                [(7, 30), (13, 30), (19, 30)], date(2026, 8, 31),
-                set(), sender)
-
-        self.assertEqual(fired_date, date(2026, 9, 1))
-        self.assertEqual(fired, set())
+        self.assertEqual(state.skipped, {(7, 30)})
+        self.assertEqual(state.fired, {(13, 30)})
+        self.assertEqual(state.pending, [])
         sender.assert_called_once()
-        self.assertIn("🌅 아침 브리핑", sender.call_args.args[2])
+        self.assertIn("🌞 점심 브리핑", sender.call_args.args[2])
+
+    def test_failed_send_restarts_next_minute_from_persisted_pending(self):
+        slots = [(7, 30)]
+        first_now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(first_now, slots)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(state, first_now, Mock(return_value=False), slots)
+
+        self.assertEqual(self._disk_state(), {
+            "version": 1, "day": "2026-09-01", "fired": [],
+            "pending": ["07:30"],
+        })
+        restarted = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        retry_sender = Mock(return_value=True)
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            restarted = self._send(
+                restarted, datetime(2026, 9, 1, 7, 31), retry_sender, slots)
+
+        retry_sender.assert_called_once()
+        self.assertEqual(restarted.fired, {(7, 30)})
+        self.assertEqual(restarted.pending, [])
+
+    def test_successful_send_does_not_duplicate_after_restart(self):
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(state, now, Mock(return_value=True), slots)
+
+        restarted = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        sender = Mock(return_value=True)
+        with patch.object(_BRIDGE, "do_brief", return_value="body") as generator:
+            restarted = self._send(
+                restarted, datetime(2026, 9, 1, 7, 31), sender, slots)
+
+        self.assertEqual(restarted.fired, {(7, 30)})
+        sender.assert_not_called()
+        generator.assert_not_called()
+
+    def test_live_day_rollover_sends_slots_due_on_the_new_day(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01",
+            "fired": ["07:30", "13:30", "19:30"], "pending": [],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 20, 0))
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 2, 13, 30), sender)
+
+        self.assertEqual(state.day, date(2026, 9, 2))
+        self.assertEqual(state.fired, {(7, 30), (13, 30)})
+        self.assertEqual(sender.call_count, 2)
+
+    def test_rollover_state_write_failure_preserves_prior_day_in_memory(self):
+        slots = [(7, 30)]
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01",
+            "fired": ["07:30"], "pending": [],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 8, 0), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=OSError("disk full")), \
+                patch.object(_BRIDGE, "do_brief", return_value="body") as generator, \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 2, 7, 30), sender, slots)
+
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [])
+        sender.assert_not_called()
+        generator.assert_not_called()
+
+    def test_first_success_second_failure_preserves_ordered_remaining_pending(self):
+        state = self._load(datetime(2026, 9, 1, 6, 0))
+        sender = Mock(side_effect=[True, False])
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 1, 20, 0), sender)
+
+        self.assertEqual(sender.call_count, 2)
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [(13, 30), (19, 30)])
+        self.assertEqual(self._disk_state()["pending"], ["13:30", "19:30"])
+
+    def test_pending_write_failure_sends_and_generates_nothing(self):
+        slots = [(7, 30)]
+        state = self._load(datetime(2026, 9, 1, 7, 30), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=OSError("disk full")), \
+                patch.object(_BRIDGE, "do_brief", return_value="body") as generator, \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 1, 7, 30), sender, slots)
+
+        sender.assert_not_called()
+        generator.assert_not_called()
+        self.assertEqual(state.pending, [])
+        self.assertFalse(self.state_file.exists())
+
+    def test_fired_write_failure_leaves_sent_head_retryable(self):
+        slots = [(7, 30)]
+        state = self._load(datetime(2026, 9, 1, 7, 30), slots)
+        sender = Mock(return_value=True)
+        real_writer = _BRIDGE.atomic_write_text
+        write_count = 0
+
+        def fail_second_write(path, text):
+            nonlocal write_count
+            write_count += 1
+            if write_count == 2:
+                raise OSError("disk full")
+            return real_writer(path, text)
+
+        with patch.object(
+                _BRIDGE, "atomic_write_text", side_effect=fail_second_write), \
+                patch.object(_BRIDGE, "do_brief", return_value="body"), \
+                self.assertRaises(OSError):
+            self._send(
+                state, datetime(2026, 9, 1, 7, 30), sender, slots)
+
+        sender.assert_called_once()
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.pending, [(7, 30)])
+        self.assertEqual(self._disk_state()["pending"], ["07:30"])
+
+    def test_prior_day_pending_drains_before_same_clock_new_day_slot(self):
+        slots = [(7, 30)]
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01", "fired": [],
+            "pending": ["07:30"],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 7, 31), slots)
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            state = self._send(
+                state, datetime(2026, 9, 2, 7, 30), sender, slots)
+
+        self.assertEqual(sender.call_count, 2)
+        self.assertEqual(state.day, date(2026, 9, 2))
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [])
+
+    def test_legacy_dates_migrate_globally_and_inside_namespace(self):
+        slots = [(7, 30)]
+        global_root = self.root / "global"
+        namespace = global_root / "vault-a-12345"
+        global_root.mkdir()
+        (global_root / "last_brief").write_text("2026-09-01", encoding="utf-8")
+        _BRIDGE.migrate_legacy_state(global_root, namespace, namespace.name)
+
+        global_state = _BRIDGE.load_briefing_state(
+            namespace / "last_brief", slots, datetime(2026, 9, 1, 9, 0))
+        self.assertEqual(global_state.fired, {(7, 30)})
+        self.assertEqual(json.loads(
+            (namespace / "last_brief").read_text(encoding="utf-8"))["version"], 1)
+
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-08-31", encoding="utf-8")
+        namespaced = self._load(datetime(2026, 9, 1, 13, 0))
+        self.assertEqual(namespaced.day, date(2026, 9, 1))
+        self.assertEqual(namespaced.fired, set())
+        self.assertEqual(namespaced.skipped, {(7, 30)})
+        self.assertEqual(self._disk_state(), {
+            "version": 1, "day": "2026-08-31", "fired": [], "pending": [],
+        })
+
+    def test_today_legacy_date_with_multiple_slots_is_actionably_ambiguous(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-09-01", encoding="utf-8")
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "multiple briefing slots"):
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_future_legacy_date_fails_closed(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("2026-09-02", encoding="utf-8")
+
+        with self.assertRaisesRegex(_BRIDGE.JarvisConfigError, "future"):
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_invalid_briefing_state_variants_fail_closed(self):
+        valid_base = {
+            "version": 1, "day": "2026-09-01", "fired": [], "pending": [],
+        }
+        cases = {
+            "corrupt": "{",
+            "duplicate": json.dumps({
+                **valid_base, "fired": ["07:30", "07:30"]}),
+            "overlap": json.dumps({
+                **valid_base, "fired": ["07:30"], "pending": ["07:30"]}),
+            "out-of-order": json.dumps({
+                **valid_base, "pending": ["13:30", "07:30"]}),
+            "foreign": json.dumps({**valid_base, "pending": ["08:00"]}),
+            "unicode-digits": json.dumps({**valid_base, "pending": ["٠٧:٣٠"]}),
+            "future": json.dumps({**valid_base, "day": "2026-09-02"}),
+        }
+        self.state_file.parent.mkdir(parents=True)
+        for name, raw in cases.items():
+            with self.subTest(case=name):
+                self.state_file.write_text(raw, encoding="utf-8")
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    self._load(datetime(2026, 9, 1, 9, 0))
+
+    def test_briefing_state_normalizes_plain_json_value_errors(self):
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text("{}", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.json, "loads", side_effect=ValueError("CONTENT-SENTINEL")), \
+                self.assertRaisesRegex(_BRIDGE.JarvisConfigError, "invalid JSON") as raised:
+            self._load(datetime(2026, 9, 1, 9, 0))
+
+        self.assertNotIn("CONTENT-SENTINEL", str(raised.exception))
 
     def test_manual_brief_wording_is_neutral(self):
         sender = Mock(return_value=True)
@@ -693,6 +894,30 @@ class JarvisBriefingTests(unittest.TestCase):
                 text = (_ROOT / relative).read_text(encoding="utf-8")
                 self.assertIn(disclosure, text)
 
+    def test_module_and_user_docs_match_write_log_and_capture_contracts(self):
+        contracts = (
+            "메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.",
+            "예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.",
+            "거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 "
+            "`~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.",
+            "캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.",
+        )
+        sources = {
+            "jarvis_bridge.py docstring": _BRIDGE.__doc__ or "",
+            **{
+                relative: (_ROOT / relative).read_text(encoding="utf-8")
+                for relative in (
+                    "commands/vault-jarvis-setup.md",
+                    "README.md",
+                    "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md",
+                )
+            },
+        }
+        for source_name, text in sources.items():
+            for contract in contracts:
+                with self.subTest(source=source_name, contract=contract):
+                    self.assertIn(contract, text)
+
 
 class JarvisStateTests(unittest.TestCase):
     def setUp(self):
@@ -734,6 +959,33 @@ class JarvisStateTests(unittest.TestCase):
 
         self.assertEqual(target.read_text(encoding="utf-8"), "42")
         self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_concurrent_atomic_replacements_use_unique_complete_temporaries(self):
+        target = self.root / "offset"
+        barrier = threading.Barrier(2)
+        original_replace = Path.replace
+        temporary_names = []
+        names_lock = threading.Lock()
+        replace_lock = threading.Lock()
+
+        def synchronized_replace(source, destination):
+            if Path(destination) == target:
+                with names_lock:
+                    temporary_names.append(Path(source).name)
+                barrier.wait(timeout=5)
+            with replace_lock:
+                return original_replace(source, destination)
+
+        with patch.object(Path, "replace", synchronized_replace), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(
+                lambda text: _BRIDGE.atomic_write_text(target, text),
+                ("alpha", "beta"),
+            ))
+
+        self.assertIn(target.read_text(encoding="utf-8"), {"alpha", "beta"})
+        self.assertEqual(len(set(temporary_names)), 2)
+        self.assertEqual(list(self.root.glob(".*.tmp")), [])
 
     def test_float_state_accepts_missing_default_and_finite_non_negative_values(self):
         path = self.root / "last_butler"
@@ -778,6 +1030,98 @@ class JarvisStateTests(unittest.TestCase):
         self.assertTrue((self.root / "last_brief").exists())
         self.assertFalse((second_namespace / "last_brief").exists())
         self.assertIn("another owner", warning.getvalue().lower())
+
+    def test_owner_claim_is_observed_only_as_complete_valid_json(self):
+        namespace = self.root / "vault-a-12345"
+        owner_path = self.root / "legacy-owner.json"
+        observed = []
+        original_link = os.link
+
+        def observing_link(source, target):
+            if Path(target) == owner_path:
+                staged = Path(source).read_text(encoding="utf-8")
+                self.assertEqual(json.loads(staged), {"owner_key": namespace.name})
+                self.assertFalse(owner_path.exists())
+                result = original_link(source, target)
+                observed.append(owner_path.read_text(encoding="utf-8"))
+                return result
+            return original_link(source, target)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=observing_link):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, namespace.name)
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(json.loads(observed[0]), {"owner_key": namespace.name})
+        self.assertEqual(list(self.root.glob(".legacy-owner.json.*.tmp")), [])
+
+    def test_unreadable_owner_with_remaining_legacy_state_aborts(self):
+        owner = self.root / "legacy-owner.json"
+        owner.write_text("{", encoding="utf-8")
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "legacy state owner.*unreadable"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
+        self.assertEqual(owner.read_text(encoding="utf-8"), "{")
+        self.assertTrue((self.root / "offset").exists())
+
+    def test_unreadable_owner_without_legacy_state_warns_and_continues(self):
+        owner = self.root / "legacy-owner.json"
+        owner.mkdir()
+        warning = io.StringIO()
+
+        with redirect_stdout(warning):
+            _BRIDGE.migrate_legacy_state(
+                self.root, self.root / "vault-a-12345", "vault-a-12345")
+
+        self.assertTrue(owner.is_dir())
+        self.assertIn("unreadable", warning.getvalue().lower())
+
+    def test_simultaneous_different_owners_have_one_valid_winner(self):
+        namespaces = [self.root / "vault-a-12345", self.root / "vault-b-67890"]
+        (self.root / "offset").write_text("41", encoding="utf-8")
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_owner_link(source, target):
+            if Path(target).name == "legacy-owner.json":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_owner_link), \
+                patch.object(_BRIDGE, "log") as logger, \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(
+                lambda namespace: _BRIDGE.migrate_legacy_state(
+                    self.root, namespace, namespace.name),
+                namespaces,
+            ))
+
+        owner = json.loads(
+            (self.root / "legacy-owner.json").read_text(encoding="utf-8"))["owner_key"]
+        self.assertIn(owner, {namespace.name for namespace in namespaces})
+        winners = [namespace for namespace in namespaces if (namespace / "offset").exists()]
+        self.assertEqual([namespace.name for namespace in winners], [owner])
+        self.assertEqual((winners[0] / "offset").read_text(encoding="utf-8"), "41")
+        warnings = " ".join(call.args[0] for call in logger.call_args_list)
+        self.assertIn("another owner", warnings.lower())
+
+    def test_unsupported_owner_no_clobber_fails_closed_and_cleans_temp(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "offset").write_text("41", encoding="utf-8")
+
+        with patch.object(
+                _BRIDGE.os, "link",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "safely publish legacy state owner"):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, namespace.name)
+
+        self.assertFalse((self.root / "legacy-owner.json").exists())
+        self.assertEqual((self.root / "offset").read_text(encoding="utf-8"), "41")
+        self.assertEqual(list(self.root.glob(".legacy-owner.json.*.tmp")), [])
 
     def test_same_owner_resumes_partial_migration_without_overwriting_target(self):
         namespace = self.root / "vault-a-12345"
@@ -873,6 +1217,81 @@ class JarvisStateTests(unittest.TestCase):
             _BRIDGE.do_capture(
                 self.vault, "different", "telegram", capture_id="100/../unsafe!?",
                 received_at=received)
+
+    def test_concurrent_same_content_captures_converge_without_temp_residue(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_capture_link(source, target):
+            if Path(target).suffix == ".md":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        def capture():
+            return _BRIDGE.do_capture(
+                self.vault, "same", "telegram", capture_id="100",
+                received_at=received)
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_capture_link), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            names = list(pool.map(lambda _item: capture(), range(2)))
+
+        self.assertEqual(names[0], names[1])
+        inbox = self.vault / "10-inbox" / "jarvis"
+        captures = list(inbox.glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("same", captures[0].read_text(encoding="utf-8"))
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_concurrent_conflicting_captures_keep_one_complete_winner(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        barrier = threading.Barrier(2)
+        original_link = os.link
+
+        def synchronized_capture_link(source, target):
+            if Path(target).suffix == ".md":
+                barrier.wait(timeout=5)
+            return original_link(source, target)
+
+        def capture(body):
+            try:
+                return _BRIDGE.do_capture(
+                    self.vault, body, "telegram", capture_id="100",
+                    received_at=received)
+            except Exception as error:  # outcome is asserted below
+                return error
+
+        with patch.object(_BRIDGE.os, "link", side_effect=synchronized_capture_link), \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(capture, ("alpha", "beta")))
+
+        self.assertEqual(sum(isinstance(value, str) for value in outcomes), 1)
+        errors = [value for value in outcomes if isinstance(value, Exception)]
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], RuntimeError)
+        inbox = self.vault / "10-inbox" / "jarvis"
+        captures = list(inbox.glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        content = captures[0].read_text(encoding="utf-8")
+        self.assertEqual(sum(body in content for body in ("alpha", "beta")), 1)
+        self.assertTrue(content.endswith("채널: telegram\n"))
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_unsupported_capture_no_clobber_fails_without_destination(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+
+        with patch.object(
+                _BRIDGE.os, "link",
+                side_effect=OSError(errno.EOPNOTSUPP, "unsupported")), \
+                self.assertRaisesRegex(RuntimeError, "safely publish capture"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        inbox = self.vault / "10-inbox" / "jarvis"
+        self.assertEqual(list(inbox.glob("*.md")), [])
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
 
 
 class JarvisUpdateDurabilityTests(unittest.TestCase):
@@ -1004,6 +1423,23 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
         namespace.mkdir(parents=True)
         (namespace / "last_butler").write_text("nan", encoding="utf-8")
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=AssertionError("polled")), \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.serve(self.vault, cfg)
+
+    def test_invalid_last_brief_aborts_before_polling(self):
+        token = "12345:secret"
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        namespace.mkdir(parents=True)
+        (namespace / "last_brief").write_text("{", encoding="utf-8")
         cfg = {
             "telegram_user_ids": [],
             "_briefing_slots": [(7, 30)],
@@ -1231,17 +1667,21 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
             "ok": False, "error_code": 400,
             "description": "CONTENT-SENTINEL",
         }).encode("utf-8")
+        state_file = self.root / "brief-state" / "last_brief"
+        state = _BRIDGE.load_briefing_state(
+            state_file, [(7, 30)], datetime(2026, 9, 1, 7, 30))
         with patch.object(
                 _BRIDGE.urllib.request, "urlopen", return_value=response) as opener, \
                 patch.object(_BRIDGE, "do_brief", return_value="body"), \
                 patch.object(_BRIDGE, "log"):
-            fired_date, fired = _BRIDGE.send_due_briefings(
+            state = _BRIDGE.send_due_briefings(
                 self.vault, self.cfg, "12345:secret", 111,
                 datetime(2026, 9, 1, 7, 30), [(7, 30)],
-                date(2026, 8, 31), set(), _BRIDGE.tg_send)
+                state, state_file, _BRIDGE.tg_send)
 
-        self.assertEqual(fired_date, date(2026, 9, 1))
-        self.assertEqual(fired, set())
+        self.assertEqual(state.day, date(2026, 9, 1))
+        self.assertEqual(state.fired, set())
+        self.assertEqual(state.pending, [(7, 30)])
         self.assertEqual(opener.call_count, 1)
 
     def test_protocol_send_failure_does_not_advance_inbound_offset(self):
