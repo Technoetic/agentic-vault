@@ -58,6 +58,14 @@ REQUIRED_RELEASE_LITERALS = (
     "git status --short --branch",
     "git log --oneline origin/master..HEAD",
 )
+EXPECTED_SCOPE_UPGRADE_LINES = (
+    "2. 일반 누락 키 보충은 `frontmatter_roots`와 "
+    "`frontmatter_exempt_paths`가 없을 때 그 부재를 보존한다. "
+    "`frontmatter_exempt_paths`가 없고 기존 `fm_exempt_zones`가 있으면 "
+    "호환 alias가 계속 적용되도록 새 키를 자동 추가하지 않는다.",
+    "3. 두 범위 키를 추가하려면 full 모드 검사 범위가 어떻게 바뀌는지 "
+    "먼저 확인하고, 별도의 검사 범위 마이그레이션으로 명시적으로 승인한다.",
+)
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -98,3 +106,6 @@ class ReleaseMetadataTests(unittest.TestCase):
         for literal in REQUIRED_RELEASE_LITERALS:
             with self.subTest(literal=literal):
                 self.assertIn(literal, release)
+        for line in EXPECTED_SCOPE_UPGRADE_LINES:
+            with self.subTest(line=line):
+                self.assertIn(line, release_lines)

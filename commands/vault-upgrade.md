@@ -1,10 +1,10 @@
 ---
-description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 누락된 템플릿·설정 키·git 훅·anchor를 멱등 설치
+description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레거시 검사 범위를 보존하며 누락된 템플릿·설정 키·git 훅·anchor를 멱등 설치
 ---
 
 # /vault-upgrade — 기존 볼트 업그레이드
 
-기존 볼트에 이 플러그인 버전의 기능을 설치하라. **멱등(idempotent)**: 이미 있는 것은 건너뛰고, 기존 사용자 파일·값은 덮어쓰지 않으며, 누락분과 명확히 식별되는 구버전 엔진 소유 파일만 아래 절차대로 갱신한다. `/vault-init`이 새 볼트용이라면 이 명령은 살아 있는 볼트용이다.
+기존 볼트에 이 플러그인 버전의 기능을 설치하라. **멱등(idempotent)**: 이미 있는 것은 건너뛰고, 기존 사용자 파일·값은 덮어쓰지 않으며, 아래 호환 범위 키 예외를 뺀 누락분과 명확히 식별되는 구버전 엔진 소유 파일만 절차대로 갱신한다. `/vault-init`이 새 볼트용이라면 이 명령은 살아 있는 볼트용이다.
 
 ## 0. 볼트 판별
 
@@ -15,7 +15,10 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 누
 
 각 항목을 검사하고 상태를 기록하라: `이미 있음(건너뜀)` / `추가함` / `사용자 거부`.
 
-1. **vault-config 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `jarvis` 블록(기본 `enabled: false`), `stale_days`, `index_scopes`.
+1. **vault-config 일반 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `jarvis` 블록(기본 `enabled: false`), `stale_days`, `index_scopes`.
+   - **호환 범위 키 예외**: `frontmatter_roots`와 `frontmatter_exempt_paths`는 단순 기본값이 아니라 레거시 full 모드의 검사 범위를 선택하는 부재 marker다. 두 키를 일반 누락 키 보충에서 제외하라. 기존 config에 둘 중 하나라도 없으면 그 부재를 그대로 보존하고, 다른 키가 이미 있더라도 빠진 키를 자동 추가하지 마라.
+   - `frontmatter_exempt_paths`가 없고 `fm_exempt_zones`가 있으면 기존 키가 호환 alias로 계속 적용된다. 템플릿 기본 `frontmatter_exempt_paths`를 넣어 alias를 가리지 마라.
+   - 두 키 중 빠진 키를 추가하는 작업은 별도 **검사 범위 마이그레이션**이다. 추가 전 현재 full 모드의 유효 범위와 템플릿 값을 적용한 뒤의 범위를 비교해 보여주고, 범위가 넓어지거나 좁아지는 경로와 기존 alias 대체 여부를 설명하라. 그 뒤 사용자가 해당 키 추가를 명시적으로 승인한 경우에만 추가하고, 거부하거나 답이 없으면 config를 그대로 유지하라.
 1-1. **행동 계약 rules 구조 (v0.6.0+)** — 3단계로 검사하라:
    - **rules 설치/교체**: `.claude/rules/vault-*.md` 5종(architecture·linking·frontmatter·workflow·collab)이 없으면 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`에서 복사하라. 있으면 각 파일 첫 줄의 `engine=` 스탬프를 플러그인 버전과 비교해 **낮은 파일만 통째로 교체**하라(엔진 소유 파일 — 아래 안전 규칙의 명시적 예외). 교체 전 diff에서 템플릿에 없는 로컬 추가분이 보이면, 그 줄들을 사용자에게 보여주고 CLAUDE.md로 옮길지 물어본 뒤 진행하라.
    - **구판 모놀리스 마이그레이션**: 루트 CLAUDE.md의 `agentic-vault:begin`~`end` 마커 사이에 상세 규칙 섹션(`## 볼트 아키텍처 맵`, `## Hard Rules:` 등)이 남아 있으면 구판(v0.5.x 이하) 설치다. **사용자 확인 후** 마이그레이션하라: ①마커 사이 내용을 rules 템플릿 5종과 대조해 **볼트 고유 추가·수정분을 식별**하고(예: 프로젝트명·SSOT 규칙·커스텀 deny 경로) ②마커 사이를 치환된 `CLAUDE-vault-stub.md` 내용으로 교체하되 ③식별한 볼트 고유분은 마커 **밖**(CLAUDE.md 본문, "볼트 고유 규칙" 섹션 신설)으로 보존 이동하라. 고유분인지 엔진 표준인지 판단이 서지 않는 줄은 **삭제하지 말고 보존 쪽을 택하라**. 마이그레이션 전 CLAUDE.md 원본을 `00-meta/scratch/step_archive/CLAUDE-premigration-<날짜>.md`로 백업하라.

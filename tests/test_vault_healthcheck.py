@@ -455,9 +455,14 @@ class CliModeTests(unittest.TestCase):
         self.assertTrue(report.is_file())
         self.assertIn("## 1. 프런트매터 누락 — 치명 (0)", report.read_text(encoding="utf-8"))
 
-    def test_full_mode_without_frontmatter_roots_preserves_legacy_all_notes_scope(self) -> None:
-        self.write_config()
+    def test_full_mode_without_new_scope_markers_checks_custom_root_and_honors_alias(
+        self,
+    ) -> None:
+        config_path = self.write_config(
+            overrides={"fm_exempt_zones": ["custom/raw"]},
+        )
         self.write("custom/Legacy.md", "legacy content without frontmatter\n")
+        self.write("custom/raw/Capture.md", "exempt legacy capture\n")
 
         result = self.run_cli()
 
@@ -466,7 +471,14 @@ class CliModeTests(unittest.TestCase):
         self.assertTrue(report.is_file())
         report_text = report.read_text(encoding="utf-8")
         self.assertIn("## 1. 프런트매터 누락 — 치명 (1)", report_text)
-        self.assertIn("custom/Legacy.md", report_text)
+        missing_frontmatter = report_text.split(
+            "## 1. 프런트매터 누락 — 치명 (1)", 1
+        )[1].split("## 2. 필수 키 누락", 1)[0]
+        self.assertIn("custom/Legacy.md", missing_frontmatter)
+        self.assertNotIn("custom/raw/Capture.md", missing_frontmatter)
+        persisted = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertNotIn("frontmatter_roots", persisted)
+        self.assertNotIn("frontmatter_exempt_paths", persisted)
 
     def test_staged_mode_rejects_report_output_argument(self) -> None:
         self.write_config(frontmatter_roots=["20-knowledge"])

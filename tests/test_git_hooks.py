@@ -356,6 +356,24 @@ class HookAssetContractTests(unittest.TestCase):
         self.assertIn("자동 덮어쓰기 금지", command)
         self.assertIn("로컬 수정", command)
 
+    def test_upgrade_preserves_absent_legacy_frontmatter_scope_markers(self) -> None:
+        command = UPGRADE_COMMAND.read_text(encoding="utf-8")
+
+        for literal in (
+            "호환 범위 키 예외",
+            "`frontmatter_roots`",
+            "`frontmatter_exempt_paths`",
+            "일반 누락 키 보충에서 제외",
+            "둘 중 하나라도 없으면 그 부재를 그대로 보존",
+            "자동 추가하지 마라",
+            "`fm_exempt_zones`",
+            "호환 alias",
+            "검사 범위 마이그레이션",
+            "명시적으로 승인",
+        ):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, command)
+
     def test_upgrade_requires_confirmation_for_unrelated_hooks_path(self) -> None:
         command = UPGRADE_COMMAND.read_text(encoding="utf-8")
 
