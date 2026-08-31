@@ -10,3 +10,7 @@ Thumbs.db
 desktop.ini
 *.tmp
 *~
+
+# Codex/Superpowers 격리 작업공간
+.worktrees/
+.superpowers/
