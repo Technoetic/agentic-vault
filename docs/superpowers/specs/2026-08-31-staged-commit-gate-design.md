@@ -17,7 +17,7 @@
 ## 3. Git index가 진실의 원천
 
 - 설정은 워킹트리가 아니라 `git show :00-meta/vault-config.json`에서 BOM-safe JSON으로 읽는다.
-- 변경 목록은 `git diff --cached --name-status -z --diff-filter=ACMRD`로 읽어 공백·한글·rename을 손실 없이 파싱한다.
+- 변경 목록은 `git diff --cached --name-status -z --find-renames --diff-filter=ACMRD`로 읽어 공백·한글·rename을 손실 없이 파싱한다. unborn HEAD와 Git 명령 실패도 명시적으로 처리한다.
 - 노트 내용은 `git show :<path>`에서 읽는다. unstaged 작업 트리 내용은 판정에 영향을 주지 않는다.
 - 검사 대상과 참조 검색은 config의 `deny_zones`·`exclude_dirs`를 Git pathspec exclusion으로 적용한다. deny zone 파일명이나 본문을 검사 목적으로 순회하지 않는다.
 
@@ -27,13 +27,17 @@
 - 기본 `frontmatter_roots`는 `00-meta`, `20-knowledge`, `30-journal`, `40-people`, `50-projects`; 기본 면제는 `00-meta/scratch`, `00-meta/scripts`, `10-inbox`다. 기존 config에 키가 없어도 동일하게 동작한다.
 - 삭제 또는 rename 전 경로의 노트 stem을 가리키는 백링크가 결과 index에 남으면 차단한다. 같은 커밋에서 링크를 수정하면 통과한다.
 - log와 health report처럼 append-only·generated 파일은 삭제 백링크 참조자에서 제외하되 경로는 staged config에서 가져온다.
-- config 자체가 잘못된 JSON, 절대경로, 드라이브 경로, `..` 경로, 잘못된 타입을 포함하면 침묵 통과하지 않고 차단한다.
+- config 자체가 잘못된 JSON, 절대경로, 드라이브·UNC 경로, `..` 경로, 잘못된 타입을 포함하면 침묵 통과하지 않고 차단한다. 단 사용자가 CLI로 직접 지정한 `--output`은 기존처럼 볼트 밖 임시 경로를 허용하고 config 내부 경로만 제한한다.
 - 훅이 활성인 상태에서 vault marker인 `00-meta/vault-config.json`을 삭제하는 커밋은 차단한다. 볼트 해제는 훅 비활성화·엔진 파일 제거를 포함한 명시적 uninstall 절차로만 수행한다.
+- copy(`C`)는 새 경로의 스키마만 검사하고 원본 stem 삭제로 취급하지 않는다. rename(`R`)은 새 경로를 검사하고, stem이 바뀐 경우에만 이전 stem의 삭제 백링크를 검사한다.
+- 같은 stem의 다른 Markdown 노트가 결과 index에 남아 있으면 위키링크 대상이 계속 존재하므로 삭제 백링크 차단을 적용하지 않는다.
 - Markdown 변경이 없는 커밋도 config 변경과 훅에 필요한 기본 진단은 실행한다.
 
 ## 5. 전체 검사와의 관계
 
 `--staged`는 커밋 직전 변경 표면만 차단하며 health report를 쓰지 않는다. 인덱스 전체의 기존 관리성 부채는 기존 full mode가 리포트한다. 동일한 config 검증기와 프런트매터 파서를 공유해 두 모드의 규칙 의미가 갈라지지 않게 한다.
+
+기존 config의 `fm_exempt_zones`는 `frontmatter_exempt_paths`의 호환 alias로 읽는다. `frontmatter_roots`가 없는 legacy config에서 full mode는 기존처럼 활성 노트 전체에 스키마를 적용하고, staged mode만 기존 pre-commit과 같은 기본 5개 root를 사용한다. 새 템플릿과 `/vault-upgrade`가 명시적 roots를 추가한 뒤에는 두 모드가 같은 roots를 사용한다.
 
 ## 6. 테스트
 
