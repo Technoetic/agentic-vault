@@ -293,6 +293,44 @@ class PreCommitHookTests(unittest.TestCase):
 
 
 class HookAssetContractTests(unittest.TestCase):
+    def test_prepush_classifies_remote_locality(self) -> None:
+        shell = find_shell()
+        cases = (
+            ("absolute POSIX path", "/var/backups/vault.git", 0),
+            ("Windows path with forward slashes", "C:/backups/vault.git", 0),
+            ("Windows path with backslashes", r"C:\backups\vault.git", 0),
+            ("local POSIX file URI", "file:///var/backups/vault.git", 0),
+            ("local Windows file URI", "file:///C:/backups/vault.git", 0),
+            ("slash UNC path", "//server/share/vault.git", 1),
+            ("backslash UNC path", r"\\server\share\vault.git", 1),
+            ("hosted file URI", "file://server/share/vault.git", 1),
+            ("UNC-like four-slash file URI", "file:////server/share/vault.git", 1),
+            ("single-letter scp remote", "x:path", 1),
+            ("scp remote", "git@example.com:team/vault.git", 1),
+            ("SSH URL", "ssh://example.com/team/vault.git", 1),
+            ("HTTP URL", "http://example.com/team/vault.git", 1),
+            ("HTTPS URL", "https://example.com/team/vault.git", 1),
+            ("Git URL", "git://example.com/team/vault.git", 1),
+            ("empty URL", "", 1),
+            ("malformed file URI", "file://", 1),
+            ("drive-relative Windows path", r"C:backups\vault.git", 1),
+            ("relative path", "backups/vault.git", 1),
+        )
+
+        for label, remote_url, expected_status in cases:
+            with self.subTest(label=label, remote_url=remote_url):
+                result = subprocess.run(
+                    [str(shell), shell_path(PRE_PUSH), "origin", remote_url],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, expected_status, result.stderr)
+
     def test_hook_files_have_engine_stamp_and_shell_syntax(self) -> None:
         shell = find_shell()
         for hook in (PRE_COMMIT, PRE_PUSH):

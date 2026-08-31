@@ -13,7 +13,8 @@
 
 remote_url="$2"
 case "$remote_url" in
-  file://*|[A-Za-z]:*|/*) exit 0 ;;
+  file:////*|//*) ;;
+  file:///*|[A-Za-z]:/*|[A-Za-z]:\\*|/*) exit 0 ;;
 esac
 
 echo "" >&2
