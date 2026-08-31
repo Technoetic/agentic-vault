@@ -442,11 +442,28 @@ def route(text: str) -> tuple[str, str]:
 
 # ---------------------------------------------------------------- 동작
 
+def _resolve_capture_directory(vault: Path, inbox: Path) -> Path:
+    try:
+        resolved_vault = vault.resolve(strict=True)
+        resolved_inbox = inbox.resolve(strict=False)
+    except (OSError, RuntimeError):
+        raise RuntimeError("cannot safely resolve capture directory") from None
+    try:
+        resolved_inbox.relative_to(resolved_vault)
+    except ValueError:
+        raise RuntimeError("capture directory escapes vault") from None
+    return resolved_inbox
+
+
 def do_capture(
         vault: Path, body: str, source: str, capture_id: str | None = None,
         received_at: datetime | None = None) -> str:
     inbox = vault / "10-inbox" / "jarvis"
-    inbox.mkdir(parents=True, exist_ok=True)
+    resolved_inbox = _resolve_capture_directory(vault, inbox)
+    try:
+        resolved_inbox.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise RuntimeError("cannot safely create capture directory") from None
     now = received_at or datetime.now()
     suffix = ""
     if capture_id is not None:
@@ -454,7 +471,8 @@ def do_capture(
         suffix = f"-{safe_capture_id}"
     name = now.strftime("%Y-%m-%d %H%M%S") + suffix + ".md"
     content = f"{body}\n\n---\n수신: {now.strftime('%Y-%m-%d %H:%M:%S')} · 채널: {source}\n"
-    target = inbox / name
+    resolved_inbox = _resolve_capture_directory(vault, inbox)
+    target = resolved_inbox / name
     try:
         published = _publish_text_no_clobber(target, content)
     except OSError:

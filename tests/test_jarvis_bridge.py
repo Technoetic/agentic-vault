@@ -1599,6 +1599,55 @@ class JarvisStateTests(unittest.TestCase):
                 self.vault, "different", "telegram", capture_id="100/../unsafe!?",
                 received_at=received)
 
+    def test_capture_rechecks_resolved_parent_before_publishing(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        inbox = self.vault / "10-inbox" / "jarvis"
+        outside = self.root / "outside"
+        outside.mkdir()
+        original_resolve = Path.resolve
+        inbox_resolutions = 0
+
+        def redirected_resolve(path, strict=False):
+            nonlocal inbox_resolutions
+            if Path(path) == inbox:
+                inbox_resolutions += 1
+                if inbox_resolutions > 1:
+                    return outside
+            return original_resolve(path, strict=strict)
+
+        with patch.object(Path, "resolve", redirected_resolve), \
+                self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual(list(inbox.glob("*.md")), [])
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+    def test_capture_rejects_real_outside_symlink_without_external_write(self):
+        received = datetime(2026, 8, 31, 9, 0, 0)
+        inbox_parent = self.vault / "10-inbox"
+        inbox_parent.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        inbox = inbox_parent / "jarvis"
+        try:
+            inbox.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314 or error.errno in {
+                    errno.EACCES, errno.EPERM}:
+                self.skipTest(f"real symlink creation requires OS privilege: {error}")
+            raise
+
+        with self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+            _BRIDGE.do_capture(
+                self.vault, "body", "telegram", capture_id="100",
+                received_at=received)
+
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertTrue(inbox.is_symlink())
+
     def test_concurrent_same_content_captures_converge_without_temp_residue(self):
         received = datetime(2026, 8, 31, 9, 0, 0)
         barrier = threading.Barrier(2)
