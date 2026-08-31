@@ -28,6 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime, date
 from pathlib import Path
 
@@ -73,6 +74,15 @@ def atomic_write_text(path: Path, text: str) -> None:
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def read_int_state(path: Path, default: int = 0) -> int:
+    if not path.is_file():
+        return default
+    try:
+        return int(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise JarvisConfigError(f"invalid integer state: {path.name}") from error
 
 
 def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
@@ -364,23 +374,86 @@ def _chunks_by_line(text: str, limit: int = 3500) -> list[str]:
     return chunks or [""]
 
 
-def tg_send(token: str, chat_id: int, text: str) -> None:
+def _telegram_error_label(error: BaseException) -> str:
+    code = getattr(error, "code", None)
+    return type(error).__name__ + (f" code={code}" if code is not None else "")
+
+
+def tg_send(token: str, chat_id: int, text: str) -> bool:
     for chunk in _chunks_by_line(text):
         html = md_to_telegram_html(chunk)
         try:
             tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
                     text=html, parse_mode="HTML")
-        except urllib.error.HTTPError as e:
-            log(f"HTML 전송 실패({e.code}) — 플레인 폴백")
+        except urllib.error.HTTPError as error:
+            log(f"HTML 전송 실패({_telegram_error_label(error)}) — 플레인 폴백")
             try:
                 tg_call(token, "sendMessage", http_timeout=30, chat_id=chat_id,
                         text=chunk)
-            except (urllib.error.URLError, OSError) as e2:
-                log(f"sendMessage 실패: {e2}")
-                return
-        except (urllib.error.URLError, OSError) as e:
-            log(f"sendMessage 실패: {e}")
-            return
+            except (urllib.error.URLError, OSError, json.JSONDecodeError) as fallback_error:
+                log(f"sendMessage 실패({_telegram_error_label(fallback_error)})")
+                return False
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+            log(f"sendMessage 실패({_telegram_error_label(error)})")
+            return False
+    return True
+
+
+def process_update(
+        vault: Path, cfg: dict, token: str, whitelist: set[int], update: dict,
+        started: float, qa_times: deque[float], qa_attempt_ids: set[int],
+        sender: Callable[[str, int, str], bool]) -> bool:
+    message = update.get("message") or {}
+    text = message.get("text")
+    if not isinstance(text, str) or not text:
+        return True
+    if not is_authorized_private_message(message, whitelist):
+        sender_id = (message.get("from") or {}).get("id")
+        log(f"미승인 또는 비공개 아닌 발신자 폐기: from={sender_id}")
+        return True
+
+    update_id = update["update_id"]
+    chat_id = message["chat"]["id"]
+    kind, body = route(text)
+    log(f"수신[{kind}] from={chat_id}: {text[:80]}")
+    if kind == "capture":
+        received_at = datetime.fromtimestamp(message["date"])
+        name = do_capture(
+            vault, body, "telegram", capture_id=str(update_id),
+            received_at=received_at)
+        return bool(sender(token, chat_id, f"📝 적어뒀습니다 → 10-inbox/jarvis/{name}"))
+    if kind == "status":
+        return bool(sender(token, chat_id, do_status(vault, started)))
+    if kind == "brief":
+        emoji, slot_name = _slot(datetime.now().hour)
+        return bool(sender(
+            token, chat_id,
+            f"{emoji} {slot_name} 브리핑\n" + do_brief(vault, cfg, slot_name)))
+
+    now = time.time()
+    cutoff = now - 3600
+    while qa_times and qa_times[0] < cutoff:
+        qa_times.popleft()
+    if update_id not in qa_attempt_ids:
+        if len(qa_times) >= cfg["qa_hourly_limit"]:
+            return bool(sender(
+                token, chat_id,
+                f"⏳ 시간당 질의 한도({cfg['qa_hourly_limit']}회) 도달 — 잠시 후 다시."))
+        qa_attempt_ids.add(update_id)
+        qa_times.append(now)
+    return bool(sender(token, chat_id, do_qa(vault, cfg, body)))
+
+
+def process_update_batch(
+        updates: list[dict], offset: int, handler: Callable[[dict], bool],
+        save_offset: Callable[[int], None]) -> tuple[int, bool]:
+    committed = offset
+    for update in sorted(updates, key=lambda item: item["update_id"]):
+        if not handler(update):
+            return committed, False
+        committed = update["update_id"]
+        save_offset(committed)
+    return committed, True
 
 
 # ---------------------------------------------------------------- 메인 루프
@@ -395,9 +468,12 @@ def serve(vault: Path, cfg: dict) -> None:
         log("⚠️ 화이트리스트가 비어 있음 — 모든 메시지를 폐기하며, 발신자 ID만 콘솔에 표시합니다.")
     started = time.time()
     qa_times: deque[float] = deque()
-    offset_file = STATE_ROOT / "offset"
-    offset = int(offset_file.read_text()) if offset_file.is_file() else 0
-    butler_file = STATE_ROOT / "last_butler"
+    qa_attempt_ids: set[int] = set()
+    state_dir = state_dir_for(vault, token, STATE_ROOT)
+    migrate_legacy_state(STATE_ROOT, state_dir, state_dir.name)
+    offset_file = state_dir / "offset"
+    offset = read_int_state(offset_file, default=0)
+    butler_file = state_dir / "last_butler"
     last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
     # 브리핑 시각: briefing_times(복수) 우선, 없으면 briefing_time(단일) — 하위호환
     _bt = cfg.get("briefing_times") or [cfg["briefing_time"]]
@@ -431,42 +507,16 @@ def serve(vault: Path, cfg: dict) -> None:
         try:
             resp = tg_call(token, "getUpdates", http_timeout=65, offset=offset + 1,
                            timeout=50, allowed_updates='["message"]')
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-            log(f"getUpdates 오류(재시도): {e}")
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+            log(f"getUpdates 오류(재시도): {_telegram_error_label(error)}")
             time.sleep(5)
             continue
-        for upd in resp.get("result", []):
-            offset = max(offset, upd["update_id"])
-            offset_file.parent.mkdir(parents=True, exist_ok=True)
-            offset_file.write_text(str(offset))
-            msg = upd.get("message") or {}
-            text = msg.get("text", "")
-            frm = (msg.get("from") or {}).get("id")
-            chat = (msg.get("chat") or {}).get("id")
-            if not text or frm is None or chat is None:
-                continue
-            if frm not in whitelist:
-                log(f"미등재 발신자 폐기: from={frm}")
-                continue
-            kind, body = route(text)
-            log(f"수신[{kind}] from={frm}: {text[:80]}")
-            if kind == "capture":
-                name = do_capture(vault, body, "telegram")
-                tg_send(token, chat, f"📝 적어뒀습니다 → 10-inbox/jarvis/{name}")
-            elif kind == "status":
-                tg_send(token, chat, do_status(vault, started))
-            elif kind == "brief":
-                emo, name = _slot(datetime.now().hour)
-                tg_send(token, chat, f"{emo} {name} 브리핑\n" + do_brief(vault, cfg, name))
-            else:  # qa
-                cutoff = time.time() - 3600
-                while qa_times and qa_times[0] < cutoff:
-                    qa_times.popleft()
-                if len(qa_times) >= cfg["qa_hourly_limit"]:
-                    tg_send(token, chat, f"⏳ 시간당 질의 한도({cfg['qa_hourly_limit']}회) 도달 — 잠시 후 다시.")
-                    continue
-                qa_times.append(time.time())
-                tg_send(token, chat, do_qa(vault, cfg, body))
+        offset, _complete = process_update_batch(
+            resp.get("result", []), offset,
+            lambda update: process_update(
+                vault, cfg, token, whitelist, update, started, qa_times,
+                qa_attempt_ids, tg_send),
+            lambda committed: atomic_write_text(offset_file, str(committed)))
 
 
 # ---------------------------------------------------------------- self-test
