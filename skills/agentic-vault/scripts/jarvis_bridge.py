@@ -99,11 +99,20 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
     for name in ("offset", "last_butler", "last_brief"):
         source = root / name
         target = namespace / name
-        if not source.exists() or target.exists():
+        try:
+            os.link(source, target)
+        except FileExistsError:
+            try:
+                if source.samefile(target):
+                    source.unlink()
+            except OSError:
+                pass
+            continue
+        except FileNotFoundError:
             continue
         try:
-            source.rename(target)
-        except FileExistsError:
+            source.unlink()
+        except FileNotFoundError:
             pass
 
 

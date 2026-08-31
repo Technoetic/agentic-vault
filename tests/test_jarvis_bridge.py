@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 
 _BRIDGE_PATH = Path(__file__).parents[1] / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py"
@@ -121,6 +123,61 @@ class JarvisStateTests(unittest.TestCase):
 
         self.assertEqual((namespace / "last_butler").read_text(encoding="utf-8"), "12.5")
         self.assertFalse((self.root / "last_butler").exists())
+
+    def test_migration_target_race_never_overwrites_competing_file(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        original_link = os.link
+        original_replace = Path.replace
+
+        def competing_rename(path, destination):
+            destination.write_text("competitor", encoding="utf-8")
+            return original_replace(path, destination)
+
+        def competing_link(path, destination):
+            destination.write_text("competitor", encoding="utf-8")
+            return original_link(path, destination)
+
+        with patch.object(Path, "rename", competing_rename), \
+                patch.object(_BRIDGE.os, "link", competing_link):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "competitor")
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+
+    def test_migration_source_disappearance_race_is_handled(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+
+        def disappearing_source(path, destination):
+            path.unlink(missing_ok=True)
+            raise FileNotFoundError(path)
+
+        with patch.object(Path, "rename", disappearing_source), \
+                patch.object(_BRIDGE.os, "link", disappearing_source):
+            _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertFalse(source.exists())
+        self.assertFalse(target.exists())
+
+    def test_same_owner_resumes_after_link_before_source_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        os.link(source, target)
+
+        _BRIDGE.migrate_legacy_state(self.root, namespace, "vault-a-12345")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "41")
+        self.assertFalse(source.exists())
 
     def test_capture_id_makes_retry_idempotent_and_same_second_distinct(self):
         received = datetime(2026, 8, 31, 9, 0, 0)
