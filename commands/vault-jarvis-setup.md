@@ -29,7 +29,7 @@ description: Vault Jarvis 설정 — Telegram 봇 연동으로 브리핑·캡처
 
 1. 브리지를 임시 실행: `python .../jarvis_bridge.py --vault .` — 화이트리스트가 비어 있으면 모든 메시지를 폐기하며 **발신자 숫자 ID를 콘솔에만 표시**한다.
 2. 사용자가 자신의 봇에게 아무 메시지나 1통 전송 → 콘솔의 `미등재 발신자 폐기: from=<숫자>`에서 ID 확보.
-3. `00-meta/vault-config.json`의 `jarvis` 블록을 Edit하라: `"enabled": true`, `"telegram_user_ids": [<확보한 숫자>]`. 블록이 없으면 템플릿(`${CLAUDE_PLUGIN_ROOT}/assets/templates/vault-config.json`의 `jarvis` 키)을 참고해 추가하라.
+3. `00-meta/vault-config.json`의 `jarvis` 블록을 Edit하라: `"enabled": true`, `"telegram_user_ids": [<확보한 숫자>]`, `"briefing_times": ["07:30"]`. `briefing_times`에는 하루 한 개 이상의 `HH:MM` 시각을 배열로 지정한다. 블록이 없으면 템플릿(`${CLAUDE_PLUGIN_ROOT}/assets/templates/vault-config.json`의 `jarvis` 키)을 참고해 추가하라. 기존 볼트의 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 4. 브리지 재시작.
 
 ## 4. 상시 실행 등록 (Windows 권장 경로)

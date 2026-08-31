@@ -270,14 +270,36 @@ def do_qa(vault: Path, cfg: dict, question: str) -> str:
     return run_claude(vault, cfg, question)
 
 
-def _slot(hour: int) -> tuple[str, str]:
-    """시각 → (이모지, 시간대명). 스케줄 라벨과 브리핑 프롬프트가 같은 슬롯을 쓰게 하는 단일 출처."""
+def briefing_label(slot: tuple[int, int]) -> tuple[str, str]:
+    """브리핑 슬롯 → Telegram 전용 (이모지, 시간대명) 라벨."""
+    hour, _minute = slot
     return ("🌅", "아침") if hour < 11 else (("🌞", "점심") if hour < 17 else ("🌆", "저녁"))
 
 
-def do_brief(vault: Path, cfg: dict, slot: str = "아침") -> str:
+def due_briefing_slots(
+        now: datetime, slots: list[tuple[int, int]], fired_date: date | None,
+        fired_slots: set[tuple[int, int]],
+        ) -> tuple[date, set[tuple[int, int]], list[tuple[int, int]]]:
+    """현재 날짜의 발송 상태와 지금 발송할 슬롯을 부작용 없이 계산한다.
+
+    ``fired_date is None``은 프로세스 기동을 뜻한다. 이때 이미 지난 슬롯만
+    소비해 재기동 폭주를 막고, 정확히 현재 분인 슬롯은 다음 루프에서 발송한다.
+    """
+    today = now.date()
+    current_clock = (now.hour, now.minute)
+    if fired_date is None:
+        consumed = {slot for slot in slots if slot < current_clock}
+        return today, consumed, []
+    active_fired = set() if fired_date != today else set(fired_slots)
+    due = sorted(
+        slot for slot in slots
+        if slot <= current_clock and slot not in active_fired)
+    return today, active_fired, due
+
+
+def do_brief(vault: Path, cfg: dict) -> str:
     git_lines = _git(vault, "log", "--oneline", "--date=short", "-10") or "(git 이력 없음)"
-    parts = [f"오늘({date.today().isoformat()}) {slot} 브리핑을 만들어라.",
+    parts = [f"오늘({date.today().isoformat()}) 정기 브리핑을 만들어라.",
              f"다음 노트를 읽어라: {cfg['_hot_note']}"]
     if cfg["_handoff_note"]:
         parts.append(f"그리고 {cfg['_handoff_note']} (직전 세션 인계·NEXT 섹션 주목)")
@@ -428,10 +450,9 @@ def process_update(
     if kind == "status":
         return bool(sender(token, chat_id, do_status(vault, started)))
     if kind == "brief":
-        emoji, slot_name = _slot(datetime.now().hour)
         return bool(sender(
             token, chat_id,
-            f"{emoji} {slot_name} 브리핑\n" + do_brief(vault, cfg, slot_name)))
+            "📋 정기 브리핑\n" + do_brief(vault, cfg)))
 
     now = time.time()
     cutoff = now - 3600
@@ -459,6 +480,39 @@ def process_update_batch(
     return committed, True
 
 
+def send_due_briefings(
+        vault: Path, cfg: dict, token: str, chat_id: int, now: datetime,
+        slots: list[tuple[int, int]], fired_date: date | None,
+        fired_slots: set[tuple[int, int]],
+        sender: Callable[[str, int, str], bool],
+        ) -> tuple[date, set[tuple[int, int]]]:
+    active_date, active_fired, due = due_briefing_slots(
+        now, slots, fired_date, fired_slots)
+    for slot in due:
+        emoji, name = briefing_label(slot)
+        log("스케줄 브리핑 생성(%s %02d:%02d)" % (
+            name, slot[0], slot[1]))
+        if not sender(
+                token, chat_id,
+                f"{emoji} {name} 브리핑\n" + do_brief(vault, cfg)):
+            break
+        active_fired.add(slot)
+    return active_date, active_fired
+
+
+def send_butler_if_due(
+        vault: Path, cfg: dict, token: str, chat_id: int, last_butler: float,
+        state_file: Path, now_epoch: float,
+        sender: Callable[[str, int, str], bool],
+        ) -> float:
+    if now_epoch - last_butler <= cfg["butler_interval_hours"] * 3600:
+        return last_butler
+    if not sender(token, chat_id, do_butler(vault, cfg)):
+        return last_butler
+    atomic_write_text(state_file, str(now_epoch))
+    return now_epoch
+
+
 # ---------------------------------------------------------------- 메인 루프
 
 def serve(vault: Path, cfg: dict) -> None:
@@ -478,13 +532,10 @@ def serve(vault: Path, cfg: dict) -> None:
     offset = read_int_state(offset_file, default=0)
     butler_file = state_dir / "last_butler"
     last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
-    # 브리핑 시각: briefing_times(복수) 우선, 없으면 briefing_time(단일) — 하위호환
-    _bt = cfg.get("briefing_times") or [cfg["briefing_time"]]
-    brief_slots = sorted(tuple(map(int, t.split(":"))) for t in _bt)
-    # 기동 시각이 이미 지난 슬롯은 오늘분 발송하지 않는다(재기동 폭주 방지)
-    _n = datetime.now()
-    fired_date: date = _n.date()
-    fired_slots = {s for s in brief_slots if (_n.hour, _n.minute) >= s}
+    brief_slots = cfg["_briefing_slots"]
+    # 기동 전에 이미 지난 슬롯은 오늘분 발송하지 않는다(재기동 폭주 방지).
+    fired_date, fired_slots, _due = due_briefing_slots(
+        datetime.now(), brief_slots, None, set())
     log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}, "
         f"브리핑 {['%02d:%02d' % s for s in brief_slots]}")
 
@@ -493,19 +544,12 @@ def serve(vault: Path, cfg: dict) -> None:
         now = datetime.now()
         if whitelist:
             first = sorted(whitelist)[0]
-            if fired_date != now.date():
-                fired_date = now.date()
-                fired_slots = set()
-            for s in brief_slots:
-                if s not in fired_slots and (now.hour, now.minute) >= s:
-                    fired_slots.add(s)
-                    emo, name = _slot(s[0])
-                    log("스케줄 브리핑 생성(%s %s %02d:%02d)" % (emo, name, s[0], s[1]))
-                    tg_send(token, first, f"{emo} {name} 브리핑\n" + do_brief(vault, cfg, name))
-            if time.time() - last_butler > cfg["butler_interval_hours"] * 3600:
-                last_butler = time.time()
-                butler_file.write_text(str(last_butler))
-                tg_send(token, first, do_butler(vault, cfg))
+            fired_date, fired_slots = send_due_briefings(
+                vault, cfg, token, first, now, brief_slots, fired_date,
+                fired_slots, tg_send)
+            last_butler = send_butler_if_due(
+                vault, cfg, token, first, last_butler, butler_file,
+                time.time(), tg_send)
         # --- 수신 ---
         try:
             resp = tg_call(token, "getUpdates", http_timeout=65, offset=offset + 1,

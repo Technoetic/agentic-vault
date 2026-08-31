@@ -27,7 +27,7 @@
   "jarvis": {
     "enabled": false,
     "telegram_user_ids": [],
-    "briefing_time": "07:30",
+    "briefing_times": ["07:30"],
     "butler_interval_hours": 24,
     "qa_hourly_limit": 6,
     "qa_timeout_sec": 180,

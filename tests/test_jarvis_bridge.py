@@ -3,17 +3,19 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import tempfile
 import unittest
 from collections import deque
 from contextlib import redirect_stdout
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 
-_BRIDGE_PATH = Path(__file__).parents[1] / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py"
+_ROOT = Path(__file__).parents[1]
+_BRIDGE_PATH = _ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py"
 _SPEC = importlib.util.spec_from_file_location("jarvis_bridge", _BRIDGE_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 _BRIDGE = importlib.util.module_from_spec(_SPEC)
@@ -48,6 +50,143 @@ class JarvisConfigAuthorizationTests(unittest.TestCase):
             {"from": {"id": 111}, "chat": {"id": -99, "type": "group"}}, allowed))
         self.assertFalse(_BRIDGE.is_authorized_private_message(
             {"from": {"id": 111}, "chat": {"id": 222, "type": "private"}}, allowed))
+
+
+class JarvisBriefingTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        self.cfg = {
+            "_hot_note": "00-meta/hot.md",
+            "_handoff_note": "",
+            "_log_note": "00-meta/log.md",
+            "butler_interval_hours": 24,
+        }
+
+    def test_do_brief_uses_neutral_recurring_prompt(self):
+        with patch.object(_BRIDGE, "_git", return_value="abc123 change"), \
+                patch.object(_BRIDGE, "run_claude", return_value="brief") as runner:
+            result = _BRIDGE.do_brief(self.vault, self.cfg)
+
+        self.assertEqual(result, "brief")
+        prompt = runner.call_args.args[2]
+        self.assertIn("정기 브리핑", prompt)
+        for time_of_day in ("아침 브리핑", "점심 브리핑", "저녁 브리핑"):
+            self.assertNotIn(time_of_day, prompt)
+
+    def test_briefing_label_maps_the_slot_only_for_telegram(self):
+        self.assertEqual(_BRIDGE.briefing_label((8, 30)), ("🌅", "아침"))
+        self.assertEqual(_BRIDGE.briefing_label((13, 30)), ("🌞", "점심"))
+        self.assertEqual(_BRIDGE.briefing_label((19, 30)), ("🌆", "저녁"))
+
+    def test_startup_consumes_only_already_passed_slots(self):
+        current_date, fired, due = _BRIDGE.due_briefing_slots(
+            datetime(2026, 9, 1, 12, 0),
+            [(7, 30), (12, 0), (13, 30), (19, 30)],
+            None,
+            set(),
+        )
+
+        self.assertEqual(current_date, date(2026, 9, 1))
+        self.assertEqual(fired, {(7, 30)})
+        self.assertEqual(due, [])
+
+    def test_new_day_resets_fired_slots_and_exposes_due_slots(self):
+        current_date, fired, due = _BRIDGE.due_briefing_slots(
+            datetime(2026, 9, 1, 12, 0),
+            [(7, 30), (13, 30)],
+            date(2026, 8, 31),
+            {(7, 30), (13, 30)},
+        )
+
+        self.assertEqual(current_date, date(2026, 9, 1))
+        self.assertEqual(fired, set())
+        self.assertEqual(due, [(7, 30)])
+
+    def test_scheduled_briefing_is_marked_only_after_successful_send(self):
+        sender = Mock(side_effect=[False, True])
+        now = datetime(2026, 9, 1, 7, 30)
+        slots = [(7, 30)]
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            fired_date, fired = _BRIDGE.send_due_briefings(
+                self.vault, self.cfg, "12345:secret", 111, now, slots,
+                date(2026, 8, 31), set(), sender)
+            self.assertEqual((fired_date, fired), (date(2026, 9, 1), set()))
+
+            fired_date, fired = _BRIDGE.send_due_briefings(
+                self.vault, self.cfg, "12345:secret", 111, now, slots,
+                fired_date, fired, sender)
+
+        self.assertEqual(fired, {(7, 30)})
+        self.assertEqual(sender.call_count, 2)
+        self.assertIn("🌅 아침 브리핑", sender.call_args.args[2])
+
+    def test_manual_brief_wording_is_neutral(self):
+        sender = Mock(return_value=True)
+        update = {
+            "update_id": 7,
+            "message": {
+                "text": "/brief",
+                "date": 1_788_134_400,
+                "from": {"id": 111},
+                "chat": {"id": 111, "type": "private"},
+            },
+        }
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            handled = _BRIDGE.process_update(
+                self.vault, self.cfg, "12345:secret", {111}, update,
+                0.0, deque(), set(), sender)
+
+        self.assertTrue(handled)
+        message = sender.call_args.args[2]
+        self.assertEqual(message, "📋 정기 브리핑\nbody")
+
+    def test_butler_completion_is_success_only_and_atomic(self):
+        sender = Mock(side_effect=[False, True])
+        state_file = self.root / "state" / "last_butler"
+
+        with patch.object(_BRIDGE, "do_butler", return_value="report"), \
+                patch.object(
+                    _BRIDGE, "atomic_write_text",
+                    wraps=_BRIDGE.atomic_write_text) as writer:
+            last_butler = _BRIDGE.send_butler_if_due(
+                self.vault, self.cfg, "12345:secret", 111, 0.0,
+                state_file, 100_000.0, sender)
+            self.assertEqual(last_butler, 0.0)
+            self.assertFalse(state_file.exists())
+            writer.assert_not_called()
+
+            last_butler = _BRIDGE.send_butler_if_due(
+                self.vault, self.cfg, "12345:secret", 111, last_butler,
+                state_file, 100_000.0, sender)
+
+        self.assertEqual(last_butler, 100_000.0)
+        self.assertEqual(state_file.read_text(encoding="utf-8"), "100000.0")
+        writer.assert_called_once_with(state_file, "100000.0")
+        self.assertEqual(list(state_file.parent.glob("*.tmp")), [])
+
+    def test_template_and_docs_describe_multi_slot_fallback_contract(self):
+        template = json.loads(
+            (_ROOT / "assets" / "templates" / "vault-config.json").read_text(
+                encoding="utf-8"))
+        self.assertEqual(template["jarvis"]["briefing_times"], ["07:30"])
+        self.assertNotIn("briefing_time", template["jarvis"])
+
+        for relative in (
+            "commands/vault-jarvis-setup.md",
+            "README.md",
+            "docs/superpowers/specs/2026-07-17-vault-jarvis-design.md",
+        ):
+            with self.subTest(path=relative):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("`briefing_times`", text)
+                self.assertIn("`briefing_time`", text)
+                self.assertIn("없을 때만", text)
 
 
 class JarvisStateTests(unittest.TestCase):
@@ -374,7 +513,7 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
             "bad gateway", {}, None)
         cfg = {
             "telegram_user_ids": [],
-            "briefing_time": "07:30",
+            "_briefing_slots": [(7, 30)],
             "butler_interval_hours": 24,
         }
 
