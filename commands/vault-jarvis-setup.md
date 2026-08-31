@@ -53,9 +53,10 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 
 4종 통과 시 설정 완료를 보고하고, 볼트가 git 저장소면 `vault-config.json` 변경을 커밋하라. `log_note`에 `[ops]` 태그로 1줄 기록하라.
 
-## 보안 경계 (사용자에게 요약 고지)
+## 접근 정책과 잔여 위험 (사용자에게 요약 고지)
 
 - 화이트리스트 숫자 ID 외 발신자는 무응답 폐기된다.
 - Q&A·브리핑 세션은 읽기 전용(Read·Grep·Glob) — 볼트 변경·명령 실행 불가.
 - 자비스의 볼트 쓰기는 `10-inbox/jarvis/` 한 곳뿐이며 정제는 `/vault-process-inbox`가 담당.
 - deny zone·`.env`·`90-assets/`는 Q&A 탐색에서 금지된다.
+- deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.

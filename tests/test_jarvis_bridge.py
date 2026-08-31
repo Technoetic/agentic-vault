@@ -94,6 +94,20 @@ class JarvisBriefingTests(unittest.TestCase):
         self.assertEqual(fired, {(7, 30)})
         self.assertEqual(due, [])
 
+    def test_exact_current_startup_slot_is_due_on_next_evaluation(self):
+        now = datetime(2026, 9, 1, 12, 0)
+        slots = [(7, 30), (12, 0), (13, 30)]
+
+        current_date, fired, due = _BRIDGE.due_briefing_slots(
+            now, slots, None, set())
+        self.assertEqual((fired, due), ({(7, 30)}, []))
+
+        current_date, fired, due = _BRIDGE.due_briefing_slots(
+            now, slots, current_date, fired)
+
+        self.assertEqual(fired, {(7, 30)})
+        self.assertEqual(due, [(12, 0)])
+
     def test_new_day_resets_fired_slots_and_exposes_due_slots(self):
         current_date, fired, due = _BRIDGE.due_briefing_slots(
             datetime(2026, 9, 1, 12, 0),
@@ -123,6 +137,21 @@ class JarvisBriefingTests(unittest.TestCase):
 
         self.assertEqual(fired, {(7, 30)})
         self.assertEqual(sender.call_count, 2)
+        self.assertIn("🌅 아침 브리핑", sender.call_args.args[2])
+
+    def test_first_send_failure_does_not_call_or_mark_later_due_slots(self):
+        sender = Mock(return_value=False)
+
+        with patch.object(_BRIDGE, "do_brief", return_value="body"):
+            fired_date, fired = _BRIDGE.send_due_briefings(
+                self.vault, self.cfg, "12345:secret", 111,
+                datetime(2026, 9, 1, 20, 0),
+                [(7, 30), (13, 30), (19, 30)], date(2026, 8, 31),
+                set(), sender)
+
+        self.assertEqual(fired_date, date(2026, 9, 1))
+        self.assertEqual(fired, set())
+        sender.assert_called_once()
         self.assertIn("🌅 아침 브리핑", sender.call_args.args[2])
 
     def test_manual_brief_wording_is_neutral(self):
@@ -187,6 +216,13 @@ class JarvisBriefingTests(unittest.TestCase):
                 self.assertIn("`briefing_times`", text)
                 self.assertIn("`briefing_time`", text)
                 self.assertIn("없을 때만", text)
+
+    def test_user_docs_disclose_deny_zones_are_not_an_os_security_boundary(self):
+        disclosure = "deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다."
+        for relative in ("commands/vault-jarvis-setup.md", "README.md"):
+            with self.subTest(path=relative):
+                text = (_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn(disclosure, text)
 
 
 class JarvisStateTests(unittest.TestCase):
