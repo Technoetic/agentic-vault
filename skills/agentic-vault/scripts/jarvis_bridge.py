@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -31,7 +32,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 API_BASE = "https://api.telegram.org/bot{token}/{method}"
-STATE_DIR = Path.home() / ".vault-jarvis"
+STATE_ROOT = Path.home() / ".vault-jarvis"
 LOG_MAX_BYTES = 1_000_000
 TG_CHUNK = 4000
 
@@ -50,6 +51,60 @@ DEFAULTS = {
 
 class JarvisConfigError(ValueError):
     pass
+
+
+def state_dir_for(vault: Path, token: str, root: Path = STATE_ROOT) -> Path:
+    bot_id, separator, _secret = token.partition(":")
+    if not separator or not re.fullmatch(r"[0-9]+", bot_id):
+        raise JarvisConfigError("Telegram token must start with a numeric bot ID")
+    normalized_vault = os.path.normcase(str(vault.resolve(strict=False)))
+    vault_id = hashlib.sha256(normalized_vault.encode("utf-8")).hexdigest()[:12]
+    return root / f"{vault_id}-{bot_id}"
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    owner_path = root / "legacy-owner.json"
+    try:
+        with owner_path.open("x", encoding="utf-8") as handle:
+            json.dump({"owner_key": owner_key}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        pass
+
+    try:
+        stored_owner = json.loads(owner_path.read_text(encoding="utf-8"))["owner_key"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        log("warning: legacy state owner is unreadable; leaving legacy files untouched")
+        return
+    if stored_owner != owner_key:
+        log("warning: legacy state belongs to another owner; leaving legacy files untouched")
+        return
+
+    namespace.mkdir(parents=True, exist_ok=True)
+    for name in ("offset", "last_butler", "last_brief"):
+        source = root / name
+        target = namespace / name
+        if not source.exists() or target.exists():
+            continue
+        try:
+            source.rename(target)
+        except FileExistsError:
+            pass
 
 
 def parse_briefing_slots(block: dict) -> list[tuple[int, int]]:
@@ -79,10 +134,10 @@ def log(msg: str) -> None:
     line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
     print(line, flush=True)
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        logfile = STATE_DIR / "jarvis.log"
+        STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        logfile = STATE_ROOT / "jarvis.log"
         if logfile.exists() and logfile.stat().st_size > LOG_MAX_BYTES:
-            logfile.replace(STATE_DIR / "jarvis.log.1")
+            logfile.replace(STATE_ROOT / "jarvis.log.1")
         with open(logfile, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except OSError:
@@ -136,13 +191,26 @@ def route(text: str) -> tuple[str, str]:
 
 # ---------------------------------------------------------------- 동작
 
-def do_capture(vault: Path, body: str, source: str) -> str:
+def do_capture(
+        vault: Path, body: str, source: str, capture_id: str | None = None,
+        received_at: datetime | None = None) -> str:
     inbox = vault / "10-inbox" / "jarvis"
     inbox.mkdir(parents=True, exist_ok=True)
-    now = datetime.now()
-    name = now.strftime("%Y-%m-%d %H%M%S") + ".md"
+    now = received_at or datetime.now()
+    suffix = ""
+    if capture_id is not None:
+        safe_capture_id = re.sub(r"[^A-Za-z0-9_-]", "_", capture_id) or "_"
+        suffix = f"-{safe_capture_id}"
+    name = now.strftime("%Y-%m-%d %H%M%S") + suffix + ".md"
     content = f"{body}\n\n---\n수신: {now.strftime('%Y-%m-%d %H:%M:%S')} · 채널: {source}\n"
-    (inbox / name).write_text(content, encoding="utf-8")
+    target = inbox / name
+    if target.exists():
+        existing = target.read_text(encoding="utf-8")
+        if existing == content:
+            return name
+        if capture_id is not None:
+            raise RuntimeError(f"conflicting capture content for ID {safe_capture_id}")
+    atomic_write_text(target, content)
     return name
 
 
@@ -313,9 +381,9 @@ def serve(vault: Path, cfg: dict) -> None:
         log("⚠️ 화이트리스트가 비어 있음 — 모든 메시지를 폐기하며, 발신자 ID만 콘솔에 표시합니다.")
     started = time.time()
     qa_times: deque[float] = deque()
-    offset_file = STATE_DIR / "offset"
+    offset_file = STATE_ROOT / "offset"
     offset = int(offset_file.read_text()) if offset_file.is_file() else 0
-    butler_file = STATE_DIR / "last_butler"
+    butler_file = STATE_ROOT / "last_butler"
     last_butler = float(butler_file.read_text()) if butler_file.is_file() else 0.0
     # 브리핑 시각: briefing_times(복수) 우선, 없으면 briefing_time(단일) — 하위호환
     _bt = cfg.get("briefing_times") or [cfg["briefing_time"]]
@@ -436,8 +504,8 @@ def self_test() -> int:
         check("env: JARVIS_TELEGRAM_TOKEN 설정", bool(os.environ.get("JARVIS_TELEGRAM_TOKEN")), warn=True)
         # ⑤ 로그 쓰기
         try:
-            STATE_DIR.mkdir(parents=True, exist_ok=True)
-            probe = STATE_DIR / ".write-probe"
+            STATE_ROOT.mkdir(parents=True, exist_ok=True)
+            probe = STATE_ROOT / ".write-probe"
             probe.write_text("ok")
             probe.unlink()
             check("log: 상태 디렉토리 쓰기", True)
