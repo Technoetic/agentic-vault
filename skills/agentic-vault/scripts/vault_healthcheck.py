@@ -330,15 +330,15 @@ def staged_markdown_pathspecs(
     if not isinstance(config, dict):
         raise HealthcheckError("validated config must be an object")
 
-    pathspecs = [":(top,glob)**/*.md"]
+    pathspecs = [":(top,glob,icase)**/*.md"]
     deny_zones = sorted(set(config.get("deny_zones") or ()))
     exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
     pathspecs.extend(
-        f":(exclude,top,glob){_escape_git_glob(path)}/**"
+        f":(exclude,top,glob,icase){_escape_git_glob(path)}/**"
         for path in deny_zones
     )
     pathspecs.extend(
-        f":(exclude,glob)**/{_escape_git_glob(name)}/**"
+        f":(exclude,glob,icase)**/{_escape_git_glob(name)}/**"
         for name in exclude_dirs
     )
 
@@ -351,7 +351,7 @@ def staged_markdown_pathspecs(
             effective_health_report,
         }
         pathspecs.extend(
-            f":(exclude,top,literal){path}"
+            f":(exclude,top,literal,icase){path}"
             for path in sorted(generated)
             if path
         )
@@ -690,13 +690,24 @@ def _grep_index_backlink_paths(vault: Path, config: dict) -> list[str]:
     return _decode_nul_paths(data, "staged backlink path")
 
 
-def _index_blob_wikilink_targets(vault: Path, path: str) -> set[str]:
-    """Return normalized note targets from one index blob, excluding code contexts."""
+def _index_blob_wikilink_targets(
+    vault: Path,
+    path: str,
+    note_stem_candidates: set[str],
+) -> set[str]:
+    """Return staged note targets from one index blob, excluding code contexts."""
     text = read_index_text(vault, path)
     clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
     targets: set[str] = set()
     for raw_target in WIKILINK_RE.findall(clean_text):
-        target = normalize_link_target(raw_target)
+        raw_stem = raw_target.split("/")[-1].strip()
+        if raw_stem.lower().endswith(".md"):
+            raw_stem = raw_stem[:-3].strip()
+        target = (
+            raw_stem
+            if raw_stem in note_stem_candidates
+            else normalize_link_target(raw_target)
+        )
         if target is not None:
             targets.add(target)
     return targets
@@ -728,6 +739,7 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
             _posix_markdown_stem(path)
             for path in _index_markdown_paths(vault, config)
         }
+        note_stem_candidates = deleted_stems | result_stems
         stems_to_check = sorted(
             stem for stem in deleted_stems
             if stem and stem not in result_stems
@@ -735,7 +747,9 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
         referrers_by_target: dict[str, set[str]] = {}
         if stems_to_check:
             for referrer in _grep_index_backlink_paths(vault, config):
-                for target in _index_blob_wikilink_targets(vault, referrer):
+                for target in _index_blob_wikilink_targets(
+                    vault, referrer, note_stem_candidates
+                ):
                     referrers_by_target.setdefault(target, set()).add(referrer)
         for stem in stems_to_check:
             for referrer in sorted(referrers_by_target.get(stem, ())):

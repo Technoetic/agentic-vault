@@ -604,6 +604,17 @@ class StagedGateTests(unittest.TestCase):
 
         self.assertTrue(any("Note.md" in error and "프런트매터" in error for error in errors))
 
+    def test_uppercase_markdown_addition_is_schema_checked(self) -> None:
+        self.seed_notes({})
+        self.write("20-knowledge/Bad.MD", "missing frontmatter\n")
+        self.git("add", "20-knowledge/Bad.MD")
+
+        errors = self.staged_errors()
+
+        self.assertTrue(
+            any("Bad.MD" in error and "프런트매터 누락" in error for error in errors)
+        )
+
     def test_schema_rules_apply_only_to_configured_non_exempt_roots(self) -> None:
         self.seed_notes(
             {},
@@ -752,6 +763,97 @@ class StagedGateTests(unittest.TestCase):
         errors = self.staged_errors()
 
         self.assertTrue(any("Ref.md" in error and "A" in error for error in errors))
+
+    def test_uppercase_markdown_deletion_with_uppercase_referrer_is_blocked(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.MD": self.valid_note("A"),
+                "20-knowledge/Ref.MD": self.valid_note("Ref", "[[A]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/A.MD")
+
+        errors = self.staged_errors()
+
+        self.assertTrue(any("Ref.MD" in error and "'A'" in error for error in errors))
+
+    def test_uppercase_markdown_rename_with_live_backlink_is_blocked(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.MD": self.valid_note("A"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", "[[A]]"),
+            }
+        )
+        self.git("mv", "20-knowledge/A.MD", "20-knowledge/B.MD")
+
+        errors = self.staged_errors()
+
+        self.assertTrue(any("Ref.md" in error and "'A'" in error for error in errors))
+
+    def test_uppercase_markdown_rename_with_same_commit_repair_passes(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.MD": self.valid_note("A"),
+                "20-knowledge/Ref.MD": self.valid_note("Ref", "[[A]]"),
+            }
+        )
+        self.git("mv", "20-knowledge/A.MD", "20-knowledge/B.MD")
+        self.write("20-knowledge/Ref.MD", self.valid_note("Ref", "[[B]]"))
+        self.git("add", "20-knowledge/Ref.MD")
+
+        self.assertEqual(self.staged_errors(), [])
+
+    def test_deleted_version_note_stem_blocks_live_backlink(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/v0.8.2.md": self.valid_note("v0.8.2"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", "[[v0.8.2]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/v0.8.2.md")
+
+        errors = self.staged_errors()
+
+        self.assertTrue(
+            any("Ref.md" in error and "'v0.8.2'" in error for error in errors)
+        )
+
+    def test_renamed_asset_like_note_stem_blocks_live_backlink(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.png.md": self.valid_note("A.png"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", "[[A.png]]"),
+            }
+        )
+        self.git("mv", "20-knowledge/A.png.md", "20-knowledge/B.md")
+
+        errors = self.staged_errors()
+
+        self.assertTrue(any("Ref.md" in error and "'A.png'" in error for error in errors))
+
+    def test_dotted_note_rename_with_same_commit_repair_passes(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.png.md": self.valid_note("A.png"),
+                "20-knowledge/Ref.md": self.valid_note("Ref", "[[A.png]]"),
+            }
+        )
+        self.git("mv", "20-knowledge/A.png.md", "20-knowledge/B.md")
+        self.write("20-knowledge/Ref.md", self.valid_note("Ref", "[[B]]"))
+        self.git("add", "20-knowledge/Ref.md")
+
+        self.assertEqual(self.staged_errors(), [])
+
+    def test_genuine_asset_only_link_does_not_block_dotted_note_deletion(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.png.md": self.valid_note("A.png"),
+                "20-knowledge/Assets.md": self.valid_note("Assets", "[[image.png]]"),
+            }
+        )
+        self.git("rm", "20-knowledge/A.png.md")
+
+        self.assertEqual(self.staged_errors(), [])
 
     def test_deletion_backlinks_ignore_code_but_still_block_real_link_in_index_blob(self) -> None:
         code_only = "```markdown\n[[A]]\n```\n\n`inline [[A]] example`"
@@ -951,9 +1053,13 @@ class StagedGateTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
         flattened = [arg for call in calls for arg in call]
-        self.assertIn(":(top,glob)**/*.md", flattened)
-        self.assertIn(":(exclude,top,glob)20-knowledge/_archive/**", flattened)
-        self.assertIn(":(exclude,glob)**/node_modules/**", flattened)
+        self.assertIn(":(top,glob,icase)**/*.md", flattened)
+        self.assertIn(":(exclude,top,glob,icase)20-knowledge/_archive/**", flattened)
+        self.assertIn(":(exclude,glob,icase)**/node_modules/**", flattened)
+        self.assertIn(":(exclude,top,literal,icase)00-meta/log.md", flattened)
+        self.assertIn(
+            ":(exclude,top,literal,icase)00-meta/health-report.md", flattened
+        )
         self.assertFalse(any("_archive" in path or "node_modules" in path for path in read_paths))
 
     def test_non_markdown_commit_still_rejects_invalid_staged_config(self) -> None:
