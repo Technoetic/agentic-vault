@@ -1405,7 +1405,7 @@ class JarvisStateTests(unittest.TestCase):
         self.assertEqual(source.read_text(encoding="utf-8"), "41")
         self.assertFalse(target.exists())
 
-    def test_existing_target_samefile_io_error_fails_closed(self):
+    def test_existing_target_lstat_io_error_fails_closed(self):
         namespace = self.root / "vault-a-12345"
         namespace.mkdir()
         (self.root / "legacy-owner.json").write_text(
@@ -1414,9 +1414,15 @@ class JarvisStateTests(unittest.TestCase):
         target = namespace / "offset"
         source.write_text("legacy", encoding="utf-8")
         target.write_text("existing", encoding="utf-8")
+        original_lstat = Path.lstat
+
+        def failing_target_lstat(path):
+            if Path(path) == target:
+                raise PermissionError("denied")
+            return original_lstat(path)
 
         with patch.object(
-                Path, "samefile", side_effect=PermissionError("denied")), \
+                Path, "lstat", failing_target_lstat), \
                 self.assertRaisesRegex(
                     _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
             _BRIDGE.migrate_legacy_state(
@@ -1424,6 +1430,54 @@ class JarvisStateTests(unittest.TestCase):
 
         self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
         self.assertEqual(target.read_text(encoding="utf-8"), "existing")
+
+    def test_following_equal_symlink_target_fails_closed_without_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.write_text("controlled symlink placeholder", encoding="utf-8")
+        original_lstat = Path.lstat
+        symlink_stat = os.stat_result((
+            _BRIDGE.stat.S_IFLNK | 0o777, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+        ))
+
+        def symlink_target_lstat(path):
+            if Path(path) == target:
+                return symlink_stat
+            return original_lstat(path)
+
+        with patch.object(Path, "lstat", symlink_target_lstat), \
+                patch.object(Path, "samefile", return_value=True), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertEqual(
+            target.read_text(encoding="utf-8"), "controlled symlink placeholder")
+
+    def test_non_regular_target_fails_closed_without_unlink(self):
+        namespace = self.root / "vault-a-12345"
+        namespace.mkdir()
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("legacy", encoding="utf-8")
+        target.mkdir()
+
+        with self.assertRaisesRegex(
+                _BRIDGE.JarvisConfigError, "cannot verify legacy migration target"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "legacy")
+        self.assertTrue(target.is_dir())
 
     def test_legacy_unlink_io_error_is_normalized_after_safe_link(self):
         namespace = self.root / "vault-a-12345"
@@ -1447,6 +1501,31 @@ class JarvisStateTests(unittest.TestCase):
 
         self.assertEqual(source.read_text(encoding="utf-8"), "41")
         self.assertEqual(target.read_text(encoding="utf-8"), "41")
+
+    def test_legacy_link_missing_target_parent_with_source_present_fails_closed(self):
+        namespace = self.root / "vault-a-12345"
+        (self.root / "legacy-owner.json").write_text(
+            json.dumps({"owner_key": namespace.name}), encoding="utf-8")
+        source = self.root / "offset"
+        target = namespace / "offset"
+        source.write_text("41", encoding="utf-8")
+        original_link = os.link
+
+        def missing_target_parent(path, destination):
+            if Path(destination) == target:
+                namespace.rmdir()
+                raise FileNotFoundError(destination)
+            return original_link(path, destination)
+
+        with patch.object(
+                _BRIDGE.os, "link", side_effect=missing_target_parent), \
+                self.assertRaisesRegex(
+                    _BRIDGE.JarvisConfigError, "cannot safely migrate legacy state"):
+            _BRIDGE.migrate_legacy_state(
+                self.root, namespace, namespace.name)
+
+        self.assertEqual(source.read_text(encoding="utf-8"), "41")
+        self.assertFalse(target.exists())
 
     def test_migration_source_disappearance_race_is_handled(self):
         namespace = self.root / "vault-a-12345"

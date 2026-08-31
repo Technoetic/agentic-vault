@@ -286,15 +286,23 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
             os.link(source, target)
         except FileExistsError:
             try:
-                same_file = source.samefile(target)
-            except FileNotFoundError:
-                if _lstat_or_missing(source) is None:
-                    continue
+                source_stat = _lstat_or_missing(source)
+            except JarvisConfigError:
                 raise JarvisConfigError(
                     f"cannot verify legacy migration target: {name}") from None
-            except OSError:
+            if source_stat is None:
+                continue
+            try:
+                target_stat = _lstat_or_missing(target)
+            except JarvisConfigError:
                 raise JarvisConfigError(
                     f"cannot verify legacy migration target: {name}") from None
+            if target_stat is None or not (
+                    stat.S_ISREG(source_stat.st_mode)
+                    and stat.S_ISREG(target_stat.st_mode)):
+                raise JarvisConfigError(
+                    f"cannot verify legacy migration target: {name}") from None
+            same_file = os.path.samestat(source_stat, target_stat)
             if same_file:
                 _fsync_directory(namespace)
                 try:
@@ -307,7 +315,10 @@ def migrate_legacy_state(root: Path, namespace: Path, owner_key: str) -> None:
                 _fsync_directory(root)
             continue
         except FileNotFoundError:
-            continue
+            if _lstat_or_missing(source) is None:
+                continue
+            raise JarvisConfigError(
+                f"cannot safely migrate legacy state: {name}") from None
         except OSError:
             raise JarvisConfigError(
                 f"cannot safely migrate legacy state: {name}") from None
