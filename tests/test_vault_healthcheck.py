@@ -534,6 +534,18 @@ class StagedGateTests(unittest.TestCase):
 
         self.assertEqual(self.staged_errors(), [])
 
+    def test_empty_health_report_excludes_effective_default_referrer(self) -> None:
+        self.seed_notes(
+            {
+                "20-knowledge/A.md": self.valid_note("A"),
+                "00-meta/health-report.md": self.valid_note("Health", "[[A]]"),
+            },
+            {"health_report": ""},
+        )
+        self.git("rm", "20-knowledge/A.md")
+
+        self.assertEqual(self.staged_errors(), [])
+
     def test_deny_and_exclude_zones_are_pruned_from_git_queries_and_reads(self) -> None:
         self.seed_notes(
             {
@@ -546,6 +558,12 @@ class StagedGateTests(unittest.TestCase):
         self.write("20-knowledge/_archive/비밀.md", "invalid staged secret [[A]]\n")
         self.write("nested/node_modules/Hidden.md", "invalid staged excluded [[A]]\n")
         self.git("add", "-A")
+        index_paths = healthcheck._index_markdown_paths(
+            self.repo, load_staged_config(self.repo)
+        )
+        self.assertFalse(
+            any("_archive" in path or "node_modules" in path for path in index_paths)
+        )
         calls: list[tuple[str, ...]] = []
         read_paths: list[str] = []
         real_run = healthcheck._run_git_bytes

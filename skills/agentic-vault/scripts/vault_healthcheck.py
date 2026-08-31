@@ -324,9 +324,12 @@ def staged_markdown_pathspecs(
     )
 
     if exclude_generated_referrers:
+        effective_health_report = (
+            config.get("health_report") or DEFAULT_CONFIG["health_report"]
+        )
         generated = {
             config.get("log_note") or "",
-            config.get("health_report") or "",
+            effective_health_report,
         }
         pathspecs.extend(
             f":(exclude,top,literal){path}"
