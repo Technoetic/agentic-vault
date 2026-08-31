@@ -322,6 +322,17 @@ class HookAssetContractTests(unittest.TestCase):
             ["00-meta/scratch", "00-meta/scripts", "10-inbox"],
         )
 
+    def test_first_party_healthcheck_callers_preserve_config_report_provenance(self) -> None:
+        for command_path in (INIT_COMMAND, UPGRADE_COMMAND):
+            execution_lines = [
+                line
+                for line in command_path.read_text(encoding="utf-8").splitlines()
+                if "vault_healthcheck.py" in line and "--vault ." in line
+            ]
+            with self.subTest(command=command_path.name):
+                self.assertEqual(len(execution_lines), 1)
+                self.assertNotIn("--output", execution_lines[0])
+
     def test_init_installs_engine_before_hooks_and_activation(self) -> None:
         command = INIT_COMMAND.read_text(encoding="utf-8")
         engine_source = "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py"

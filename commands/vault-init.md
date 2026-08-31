@@ -99,7 +99,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 ## 7. 검증 (healthcheck)
 
-- `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py" --vault . --output 00-meta/health-report.md`를 실행하라.
+- `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py" --vault .`를 실행하라.
 - 스크립트가 그 경로에 없으면 `${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/`에서 이름에 healthcheck가 들어간 .py를 찾아 같은 인자로 실행하라. 그래도 없으면 검증을 건너뛰되 그 사실을 보고하고 `/vault-lint`로 추후 검증을 안내하라.
 - exit code가 0이 아니면 `00-meta/health-report.md`를 읽고 치명 위반(대개 플레이스홀더 치환 누락·프런트매터 오류)을 즉시 수정한 뒤 재실행해 0을 확인하라.
 
