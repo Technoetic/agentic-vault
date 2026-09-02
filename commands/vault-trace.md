@@ -42,4 +42,4 @@ argument-hint: [추적할 키워드/주제]
 ## 4. 영구화 제안 (사용자 승인 필수)
 
 - 가치 있는 통찰이 도출되면 `20-knowledge/concepts/`(없으면 `20-knowledge/`)에 원자 노트로 저장할지 **사용자에게 제안**하라. 승인 전에 임의로 저장하지 마라.
-- 저장이 승인되면: `required_keys`·`enums`·`frontmatter_max_lines`를 지킨 프런트매터를 작성하고(위키링크 값은 반드시 이중 따옴표), `index_note`에 등록한 뒤 `log_note` 최상단에 `[query]` 태그로 1줄 요약을 남겨라.
+- 저장이 승인되면: `required_keys`·`enums`·`frontmatter_max_lines`를 지킨 프런트매터를 작성하고(위키링크 값은 반드시 이중 따옴표), `index_note`에 등록한 뒤 `log_note` 최상단에 `[query]` 태그로 1줄 요약을 남겨라. index 등록 서술은 **설명만 읽고 열지 말지 판단 가능한 1~2문장**(핵심 결론+범위+언제 열지), 한 물리적 줄로 — index 노트 헤더에 서술 규격이 있으면 그것을 우선하라.

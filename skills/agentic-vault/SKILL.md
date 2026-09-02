@@ -27,6 +27,7 @@ description: "Use when working in a directory containing 00-meta/vault-config.js
    **CRITICAL:** 프런트매터 안의 위키링크는 반드시 이중 따옴표 — `related: ["[[노트 이름]]"]`. 따옴표 없는 `[[ ]]`는 YAML 중첩 배열로 오파싱되어 Dataview가 붕괴한다. 본문 인라인 필드(`[key:: value]`)는 금지 — 메타데이터는 프런트매터에만.
 3. **원자 노트 + 밀집 링크** — 원자적으로 분할하고, 본문의 주요 개념·프로젝트명·인명·조직명을 위키링크로 감싸라. 대상 노트가 없어도 링크부터 만든다. 링크 규율 전체: [references/linking-rules.md](references/linking-rules.md)
 4. **index 등록 + log 태그 기록** — 작업 종료 시 `index_note`에 새 노트를 등록하고, `log_note`(기본 `00-meta/log.md`) 최상단에 1줄 요약을 남겨라.
+   등록 서술은 **설명만 읽고 열지 말지 판단 가능**해야 한다(제목 재진술 금지, 한 물리적 줄): 실패·교훈형 노트는 `문제+근본 원인+처방`, 그 외는 `핵심 결론+범위+언제 열어볼지` 1~2문장 — index는 에이전트가 페이지 개방을 결정하는 게이트라서, 서술이 빈약하면 grep 전수 탐색으로 후퇴한다.
    형식: `- YYYY-MM-DD HH:MM | 행위자 | [태그] 요약` — 태그는 `log_tags` 중 하나(기본: `ingest`·`query`·`lint`·`build`·`ops`·`decision`)를 요약 맨 앞에 붙인다. 이 규약이 로그를 grep 가능한 데이터로 만든다.
 
 ## 3. Deny Zone — 읽기·스캔 절대 금지 구역
