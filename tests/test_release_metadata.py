@@ -105,6 +105,19 @@ REQUIRED_SESSION_END_LITERALS = (
     "`(재발)` 마커",
     "**초안을 쓰기 전에 대장의 '기각 대장' 섹션(있으면)에서 같은 교훈의 "
     "이전 기각 사유를 읽어라**",
+    "승격완료(검증중→대상, 승격일 오늘, anchor",
+    "요약 본문은 `세션 종료 — `로 시작하라",
+    "커밋 수에서 1을 뺀 값",
+)
+# Index description spec must stay wired into every registration path —
+# the release note advertises "등록 경로 4곳에 일관 적용".
+REQUIRED_INDEX_SPEC_WIRING = (
+    ("skills/agentic-vault/SKILL.md", "열지 말지"),
+    ("commands/vault-ingest.md", "열지 말지"),
+    ("commands/vault-trace.md", "문제+근본 원인+처방"),
+    ("commands/vault-lint.md", "열지 말지"),
+    ("assets/templates/index.md", "열지 말지"),
+    ("assets/templates/rules/vault-workflow.md", "열지 말지"),
 )
 REQUIRED_LESSONS_TEMPLATE_LITERALS = (
     "## 기각 대장 — 기각된 승격 초안의 전문 보존",
@@ -191,3 +204,9 @@ class ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, lessons)
         self.assertIn(REQUIRED_WORKFLOW_RULE_STAMP, workflow_rule)
+
+    def test_v083_index_spec_is_wired(self) -> None:
+        for rel_path, literal in REQUIRED_INDEX_SPEC_WIRING:
+            with self.subTest(path=rel_path):
+                content = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                self.assertIn(literal, content)
