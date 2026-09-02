@@ -10,7 +10,7 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.8.2-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.2)
+[![Version](https://img.shields.io/badge/v0.8.3-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.3)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -60,7 +60,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** that warns when the auto-injected handoff/hot notes outgrow their limit (measured in estimated tokens, not words or characters — a 500-word budget means five times more tokens in Korean than in English), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes), a cross-platform backup script, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** that warns when the auto-injected handoff/hot notes outgrow their limit (measured in estimated tokens, not words or characters — a 500-word budget means five times more tokens in Korean than in English), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with the ledger kept append-only, while rejected drafts are preserved verbatim so only improved re-proposals return), a cross-platform backup script, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -81,9 +81,9 @@ flowchart TB
 | `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
-| `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안) + git 커밋(로컬) — **다음 세션 예약** |
+| `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
-| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장·jarvis 블록·git 훅·anchor 멱등 설치 + **`.claude/rules/` 3층 계약 마이그레이션**(사용자 값 불변, 엔진 소유 rules만 스탬프 비교 교체) |
+| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장(+기각 대장 섹션)·jarvis 블록·git 훅·anchor 멱등 설치 + **`.claude/rules/` 3층 계약 마이그레이션**(사용자 값 불변, 엔진 소유 rules만 스탬프 비교 교체) |
 
 ---
 
@@ -183,6 +183,8 @@ SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부
 
 교훈도 계층을 탄다 — **자기개선 루프**: 매 세션의 교훈이 `00-meta/lessons.md` 대장에 축적되고, 같은 교훈이 **3회 반복**되면 `/vault-session-end`가 스킬 승격(CLAUDE.md 계약 조항 · 새 명령 · 기존 문서 보강)을 제안한다. **자동 승격은 없다 — 제안뿐이고 승인은 사람이 한다.** 잘못된 교훈이 규칙으로 굳는 오염을 구조로 차단한 것이다.
 
+v0.8.3부터 루프는 승격 **이후**까지 닫힌다(WikiSkill의 gating·rollback 비대칭 흡수): 승격된 조항은 `검증중` 상태로 관찰 기간(기본 3세션)을 거쳐 확정되고, 역효과가 관찰되면 롤백이 **제안**된다(승인은 역시 사람). 롤백돼도 대장 기록은 지워지지 않는다 — **조항은 가역, 대장은 영속.** 기각된 승격 초안도 전문이 기각 대장에 보존되어, 같은 초안의 재발명 대신 기각 사유를 해소한 개선 재제안만 허용된다.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -265,7 +267,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.8.2 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.8.3 · MIT)
 │
 ├── commands/                          ← 10개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -528,6 +530,7 @@ claude
 | [MemoryHub](https://memoryhub.ai) | 기억 3계층 경계의 실전 원형 — 볼트(진실의 원천) vs 장기 기억 MCP(세션 횡단 기계 회상)의 역할 분리와 "모순 시 볼트 우선" 원칙 |
 | [OpenClaw](https://github.com/openclaw/openclaw) | 🤖 Jarvis 계층의 "몸통" 사상 — 메신저 편재성·상시 데몬·cron 선발화. 우리는 채널 20종 대신 **1채널 최소판**으로 흡수하고 몸통 인프라 재발명은 의도적으로 포기 |
 | [hermes-agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | 에이전트 **선별** 메모리 사상(캡처→인박스→사람 있는 세션 정제)과 **자기개선 스킬 루프** — 후자는 `lessons.md` 대장 + 반복 3회 승격 제안으로 파일 기반 흡수(자동 승격 없음, v0.4.0) |
+| [WikiSkill](https://arxiv.org/abs/2608.27454) (Google Research) | 스킬 진화의 **영속 위키 계층**과 승격 게이팅 — v0.8.3이 3건 흡수: index 서술 규격("설명만 읽고 열지 말지 결정") · 기각 초안 전문 보존 · 승격 후 관찰 검증→확정/롤백("스킬은 가역, 위키는 영속" 비대칭) |
 | [Obsidian](https://obsidian.md) | 위키링크 그래프 · 프런트매터 · 로컬 평문 소유권 |
 
 ---

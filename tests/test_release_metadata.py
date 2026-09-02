@@ -1,4 +1,4 @@
-"""Release-surface contract tests for agentic-vault v0.8.2."""
+"""Release-surface contract tests for agentic-vault v0.8.3."""
 from __future__ import annotations
 
 import json
@@ -10,16 +10,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_MANIFEST = REPO_ROOT / ".claude-plugin" / "plugin.json"
 MARKETPLACE_MANIFEST = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 README = REPO_ROOT / "README.md"
-RELEASE_NOTE = REPO_ROOT / "docs" / "releases" / "v0.8.2.md"
+RELEASE_NOTE_V082 = REPO_ROOT / "docs" / "releases" / "v0.8.2.md"
+RELEASE_NOTE_V083 = REPO_ROOT / "docs" / "releases" / "v0.8.3.md"
 
-EXPECTED = "0.8.2"
+EXPECTED = "0.8.3"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.8.2-10B981?style=for-the-badge)]"
-    "(https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.2)"
+    "[![Version](https://img.shields.io/badge/v0.8.3-10B981?style=for-the-badge)]"
+    "(https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.3)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.8.2 · MIT)"
+    "← plugin.json · marketplace.json (v0.8.3 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -36,7 +37,7 @@ REQUIRED_README_LITERALS = (
     '`chat.type == "private"`',
     "`chat.id == from.id`",
 )
-REQUIRED_RELEASE_SECTIONS = (
+REQUIRED_V082_RELEASE_SECTIONS = (
     "## 보안 수정",
     "## 데이터 내구성",
     "## commit gate",
@@ -46,7 +47,7 @@ REQUIRED_RELEASE_SECTIONS = (
     "## 알려진 경계",
     "## 미포함 v0.9.0 항목",
 )
-REQUIRED_RELEASE_LITERALS = (
+REQUIRED_V082_RELEASE_LITERALS = (
     "`briefing_times`",
     "private chat",
     "process-then-ack",
@@ -73,10 +74,49 @@ EXPECTED_LEGACY_BRIEFING_UPGRADE_LINE = (
     "`07:30`으로 바꾸지 않는다. 새 config나 `jarvis` 블록이 없는 config는 "
     "계속 새 템플릿의 `briefing_times` 기본값을 사용한다."
 )
+REQUIRED_V083_RELEASE_SECTIONS = (
+    "## index 서술 규격",
+    "## 기각 대장 (rejected-proposal ledger)",
+    "## 승격 검증 게이트 + 가역 롤백",
+    "## 하위호환",
+    "## 업그레이드",
+    "## 검증",
+    "## 알려진 경계",
+    "## 미포함 v0.9.0 항목",
+)
+REQUIRED_V083_RELEASE_LITERALS = (
+    "arXiv 2608.27454",
+    "`promotion_review_sessions`",
+    "승격완료(검증중→대상, 승격일, anchor)",
+    "롤백(사유)",
+    "조항은 가역, 대장은 영속",
+    "`(재발)`",
+    "## 기각 대장",
+    "engine=0.8.3",
+    "제목 재진술 금지",
+    "git log --oneline origin/master..HEAD",
+)
+# v0.8.3 behavioral-contract anchors: the promotion probation gate and the
+# rejection ledger must stay wired into the session-end command and templates.
+REQUIRED_SESSION_END_LITERALS = (
+    "0. **승격 검증 게이트**",
+    "`promotion_review_sessions`",
+    "상태를 `롤백(사유)`로 바꿔라",
+    "`(재발)` 마커",
+    "**초안을 쓰기 전에 대장의 '기각 대장' 섹션(있으면)에서 같은 교훈의 "
+    "이전 기각 사유를 읽어라**",
+)
+REQUIRED_LESSONS_TEMPLATE_LITERALS = (
+    "## 기각 대장 — 기각된 승격 초안의 전문 보존",
+    "승격완료(검증중→대상, 승격일, anchor)",
+    "구판 표기 `승격완료(→대상)`(승격일·anchor 없음)는 검증을 통과한 "
+    "확정분으로 간주한다",
+)
+REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.8.3"
 
 
 class ReleaseMetadataTests(unittest.TestCase):
-    def test_active_version_surfaces_are_v082(self) -> None:
+    def test_active_version_surfaces_are_v083(self) -> None:
         plugin = json.loads(
             PLUGIN_MANIFEST.read_text(encoding="utf-8-sig")
         )
@@ -99,21 +139,55 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_release_note_records_v082_contract(self) -> None:
         self.assertTrue(
-            RELEASE_NOTE.is_file(),
-            f"missing release note: {RELEASE_NOTE.relative_to(REPO_ROOT)}",
+            RELEASE_NOTE_V082.is_file(),
+            f"missing release note: {RELEASE_NOTE_V082.relative_to(REPO_ROOT)}",
         )
-        release = RELEASE_NOTE.read_text(encoding="utf-8")
+        release = RELEASE_NOTE_V082.read_text(encoding="utf-8")
         release_lines = release.splitlines()
 
-        self.assertIn(EXPECTED, release)
+        self.assertIn("0.8.2", release)
         self.assertIn(EXPECTED_JARVIS_BOUNDARY_LINE, release_lines)
-        for section in REQUIRED_RELEASE_SECTIONS:
+        for section in REQUIRED_V082_RELEASE_SECTIONS:
             with self.subTest(section=section):
                 self.assertIn(section, release)
-        for literal in REQUIRED_RELEASE_LITERALS:
+        for literal in REQUIRED_V082_RELEASE_LITERALS:
             with self.subTest(literal=literal):
                 self.assertIn(literal, release)
         for line in EXPECTED_SCOPE_UPGRADE_LINES:
             with self.subTest(line=line):
                 self.assertIn(line, release_lines)
         self.assertIn(EXPECTED_LEGACY_BRIEFING_UPGRADE_LINE, release_lines)
+
+    def test_release_note_records_v083_contract(self) -> None:
+        self.assertTrue(
+            RELEASE_NOTE_V083.is_file(),
+            f"missing release note: {RELEASE_NOTE_V083.relative_to(REPO_ROOT)}",
+        )
+        release = RELEASE_NOTE_V083.read_text(encoding="utf-8")
+
+        self.assertIn(EXPECTED, release)
+        for section in REQUIRED_V083_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V083_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+
+    def test_v083_loop_contract_is_wired(self) -> None:
+        session_end = (REPO_ROOT / "commands" / "vault-session-end.md").read_text(
+            encoding="utf-8"
+        )
+        lessons = (
+            REPO_ROOT / "assets" / "templates" / "lessons.md"
+        ).read_text(encoding="utf-8")
+        workflow_rule = (
+            REPO_ROOT / "assets" / "templates" / "rules" / "vault-workflow.md"
+        ).read_text(encoding="utf-8")
+
+        for literal in REQUIRED_SESSION_END_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, session_end)
+        for literal in REQUIRED_LESSONS_TEMPLATE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, lessons)
+        self.assertIn(REQUIRED_WORKFLOW_RULE_STAMP, workflow_rule)
