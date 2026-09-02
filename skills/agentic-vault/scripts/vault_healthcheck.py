@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.8.2
+# agentic-vault:healthcheck engine=0.8.4
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -22,6 +22,10 @@
   10  rules 무결성 — .claude/rules/ 존재 시만 (관리성, v0.7):
         10a 파일 크기 상한 초과 (절차성 장문 유입 경고)
         10b 엔진 rules ↔ CLAUDE.md 규칙 제목 중복 (충돌 시 모델 임의선택 방지)
+  11  세션 주입 토큰 예산 초과 — hot/handoff 통주입 감시 (관리성)
+  12  세션 종료 누락 의심 — handoff anchor와 git HEAD 커밋 거리 (관리성)
+  14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
+      ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
 
 종료 코드(fail-closed):
   0 = 볼트 아님(조용히 통과) 또는 치명 이슈 0건 (관리성 이슈는 리포트만)
@@ -52,7 +56,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.8.2"
+ENGINE_VERSION = "0.8.4"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 DEFAULT_FRONTMATTER_ROOTS = (
     "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
@@ -232,6 +236,22 @@ def validate_config(raw: object) -> dict:
             _normalize_relative_path(item, f"{key}[{index}]", allow_empty=False)
             for index, item in enumerate(values)
         ]
+
+    # deny zone은 읽기 금지 구역이다 — 검사기·훅이 되읽어야 하는 경로 필드(handoff·
+    # index·리포트 등)가 그 안을 가리키면 pre-commit --staged가 대상을 읽지 못한 채
+    # 조용히 통과하는 우회가 된다(2026-08-31 포크(NS) 교차 검증 프로브 실증, v0.8.4).
+    # 배치는 _PATH_LIST_KEYS 정규화 이후 — deny_zones가 정규화된 뒤에만 비교가 옳다.
+    deny_zones = config.get("deny_zones") or []
+    for key in sorted(_PATH_KEYS):
+        value = config.get(key)
+        if not value:
+            continue
+        parts = tuple(part.casefold() for part in Path(value).parts)
+        for zone in deny_zones:
+            zone_parts = tuple(part.casefold() for part in Path(zone).parts)
+            if zone_parts and parts[:len(zone_parts)] == zone_parts:
+                raise HealthcheckError(
+                    f"{key} must not point inside deny zone {zone!r}")
 
     enums = config.get("enums")
     if not isinstance(enums, dict):
@@ -539,6 +559,16 @@ SKIP_FILENAMES = {"claude.md", "agents.md", "readme.md"}
 
 def read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
+
+
+def read_note_text(p: Path) -> tuple[str | None, str | None]:
+    """(본문, 오류) 중 하나만 채워 반환한다 — 파일 단위 fail-soft (v0.8.4).
+    노트 하나를 못 읽는다고(클라우드 하이드레이션 실패·백신 잠금·동시 저장 레이스)
+    전체 검사가 traceback으로 죽으면 안 된다. 못 읽은 파일은 §14로 보고만 한다."""
+    try:
+        return read_text(p), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def rel_posix(p: Path, vault: Path) -> str:
@@ -1024,6 +1054,7 @@ def main() -> int:
     oversized_fm: list[tuple[str, int]] = []
     dead_links: list[tuple[str, str]] = []
     stale: list[tuple[str, str]] = []
+    unreadable: list[tuple[str, str]] = []
     outgoing: dict[str, set[str]] = {}
     incoming: dict[str, int] = {p.stem: 0 for p in targets}
     note_types: dict[str, str] = {}
@@ -1054,7 +1085,11 @@ def main() -> int:
 
     for p in targets:
         rel = rel_posix(p, vault)
-        text = read_text(p)
+        text, read_err = read_note_text(p)
+        if text is None:
+            # 파일 단위 fail-soft — 이 노트만 건너뛰고 검사를 계속한다(§14 보고).
+            unreadable.append((rel, read_err or "읽기 실패"))
+            continue
         fm, _body = split_frontmatter(text)
 
         exempt = is_fm_exempt(rel)
@@ -1114,12 +1149,23 @@ def main() -> int:
             for v in vals:
                 fact_hits[label].setdefault(v, []).append(rel)
 
+    if targets and len(unreadable) == len(targets):
+        # 침묵 통과(silent green) 방지: 전 노트가 읽기 실패면 검사가 수행되지 않은 것이다.
+        print("[vault-healthcheck] 오류: 검사 대상 전부를 읽지 못했습니다 — "
+              "잠금·권한·클라우드 하이드레이션 상태를 확인하세요.", file=sys.stderr)
+        return 1
+
     # --- 고아 / 준고아 ---------------------------------------------------------
+    # 못 읽은 노트는 본문(발신 링크)을 모르므로 고아·준고아 판정에서 제외한다 —
+    # 읽기 실패를 링크 부재로 오판하지 않는다.
+    unreadable_stems = {Path(rel).stem for rel, _ in unreadable}
     orphans = [p for p in targets
-               if not outgoing.get(p.stem) and incoming.get(p.stem, 0) == 0
+               if p.stem not in unreadable_stems
+               and not outgoing.get(p.stem) and incoming.get(p.stem, 0) == 0
                and p.stem not in hub_stems]
     semi_orphans = [p for p in targets
-                    if incoming.get(p.stem, 0) == 0 and p.stem not in hub_stems
+                    if p.stem not in unreadable_stems
+                    and incoming.get(p.stem, 0) == 0 and p.stem not in hub_stems
                     and p not in orphans]
 
     # --- 인덱스 미등록 ----------------------------------------------------------
@@ -1219,6 +1265,7 @@ def main() -> int:
                     + len(log_tag_missing) + len(log_tag_unknown)
                     + len(rules_oversized) + len(rules_dup)
                     + len(injection_over)
+                    + len(unreadable)
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
@@ -1348,6 +1395,12 @@ def main() -> int:
         "활성 세션 중간엔 커밋 누적이 정상이라 exit 코드에는 반영하지 않고 콘솔 요약에만 띄운다)",
         *drift_lines,
         "",
+        f"## 14. 읽기 실패 — 파일 단위 fail-soft — 관리성 ({len(unreadable)})",
+        "  (읽지 못한 노트는 이번 검사에서 건너뛰었다 — 프런트매터·링크·고아 판정 대상 아님. "
+        "클라우드 하이드레이션 실패·백신 잠금·동시 저장 레이스가 흔한 원인. "
+        "13은 결번 — 포크 볼트의 루트 allowlist 검사 번호와 충돌 회피)",
+        *([f"- {rel} — {err}" for rel, err in unreadable] or ["- 없음"]),
+        "",
     ]
 
     try:
@@ -1360,8 +1413,9 @@ def main() -> int:
         return 1
 
     drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
+    read_note = f" ⚠️읽기 실패 {len(unreadable)}건(§14)" if unreadable else ""
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
-          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}")
+          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}")
     return 1 if critical > 0 else 0
 
 

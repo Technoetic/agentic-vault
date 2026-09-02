@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -1254,6 +1256,115 @@ class StagedGateTests(unittest.TestCase):
         with mock.patch.object(healthcheck, "_run_git_bytes", side_effect=fail_grep):
             with self.assertRaisesRegex(HealthcheckError, "grep"):
                 self.staged_errors()
+
+
+class DenyZonePathKeyTests(unittest.TestCase):
+    """v0.8.4 계약: 검사기가 되읽는 경로 필드는 deny zone 안을 가리킬 수 없다.
+
+    deny zone은 읽기 금지 구역이라, handoff·index 등이 그 안에 있으면
+    pre-commit --staged가 대상을 읽지 못한 채 조용히 통과한다(2026-08-31 프로브)."""
+
+    def test_path_key_inside_deny_zone_is_rejected(self) -> None:
+        with self.assertRaisesRegex(HealthcheckError, "handoff_note"):
+            validate_config({
+                "deny_zones": ["90-assets"],
+                "handoff_note": "90-assets/handoff.md",
+            })
+
+    def test_case_variant_deny_zone_hit_is_rejected(self) -> None:
+        # Windows 파일시스템은 대소문자 불문 — 표기 차이는 우회가 아니다.
+        with self.assertRaisesRegex(HealthcheckError, "index_note"):
+            validate_config({
+                "deny_zones": ["90-assets"],
+                "index_note": "90-Assets/index.md",
+            })
+
+    def test_similar_prefix_directory_is_not_rejected(self) -> None:
+        # 경로 세그먼트 비교 — 문자열 startswith가 아니다("90-assets-notes"는 다른 폴더).
+        config = validate_config({
+            "deny_zones": ["90-assets"],
+            "index_note": "90-assets-notes/index.md",
+            "handoff_note": "50-projects/handoff.md",
+        })
+        self.assertEqual(config["index_note"], "90-assets-notes/index.md")
+
+
+class ReadFailSoftTests(unittest.TestCase):
+    """v0.8.4 계약: 노트 하나의 읽기 실패(OSError)는 §14 보고로 격리되고
+    전체 검사는 계속된다. 단, 전부 실패면 침묵 통과 대신 exit 1이다."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name) / "failsoft vault"
+        self.repo.mkdir()
+
+    def write(self, relpath: str, text: str) -> Path:
+        path = self.repo / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def write_config(self) -> None:
+        self.write("00-meta/vault-config.json", json.dumps({
+            "vault_name": "failsoft 테스트 볼트",
+            "required_keys": ["title"],
+            "enums": {},
+            "deny_zones": [],
+            "exclude_dirs": [".git"],
+            "frontmatter_roots": ["20-knowledge"],
+            "index_note": "",
+            "log_note": "",
+            "log_tags": [],
+            "hot_note": "",
+            "handoff_note": "",
+            "ssot_note": "",
+            "health_report": "00-meta/failsoft-health.md",
+            "rules_dir": "",
+        }, ensure_ascii=False))
+
+    def run_main(self) -> int:
+        with mock.patch.object(
+            sys, "argv", ["vault_healthcheck.py", "--vault", str(self.repo)]
+        ):
+            return healthcheck.main()
+
+    def test_unreadable_note_is_reported_and_scan_continues(self) -> None:
+        self.write_config()
+        self.write("20-knowledge/Good.md", '---\ntitle: "Good"\n---\n[[Broken]]\n')
+        self.write("20-knowledge/Broken.md", '---\ntitle: "Broken"\n---\n')
+        real_read_text = healthcheck.read_text
+
+        def flaky(p: Path) -> str:
+            if p.name == "Broken.md":
+                raise OSError("locked by antivirus (test)")
+            return real_read_text(p)
+
+        with mock.patch.object(healthcheck, "read_text", side_effect=flaky):
+            rc = self.run_main()
+
+        self.assertEqual(rc, 0)  # 읽기 실패는 관리성 — 치명 아님
+        report = (self.repo / "00-meta/failsoft-health.md").read_text(encoding="utf-8")
+        self.assertIn("## 14. 읽기 실패 — 파일 단위 fail-soft — 관리성 (1)", report)
+        self.assertIn("20-knowledge/Broken.md — OSError", report)
+        # 건너뛴 노트를 프런트매터 누락·고아로 오판하지 않는다
+        self.assertIn("## 1. 프런트매터 누락 — 치명 (0)", report)
+        self.assertIn("## 6. 고아 노드 — 관리성 (0)", report)
+
+    def test_all_notes_unreadable_fails_closed(self) -> None:
+        self.write_config()
+        self.write("20-knowledge/Only.md", '---\ntitle: "Only"\n---\n')
+
+        def always_fail(p: Path) -> str:
+            raise OSError("volume offline (test)")
+
+        stderr = io.StringIO()
+        with mock.patch.object(healthcheck, "read_text", side_effect=always_fail):
+            with contextlib.redirect_stderr(stderr):
+                rc = self.run_main()
+
+        self.assertEqual(rc, 1)
+        self.assertIn("전부를 읽지 못했습니다", stderr.getvalue())
 
 
 if __name__ == "__main__":
