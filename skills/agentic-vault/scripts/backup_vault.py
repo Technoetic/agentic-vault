@@ -1,237 +1,395 @@
-# -*- coding: utf-8 -*-
-"""agentic-vault 로컬 2차 백업 — 볼트 전체 미러 + git 이력 번들 (크로스 플랫폼).
+"""Independent local snapshots, SHA-256 verification, and new-directory restore.
 
-목적: git이 커버하지 않는 바이너리(에셋, .gitignore 제외물)까지 포함한
-      볼트 전체의 사고 방어 — 실수 삭제, 파일 손상, 미추적 파일 소실.
+Create:  backup_vault.py [--vault VAULT] [--target BACKUP_ROOT]
+Verify:  backup_vault.py --verify SNAPSHOT
+Restore: backup_vault.py --restore SNAPSHOT --destination NEW_DIRECTORY
 
-동작:
-  1. 볼트 감지: --vault 인자 → CLAUDE_PROJECT_DIR → 현재 디렉토리 순.
-     00-meta/vault-config.json이 없으면 볼트가 아니므로 정중히 무동작(exit 0).
-  2. config의 backup_target(또는 --target 인자)이 비어 있으면 안내 후 exit 0.
-  3. 미러: <target>/mirror 로 전체 미러(삭제 동기화 포함).
-     - Windows: robocopy /MIR (종료코드 0~7 성공, 8+ 실패)
-     - macOS/Linux: rsync -a --delete
-     - 둘 다 없으면 표준 라이브러리(shutil) 폴백 미러.
-     config의 exclude_dirs(이름 기준, 모든 깊이)와 Thumbs.db·desktop.ini는 제외.
-  4. 볼트가 git repo면 <target>/bundles/ 에 `git bundle --all`을 날짜명으로 누적.
-  5. <target>/backup-log.txt 에 결과 1줄 기록.
-
-사용법: python backup_vault.py [--vault <볼트경로>] [--target <백업경로>]
-표준 라이브러리만 사용. 권장 주기: 세션 종료 시 또는 큰 작업 단위 후.
+Completed snapshots are never updated or pruned. Failed private staging directories
+are retained for inspection; a process killed while holding .backup.lock requires
+manual lock removal after confirming that no backup writer is running. Restore
+exports working files; history.bundle remains in the snapshot for `git clone`.
+Use a quiescent vault: this is a checked file copy, not a filesystem point-in-time
+snapshot. Hashes detect accidental corruption, not malicious manifest replacement.
 """
 import argparse
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
-from datetime import datetime
-from pathlib import Path
+import uuid
+
 
 CONFIG_REL = "00-meta/vault-config.json"
 DEFAULT_EXCLUDE_DIRS = [
     "node_modules", ".venv", "venv", "__pycache__", ".git", ".trash", "step_archive",
 ]
 EXCLUDE_FILES = ["Thumbs.db", "desktop.ini"]
+CHUNK_SIZE = 1024 * 1024
+MAX_MANIFEST_BYTES = 32 * 1024 * 1024
+REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
-def _utf8_stdout() -> None:
-    """Windows cp949 콘솔에서도 한국어 출력이 깨지지 않도록 stdout을 UTF-8로 재설정."""
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, ValueError):
-        pass
+class BackupError(ValueError):
+    """Unsafe input, changed files, invalid snapshot, or failed Git operation."""
 
 
-def find_vault(cli_vault: str | None) -> Path | None:
-    """볼트 루트 결정: --vault → CLAUDE_PROJECT_DIR → cwd. 볼트가 아니면 None."""
-    candidates = []
-    if cli_vault:
-        candidates.append(Path(cli_vault))
-    env_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
-    if env_dir:
-        candidates.append(Path(env_dir))
-    candidates.append(Path.cwd())
-    for cand in candidates:
+def _is_link(info):
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & REPARSE_POINT)
+
+
+def _safe_path(raw: Path) -> Path:
+    """Check lexical components before resolving so junctions cannot disappear."""
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
         try:
-            if (cand / CONFIG_REL).is_file():
-                return cand.resolve()
-        except OSError:
+            info = current.lstat()
+        except FileNotFoundError:
             continue
-    return None
+        if _is_link(info):
+            raise BackupError(f"symlink or reparse point is not supported: {current}")
+    return path.resolve()
+
+
+def _nonoverlap(first: Path, second: Path):
+    if first.is_relative_to(second) or second.is_relative_to(first):
+        raise BackupError("source and destination paths overlap")
+
+
+def _relative_name(value):
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise BackupError("invalid relative snapshot path")
+    for part in value.split("/"):
+        if (not part or part in (".", "..") or part.endswith((".", " "))
+                or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
+                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", part)):
+            raise BackupError("invalid relative snapshot path")
+    return value
+
+
+def _json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise BackupError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _read_json(path, limit):
+    path = _safe_path(path)
+    if not stat.S_ISREG(path.stat().st_mode):
+        raise BackupError("expected a regular JSON file")
+    with path.open("rb") as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise BackupError("JSON file exceeds size limit")
+    try:
+        return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_json_object)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise BackupError("invalid JSON file") from exc
 
 
 def load_config(vault: Path) -> dict:
+    config = _read_json(vault / CONFIG_REL, 1024 * 1024)
+    if not isinstance(config, dict):
+        raise BackupError("vault configuration must be an object")
+    if "backup_target" in config and not isinstance(config["backup_target"], str):
+        raise BackupError("backup_target must be a string")
+    excluded = config.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)
+    if not isinstance(excluded, list):
+        raise BackupError("exclude_dirs must be a list of directory names")
+    for name in excluded:
+        _relative_name(name)
+        if "/" in name:
+            raise BackupError("exclude_dirs entries must be directory names")
+    return config
+
+
+def find_vault(cli_vault: str | None) -> Path | None:
+    candidates = ([cli_vault] if cli_vault else
+                  [os.environ.get("CLAUDE_PROJECT_DIR", ""), str(Path.cwd())])
+    for candidate in candidates:
+        if candidate:
+            vault = _safe_path(Path(candidate))
+            if (vault / CONFIG_REL).exists():
+                return vault
+    return None
+
+
+def _fingerprint(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns)
+
+
+def _inventory(root: Path, excluded=(), exclude_files=()):
+    """Scan even excluded directories for unsafe links; never follow a link."""
+    files, directories = {}, []
+    root = _safe_path(root)
+    if not root.is_dir():
+        raise BackupError("expected a directory")
+    pending = [(root, False)]
+    while pending:
+        directory, omitted = pending.pop()
+        _safe_path(directory)
+        with os.scandir(directory) as entries:
+            for entry in sorted(entries, key=lambda item: item.name):
+                path = directory / entry.name
+                info = entry.stat(follow_symlinks=False)
+                if _is_link(info):
+                    raise BackupError(f"symlink or reparse point is not supported: {path}")
+                rel = path.relative_to(root).as_posix()
+                if stat.S_ISDIR(info.st_mode):
+                    skip = omitted or entry.name in excluded
+                    pending.append((path, skip))
+                    if not skip:
+                        directories.append(_relative_name(rel))
+                elif stat.S_ISREG(info.st_mode):
+                    if not omitted and entry.name not in exclude_files:
+                        files[_relative_name(rel)] = _fingerprint(info)
+                else:
+                    raise BackupError(f"unsupported non-regular file: {path}")
+    return files, sorted(directories)
+
+
+def _digest(path: Path):
+    path = _safe_path(path)
+    before = path.stat()
+    if not stat.S_ISREG(before.st_mode):
+        raise BackupError("expected a regular file")
+    digest, size = hashlib.sha256(), 0
+    with path.open("rb") as stream:
+        if _fingerprint(os.fstat(stream.fileno())) != _fingerprint(before):
+            raise BackupError("file changed before reading")
+        for block in iter(lambda: stream.read(CHUNK_SIZE), b""):
+            digest.update(block)
+            size += len(block)
+    if _fingerprint(_safe_path(path).stat()) != _fingerprint(before):
+        raise BackupError("file changed while reading")
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
+def _copy_file(source: Path, destination: Path):
+    source = _safe_path(source)
+    destination = _safe_path(destination)
+    before = source.stat()
+    if not stat.S_ISREG(before.st_mode):
+        raise BackupError("expected a regular source file")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest, size = hashlib.sha256(), 0
+    with source.open("rb") as src, destination.open("xb") as dst:
+        if _fingerprint(os.fstat(src.fileno())) != _fingerprint(before):
+            raise BackupError("source changed before copying")
+        for block in iter(lambda: src.read(CHUNK_SIZE), b""):
+            dst.write(block)
+            digest.update(block)
+            size += len(block)
+        dst.flush()
+        os.fsync(dst.fileno())
+    if _fingerprint(_safe_path(source).stat()) != _fingerprint(before):
+        raise BackupError("source changed while copying")
+    shutil.copystat(source, destination, follow_symlinks=False)
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
+@contextmanager
+def _writer_lock(target):
+    lock = target / ".backup.lock"
     try:
-        config = json.loads((vault / CONFIG_REL).read_text(encoding="utf-8-sig"))
-        return config if isinstance(config, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def mirror_robocopy(src: Path, dst: Path, exclude_dirs: list[str]) -> tuple[str, int, bool]:
-    """Windows robocopy 미러. 반환: (방식, 종료코드, 성공여부)."""
-    cmd = [
-        "robocopy", str(src), str(dst), "/MIR",
-        "/XD", *exclude_dirs,
-        "/XF", *EXCLUDE_FILES,
-        "/R:1", "/W:1", "/NFL", "/NDL", "/NP",
-    ]
-    rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
-    return ("robocopy", rc, rc < 8)  # robocopy: 0~7 성공 계열, 8+ 실패
-
-
-def mirror_rsync(src: Path, dst: Path, exclude_dirs: list[str]) -> tuple[str, int, bool]:
-    """macOS/Linux rsync 미러. 반환: (방식, 종료코드, 성공여부)."""
-    cmd = ["rsync", "-a", "--delete"]
-    for name in exclude_dirs + EXCLUDE_FILES:
-        cmd.append(f"--exclude={name}")
-    cmd += [str(src) + "/", str(dst) + "/"]
-    rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
-    return ("rsync", rc, rc in (0, 24))  # 24 = 전송 중 파일 소실(경고 취급)
-
-
-def mirror_shutil(src: Path, dst: Path, exclude_dirs: list[str]) -> tuple[str, int, bool]:
-    """표준 라이브러리 폴백 미러: 신규·변경 복사 후 원본에 없는 항목 삭제."""
-    excl = set(exclude_dirs)
-    excl_files = set(EXCLUDE_FILES)
-    errors = 0
-
-    # 1) 복사 단계 — 부재하거나 (mtime·size 기준) 변경된 파일만 복사
-    for root, dirs, files in os.walk(src):
-        dirs[:] = [d for d in dirs if d not in excl]
-        rel = os.path.relpath(root, src)
-        troot = dst if rel == "." else dst / rel
-        try:
-            os.makedirs(troot, exist_ok=True)
-        except OSError:
-            errors += 1
-            continue
-        for name in files:
-            if name in excl_files:
-                continue
-            s = Path(root) / name
-            t = Path(troot) / name
-            try:
-                if (not t.exists()
-                        or abs(s.stat().st_mtime - t.stat().st_mtime) > 2
-                        or s.stat().st_size != t.stat().st_size):
-                    shutil.copy2(s, t)
-            except OSError:
-                errors += 1
-
-    # 2) 삭제 단계 — 원본에 더 이상 없는 파일·디렉토리 제거(제외 이름은 건드리지 않음)
-    for root, dirs, files in os.walk(dst, topdown=False):
-        rel = os.path.relpath(root, dst)
-        parts = [] if rel == "." else rel.split(os.sep)
-        if any(p in excl for p in parts):
-            continue
-        sroot = src if rel == "." else src / rel
-        for name in files:
-            if name in excl_files:
-                continue
-            if not (sroot / name).exists():
-                try:
-                    os.remove(Path(root) / name)
-                except OSError:
-                    errors += 1
-        for name in dirs:
-            if name in excl:
-                continue
-            dpath = Path(root) / name
-            if not (sroot / name).exists() and dpath.is_dir():
-                try:
-                    shutil.rmtree(dpath)
-                except OSError:
-                    errors += 1
-
-    return ("shutil", errors, errors == 0)
-
-
-def make_bundle(vault: Path, bundles_dir: Path) -> str:
-    """볼트가 git repo면 전체 이력 번들 생성. 로그용 결과 문자열 반환."""
-    if not (vault / ".git").exists():
-        return "skipped(not-a-git-repo)"
-    if shutil.which("git") is None:
-        return "skipped(git-not-found)"
+        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise BackupError("backup writer lock exists; confirm no writer is running before manual removal") from exc
     try:
-        bundles_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return "skipped(mkdir-failed)"
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", vault.name).strip("-") or "vault"
-    bundle_file = bundles_dir / f"{stem}-{datetime.now():%Y%m%d-%H%M}.bundle"
-    rc = subprocess.run(
-        ["git", "-C", str(vault), "bundle", "create", str(bundle_file), "--all"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    ).returncode
-    return bundle_file.name if rc == 0 else f"failed(rc={rc})"
+        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+            stream.write(f"pid={os.getpid()}\n")
+        yield
+    finally:
+        lock.unlink()
+
+
+def _make_bundle(vault, stage):
+    git_dir = vault / ".git"
+    if not git_dir.exists():
+        return None
+    if not git_dir.is_dir():
+        raise BackupError("Git worktree/submodule .git files are unsupported for history backup")
+    git = shutil.which("git")
+    if git is None:
+        raise BackupError("Git is required to back up this repository's history")
+    result = subprocess.run(
+        [git, "-C", str(vault), "bundle", "create", str(stage / "history.bundle"), "--all"],
+        capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise BackupError(f"Git history bundle failed (exit {result.returncode})")
+    return _digest(stage / "history.bundle")
+
+
+def _record(value):
+    if (not isinstance(value, dict) or set(value) != {"size", "sha256"}
+            or type(value["size"]) is not int or value["size"] < 0
+            or not isinstance(value["sha256"], str)
+            or not re.fullmatch("[0-9a-f]{64}", value["sha256"])):
+        raise BackupError("invalid manifest file record")
+
+
+def verify_snapshot(snapshot: Path) -> dict:
+    """Return a validated manifest; raise before accepting any corrupt snapshot."""
+    snapshot = _safe_path(snapshot)
+    manifest = _read_json(snapshot / "manifest.json", MAX_MANIFEST_BYTES)
+    if (not isinstance(manifest, dict)
+            or set(manifest) != {"version", "created_utc", "files", "directories", "git_bundle"}
+            or type(manifest["version"]) is not int or manifest["version"] != 1
+            or not isinstance(manifest["created_utc"], str)
+            or not isinstance(manifest["files"], dict)
+            or not isinstance(manifest["directories"], list)):
+        raise BackupError("unsupported or malformed snapshot manifest")
+    names = list(manifest["files"]) + manifest["directories"]
+    seen = set()
+    for name in names:
+        _relative_name(name)
+        if name.casefold() in seen:
+            raise BackupError("duplicate or case-colliding manifest paths")
+        seen.add(name.casefold())
+    directory_set = set(manifest["directories"])
+    for name in names:
+        parent = Path(name).parent
+        while parent != Path("."):
+            if parent.as_posix() not in directory_set:
+                raise BackupError("manifest omits a parent directory")
+            parent = parent.parent
+    expected_top = {"files", "manifest.json"}
+    if manifest["git_bundle"] is not None:
+        _record(manifest["git_bundle"])
+        expected_top.add("history.bundle")
+    if {item.name for item in snapshot.iterdir()} != expected_top:
+        raise BackupError("unexpected or missing snapshot contents")
+    files, directories = _inventory(snapshot / "files")
+    if set(files) != set(manifest["files"]) or directories != sorted(manifest["directories"]):
+        raise BackupError("snapshot inventory does not match manifest")
+    for name, record in manifest["files"].items():
+        _record(record)
+        if _digest(snapshot / "files" / name) != record:
+            raise BackupError(f"snapshot file checksum mismatch: {name}")
+    if manifest["git_bundle"] is not None:
+        if _digest(snapshot / "history.bundle") != manifest["git_bundle"]:
+            raise BackupError("Git bundle checksum mismatch")
+    return manifest
+
+
+def create_backup(vault: Path, target: Path) -> Path:
+    """Publish one verified snapshot with an exclusive per-target writer lock."""
+    vault = _safe_path(vault)
+    target = _safe_path(target if Path(target).is_absolute() else vault / target)
+    _nonoverlap(vault, target)
+    config = load_config(vault)
+    excluded = set(config.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)) | {".git"}
+    target.mkdir(parents=True, exist_ok=True)
+    with _writer_lock(target):
+        snapshots = _safe_path(target / "snapshots")
+        snapshots.mkdir(exist_ok=True)
+        identifier = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex
+        stage = target / (".staging-" + identifier)
+        stage.mkdir(mode=0o700)
+        (stage / "files").mkdir()
+        before, directories = _inventory(vault, excluded, EXCLUDE_FILES)
+        manifest = {"version": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
+                    "files": {}, "directories": directories, "git_bundle": None}
+        for name in directories:
+            (stage / "files" / name).mkdir(parents=True, exist_ok=True)
+        for name in sorted(before):
+            source = vault / name
+            manifest["files"][name] = _copy_file(source, stage / "files" / name)
+            if _digest(source) != manifest["files"][name]:
+                raise BackupError("source changed during backup")
+        manifest["git_bundle"] = _make_bundle(vault, stage)
+        if _inventory(vault, excluded, EXCLUDE_FILES) != (before, directories):
+            raise BackupError("vault changed during backup; retry with a quiescent vault")
+        with (stage / "manifest.json").open("x", encoding="utf-8") as stream:
+            json.dump(manifest, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        verify_snapshot(stage)
+        published = snapshots / identifier
+        if published.exists():
+            raise BackupError("snapshot identifier collision")
+        stage.rename(published)
+        return published
+
+
+def restore_snapshot(snapshot: Path, destination: Path) -> Path:
+    """Validate completely before creating an exclusive new destination directory.
+
+    I/O failure during export leaves the new directory partially populated for
+    inspection. Existing directories are never merged with or overwritten.
+    """
+    snapshot, destination = _safe_path(snapshot), _safe_path(destination)
+    _nonoverlap(snapshot, destination)
+    if destination.exists():
+        raise BackupError("restore destination must be a new directory")
+    manifest = verify_snapshot(snapshot)
+    destination.mkdir(parents=True, exist_ok=False)
+    for name in manifest["directories"]:
+        (destination / name).mkdir(parents=True, exist_ok=True)
+    for name, record in manifest["files"].items():
+        if _copy_file(snapshot / "files" / name, destination / name) != record:
+            raise BackupError("snapshot changed during restore")
+        if _digest(destination / name) != record:
+            raise BackupError("restored file checksum mismatch")
+    return destination
 
 
 def main() -> int:
-    _utf8_stdout()
-    parser = argparse.ArgumentParser(description="agentic-vault 로컬 2차 백업 (미러 + git 번들)")
-    parser.add_argument("--vault", help="볼트 루트 경로 (기본: CLAUDE_PROJECT_DIR → 현재 디렉토리)")
-    parser.add_argument("--target", help="백업 대상 경로 (기본: vault-config.json의 backup_target)")
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--vault", help="vault root (default: CLAUDE_PROJECT_DIR or cwd)")
+    parser.add_argument("--target", help="backup root (default: config backup_target)")
+    operations = parser.add_mutually_exclusive_group()
+    operations.add_argument("--verify", type=Path, metavar="SNAPSHOT")
+    operations.add_argument("--restore", type=Path, metavar="SNAPSHOT")
+    parser.add_argument("--destination", type=Path, help="new directory for restored working files")
     args = parser.parse_args()
-
-    vault = find_vault(args.vault)
-    if vault is None:
-        print("[agentic-vault] 볼트(00-meta/vault-config.json)가 아니므로 백업을 건너뜁니다.")
+    if (args.verify or args.restore) and (args.vault or args.target):
+        parser.error("--vault and --target apply only to snapshot creation")
+    if bool(args.restore) != bool(args.destination):
+        parser.error("--restore and --destination must be used together")
+    try:
+        if args.verify:
+            verify_snapshot(args.verify)
+            print(f"Verified: {args.verify}")
+        elif args.restore:
+            print(f"Restored: {restore_snapshot(args.restore, args.destination)}")
+        else:
+            vault = find_vault(args.vault)
+            if vault is None:
+                if args.vault:
+                    raise BackupError("explicit --vault has no vault configuration")
+                return 0
+            config = load_config(vault)
+            target = (args.target or config.get("backup_target", "")).strip()
+            if not target:
+                print("[agentic-vault] No backup_target configured; backup skipped.")
+                return 0
+            print(f"Snapshot: {create_backup(vault, Path(target))}")
         return 0
-
-    config = load_config(vault)
-    target_raw = (args.target or config.get("backup_target", "") or "").strip()
-    if not target_raw:
-        print("[agentic-vault] backup_target이 설정되지 않아 백업을 건너뜁니다.")
-        print("  → 00-meta/vault-config.json의 \"backup_target\"에 백업 경로를 지정하거나 --target 인자를 사용하세요.")
-        return 0
-
-    target = Path(target_raw)
-    if not target.is_absolute():
-        target = (vault / target).resolve()
-    # 안전장치: 백업 대상이 볼트 내부면 자기 자신을 재귀 복사하게 되므로 거부
-    try:
-        target.relative_to(vault)
-        print(f"[agentic-vault] backup_target({target})이 볼트 내부입니다. 볼트 밖 경로를 지정하세요.")
+    except (OSError, ValueError) as exc:
+        print(f"[agentic-vault] Backup failed: {exc}", file=sys.stderr)
         return 1
-    except ValueError:
-        pass
-
-    exclude_dirs = config.get("exclude_dirs") or DEFAULT_EXCLUDE_DIRS
-    if not isinstance(exclude_dirs, list):
-        exclude_dirs = DEFAULT_EXCLUDE_DIRS
-    exclude_dirs = [str(d) for d in exclude_dirs]
-
-    mirror_dir = target / "mirror"
-    bundles_dir = target / "bundles"
-    try:
-        mirror_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        print(f"[agentic-vault] 백업 대상 생성 실패: {target} ({exc})")
-        return 1
-
-    # 1) 전체 미러
-    if os.name == "nt" and shutil.which("robocopy"):
-        method, rc, ok = mirror_robocopy(vault, mirror_dir, exclude_dirs)
-    elif shutil.which("rsync"):
-        method, rc, ok = mirror_rsync(vault, mirror_dir, exclude_dirs)
-    else:
-        method, rc, ok = mirror_shutil(vault, mirror_dir, exclude_dirs)
-
-    # 2) git 전체 이력 번들 — 날짜명 누적(단일 파일 복원용)
-    bundle_result = make_bundle(vault, bundles_dir)
-
-    # 3) 백업 로그
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"{stamp} | mirror={method} rc={rc} | bundle={bundle_result}"
-    try:
-        with open(target / "backup-log.txt", "a", encoding="utf-8") as fp:
-            fp.write(line + "\n")
-    except OSError:
-        pass
-    print(line)
-    return 0 if ok else 1
 
 
 if __name__ == "__main__":
