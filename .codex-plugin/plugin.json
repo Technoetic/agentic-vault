@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.9.0-local.2",
+  "version": "0.9.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, Korean and English lexical recall, health checks and verified backup recovery. Prerelease of Technoetic/agentic-vault.",
+    "longDescription": "Use one Markdown vault for session handoff, Korean and English lexical recall, health checks and verified backup recovery. Release v0.9.0 of Technoetic/agentic-vault.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

@@ -1,16 +1,16 @@
 # Claude Code · Codex 겸용 사용
 
-`0.9.0-local.2`는 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+`v0.9.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
 사용한다. Codex CLI `0.150.1`에서 로컬 설치와 스킬·훅 검색을 검증했다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
-개발 중 사용한 `local.2` 버전 식별자를 유지한 공개 사전 릴리스다.
+`0.9.0-local.2` 사전 릴리스를 정식 승격한 판이다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0-local.2
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 

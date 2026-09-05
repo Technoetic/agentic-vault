@@ -13,18 +13,19 @@ README = REPO_ROOT / "README.md"
 RELEASE_NOTE_V082 = REPO_ROOT / "docs" / "releases" / "v0.8.2.md"
 RELEASE_NOTE_V083 = REPO_ROOT / "docs" / "releases" / "v0.8.3.md"
 RELEASE_NOTE_V084 = REPO_ROOT / "docs" / "releases" / "v0.8.4.md"
+RELEASE_NOTE_V090 = REPO_ROOT / "docs" / "releases" / "v0.9.0.md"
 HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.9.0-local.2"
+EXPECTED = "0.9.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.9.0--local.2-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.9.0-local.2.md)"
+    "[![Version](https://img.shields.io/badge/v0.9.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.9.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.9.0-local.2 · MIT)"
+    "← plugin.json · marketplace.json (v0.9.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -148,8 +149,30 @@ REQUIRED_V084_RELEASE_LITERALS = (
 )
 
 
+REQUIRED_V090_RELEASE_SECTIONS = (
+    "## 변경",
+    "### Claude Code · Codex 겸용 (local.2)",
+    "### 신뢰성 (local.1)",
+    "## 하위호환·업그레이드",
+    "## 설치",
+    "## 검증",
+    "## 알려진 한계",
+)
+REQUIRED_V090_RELEASE_LITERALS = (
+    "Claude Code, Codex 겸용",
+    "`0.9.0-local.1`",
+    "`0.9.0-local.2`",
+    "engine=0.9.0",
+    "engine=0.8.3",
+    "--ref v0.9.0",
+    "`/vault-recall`",
+    "SHA-256",
+    "예산 **0은 주입 비활성화**",
+    "BrokenBarrierError",
+)
+
 class ReleaseMetadataTests(unittest.TestCase):
-    def test_active_version_surfaces_match_local_prerelease(self) -> None:
+    def test_active_version_surfaces_match_release(self) -> None:
         plugin = json.loads(
             PLUGIN_MANIFEST.read_text(encoding="utf-8-sig")
         )
@@ -258,3 +281,25 @@ class ReleaseMetadataTests(unittest.TestCase):
         script = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(REQUIRED_HEALTHCHECK_STAMP, script)
         self.assertIn('ENGINE_VERSION = "0.9.0"', script)
+
+    def test_release_note_records_v090_contract(self) -> None:
+        self.assertTrue(
+            RELEASE_NOTE_V090.is_file(),
+            f"missing release note: {RELEASE_NOTE_V090.relative_to(REPO_ROOT)}",
+        )
+        release = RELEASE_NOTE_V090.read_text(encoding="utf-8")
+
+        self.assertIn("v0.9.0", release)
+        for section in REQUIRED_V090_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V090_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        # 사전 릴리스 식별자가 활성 표면(매니페스트·README 배지·트리·Codex ref)에 남아 있으면 안 된다
+        for rel in (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".codex-plugin/plugin.json"):
+            with self.subTest(path=rel):
+                self.assertNotIn("local.2", (REPO_ROOT / rel).read_text(encoding="utf-8-sig"))
+        readme = README.read_text(encoding="utf-8")
+        self.assertNotIn("--ref v0.9.0-local.2", readme)
+        self.assertNotIn("v0.9.0--local.2", readme)

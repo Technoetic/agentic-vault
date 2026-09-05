@@ -11,7 +11,7 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.9.0--local.2-10B981?style=for-the-badge)](docs/releases/v0.9.0-local.2.md)
+[![Version](https://img.shields.io/badge/v0.9.0-10B981?style=for-the-badge)](docs/releases/v0.9.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -271,7 +271,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.9.0-local.2 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.9.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -328,7 +328,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **0.9.0-local.2 사전 릴리스**다. 개발 중 사용한 버전 식별자를 유지하며 Claude Code·Codex 겸용 개선을 포함한다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.9.0-local.2)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
+현재 버전은 **v0.9.0**이다 — `0.9.0-local.1`(신뢰성)·`0.9.0-local.2`(Codex 겸용) 사전 릴리스를 정식 승격했으며 **Claude Code, Codex 겸용**이다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.9.0-local.2)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -369,7 +369,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0-local.2
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
