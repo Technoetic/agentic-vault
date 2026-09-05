@@ -50,6 +50,11 @@ with no symlink/reparse component; invalid paths raise `ValueError` or `OSError`
 Consumers use the existing healthcheck `validate_config` and `estimate_tokens`.
 The installed standalone healthcheck does not gain a new module dependency.
 
+During implementation the asynchronous full healthcheck reader is audited against
+the same boundary: linked notes/configuration and Windows path aliases must not
+bypass containment or deny zones. Confirmed gaps receive focused standalone fixes;
+the explicit CLI `--output` override and staged Git-index behavior are preserved.
+
 ## Deliberate trade-offs
 
 Snapshots use more disk than a deletion-synchronized mirror. Retention is explicit,

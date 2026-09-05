@@ -23,7 +23,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
    - `frontmatter_exempt_paths`가 없고 `fm_exempt_zones`가 있으면 기존 키가 호환 alias로 계속 적용된다. 템플릿 기본 `frontmatter_exempt_paths`를 넣어 alias를 가리지 마라.
    - 두 키 중 빠진 키를 추가하는 작업은 별도 **검사 범위 마이그레이션**이다. 추가 전 현재 full 모드의 유효 범위와 템플릿 값을 적용한 뒤의 범위를 비교해 보여주고, 범위가 넓어지거나 좁아지는 경로와 기존 alias 대체 여부를 설명하라. 그 뒤 사용자가 해당 키 추가를 명시적으로 승인한 경우에만 추가하고, 거부하거나 답이 없으면 config를 그대로 유지하라.
 1-1. **행동 계약 rules 구조 (v0.6.0+)** — 3단계로 검사하라:
-   - **rules 설치/교체**: `.claude/rules/vault-*.md` 5종(architecture·linking·frontmatter·workflow·collab)이 없으면 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`에서 복사하라. 있으면 각 파일 첫 줄의 `engine=` 스탬프를 플러그인 버전과 비교해 **낮은 파일만 통째로 교체**하라(엔진 소유 파일 — 아래 안전 규칙의 명시적 예외). 교체 전 diff에서 템플릿에 없는 로컬 추가분이 보이면, 그 줄들을 사용자에게 보여주고 CLAUDE.md로 옮길지 물어본 뒤 진행하라.
+   - **rules 설치/교체**: `.claude/rules/vault-*.md` 5종(architecture·linking·frontmatter·workflow·collab)이 없으면 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`에서 복사하라. 있으면 각 파일 첫 줄의 `engine=` 스탬프를 **대응하는 원본 템플릿 파일의 스탬프**와 비교해 **낮은 파일만 통째로 교체**하라(엔진 소유 파일 — 아래 안전 규칙의 명시적 예외). 전체 플러그인 버전이나 prerelease 문자열로 rules 버전을 추정하지 마라. 교체 전 diff에서 템플릿에 없는 로컬 추가분이 보이면, 그 줄들을 사용자에게 보여주고 CLAUDE.md로 옮길지 물어본 뒤 진행하라.
    - **구판 모놀리스 마이그레이션**: 루트 CLAUDE.md의 `agentic-vault:begin`~`end` 마커 사이에 상세 규칙 섹션(`## 볼트 아키텍처 맵`, `## Hard Rules:` 등)이 남아 있으면 구판(v0.5.x 이하) 설치다. **사용자 확인 후** 마이그레이션하라: ①마커 사이 내용을 rules 템플릿 5종과 대조해 **볼트 고유 추가·수정분을 식별**하고(예: 프로젝트명·SSOT 규칙·커스텀 deny 경로) ②마커 사이를 치환된 `CLAUDE-vault-stub.md` 내용으로 교체하되 ③식별한 볼트 고유분은 마커 **밖**(CLAUDE.md 본문, "볼트 고유 규칙" 섹션 신설)으로 보존 이동하라. 고유분인지 엔진 표준인지 판단이 서지 않는 줄은 **삭제하지 말고 보존 쪽을 택하라**. 마이그레이션 전 CLAUDE.md 원본을 `00-meta/scratch/step_archive/CLAUDE-premigration-<날짜>.md`로 백업하라.
    - **AGENTS.md 생성/재생성**: `agentic-vault:generated` 주석이 있는 AGENTS.md는 스텁+rules 본문으로 재생성하라. 주석 없는 AGENTS.md(수제작)가 있으면 덮어쓰지 말고, 생성판으로의 전환 여부를 사용자에게 물어라(수제작 내용 중 rules에 없는 것은 CLAUDE.md 보존 이동 대상).
 2. **교훈 대장**: `00-meta/lessons.md`가 없으면 템플릿 `lessons.md`를 `{{DATE}}` 치환해 생성하라 — 자기개선 루프가 이 파일 존재로 켜진다. 이미 있는데 `## 기각 대장` 섹션이 없으면(v0.8.2 이하 생성분) 두 가지를 함께 하라 — 하나만 하면 파일이 자기모순이 된다: ①템플릿의 `## 기각 대장` 섹션을 파일 끝에 멱등 추가 ②`## 규칙` 섹션의 구판 보일러플레이트를 신판으로 정합 — 구판 문장 "기각하면 … 다시 제안하지 않는다"와 구판 형식 줄(상태 enum에 `검증중`·`롤백` 없음)을 템플릿의 해당 줄로 치환하고, 없는 규칙 불릿(승격 검증·하위 호환)을 추가하라. `## 규칙`·형식 줄은 엔진 보일러플레이트라 이 치환이 비파괴 계약의 예외이며, **`## 대장` 이하의 교훈·기각 데이터 줄은 절대 건드리지 마라.** 사용자가 규칙 섹션을 로컬 수정한 흔적(템플릿 구판과도 다른 문구)이 보이면 자동 치환하지 말고 diff를 보여주고 물어라.
@@ -40,6 +40,10 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 5. **Jarvis 안내** (설치는 하지 않음): `jarvis.enabled`가 false면 "Telegram 자비스를 켜려면 /vault-jarvis-setup" 한 줄만 안내하라 — 토큰 발급은 사용자 행위라 자동화 불가.
 
 ## 2. 검증
+
+- `0.9.0-local.1`의 세션 주입은 예산을 실제 출력에 적용하며 0은 주입 비활성화다. 구판 설정값은 유지하고 이 의미 변경을 안내하라. 절대경로·상위 경로·deny zone·심볼릭 링크/정션을 가리키는 상태 파일은 주입되지 않으므로, 설정 오류를 우회하지 말고 사용자에게 정상적인 볼트 내부 경로를 제시하라.
+- 새 `/vault-recall`은 플러그인 안의 `vault_recall.py`와 `vault_paths.py`, `vault_healthcheck.py`를 함께 사용한다. 스크립트 하나만 볼트에 복사하지 마라. 플러그인 갱신으로 세 파일을 같은 버전에서 로드한다. 기존 standalone healthcheck·git 훅 설치 절차는 유지한다.
+- 새 백업은 `backup_target/snapshots/`에 독립 사본을 추가한다. 기존 `mirror/`·`bundles/`를 삭제하거나 덮어쓰지 않는다. 새 스냅샷을 검증한 뒤 필요하면 새 디렉터리로 복구할 수 있음을 `docs/reliability.md`의 CLI로 안내하라.
 
 - 볼트가 git 저장소이고 훅을 설치했으면: 임시 검증 없이 다음 실제 커밋이 게이트를 통과하는지로 확인된다는 점을 안내하라.
 - `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py" --vault .`를 실행해 exit 0을 확인하라(치명 위반이 있으면 업그레이드가 아니라 기존 문제 — /vault-lint 안내).

@@ -1,0 +1,4 @@
+{
+  "deny_zones": ["20-knowledge/_archive", "90-assets", ".obsidian"],
+  "exclude_dirs": [".git", "node_modules", "scratch"]
+}

@@ -122,7 +122,9 @@ class SnapshotTests(unittest.TestCase):
         bad_manifests = [[], {}, {**valid, "version": 999},
                          {**valid, "files": []}]
         for bad_path in ("../outside", "/absolute", "C:/absolute", "a\\b",
-                         "files/../../outside", "a//b", "a/./b", "CON", "x:stream"):
+                         "files/../../outside", "a//b", "a/./b", "CON", "x:stream",
+                         "COM¹", "com².txt", "COM³.md", "LPT¹", "lpt².txt",
+                         "LPT³.md", "CONIN$", "conout$.txt"):
             changed = json.loads(json.dumps(valid))
             changed["files"][bad_path] = {"size": 0, "sha256": "0" * 64}
             bad_manifests.append(changed)
@@ -132,6 +134,20 @@ class SnapshotTests(unittest.TestCase):
                 with self.assertRaises((ValueError, OSError)):
                     backup.restore_snapshot(snapshot, self.root / "restored")
                 self.assertFalse((self.root / "restored").exists())
+
+    def test_portable_snapshot_names_reject_console_device_aliases(self):
+        aliases = (
+            "COM¹", "com².txt", "COM³.md", "LPT¹", "lpt².txt", "LPT³.md",
+            "CONIN$", "conout$.txt",
+        )
+        for alias in aliases:
+            with self.subTest(alias=alias), self.assertRaises(backup.BackupError):
+                backup._relative_name(f"notes/{alias}")
+
+        self.assertEqual(
+            backup._relative_name("notes/회의 기록 1.md"),
+            "notes/회의 기록 1.md",
+        )
 
     def test_unlisted_files_and_missing_files_are_corruption(self):
         snapshot = self.create()

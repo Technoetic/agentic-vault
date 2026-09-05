@@ -207,6 +207,38 @@ class ConfigAndGitIndexTests(unittest.TestCase):
                 with self.subTest(key=key, value=value), self.assertRaises(HealthcheckError):
                     validate_config(self.base_config(**{key: value}))
 
+    def test_config_rejects_windows_alias_segments_but_keeps_valid_spaces(self) -> None:
+        invalid_values = (
+            "private./secret.md",
+            "private /secret.md",
+            "notes/item.md:secret",
+            "CON/note.md",
+            "notes/aux.txt",
+            "COM¹",
+            "com².txt",
+            "COM³.md",
+            "LPT¹",
+            "lpt².txt",
+            "LPT³.md",
+            "CONIN$",
+            "conout$.txt",
+        )
+        for key in ("index_note", "rules_dir"):
+            for value in invalid_values:
+                with self.subTest(key=key, value=value), self.assertRaises(HealthcheckError):
+                    validate_config(self.base_config(**{key: value}))
+        for key in ("deny_zones", "frontmatter_roots"):
+            for value in invalid_values:
+                with self.subTest(key=key, value=value), self.assertRaises(HealthcheckError):
+                    validate_config(self.base_config(**{key: [value]}))
+
+        config = validate_config(self.base_config(
+            index_note="00-meta/팀 노트.md",
+            frontmatter_roots=["20-knowledge/내 자료"],
+        ))
+        self.assertEqual(config["index_note"], "00-meta/팀 노트.md")
+        self.assertEqual(config["frontmatter_roots"], ["20-knowledge/내 자료"])
+
     def test_config_rejects_wrong_list_dict_and_integer_types(self) -> None:
         invalid = (
             {"required_keys": "title"},
@@ -395,6 +427,19 @@ class CliModeTests(unittest.TestCase):
         except (NotImplementedError, OSError) as exc:
             self.skipTest(f"real symlink creation is unsupported: {exc}")
 
+    def junction_or_skip(self, link: Path, target: Path) -> None:
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            self.skipTest(f"junction creation is unsupported: {result.stderr}")
+
     def test_staged_mode_reads_index_config_and_never_writes_report(self) -> None:
         config_path = self.write_config(frontmatter_roots=["20-knowledge"])
         self.write("20-knowledge/Note.md", self.valid_note("Note"))
@@ -555,6 +600,124 @@ class CliModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("health_report", result.stderr)
         self.assertEqual(outside.read_text(encoding="utf-8"), sentinel)
+
+    def test_full_mode_rejects_nested_denied_log_without_publishing_content(self) -> None:
+        self.write_config(overrides={
+            "deny_zones": ["private"], "log_note": "nested/private/log.md",
+            "log_tags": ["op"],
+        })
+        self.write("public.md", self.valid_note("Public"))
+        self.write("nested/private/log.md", "- 2026-09-05 10:00 | human | SECRET_MARKER\n")
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("log_note", result.stderr)
+        self.assertNotIn("SECRET_MARKER", result.stdout + result.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+    def test_full_mode_casefolds_deny_rules_and_keeps_denied_link_targets(self) -> None:
+        self.write_config(overrides={"deny_zones": ["private", "Archive/Old"]})
+        self.write("public.md", self.valid_note("Public") + "[[secret]]\n[[root-secret]]\n")
+        self.write("nested/Private/secret.md", "[[SECRET_MARKER]]\n")
+        self.write("archive/OLD/root-secret.md", "[[ROOT_SECRET_MARKER]]\n")
+        self.write("nested/archive/old/allowed.md", self.valid_note("Allowed") + "[[PUBLIC_MARKER]]\n")
+
+        result = self.run_cli()
+
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        self.assertNotIn("SECRET_MARKER", report + result.stdout + result.stderr)
+        self.assertIn("PUBLIC_MARKER", report)
+        self.assertNotIn("→ [[secret]]", report)
+        self.assertNotIn("→ [[root-secret]]", report)
+
+    def test_full_mode_denied_rule_children_and_claude_never_contribute_headings(self) -> None:
+        for denied in ("secret.md", ".CLAUDE/RULES/Secret.md", "claude.md"):
+            with self.subTest(denied=denied):
+                self.write_config(overrides={
+                    "deny_zones": [denied], "rules_dir": ".claude/rules",
+                })
+                self.write("public.md", self.valid_note("Public"))
+                self.write(".claude/rules/Secret.md", "## SECRET_MARKER\n")
+                self.write("CLAUDE.md", "## SECRET_MARKER\n")
+
+                result = self.run_cli()
+
+                report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+                self.assertNotIn("SECRET_MARKER", report + result.stdout + result.stderr)
+
+    def test_full_mode_rejects_junctioned_config_before_reading_external_content(self) -> None:
+        outside = Path(self._tmp.name) / "external-meta"
+        outside.mkdir()
+        (outside / "vault-config.json").write_text(json.dumps({
+            "vault_name": "EXTERNAL-CONFIG-SENTINEL",
+            "required_keys": ["title"],
+            "enums": {},
+            "deny_zones": [],
+            "exclude_dirs": [".git"],
+            "frontmatter_roots": ["20-knowledge"],
+            "health_report": "00-meta/cli-health.md",
+            "rules_dir": "",
+        }), encoding="utf-8")
+        self.junction_or_skip(self.repo / "00-meta", outside)
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("vault-config", result.stderr)
+        self.assertNotIn("EXTERNAL-CONFIG-SENTINEL", result.stdout)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+    def test_full_mode_skips_junctioned_markdown_tree_outside_vault(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        outside = Path(self._tmp.name) / "external-notes"
+        outside.mkdir()
+        (outside / "External.md").write_text(
+            "EXTERNAL-NOTE-SENTINEL\n", encoding="utf-8"
+        )
+        self.junction_or_skip(self.repo / "20-knowledge", outside)
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        self.assertNotIn("External.md", report)
+        self.assertNotIn("EXTERNAL-NOTE-SENTINEL", report)
+
+    def test_full_mode_rejects_configured_note_junction_outside_vault(self) -> None:
+        self.write_config(
+            frontmatter_roots=["20-knowledge"],
+            overrides={"index_note": "linked-index/index.md"},
+        )
+        self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
+        outside = Path(self._tmp.name) / "external-index"
+        outside.mkdir()
+        (outside / "index.md").write_text("[[Inside]]\n", encoding="utf-8")
+        self.junction_or_skip(self.repo / "linked-index", outside)
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("index_note", result.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
+
+    def test_full_mode_rejects_configured_rules_directory_junction_outside_vault(self) -> None:
+        self.write_config(
+            frontmatter_roots=["20-knowledge"],
+            overrides={"rules_dir": ".claude/rules"},
+        )
+        outside = Path(self._tmp.name) / "external-rules"
+        outside.mkdir()
+        (outside / "secret.md").write_text("# EXTERNAL-RULE-SENTINEL\n", encoding="utf-8")
+        link = self.repo / ".claude" / "rules"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        self.junction_or_skip(link, outside)
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("rules_dir", result.stderr)
+        self.assertFalse((self.repo / "00-meta/cli-health.md").exists())
 
 
 class StagedGateTests(unittest.TestCase):
@@ -1263,6 +1426,17 @@ class DenyZonePathKeyTests(unittest.TestCase):
 
     deny zone은 읽기 금지 구역이라, handoff·index 등이 그 안에 있으면
     pre-commit --staged가 대상을 읽지 못한 채 조용히 통과한다(2026-08-31 프로브)."""
+
+    def test_single_component_deny_applies_to_every_configured_reader_at_any_depth(self) -> None:
+        for key in ("index_note", "log_note", "hot_note", "handoff_note", "ssot_note", "rules_dir", "health_report"):
+            with self.subTest(key=key), self.assertRaisesRegex(HealthcheckError, key):
+                validate_config({"deny_zones": ["private"], key: "nested/Private/note.md"})
+
+    def test_multi_component_config_deny_is_casefolded_and_root_relative(self) -> None:
+        with self.assertRaisesRegex(HealthcheckError, "log_note"):
+            validate_config({"deny_zones": ["private/logs"], "log_note": "PRIVATE/Logs/log.md"})
+        cfg = validate_config({"deny_zones": ["private/logs"], "log_note": "nested/private/logs/log.md"})
+        self.assertEqual(cfg["log_note"], "nested/private/logs/log.md")
 
     def test_path_key_inside_deny_zone_is_rejected(self) -> None:
         with self.assertRaisesRegex(HealthcheckError, "handoff_note"):

@@ -10,12 +10,12 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.8.4-10B981?style=for-the-badge)](https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.4)
+[![Version](https://img.shields.io/badge/v0.9.0--local.1-10B981?style=for-the-badge)](docs/releases/v0.9.0-local.1.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-10-F59E0B?style=for-the-badge)](commands/)
+[![Commands](https://img.shields.io/badge/Commands-11-F59E0B?style=for-the-badge)](commands/)
 [![Templates](https://img.shields.io/badge/Templates-13%2B5_rules-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
@@ -60,7 +60,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a 500-word hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 10 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** that warns when the auto-injected handoff/hot notes outgrow their limit (measured in estimated tokens, not words or characters — a 500-word budget means five times more tokens in Korean than in English), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), a cross-platform backup script, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. All vault policy lives in a single `00-meta/vault-config.json`; directories without that file are silently ignored. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 11 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -80,6 +80,7 @@ flowchart TB
 | `/vault-process-inbox` | `10-inbox/` 대기열 정제 → 영구 지식 병합 → 원본 `_processed/` 격리 |
 | `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
+| `/vault-recall 질의` | 출처 경로·행 번호가 있는 어휘 검색, 추정 컨텍스트 예산 적용 (읽기 전용) |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
@@ -100,10 +101,10 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 10종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 11종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
-        BK["backup_vault.py<br/><i>미러 + git bundle</i>"]
+        BK["backup_vault.py<br/><i>검증 가능한 세대별 스냅샷</i>"]
         JB["jarvis_bridge.py<br/><i>Telegram 자비스 🤖</i>"]
         TPL["assets/templates/<br/><i>노트 템플릿 13종 + 엔진 rules 5종</i>"]
         SK["SKILL.md<br/><i>작업 규율</i>"]
@@ -126,7 +127,7 @@ flowchart TB
     HOOK --> HOT
     HOOK -.컨텍스트 주입.-> U
     HC -->|검사| vault
-    BK -->|미러| vault
+    vault -->|독립 스냅샷| BK
     JB -->|캡처: 10-inbox만| vault
     JB <-.->|브리핑·Q&A| U
 
@@ -138,8 +139,8 @@ flowchart TB
     style KNW fill:#0EA5E9,color:#fff
 ```
 
-볼트의 모든 정책(deny zone·필수 프런트매터 키·Enum·로그 태그·SSOT 사실)은 볼트 쪽 `vault-config.json` **한 파일**로 선언된다.
-`00-meta/vault-config.json`이 없는 디렉토리에서 모든 컴포넌트는 **조용히 무동작**한다 — 훅도, 검사기도, 명령도.
+기계가 검사하는 볼트 정책(deny zone·필수 프런트매터 키·Enum·로그 태그·SSOT 사실)은 `vault-config.json`에 선언된다. 노트 작성·교훈 판단·업그레이드 절차는 commands와 rules에 정의된다.
+`00-meta/vault-config.json`이 없으면 주입 훅은 **조용히 무동작**한다. 검사기와 명령은 볼트가 아니라는 안내 후 종료한다.
 
 ---
 
@@ -164,8 +165,8 @@ flowchart LR
 OS 메모리 계층처럼 읽는다: **자주 쓰는 것일수록 위층, 필요한 만큼만, 위층부터.**
 SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부분의 세션은 시작 즉시 직전 상태를 이어받는다.
 
-⚠️ **주입되는 두 계층은 통째로 들어간다 — 자르지 않는다.** 그래서 v0.8.0부터 healthcheck 섹션 11이 **토큰 예산**(`hot_max_tokens` / `handoff_max_tokens`)으로 비대화를 감시한다.
-단위가 토큰인 이유는 단어·글자 예산이 언어에 따라 무너지기 때문이다 — **한글 1자 ≈ 1.375토큰**이라 "500단어" 규약은 영어와 한국어에서 5배 넘게 어긋난다.
+세션 컨텍스트에는 크기 제한이 필요하다. 그래서 v0.8.0부터 healthcheck 섹션 11이 **토큰 예산**(`hot_max_tokens` / `handoff_max_tokens`)으로 비대화를 감시한다. **이 로컬 개선판은 주입 시에도 각 섹션을 추정 예산 안으로 줄인다.** 헤더·생략 표시를 포함하고 0이면 해당 섹션을 주입하지 않는다. 바이트 읽기 상한과 볼트 내부 경로 검증도 적용한다.
+계산은 기존 검사기의 **문자 종류별 추정치**를 사용한다. 실제 모델 토크나이저·청구 토큰과 같지는 않다. 500단어는 작성 권고이며 실행 상한은 config의 추정 토큰 예산이다.
 
 ⚠️ **이 계층이 낡는 것도 감시 대상이다.** handoff의 기준 커밋(anchor)은 session-end만 갱신하므로, git HEAD가 anchor보다 임계(기본 3커밋, `anchor_drift_threshold`) 이상 앞서면 **세션이 session-end 없이 닫혔다**는 신호다 — v0.8.1부터 healthcheck 섹션 12가 이 거리를 재서 콘솔 요약에 띄운다(실사례: remember 미실행 3주 공백을 어떤 계기판도 못 잡았다).
 
@@ -267,9 +268,9 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.8.4 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.9.0-local.1 · MIT)
 │
-├── commands/                          ← 10개 슬래시 커맨드
+├── commands/                          ← 11개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
 │   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
@@ -278,6 +279,7 @@ agentic-vault/
 │   ├── vault-process-inbox.md         ← 인박스 정제 + _processed 격리
 │   ├── vault-lint.md                  ← 무결성 검증 + 자가 치유  🛡️
 │   ├── vault-trace.md                 ← 키워드 시계열 횡단 추적
+│   ├── vault-recall.md                ← 출처·예산이 있는 읽기 전용 검색
 │   ├── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
 │   └── vault-upgrade.md               ← 기존 볼트를 현재 엔진으로 (멱등)  ⬆️
 │
@@ -293,7 +295,9 @@ agentic-vault/
 │   └── scripts/
 │       ├── vault_healthcheck.py       ← fail-closed 무결성 검사기 (섹션 11: 주입 토큰 예산)  🛡️
 │       ├── test_rules_inheritance.py  ← rules 상속 회귀 테스트 (버전 업 시 1회)  🔬
-│       ├── backup_vault.py            ← robocopy/rsync/shutil + git bundle
+│       ├── backup_vault.py            ← 세대별 스냅샷 + SHA-256 검증 + 새 경로 복구
+│       ├── vault_recall.py            ← 예산·출처가 있는 어휘 검색
+│       ├── vault_paths.py             ← 노트 읽기 경로 검증
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
 ├── assets/templates/                  ← 노트·시스템 템플릿 + 엔진 rules
@@ -316,6 +320,8 @@ agentic-vault/
 ## 🚀 설치
 
 </div>
+
+이 작업본은 **0.9.0-local.1 로컬 개선판**이다. 아래 GitHub 원격 설치는 원본 프로젝트를 설치한다. 이 개선판을 사용하려면 **방법 3**에서 현재 작업본 경로를 지정한다. [변경 내용](docs/releases/v0.9.0-local.1.md), [사용법](docs/reliability.md), [실행한 검증과 남은 범위](docs/validation.md)를 먼저 확인한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -344,10 +350,10 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 
 ### 방법 3 — 로컬 클론 (개발 / 커스터마이즈)
 
-```text
-git clone https://github.com/Technoetic/agentic-vault D:\agentic-vault-plugin
+이미 이 개선판을 가지고 있다면 아래 경로를 **이 README가 있는 실제 디렉터리**로 바꿔 지정한다. 원격을 새로 clone하면 원본 버전을 받으므로 현재 개선판 설치에 필요한 단계가 아니다.
 
-/plugin marketplace add D:\agentic-vault-plugin
+```text
+/plugin marketplace add C:/path/to/agentic-vault
 /plugin install agentic-vault@agentic-vault
 ```
 
@@ -413,7 +419,7 @@ claude
 | `ssot_note` | 핵심 사실 SSOT 노트 경로 — **빈 문자열이면 SSOT 기능 생략** |
 | `ssot_facts` | `[{"label", "pattern"}]` — 볼트 전체에서 매치 값 2종 이상이면 모순 보고 |
 | `health_report` | 헬스체크 리포트 출력 경로 |
-| `backup_target` | 백업 대상 경로 — **빈 문자열이면 백업 생략** |
+| `backup_target` | 독립 스냅샷 대상 경로 — **빈 문자열이면 백업 생략**, 기존 사본은 자동 삭제하지 않음 |
 | `rules_dir` | 엔진 소유 행동 계약 rules 디렉토리 |
 | `rules_max_lines` | rules 파일별 권장 최대 줄 수 |
 | `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
@@ -496,7 +502,7 @@ full 모드는 개별 노트의 읽기 실패(클라우드 하이드레이션·�
 
 이 훅은 협업 규율을 돕는 **로컬 게이트이지 보안 샌드박스가 아니다.** 저장소를 제어하는 사용자는 `git commit --no-verify`·`git push --no-verify`를 쓰거나 `core.hooksPath`를 바꿔 우회할 수 있다. 우회 불가능한 강제가 필요하면 별도의 원격 CI·서버 정책이 필요하다.
 
-또한 handoff 상단의 **기준 커밋(anchor)** 줄이 "이 handoff가 반영하는 볼트 시점"을 git 해시로 고정한다 — `/vault-session-end`가 갱신하고, `/vault-session-start`가 `anchor..HEAD` 차이를 브리핑에 반영해 handoff의 point-in-time 어긋남을 결정론적으로 해소한다. 같은 anchor 패턴이 장기 기억 MCP에도 적용된다: remember 커밋 끝에 `[anchor: <해시>]`를 붙여, 다음 세션이 낡은 회상을 볼트 이력과 대조해 걸러낸다. `/vault-trace`도 `git log -S`로 키워드의 커밋 이력을 병행 수집해, 노트가 말하는 날짜와 실제 기록된 날짜의 어긋남을 모순 신호로 잡는다.
+또한 handoff 상단의 **기준 커밋(anchor)** 줄이 "이 handoff가 반영하는 볼트 시점"을 git 해시로 고정한다. `/vault-session-end`가 갱신하고, `/vault-session-start`가 `anchor..HEAD`로 조사할 변경 범위를 정한다. 변경 해석과 요약의 정확성은 모델과 사용자의 확인이 필요하다. 같은 anchor 패턴으로 장기 기억 MCP의 `[anchor: <해시>]`를 볼트 이력과 대조하고, `/vault-trace`는 `git log -S`로 기록 날짜의 어긋남을 조사한다.
 
 ---
 
@@ -509,9 +515,9 @@ full 모드는 개별 노트의 읽기 실패(클라우드 하이드레이션·�
 | # | 한계 | 대응 |
 |:---:|:---|:---|
 | 1 | `/plugin` 설치·제거는 사용자 직접 입력만 가능 (Claude 대행 불가) | README 안내 텍스트 복붙 |
-| 2 | SessionStart 훅 matcher는 `startup\|clear` — resume 세션엔 재주입 없음 | `/vault-session-start`를 수동 호출 |
+| 2 | 요약 작성·교훈 판정은 모델에 의존한다 | session-end 실행과 출처 확인 필요; startup/clear/resume은 예산 안에서 주입 |
 | 3 | 파일 **위치** 규율(볼트 루트 잡파일 등)은 healthcheck 검사 밖 | 행동 계약(`.claude/rules/` 산문)이 커버 — 향후 버전 후보 |
-| 4 | Python이 PATH에 없으면 훅·lint가 조용히 실패할 수 있음 | 요구사항 확인 (`python --version`) |
+| 4 | Python 3.10+가 필요하며 토큰 계산은 근사치다 | 런처가 사용 가능한 인터프리터를 고르고, 없으면 진단한다 |
 | 5 | `backup_target`이 같은 물리 디스크면 디스크 장애는 미방어 | 외장·오프사이트 대상 별도 지정 권장 |
 
 ---

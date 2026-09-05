@@ -28,7 +28,7 @@ Files: `hooks/session_start.py`, `hooks/hooks.json`, new hook launcher if needed
 Produces shared `resolve_note_path(vault, rel_path, deny_zones=()) -> Path`.
 Consumes existing `validate_config` and `estimate_tokens` from healthcheck.
 
-- [ ] Write behavioral tests: outside marker never appears, deny paths and malformed
+- [x] Write behavioral tests: outside marker never appears, deny paths and malformed
   config yield no injection, normal Korean/English notes appear, zero budget omits
   section, long notes stay within the estimate, oversized reads are bounded,
   symlinks/junctions cannot escape, startup/resume preserve context.
@@ -39,11 +39,11 @@ self.assertNotIn("OUTSIDE_MARKER", result.stdout)
 self.assertEqual(result.stdout, "")
 ```
 
-- [ ] Run `python -m unittest tests.test_session_start -v` and observe regressions.
-- [ ] Implement strict path helper, validated config, bounded reads and estimated
+- [x] Run `python -m unittest tests.test_session_start -v` and observe regressions.
+- [x] Implement strict path helper, validated config, bounded reads and estimated
   section trimming. Use interpreter detection in hook wiring, not `python ... ||
   python3 ...` after a checker failure.
-- [ ] Re-run focused tests and record evidence; do not edit other task surfaces.
+- [x] Re-run focused tests and record evidence; do not edit other task surfaces.
 
 ## Task 2: Recoverable snapshots
 
@@ -52,7 +52,7 @@ Files: `skills/agentic-vault/scripts/backup_vault.py`, `tests/test_backup_vault.
 Preserves `--vault` and `--target`; adds documented verify/restore CLI operations.
 Snapshot layout, manifest and helpers remain internal to this module.
 
-- [ ] Write real-filesystem tests for deleted untracked binary recovery, mutation
+- [x] Write real-filesystem tests for deleted untracked binary recovery, mutation
   and digest mismatch, invalid/overlapping paths, concurrent runs, interrupted
   copy, malformed manifests, existing restore destination and Git bundle failure.
 
@@ -64,11 +64,11 @@ restore_snapshot(snapshot, restored)
 self.assertEqual((restored / "90-assets/sample.bin").read_bytes(), b"original")
 ```
 
-- [ ] Run focused tests and confirm the original mirror cannot meet recovery.
-- [ ] Implement staging plus atomic snapshot publication, SHA-256 manifests,
+- [x] Run focused tests and confirm the original mirror cannot meet recovery.
+- [x] Implement staging plus atomic snapshot publication, SHA-256 manifests,
   exclusive writer lock, normalized nonoverlap checks, verification and export
   restore. Never automatically prune snapshots or overwrite source data.
-- [ ] Run `python -m unittest tests.test_backup_vault -v` and record evidence.
+- [x] Run `python -m unittest tests.test_backup_vault -v` and record evidence.
 
 ## Task 3: Source-attributed deterministic recall
 
@@ -81,7 +81,7 @@ and token estimation. CLI: `--vault`, `--query`, `--limit` (default 5),
 JSON contains `context`, source matches and diagnostic counters; the budget
 applies to `context`, not JSON metadata. Text mode prints only that context.
 
-- [ ] Write literal source-ranking tests for Korean/English queries, zero matches,
+- [x] Write literal source-ranking tests for Korean/English queries, zero matches,
   deterministic ties, source attribution, denied/symlink paths, byte/scan limits,
   malformed config, exact context budget behavior and source changes.
 
@@ -91,24 +91,43 @@ self.assertEqual(result["matches"][0]["path"], "20-knowledge/rollback.md")
 self.assertIn("20-knowledge/rollback.md", result["context"])
 ```
 
-- [ ] Run tests and observe absent recall behavior, then implement a bounded
+- [x] Run tests and observe absent recall behavior, then implement a bounded
   Unicode-aware lexical ranker with title/body evidence and deterministic ordering.
-- [ ] Add independent bilingual fixture queries and evaluation with recall@3/MRR;
+- [x] Add independent bilingual fixture queries and evaluation with recall@3/MRR;
   no paid APIs and no claims about semantic or Claude answer quality.
-- [ ] Run focused tests and `python scripts/evaluate_recall.py`.
+- [x] Run focused tests and `python scripts/evaluate_recall.py`.
 
 ## Task 4: Integrate, document, and verify
 
 Files: commands, config template, plugin metadata, README, release note,
 `.github/workflows/tests.yml`, integration tests where behavior requires them.
 
-- [ ] Document actual budget semantics, fail-closed paths, snapshots and restore,
+- [x] Document actual budget semantics, fail-closed paths, snapshots and restore,
   lexical recall limitations, quality criteria and live-validation boundary.
-- [ ] Wire recall command and session workflow without introducing implicit
+- [x] Wire recall command and session workflow without introducing implicit
   network calls or auto-promoting model-generated lessons.
-- [ ] Add CI for Ubuntu/Windows/macOS and Python 3.10/3.12/3.14 where supported.
-- [ ] Inspect full branch diff; obtain independent security/correctness review.
-- [ ] Run `python -m unittest discover -s tests -v`, recall evaluation,
+- [x] Add CI for Ubuntu/Windows/macOS and Python 3.10/3.12/3.14 where supported.
+- [x] Inspect full branch diff; obtain independent security/correctness review.
+- [x] Run `python -m unittest discover -s tests -v`, recall evaluation,
   `python -m compileall -q hooks skills/agentic-vault/scripts scripts` and
   `git diff --check`; fix material findings and re-run affected checks.
-- [ ] Commit the reviewed local result and report exact outcomes and limits.
+- [x] Commit the reviewed local result and report exact outcomes and limits.
+
+## Related Task 5: Full healthcheck boundary
+
+- [x] Reproduce and close full-mode config, note, rule and report junction escapes.
+- [x] Apply consistent case-insensitive deny policy to configured, scanned and
+  special readers, while preserving standalone deployment and explicit --output.
+- [x] Close Windows reserved-device aliases in all three portable path validators.
+- [x] Verify regression fixes through focused tests, the complete suite and
+  independent whole-branch review.
+
+## Completed local result
+
+Version 0.9.0-local.1; healthcheck engine 0.9.0. Final independent review:
+spec PASS and code quality APPROVE. All required findings addressed.
+Full suite: 288 collected, 280 passed, 8 platform/privilege skips, zero failures.
+Recall: 16 bilingual queries, recall@3/MRR@3 1.0; 4-7 candidate sources per query.
+Strict Claude static validation, compilation and Git whitespace checks passed.
+Remote CI and live model integrations remain outside this local validation.
+See [validation record](../../validation.md) for evidence and limits.

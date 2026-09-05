@@ -73,7 +73,11 @@ def _relative_name(value):
     for part in value.split("/"):
         if (not part or part in (".", "..") or part.endswith((".", " "))
                 or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
-                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", part)):
+                or re.fullmatch(
+                    r"(?i)(con|prn|aux|nul|conin\$|conout\$|"
+                    r"com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?",
+                    part,
+                )):
             raise BackupError("invalid relative snapshot path")
     return value
 

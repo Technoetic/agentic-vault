@@ -1,4 +1,4 @@
-"""Release-surface contract tests for agentic-vault v0.8.4."""
+"""Release metadata consistency and historical contract regressions."""
 from __future__ import annotations
 
 import json
@@ -17,14 +17,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.8.4"
+EXPECTED = "0.9.0-local.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.8.4-10B981?style=for-the-badge)]"
-    "(https://github.com/Technoetic/agentic-vault/releases/tag/v0.8.4)"
+    "[![Version](https://img.shields.io/badge/v0.9.0--local.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.9.0-local.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.8.4 · MIT)"
+    "← plugin.json · marketplace.json (v0.9.0-local.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -133,7 +133,7 @@ REQUIRED_LESSONS_TEMPLATE_LITERALS = (
 # 머무는 것이 옳다(/vault-upgrade가 스탬프 숫자 비교로 교체 여부를 판단하므로,
 # 내용이 같은데 스탬프만 올리면 전 볼트에 무의미한 교체를 유발한다).
 REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.8.3"
-REQUIRED_HEALTHCHECK_STAMP = "agentic-vault:healthcheck engine=0.8.4"
+REQUIRED_HEALTHCHECK_STAMP = "agentic-vault:healthcheck engine=0.9.0"
 REQUIRED_V084_RELEASE_SECTIONS = (
     "## 수정 1 — config 경로 필드의 deny zone 우회 차단 (high)",
     "## 수정 2 — 노트 읽기 실패 fail-soft + §14 신설 (low)",
@@ -149,7 +149,7 @@ REQUIRED_V084_RELEASE_LITERALS = (
 
 
 class ReleaseMetadataTests(unittest.TestCase):
-    def test_active_version_surfaces_are_v084(self) -> None:
+    def test_active_version_surfaces_match_local_prerelease(self) -> None:
         plugin = json.loads(
             PLUGIN_MANIFEST.read_text(encoding="utf-8-sig")
         )
@@ -238,7 +238,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         release = RELEASE_NOTE_V084.read_text(encoding="utf-8")
 
-        self.assertIn(EXPECTED, release)
+        self.assertIn("0.8.4", release)
         for section in REQUIRED_V084_RELEASE_SECTIONS:
             with self.subTest(section=section):
                 self.assertIn(section, release)
@@ -247,4 +247,4 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(literal, release)
         script = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(REQUIRED_HEALTHCHECK_STAMP, script)
-        self.assertIn(f'ENGINE_VERSION = "{EXPECTED}"', script)
+        self.assertIn('ENGINE_VERSION = "0.9.0"', script)
