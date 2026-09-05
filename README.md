@@ -328,7 +328,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.9.0**이다 — `0.9.0-local.1`(신뢰성)·`0.9.0-local.2`(Codex 겸용) 사전 릴리스를 정식 승격했으며 **Claude Code, Codex 겸용**이다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.9.0-local.2)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
+현재 버전은 **v0.9.0**이다 — `0.9.0-local.1`(신뢰성)·`0.9.0-local.2`(Codex 겸용) 사전 릴리스를 정식 승격했으며 **Claude Code, Codex 겸용**이다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.9.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.9.0.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -377,7 +377,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 
 ### 요구사항
 
-Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
+Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). Windows에서 훅 실행은 `sh`(Git Bash)를 요구한다(Claude Code Windows가 이미 요구하는 구성). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
 
 ---
 

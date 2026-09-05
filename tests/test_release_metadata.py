@@ -303,3 +303,5 @@ class ReleaseMetadataTests(unittest.TestCase):
         readme = README.read_text(encoding="utf-8")
         self.assertNotIn("--ref v0.9.0-local.2", readme)
         self.assertNotIn("v0.9.0--local.2", readme)
+        self.assertNotIn("releases/tag/v0.9.0-local.2", readme)
+        self.assertIn("(docs/releases/v0.9.0.md)", readme)
