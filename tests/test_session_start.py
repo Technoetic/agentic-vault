@@ -66,12 +66,24 @@ class SessionStartTests(unittest.TestCase):
             json.dumps(config, ensure_ascii=False),
         )
 
-    def run_hook(self) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env["CLAUDE_PROJECT_DIR"] = str(self.vault)
+    def run_hook(
+        self,
+        *arguments: str,
+        codex: bool = False,
+        cwd: Path | None = None,
+        claude_project_dir: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = {
+            key: value for key, value in os.environ.items()
+            if not key.upper().startswith("CLAUDE_")
+        }
+        if not codex:
+            env["CLAUDE_PROJECT_DIR"] = str(self.vault)
+        if claude_project_dir is not None:
+            env["CLAUDE_PROJECT_DIR"] = claude_project_dir
         return subprocess.run(
-            [sys.executable, str(SESSION_HOOK)],
-            cwd=REPO_ROOT,
+            [sys.executable, str(SESSION_HOOK), *arguments],
+            cwd=cwd if cwd is not None else (self.vault if codex else REPO_ROOT),
             env=env,
             input='{"source":"startup"}',
             stdout=subprocess.PIPE,
@@ -101,6 +113,151 @@ class SessionStartTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
+
+    def test_codex_cwd_matches_claude_context_with_spaces_and_korean_paths(self) -> None:
+        self.vault = self.root / "작업 vault"
+        self.vault.mkdir()
+        self.write_config(handoff_note="00-meta/세션 인계.md", hot_note="00-meta/hot note.md")
+        self.write("00-meta/세션 인계.md", "Continue the release checklist.")
+        self.write("00-meta/hot note.md", "오늘은 안정성 검증을 완료한다.")
+
+        claude = self.run_hook()
+        codex = self.run_hook(codex=True)
+
+        self.assertEqual(claude.returncode, 0, claude.stderr)
+        self.assertIn("Continue the release checklist.", claude.stdout)
+        self.assertIn("오늘은 안정성 검증을 완료한다.", claude.stdout)
+        self.assertEqual(codex.returncode, 0, codex.stderr)
+        self.assertEqual(codex.stdout, claude.stdout)
+        self.assertEqual(codex.stderr, "")
+
+    def test_explicit_vault_wins_over_stale_claude_environment_and_cwd(self) -> None:
+        stale_vault = self.vault
+        self.write_config()
+        self.write("00-meta/hot.md", "STALE_CONTEXT")
+        self.vault = self.root / "선택 vault"
+        self.vault.mkdir()
+        self.write_config()
+        self.write("00-meta/hot.md", "EXPLICIT_CONTEXT")
+
+        result = self.run_hook(
+            "--vault", str(self.vault), cwd=stale_vault,
+            claude_project_dir=str(stale_vault),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("EXPLICIT_CONTEXT", result.stdout)
+        self.assertNotIn("STALE_CONTEXT", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_claude_environment_wins_over_a_different_vault_cwd(self) -> None:
+        cwd_vault = self.vault
+        self.write_config()
+        self.write("00-meta/hot.md", "CWD_CONTEXT")
+        self.vault = self.root / "claude vault"
+        self.vault.mkdir()
+        self.write_config()
+        self.write("00-meta/hot.md", "CLAUDE_CONTEXT")
+
+        result = self.run_hook(cwd=cwd_vault)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CLAUDE_CONTEXT", result.stdout)
+        self.assertNotIn("CWD_CONTEXT", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_blank_claude_environment_falls_back_to_cwd(self) -> None:
+        self.write_config()
+        self.write("00-meta/hot.md", "CWD_CONTEXT")
+
+        for value in ("", " \t "):
+            with self.subTest(value=value):
+                result = self.run_hook(codex=True, claude_project_dir=value)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("CWD_CONTEXT", result.stdout)
+                self.assertEqual(result.stderr, "")
+
+    def test_codex_non_vault_cwd_is_a_quiet_noop(self) -> None:
+        self.write_config()
+        self.write("00-meta/hot.md", "CHILD_VAULT_CONTEXT")
+
+        result = self.run_hook(codex=True, cwd=self.root)
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_codex_explicit_relative_vault_resolves_from_cwd(self) -> None:
+        self.vault = self.root / "선택 vault"
+        self.vault.mkdir()
+        self.write_config()
+        self.write("00-meta/hot.md", "RELATIVE_CONTEXT")
+
+        result = self.run_hook("--vault", self.vault.name, codex=True, cwd=self.root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RELATIVE_CONTEXT", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_codex_unsafe_configs_keep_diagnostics_content_free(self) -> None:
+        (self.root / "outside.md").write_text("OUTSIDE_SECRET", encoding="utf-8")
+        self.write("00-meta/handoff.md", "HANDOFF_SECRET")
+        self.write("00-meta/hot.md", "HOT_SECRET")
+        self.write("90-assets/hot.md", "DENIED_SECRET")
+        cases = (
+            {"handoff_note": "../outside.md"},
+            {"hot_note": "90-assets/hot.md"},
+            {"hot_note": "CONOUT$.md"},
+            {"hot_max_tokens": -1},
+            '{"hot_note": "CONFIG_SECRET"',
+            " " * (256 * 1024 + 1),
+        )
+        for explicit in (False, True):
+            for index, config in enumerate(cases):
+                with self.subTest(explicit=explicit, config=index):
+                    if isinstance(config, dict):
+                        self.write_config(**config)
+                    else:
+                        self.write("00-meta/vault-config.json", config)
+                    arguments = ("--vault", str(self.vault)) if explicit else ()
+
+                    result = self.run_hook(
+                        *arguments, codex=True, cwd=self.root if explicit else self.vault,
+                    )
+
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(
+                        result.stderr.strip(),
+                        "agentic-vault: invalid session context configuration",
+                    )
+
+    def test_codex_entry_keeps_token_and_note_read_limits(self) -> None:
+        self.write("00-meta/handoff.md", "DISABLED_HANDOFF")
+        self.write_bytes(
+            "00-meta/hot.md",
+            "한글 English ".encode("utf-8") * 100_000 + b"TAIL_SECRET",
+        )
+        for explicit, budget in (
+            (False, 40), (True, 40), (False, 1_000_000), (True, 1_000_000),
+        ):
+            with self.subTest(explicit=explicit, budget=budget):
+                self.write_config(handoff_max_tokens=0, hot_max_tokens=budget)
+                arguments = ("--vault", str(self.vault)) if explicit else ()
+                result = self.run_hook(
+                    *arguments, codex=True, cwd=self.root if explicit else self.vault,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("truncated", result.stdout.casefold())
+                self.assertNotIn("DISABLED_HANDOFF", result.stdout)
+                self.assertNotIn("TAIL_SECRET", result.stdout)
+                self.assertLessEqual(
+                    healthcheck.estimate_tokens(result.stdout.rstrip("\n")), budget,
+                )
+                self.assertLess(len(result.stdout.encode("utf-8")), 512 * 1024)
+                self.assertEqual(result.stderr, "")
 
     def test_traversal_never_reads_outside_marker(self) -> None:
         outside = self.root / "outside.md"

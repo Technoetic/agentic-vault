@@ -2,7 +2,7 @@
 
 # agentic-vault
 
-### 옵시디언 볼트 = Claude Code의 영구 기억 — 파일 기반 에이전틱 메모리
+### 옵시디언 볼트 = Claude Code · Codex의 영구 기억 — 파일 기반 에이전틱 메모리
 
 **세션은 죽는다. 기억은 파일로 산다.**<br/>
 컨텍스트 윈도우를 늘리는 대신 **기억을 사람이 읽을 수 있는 평문 마크다운에 내려놓는다**.
@@ -10,7 +10,8 @@
 <br/>
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
-[![Version](https://img.shields.io/badge/v0.9.0--local.1-10B981?style=for-the-badge)](docs/releases/v0.9.0-local.1.md)
+[![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
+[![Version](https://img.shields.io/badge/v0.9.0--local.2-10B981?style=for-the-badge)](docs/releases/v0.9.0-local.2.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -60,7 +61,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code. It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 11 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 11 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -71,6 +72,8 @@ flowchart TB
 ## 🎯 무엇을 해주는가
 
 </div>
+
+Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 같은 절차를 공유 스킬로 호출한다. [Codex 설치·사용법](docs/codex.md)에 전체 대응표가 있다. Telegram Jarvis는 Claude CLI를 사용한다.
 
 | 입력 | 산출 |
 |:---|:---|
@@ -268,7 +271,9 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.9.0-local.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.9.0-local.2 · MIT)
+├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
+├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
 ├── commands/                          ← 11개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
@@ -290,6 +295,7 @@ agentic-vault/
 ├── skills/agentic-vault/
 │   ├── SKILL.md                       ← 작업 규율 (중복 grep → 스키마 → 링크 → 기록)
 │   ├── references/
+│   │   ├── codex.md                   ← Codex 작업 연결 · 경로 · 권한 · 훅 규약
 │   │   ├── linking-rules.md           ← 위키링크 규율 (고아 링크 철학 포함)
 │   │   └── memory-tiers.md            ← 계층형 메모리 + SSOT 룩업 설계
 │   └── scripts/
@@ -305,6 +311,7 @@ agentic-vault/
 │   ├── hot.md · handoff.md · index.md · log.md
 │   ├── context.md · tasks.md · decisions.md · mistakes.md
 │   ├── frontmatter-schema.md · CLAUDE-vault-stub.md
+│   ├── AGENTS-vault-stub.md            ← 공통 rules와 합치는 에이전트 중립 계약
 │   ├── rules/                         ← 엔진 소유 행동 규칙 5종 (.claude/rules/로 설치, upgrade가 통째 교체)
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
 │
@@ -321,7 +328,7 @@ agentic-vault/
 
 </div>
 
-이 작업본은 **0.9.0-local.1 로컬 개선판**이다. 아래 GitHub 원격 설치는 원본 프로젝트를 설치한다. 이 개선판을 사용하려면 **방법 3**에서 현재 작업본 경로를 지정한다. [변경 내용](docs/releases/v0.9.0-local.1.md), [사용법](docs/reliability.md), [실행한 검증과 남은 범위](docs/validation.md)를 먼저 확인한다.
+이 작업본은 **0.9.0-local.2 로컬 개선판**이다. 아래 GitHub 원격 설치는 원본 프로젝트를 설치한다. Claude Code에서는 **방법 3**, Codex에서는 아래 **Codex 설치**에 현재 작업본 경로를 지정한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -356,6 +363,17 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 /plugin marketplace add C:/path/to/agentic-vault
 /plugin install agentic-vault@agentic-vault
 ```
+
+### Codex 설치
+
+터미널에서 경로를 이 README가 있는 실제 디렉터리로 바꿔 실행한다:
+
+```text
+codex plugin marketplace add "C:/path/to/agentic-vault"
+codex plugin add agentic-vault@agentic-vault-local
+```
+
+볼트 디렉터리에서 새 Codex 세션을 열고 `$agentic-vault:agentic-vault session-start`로 시작한다. 자동 세션 훅은 `/hooks`에서 정의를 검토하고 신뢰해야 실행된다. [기존 볼트 전환·명령 대응·검증 방법](docs/codex.md)을 참고한다.
 
 ### 요구사항
 

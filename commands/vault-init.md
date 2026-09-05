@@ -46,7 +46,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 | `decisions.md` | `50-projects/<프로젝트명>/<프로젝트명> decisions.md` | 〃 |
 | `mistakes.md` | `50-projects/<프로젝트명>/<프로젝트명> mistakes.md` | 〃 |
 
-(`CLAUDE-vault-stub.md`·`rules/`·`settings-permissions.json`은 복사 대상이 아니라 4·5단계의 입력이다.)
+(`CLAUDE-vault-stub.md`·`AGENTS-vault-stub.md`·`rules/`·`settings-permissions.json`은 복사 대상이 아니라 4·5단계의 입력이다.)
 
 프로젝트 미니볼트를 만들었으면 추가로:
 - `00-meta/vault-config.json`의 `handoff_note` 값을 `"50-projects/<프로젝트명>/<프로젝트명> handoff.md"`로 Edit하라.
@@ -60,10 +60,11 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 1. **rules 설치**: `.claude/rules/` 디렉토리를 만들고 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`의 `vault-*.md` 5개를 그대로 복사하라(치환 불필요 — 엔진 규칙은 의도적으로 볼트 무관 내용만 담는다). 각 파일 첫 줄의 `engine=` 스탬프는 유지하라(/vault-upgrade의 교체 판단 기준).
 2. **CLAUDE.md 스텁 append**: 루트 `CLAUDE.md`에 `agentic-vault:begin` 마커가 이미 있으면 건너뛰어라(중복 방지). `CLAUDE.md`가 존재하면 파일 끝에 빈 줄 하나를 두고 치환된 `${CLAUDE_PLUGIN_ROOT}/assets/templates/CLAUDE-vault-stub.md` 내용 전체를 append하라(Edit — 기존 내용을 절대 삭제·수정하지 마라). 존재하지 않으면 그 내용만으로 새로 생성하라(Write).
-3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라 — 최상단에 `<!-- agentic-vault:generated — .claude/rules/에서 생성된 파일. 직접 편집 금지, /vault-upgrade가 재생성. Claude Code는 이 파일을 읽지 않는다(Claude의 원본은 .claude/rules/) — 타 에이전트 전용. -->` 주석, 이어서 스텁 본문(마커 주석 제외)과 rules 5개 파일 본문(engine 주석 제외)을 순서대로 이어 붙인다. 이미 존재하면 건너뛰고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라. (Claude 외 에이전트는 `.claude/rules/`를 읽지 않으므로 이 파일이 그들의 단일 계약이다.)
+3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라. `${CLAUDE_PLUGIN_ROOT}/assets/templates/AGENTS-vault-stub.md`의 `{{VAULT_NAME}}`을 치환한 내용 전체를 먼저 쓰고, 설치된 rules 5개의 본문을 **architecture → linking → frontmatter → workflow → collab** 순서로 빈 줄을 사이에 두고 이어 붙인다. 각 rule의 맨 앞 `agentic-vault:rule engine=` HTML 주석 블록만 제거하고 본문은 그대로 보존한다. 스텁의 `agentic-vault:generated` 소유권 마커를 유지한다. `CLAUDE-vault-stub.md`를 AGENTS에 복사하거나 플러그인 설치 절대경로를 박아 넣지 마라. 이 전용 스텁은 사용자 규칙을 루트 `CLAUDE.md`의 관리 마커 밖에서 안전하게 읽도록 안내한다. 이미 AGENTS.md가 존재하면 내용과 소유권을 그대로 유지하고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라(Codex 표기는 `$agentic-vault:agentic-vault upgrade`).
 
 ## 5. 권한 병합 (사용자 확인 후에만)
 
+- **Claude Code 전용 단계다.** Codex에서 시작한 초기화는 생략한다. 사용자가 Claude Code 권한 설정도 명시적으로 요청한 경우에만 아래 절차를 적용한다. 이 deny 블록을 Codex 권한 설정으로 변환하지 마라.
 - `${CLAUDE_PLUGIN_ROOT}/assets/templates/settings-permissions.json`의 deny 블록을 사용자에게 보여주고 "deny zone 읽기 차단 권한을 `.claude/settings.json`에 병합할까요?"를 물어라.
 - **승인 시**: `.claude/settings.json`이 있으면 JSON을 파싱해 `permissions.deny` 배열에 **없는 항목만 추가**하라(기존 항목·다른 키는 전부 보존, 중복 금지). 파일이 없으면 이 블록만으로 새로 생성하라.
 - **거부 시**: 건너뛰고, deny zone 보호가 CLAUDE.md 행동 계약(산문 규칙)만으로 동작함을 한 줄로 알려라.
@@ -113,4 +114,4 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 ## 9. 완료 보고
 
-사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`)으로 처리, 세션 시작 시 `00-meta/hot.md`부터 읽기.
+사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`, Codex는 `$agentic-vault:agentic-vault <작업>`)으로 처리, 세션 시작 시 이미 주입된 컨텍스트를 재사용하고 없으면 검증·예산이 적용된 session-start 절차로 복원. Codex의 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰한 뒤 실행된다.

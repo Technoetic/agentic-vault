@@ -17,14 +17,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.9.0-local.1"
+EXPECTED = "0.9.0-local.2"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.9.0--local.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.9.0-local.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.9.0--local.2-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.9.0-local.2.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.9.0-local.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.9.0-local.2 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -161,6 +161,16 @@ class ReleaseMetadataTests(unittest.TestCase):
 
         self.assertEqual(plugin["version"], EXPECTED)
         self.assertEqual(market["plugins"][0]["version"], EXPECTED)
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        codex_market = json.loads((REPO_ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
+        self.assertEqual(codex["version"], EXPECTED)
+        self.assertEqual(codex["name"], plugin["name"])
+        entry = codex_market["plugins"][0]
+        self.assertEqual(entry["name"], codex["name"])
+        self.assertEqual(entry["source"]["source"], "local")
+        self.assertEqual((REPO_ROOT / entry["source"]["path"]).resolve(), REPO_ROOT)
+        self.assertTrue((REPO_ROOT / codex["skills"] / "agentic-vault/SKILL.md").is_file())
+        self.assertTrue((REPO_ROOT / "docs/releases" / f"v{EXPECTED}.md").is_file())
         self.assertIn(EXPECTED_BADGE_LINE, readme_lines)
         self.assertIn(EXPECTED_TREE_LINE, readme_lines)
         for origin in EXPECTED_HISTORICAL_ORIGINS:

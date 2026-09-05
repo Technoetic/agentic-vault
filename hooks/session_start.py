@@ -2,6 +2,7 @@
 """Inject bounded handoff and hot-note context at session start."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -113,15 +114,20 @@ def _configured_section(
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     _utf8_streams()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--vault", type=Path,
+        help="Vault directory (defaults to CLAUDE_PROJECT_DIR, then the current directory).",
+    )
+    args = parser.parse_args(argv)
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
-    if not project_dir:
-        return 0
-
-    vault = Path(project_dir)
-    config_candidate = vault / CONFIG_REL
     try:
+        vault = args.vault
+        if vault is None:
+            vault = Path(project_dir) if project_dir else Path.cwd()
+        config_candidate = vault / CONFIG_REL
         if not config_candidate.is_file():
             return 0
         config_path = resolve_note_path(vault, CONFIG_REL)

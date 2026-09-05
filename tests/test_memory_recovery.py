@@ -55,22 +55,36 @@ class MemoryRecoveryTests(unittest.TestCase):
             binary.unlink()
             restored = backup.restore_snapshot(snapshot, root / "restored vault")
 
-            environment = os.environ.copy()
-            environment["CLAUDE_PROJECT_DIR"] = str(restored)
-            injection = subprocess.run(
-                [sys.executable, str(ROOT / "hooks/session_start.py")],
-                env=environment, capture_output=True, text=True, encoding="utf-8",
-                timeout=15, check=False,
+            codex_environment = {
+                key: value for key, value in os.environ.items()
+                if not key.upper().startswith("CLAUDE_")
+            }
+            claude_environment = {
+                **codex_environment, "CLAUDE_PROJECT_DIR": str(restored),
+            }
+            entrypoints = (
+                ("claude", [], claude_environment, root),
+                ("codex-explicit", ["--vault", str(restored)], codex_environment, root),
+                ("codex-cwd", [], codex_environment, restored),
             )
-            self.assertEqual(injection.returncode, 0, injection.stderr)
-            self.assertIn("Current approved build: 42", injection.stdout)
-            self.assertNotIn("build: 99", injection.stdout)
+            for client, arguments, environment, cwd in entrypoints:
+                with self.subTest(client=client):
+                    injection = subprocess.run(
+                        [sys.executable, str(ROOT / "hooks/session_start.py"), *arguments],
+                        cwd=cwd, env=environment, capture_output=True, text=True,
+                        encoding="utf-8", timeout=15, check=False,
+                    )
+                    self.assertEqual(injection.returncode, 0, injection.stderr)
+                    self.assertIn("Current approved build: 42", injection.stdout)
+                    self.assertNotIn("build: 99", injection.stdout)
+                    self.assertEqual(injection.stderr, "")
 
             retrieval = subprocess.run(
                 [sys.executable, str(SCRIPTS / "vault_recall.py"),
                  "--vault", str(restored), "--query", "pipeline rollback build",
                  "--max-tokens", "200", "--format", "json"],
-                capture_output=True, text=True, encoding="utf-8", timeout=15,
+                cwd=root, env=codex_environment, capture_output=True, text=True,
+                encoding="utf-8", timeout=15,
                 check=False,
             )
             self.assertEqual(retrieval.returncode, 0, retrieval.stderr)
