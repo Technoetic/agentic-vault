@@ -1,0 +1,21 @@
+{
+  "description": "Hand-labeled bilingual lexical source-retrieval regression corpus; it does not measure semantic recall or Claude answer quality.",
+  "queries": [
+    {"id": "en-deploy", "language": "en", "query": "deployment rollback", "expected_paths": ["20-knowledge/deployment-rollback.md"]},
+    {"id": "en-canary", "language": "en", "query": "canary traffic stable release", "expected_paths": ["20-knowledge/deployment-rollback.md"]},
+    {"id": "en-index", "language": "en", "query": "composite index selectivity", "expected_paths": ["20-knowledge/database-indexing.md"]},
+    {"id": "en-cache", "language": "en", "query": "cache stampede jitter", "expected_paths": ["20-knowledge/cache-stampede.md"]},
+    {"id": "en-oauth", "language": "en", "query": "OAuth refresh token rotation", "expected_paths": ["20-knowledge/oauth-token-rotation.md"]},
+    {"id": "en-backup", "language": "en", "query": "SHA-256 manifest restore", "expected_paths": ["20-knowledge/backup-integrity.md"]},
+    {"id": "en-worktree", "language": "en", "query": "worktree branch isolation", "expected_paths": ["20-knowledge/git-worktree.md"]},
+    {"id": "en-handoff", "language": "en", "query": "session handoff decisions", "expected_paths": ["20-knowledge/session-handoff.md"]},
+    {"id": "ko-incident", "language": "ko", "query": "장애 대응 복구", "expected_paths": ["20-knowledge/incident-response.md"]},
+    {"id": "ko-graph", "language": "ko", "query": "지식 그래프 백링크", "expected_paths": ["20-knowledge/knowledge-graph.md"]},
+    {"id": "ko-budget", "language": "ko", "query": "토큰 예산 컨텍스트", "expected_paths": ["20-knowledge/token-budget.md"]},
+    {"id": "ko-decision", "language": "ko", "query": "회의 의사결정 기록", "expected_paths": ["20-knowledge/decision-log.md"]},
+    {"id": "ko-index", "language": "ko", "query": "데이터베이스 복합 인덱스", "expected_paths": ["20-knowledge/database-indexing.md"]},
+    {"id": "ko-cache", "language": "ko", "query": "캐시 스탬피드 지터", "expected_paths": ["20-knowledge/cache-stampede.md"]},
+    {"id": "ko-backup", "language": "ko", "query": "백업 무결성 스냅샷", "expected_paths": ["20-knowledge/backup-integrity.md"]},
+    {"id": "ko-worktree", "language": "ko", "query": "브랜치 격리 워크트리", "expected_paths": ["20-knowledge/git-worktree.md"]}
+  ]
+}

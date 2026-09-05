@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.8.4
+# agentic-vault:healthcheck engine=0.9.0
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -56,7 +56,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.8.4"
+ENGINE_VERSION = "0.9.0"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 DEFAULT_FRONTMATTER_ROOTS = (
     "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
@@ -164,6 +164,12 @@ _INTEGER_KEYS = {
     "frontmatter_max_lines", "stale_days", "rules_max_lines",
     "hot_max_tokens", "handoff_max_tokens", "anchor_drift_threshold",
 }
+_WINDOWS_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul", "clock$", "conin$", "conout$",
+    *(f"com{i}" for i in (*range(1, 10), "¹", "²", "³")),
+    *(f"lpt{i}" for i in (*range(1, 10), "¹", "²", "³")),
+}
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) -> str:
@@ -184,8 +190,22 @@ def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) ->
     segments = normalized.split("/")
     if any(segment == "" for segment in segments):
         raise HealthcheckError(f"{label} contains an empty path segment")
-    if any(segment == ".." for segment in segments):
-        raise HealthcheckError(f"{label} must stay inside the vault ('..' rejected)")
+    for segment in segments:
+        if segment in (".", ".."):
+            raise HealthcheckError(
+                f"{label} must stay inside the vault ({segment!r} rejected)"
+            )
+        if segment.endswith((" ", ".")):
+            raise HealthcheckError(
+                f"{label} contains a Windows-ambiguous trailing dot or space"
+            )
+        if ":" in segment:
+            raise HealthcheckError(f"{label} must not contain ':' (ADS rejected)")
+        device_stem = segment.split(".", 1)[0].casefold()
+        if device_stem in _WINDOWS_RESERVED_NAMES:
+            raise HealthcheckError(
+                f"{label} contains reserved Windows device name {segment!r}"
+            )
     return normalized
 
 
@@ -242,16 +262,13 @@ def validate_config(raw: object) -> dict:
     # 조용히 통과하는 우회가 된다(2026-08-31 포크(NS) 교차 검증 프로브 실증, v0.8.4).
     # 배치는 _PATH_LIST_KEYS 정규화 이후 — deny_zones가 정규화된 뒤에만 비교가 옳다.
     deny_zones = config.get("deny_zones") or []
+    deny_prefixes, deny_names = build_deny_rules(deny_zones)
     for key in sorted(_PATH_KEYS):
         value = config.get(key)
         if not value:
             continue
-        parts = tuple(part.casefold() for part in Path(value).parts)
-        for zone in deny_zones:
-            zone_parts = tuple(part.casefold() for part in Path(zone).parts)
-            if zone_parts and parts[:len(zone_parts)] == zone_parts:
-                raise HealthcheckError(
-                    f"{key} must not point inside deny zone {zone!r}")
+        if is_denied(value, deny_prefixes, deny_names):
+            raise HealthcheckError(f"{key} must not point inside a deny zone")
 
     enums = config.get("enums")
     if not isinstance(enums, dict):
@@ -294,20 +311,46 @@ def validate_config(raw: object) -> dict:
     return config
 
 
-def _ensure_config_health_report_contained(vault: Path, output: Path) -> Path:
-    """Resolve a config-derived report path and require it to stay in the vault."""
+def _ensure_vault_path(vault: Path, path: Path, label: str, deny_zones=()) -> Path:
+    """Require a path and each existing descendant component to be vault-local."""
     try:
         resolved_vault = vault.resolve()
-        resolved_output = output.resolve()
+        absolute_path = Path(os.path.abspath(path))
     except (OSError, RuntimeError) as exc:
-        raise HealthcheckError(f"health_report 경로 확인 실패: {exc}") from exc
+        raise HealthcheckError(f"{label} path check failed: {exc}") from exc
     try:
-        resolved_output.relative_to(resolved_vault)
+        relative = absolute_path.relative_to(resolved_vault)
     except ValueError as exc:
-        raise HealthcheckError(
-            f"health_report must stay inside the vault: {resolved_output}"
-        ) from exc
-    return resolved_output
+        raise HealthcheckError(f"{label} must stay inside the vault: {absolute_path}") from exc
+
+    if is_denied(relative.as_posix(), *build_deny_rules(deny_zones)):
+        raise HealthcheckError(f"{label} must not point inside a deny zone")
+
+    current = resolved_vault
+    for part in relative.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise HealthcheckError(f"{label} path check failed: {exc}") from exc
+        if current.is_symlink() or (
+            getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise HealthcheckError(f"{label} must not traverse a symlink or reparse point")
+
+    try:
+        resolved_path = absolute_path.resolve()
+        resolved_path.relative_to(resolved_vault)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HealthcheckError(f"{label} must stay inside the vault: {absolute_path}") from exc
+    return absolute_path
+
+
+def _ensure_config_health_report_contained(vault: Path, output: Path) -> Path:
+    """Resolve a config-derived report path and require it to stay in the vault."""
+    return _ensure_vault_path(vault, output, "health_report")
 
 
 def _run_git_bytes(
@@ -479,7 +522,7 @@ def _git(vault: Path, *args: str) -> str | None:
 
 
 def scan_anchor_drift(vault: Path, handoff_rel: str,
-                      threshold: int) -> tuple[str | None, list[str]]:
+                      threshold: int, deny_zones=()) -> tuple[str | None, list[str]]:
     """handoff anchor와 git HEAD의 커밋 거리로 /session-end 누락을 감지한다.
     반환 (콘솔 요약 | None, 리포트 라인들). 요약이 있으면 이슈 1건으로 집계된다.
     ⚠️한계: handoff만 손으로 갱신되고 remember만 빠진 경우는 못 잡는다."""
@@ -488,7 +531,7 @@ def scan_anchor_drift(vault: Path, handoff_rel: str,
     handoff = vault / handoff_rel
     if not handoff.is_file():
         return None, [f"- 판정 불가: handoff 없음 ({handoff_rel})"]
-    m = ANCHOR_RE.search(read_text(handoff))
+    m = ANCHOR_RE.search(read_vault_text(vault, handoff, "handoff_note", deny_zones))
     if not m:
         return ("handoff에 기준 커밋(anchor) 줄이 없음 — session-end 계약 위반",
                 ["- ⚠️ handoff에 `**기준 커밋(anchor):**` 줄이 없다. "
@@ -561,11 +604,19 @@ def read_text(p: Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
-def read_note_text(p: Path) -> tuple[str | None, str | None]:
+def read_vault_text(vault: Path, p: Path, label: str, deny_zones=()) -> str:
+    """Recheck containment and deny policy before a full-mode filesystem read."""
+    _ensure_vault_path(vault, p, label, deny_zones)
+    return read_text(p)
+
+
+def read_note_text(p: Path, vault: Path | None = None, deny_zones=()) -> tuple[str | None, str | None]:
     """(본문, 오류) 중 하나만 채워 반환한다 — 파일 단위 fail-soft (v0.8.4).
     노트 하나를 못 읽는다고(클라우드 하이드레이션 실패·백신 잠금·동시 저장 레이스)
     전체 검사가 traceback으로 죽으면 안 된다. 못 읽은 파일은 §14로 보고만 한다."""
     try:
+        if vault is not None:
+            _ensure_vault_path(vault, p, f"note {p.name}", deny_zones)
         return read_text(p), None
     except OSError as exc:
         return None, f"{type(exc).__name__}: {exc}"
@@ -583,11 +634,12 @@ def norm_cfg_path(value) -> str:
 def build_deny_rules(deny_zones) -> tuple[list[str], set[str]]:
     """deny_zones 항목을 (경로 접두 목록, 이름 집합)으로 분해한다.
     '10-inbox/_processed' 처럼 /가 있으면 루트 기준 접두 매칭,
-    '.obsidian' 처럼 단일 세그먼트면 어느 깊이든 디렉토리 이름 매칭."""
+    '.obsidian' 처럼 단일 세그먼트면 어느 깊이든 경로 구성 요소 매칭.
+    모든 비교는 casefold로 대소문자를 무시한다."""
     prefixes: list[str] = []
     names: set[str] = set()
     for z in deny_zones or []:
-        z = norm_cfg_path(z)
+        z = norm_cfg_path(z).casefold()
         if not z:
             continue
         if "/" in z:
@@ -598,9 +650,10 @@ def build_deny_rules(deny_zones) -> tuple[list[str], set[str]]:
 
 
 def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
+    rel = rel.replace("\\", "/").casefold()
     if any(rel == pre or rel.startswith(pre + "/") for pre in prefixes):
         return True
-    return any(part in names for part in rel.split("/")[:-1])
+    return any(part in names for part in rel.split("/"))
 
 
 def collect_md_files(vault: Path, exclude_names: set[str]) -> list[Path]:
@@ -609,10 +662,26 @@ def collect_md_files(vault: Path, exclude_names: set[str]) -> list[Path]:
     아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다."""
     results: list[Path] = []
     for root, dirs, files in os.walk(vault):
-        dirs[:] = [d for d in dirs if d not in exclude_names and d != ".git"]
+        root_path = Path(root)
+        safe_dirs: list[str] = []
+        for dirname in dirs:
+            child = root_path / dirname
+            if dirname in exclude_names or dirname == ".git":
+                continue
+            try:
+                _ensure_vault_path(vault, child, f"scan directory {child.name}")
+            except HealthcheckError:
+                continue
+            safe_dirs.append(dirname)
+        dirs[:] = safe_dirs
         for f in files:
             if f.lower().endswith(".md"):
-                results.append(Path(root) / f)
+                candidate = root_path / f
+                try:
+                    _ensure_vault_path(vault, candidate, f"scan file {f}")
+                except HealthcheckError:
+                    continue
+                results.append(candidate)
     return results
 
 
@@ -796,8 +865,8 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
     return sorted(set(errors))
 
 
-def scan_log_tag_gaps(log_path: Path, valid_ops: set[str],
-                      epoch: date) -> tuple[list[str], list[str]]:
+def scan_log_tag_gaps(vault: Path, log_path: Path, valid_ops: set[str],
+                      epoch: date, deny_zones=()) -> tuple[list[str], list[str]]:
     """log 노트에서 (태그 누락/형식오류 항목, 미승인 태그 항목)을 반환한다.
     epoch(태그 도입일) 이후 항목만 검사한다 — 과거 로그는 소급 대상이 아니므로
     '도입일 이후 로그는 100% 태그됨'이 결정론적으로 검증 가능한 사실이 된다.
@@ -806,7 +875,7 @@ def scan_log_tag_gaps(log_path: Path, valid_ops: set[str],
     missing: list[str] = []
     unknown: list[str] = []
     # 헤더의 형식 예시 등 코드펜스 안의 라인은 실제 로그가 아니므로 제외
-    text = CODE_FENCE_RE.sub("", read_text(log_path))
+    text = CODE_FENCE_RE.sub("", read_vault_text(vault, log_path, "log_note", deny_zones))
     for raw in text.splitlines():
         strict = LOG_ENTRY_RE.match(raw)
         excerpt = raw[:80]
@@ -871,25 +940,32 @@ def _norm_heading(h: str) -> str:
     return " ".join(h.split()).strip().lower()
 
 
-def scan_rules_integrity(rules_dir: Path, claude_md: Path, max_lines: int
-                         ) -> tuple[list[tuple[str, int]], list[str]]:
+def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_lines: int,
+                          deny_zones=()
+                          ) -> tuple[list[tuple[str, int]], list[str]]:
     """(크기 초과 rules 목록, CLAUDE.md와 제목이 겹치는 rules 목록)을 반환한다.
     - 크기: rules 파일이 max_lines 초과 → 절차성 장문 유입 신호(rules는 상시 로드라 얇아야 함).
     - 중복: 엔진 rules의 ## 제목이 CLAUDE.md 본문 제목과 겹치면, 같은 주제를 두 층이
       다르게 서술할 위험 — 충돌 시 우선순위 규칙이 없어 모델이 임의 선택한다(v0.7 근거)."""
     oversized: list[tuple[str, int]] = []
     dup_headings: list[str] = []
-    rule_files = sorted(rules_dir.glob("*.md"))
+    rule_files: list[Path] = []
+    for rule_file in sorted(rules_dir.glob("*.md")):
+        try:
+            _ensure_vault_path(vault, rule_file, f"rule file {rule_file.name}", deny_zones)
+        except HealthcheckError:
+            continue
+        rule_files.append(rule_file)
     # CLAUDE.md 본문(마커/주석 제외)의 규칙 제목 집합
     claude_headings: set[str] = set()
-    if claude_md.is_file():
-        ctext = CODE_FENCE_RE.sub("", read_text(claude_md))
+    if not is_denied(rel_posix(claude_md, vault), *build_deny_rules(deny_zones)) and claude_md.is_file():
+        ctext = CODE_FENCE_RE.sub("", read_vault_text(vault, claude_md, "CLAUDE.md", deny_zones))
         for line in ctext.splitlines():
             m = RULE_HEADING_RE.match(line)
             if m:
                 claude_headings.add(_norm_heading(m.group(1)))
     for rf in rule_files:
-        rtext = read_text(rf)
+        rtext = read_vault_text(vault, rf, f"rule file {rf.name}", deny_zones)
         # 코드펜스 내부는 예시 인용일 뿐 실제 규칙/제목이 아니므로 크기·제목 판정에서 제외
         rclean = CODE_FENCE_RE.sub("", rtext)
         body_lines = [ln for ln in rclean.splitlines()
@@ -931,6 +1007,11 @@ def main() -> int:
 
     # --- 볼트 감지: 00-meta/vault-config.json 이 없으면 조용히·정중히 무동작 ---
     cfg_path = vault / CONFIG_RELPATH
+    try:
+        _ensure_vault_path(vault, cfg_path, "vault-config")
+    except HealthcheckError as e:
+        print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+        return 1
     if not cfg_path.is_file():
         # stderr로 출력 — SessionStart 훅이 exit 0의 stdout을 컨텍스트에 주입하므로
         # 비볼트 프로젝트의 세션에 잡음이 들어가지 않게 한다(CLI 직접 실행 시에도 안내는 보임).
@@ -938,12 +1019,25 @@ def main() -> int:
               file=sys.stderr)
         return 0
     try:
+        _ensure_vault_path(vault, cfg_path, "vault-config")
         user_cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
         cfg = validate_config(user_cfg)
     except (OSError, ValueError, HealthcheckError) as e:
         print(f"[vault-healthcheck] 오류: {CONFIG_RELPATH} 파싱 실패 — {e}", file=sys.stderr)
         return 1
     warnings: list[str] = []
+
+    # Config-derived readers are fail-closed. Missing paths remain optional, but
+    # an existing symlink/junction component must never redirect a full scan.
+    for key in ("index_note", "log_note", "hot_note", "handoff_note", "ssot_note", "rules_dir"):
+        rel = norm_cfg_path(cfg.get(key))
+        if not rel:
+            continue
+        try:
+            _ensure_vault_path(vault, vault / rel, key, cfg.get("deny_zones"))
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
 
     # --- 설정 해석 -----------------------------------------------------------
     vault_name = str(cfg.get("vault_name") or "Vault")
@@ -1085,7 +1179,11 @@ def main() -> int:
 
     for p in targets:
         rel = rel_posix(p, vault)
-        text, read_err = read_note_text(p)
+        try:
+            text, read_err = read_note_text(p, vault, cfg.get("deny_zones"))
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
         if text is None:
             # 파일 단위 fail-soft — 이 노트만 건너뛰고 검사를 계속한다(§14 보고).
             unreadable.append((rel, read_err or "읽기 실패"))
@@ -1173,7 +1271,13 @@ def main() -> int:
     index_skip_note: str | None = None
     index_path = (vault / index_rel) if index_rel else None
     if index_path is not None and index_path.is_file():
-        idx_text = CODE_FENCE_RE.sub("", read_text(index_path))
+        try:
+            idx_text = CODE_FENCE_RE.sub(
+                "", read_vault_text(vault, index_path, "index_note", cfg.get("deny_zones"))
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
         idx_links = set()
         for raw_target in WIKILINK_RE.findall(idx_text):
             base = normalize_link_target(raw_target)
@@ -1210,7 +1314,13 @@ def main() -> int:
     log_skip_note: str | None = None
     log_path = (vault / log_rel) if log_rel else None
     if log_path is not None and log_path.is_file() and valid_ops:
-        log_tag_missing, log_tag_unknown = scan_log_tag_gaps(log_path, valid_ops, epoch)
+        try:
+            log_tag_missing, log_tag_unknown = scan_log_tag_gaps(
+                vault, log_path, valid_ops, epoch, cfg.get("deny_zones")
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
     else:
         log_skip_note = "- 검사 생략 (config의 log_note/log_tags 미설정 또는 파일 없음)"
 
@@ -1220,8 +1330,13 @@ def main() -> int:
     rules_skip_note: str | None = None
     rules_path = vault / rules_dir_rel if rules_dir_rel else None
     if rules_path is not None and rules_path.is_dir() and any(rules_path.glob("*.md")):
-        rules_oversized, rules_dup = scan_rules_integrity(
-            rules_path, vault / "CLAUDE.md", rules_max_lines)
+        try:
+            rules_oversized, rules_dup = scan_rules_integrity(
+                vault, rules_path, vault / "CLAUDE.md", rules_max_lines, cfg.get("deny_zones")
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
     else:
         rules_skip_note = f"- 검사 생략 ({rules_dir_rel}/ 없음 — v0.6+ 3층 계약 미설치 볼트)"
 
@@ -1244,7 +1359,12 @@ def main() -> int:
         note_path = vault / rel
         if not note_path.is_file():
             continue
-        n_tokens = estimate_tokens(read_text(note_path))
+        try:
+            note_text = read_vault_text(vault, note_path, cfg_key, cfg.get("deny_zones"))
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+        n_tokens = estimate_tokens(note_text)
         if n_tokens > budget:
             injection_over.append((rel, n_tokens, budget))
 
@@ -1254,8 +1374,13 @@ def main() -> int:
     except (TypeError, ValueError):
         drift_threshold = 0
         warnings.append("anchor_drift_threshold 값이 정수가 아님 — 검사 생략.")
-    drift_summary, drift_lines = scan_anchor_drift(
-        vault, norm_cfg_path(cfg.get("handoff_note")) or "", drift_threshold)
+    try:
+        drift_summary, drift_lines = scan_anchor_drift(
+            vault, norm_cfg_path(cfg.get("handoff_note")) or "", drift_threshold, cfg.get("deny_zones")
+        )
+    except HealthcheckError as e:
+        print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+        return 1
 
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
@@ -1404,6 +1529,8 @@ def main() -> int:
     ]
 
     try:
+        if config_derived_output:
+            _ensure_config_health_report_contained(vault, out)
         out.parent.mkdir(parents=True, exist_ok=True)
         if config_derived_output:
             _ensure_config_health_report_contained(vault, out)
