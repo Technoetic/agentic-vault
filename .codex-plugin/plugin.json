@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, Korean and English lexical recall, health checks and verified backup recovery. Local prerelease based on Technoetic/agentic-vault.",
+    "longDescription": "Use one Markdown vault for session handoff, Korean and English lexical recall, health checks and verified backup recovery. Prerelease of Technoetic/agentic-vault.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

@@ -3,12 +3,23 @@
 `0.9.0-local.2`는 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
 사용한다. Codex CLI `0.150.1`에서 로컬 설치와 스킬·훅 검색을 검증했다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
-원본 GitHub의 공식 릴리스가 아닌 로컬 개선판이다.
+개발 중 사용한 `local.2` 버전 식별자를 유지한 공개 사전 릴리스다.
 
 ## 설치
 
-압축을 풀고 `.codex-plugin/plugin.json`과 이 README가 있는 디렉터리를 지정한다.
-다음 명령은 사용자의 Codex에 로컬 marketplace와 플러그인을 등록한다.
+터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
+
+```text
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0-local.2
+codex plugin add agentic-vault@agentic-vault-local
+```
+
+`agentic-vault-local`은 기존 marketplace 식별자이며 GitHub 설치에서도 동일하다.
+Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
+사용한다. 실행 정책을 변경할 필요는 없다.
+
+로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤
+`.codex-plugin/plugin.json`과 README가 있는 디렉터리를 지정한다:
 
 ```text
 codex plugin marketplace add "C:/path/to/agentic-vault"
@@ -26,7 +37,7 @@ macOS/Linux도 같은 명령에 해당 OS의 절대경로를 쓴다. 설치 후 
 신뢰 전에도 아래의 명시적 `session-start` 요청으로 복원할 수 있다.
 [Codex 훅 공식 문서](https://learn.chatgpt.com/docs/hooks)
 
-Claude Code 설치는 [README의 로컬 설치](../README.md#방법-3--로컬-클론-개발--커스터마이즈)를
+Claude Code 설치는 [README의 설치 안내](../README.md#-설치)를
 따른다. 두 클라이언트를 별도로 설치해도 볼트 데이터는 한 벌이다.
 
 ## 사용

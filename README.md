@@ -328,7 +328,7 @@ agentic-vault/
 
 </div>
 
-이 작업본은 **0.9.0-local.2 로컬 개선판**이다. 아래 GitHub 원격 설치는 원본 프로젝트를 설치한다. Claude Code에서는 **방법 3**, Codex에서는 아래 **Codex 설치**에 현재 작업본 경로를 지정한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
+현재 버전은 **0.9.0-local.2 사전 릴리스**다. 개발 중 사용한 버전 식별자를 유지하며 Claude Code·Codex 겸용 개선을 포함한다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.9.0-local.2)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.9.0-local.2.md), [공통 엔진 사용법](docs/reliability.md), [이전 local.1 검증 기록](docs/validation.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -357,7 +357,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 
 ### 방법 3 — 로컬 클론 (개발 / 커스터마이즈)
 
-이미 이 개선판을 가지고 있다면 아래 경로를 **이 README가 있는 실제 디렉터리**로 바꿔 지정한다. 원격을 새로 clone하면 원본 버전을 받으므로 현재 개선판 설치에 필요한 단계가 아니다.
+저장소를 clone하거나 Release ZIP을 풀고, 아래 경로를 **이 README가 있는 실제 디렉터리**로 바꿔 지정한다.
 
 ```text
 /plugin marketplace add C:/path/to/agentic-vault
@@ -366,14 +366,14 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 
 ### Codex 설치
 
-터미널에서 경로를 이 README가 있는 실제 디렉터리로 바꿔 실행한다:
+터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add "C:/path/to/agentic-vault"
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0-local.2
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
-볼트 디렉터리에서 새 Codex 세션을 열고 `$agentic-vault:agentic-vault session-start`로 시작한다. 자동 세션 훅은 `/hooks`에서 정의를 검토하고 신뢰해야 실행된다. [기존 볼트 전환·명령 대응·검증 방법](docs/codex.md)을 참고한다.
+Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명령의 `codex`를 `codex.cmd`로 바꾼다. 볼트 디렉터리에서 새 Codex 세션을 열고 `$agentic-vault:agentic-vault session-start`로 시작한다. 자동 세션 훅은 `/hooks`에서 정의를 검토하고 신뢰해야 실행된다. [로컬 설치·기존 볼트 전환·명령 대응·검증 방법](docs/codex.md)을 참고한다.
 
 ### 요구사항
 
