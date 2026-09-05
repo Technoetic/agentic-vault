@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -428,6 +429,8 @@ class CliModeTests(unittest.TestCase):
             self.skipTest(f"real symlink creation is unsupported: {exc}")
 
     def junction_or_skip(self, link: Path, target: Path) -> None:
+        if os.name != "nt":
+            self.skipTest("Windows junction boundary")
         result = subprocess.run(
             ["cmd", "/c", "mklink", "/J", str(link), str(target)],
             stdout=subprocess.PIPE,
