@@ -18,6 +18,20 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
+이미 이전 Git 태그에 고정한 `agentic-vault-local` 설치를 v0.10.0으로 갱신할 때는
+같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된 옛 태그만
+새로 읽으므로 새 버전으로 이동하지 않는다. CLI 0.150.1의 임시 home에서 아래 흐름과
+기존 캐시 보존을 확인했다. 로컬 폴더를 소스로 쓰는 설치는 해당 로컬 소스를 갱신한다.
+
+```text
+codex plugin marketplace remove agentic-vault-local
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.10.0
+codex plugin add agentic-vault@agentic-vault-local
+```
+
+갱신 후 `codex plugin list`로 버전·활성화 상태를 확인하고 새 대화를 연다.
+소스 갱신을 훅 신뢰 승인으로 해석하지 않는다.
+
 로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤
 `.codex-plugin/plugin.json`과 README가 있는 디렉터리를 지정한다:
 

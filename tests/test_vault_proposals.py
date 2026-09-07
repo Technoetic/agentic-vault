@@ -23,7 +23,9 @@ class ProposalTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.vault = Path(self.temp.name)
+        # Match the resolver's canonical paths, including macOS /var aliases
+        # and Windows short names, so filesystem fault injections hit.
+        self.vault = Path(self.temp.name).resolve()
         self.write("00-meta/vault-config.json", json.dumps({
             "required_keys": ["title"], "enums": {},
         }).encode())
