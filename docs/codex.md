@@ -1,16 +1,16 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.9.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+`v0.10.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
 사용한다. Codex CLI `0.150.1`에서 로컬 설치와 스킬·훅 검색을 검증했다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
-`0.9.0-local.2` 사전 릴리스를 정식 승격한 판이다.
+v0.9.0의 겸용 구조에 기억 진단과 교훈 수정안 도구를 추가했다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.9.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.10.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -55,7 +55,7 @@ Codex 대화 입력란에서 다음처럼 요청한다. 셸 명령이 아니다.
 | 건강 검사 | `/vault-lint` | `$agentic-vault:agentic-vault lint` |
 
 Codex는 `day`, `ingest`, `process-inbox`, `trace`도 같은 이름으로 호출한다.
-¹ `doctor`와 `proposals`는 현재 개발 브랜치의 추가 기능이며 위 v0.9.0 태그에는 없다.
+¹ `doctor`와 `proposals`는 v0.10.0부터 제공한다.
 기존 파일 교훈 수정안은 `$agentic-vault:agentic-vault proposals <하위 명령과 인자>`로
 [제안·검토·적용 절차](lesson-proposals.md)에 연결한다. 진단 요청은 볼트를 수정하지 않는다.
 `backup`, `verify <스냅샷 경로>`, `restore <스냅샷 경로> <새 복구 경로>`는

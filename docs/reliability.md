@@ -32,10 +32,10 @@ hot=2000, handoff=4000을 사용한다. 새 볼트 템플릿은 hot=2500을 명�
 잘못 요약되면 저장 장치만으로 의미를 복원할 수 없다. anchor 차이는 조사할
 변경 범위를 알려주는 신호이며, 모델의 해석이 올바르다는 증명은 아니다.
 
-## 기억 주입 진단 (개발 브랜치 추가)
+## 기억 주입 진단 (v0.10.0)
 
 `/vault-doctor` 또는 Codex의 `$agentic-vault:agentic-vault doctor`는 설정·경로·
-handoff/hot의 실제 주입 예정 상태를 읽기 전용으로 검사한다. v0.9.0 태그에는 없다.
+handoff/hot의 실제 주입 예정 상태를 읽기 전용으로 검사한다. v0.10.0부터 제공한다.
 
 ```text
 python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --format json

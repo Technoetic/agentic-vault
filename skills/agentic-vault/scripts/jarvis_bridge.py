@@ -36,7 +36,7 @@ import urllib.request
 from collections import deque
 from collections.abc import Callable
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 
 API_BASE = "https://api.telegram.org/bot{token}/{method}"
 STATE_ROOT = Path.home() / ".vault-jarvis"
@@ -442,6 +442,20 @@ def route(text: str) -> tuple[str, str]:
 
 # ---------------------------------------------------------------- 동작
 
+def _capture_containment_key(path: PurePath) -> PurePath:
+    """Compare OS-resolved Windows paths in one namespace, without changing I/O."""
+    if not isinstance(path, PureWindowsPath):
+        return path
+    value = str(path)
+    if value.startswith(("\\\\?\\", "\\\\.\\")):
+        return path
+    if path.drive.startswith("\\\\"):
+        return PureWindowsPath("\\\\?\\UNC\\" + value[2:])
+    if re.fullmatch(r"[A-Za-z]:", path.drive) and path.root:
+        return PureWindowsPath("\\\\?\\" + value)
+    return path
+
+
 def _resolve_capture_directory(vault: Path, inbox: Path) -> Path:
     try:
         resolved_vault = vault.resolve(strict=True)
@@ -449,7 +463,11 @@ def _resolve_capture_directory(vault: Path, inbox: Path) -> Path:
     except (OSError, RuntimeError):
         raise RuntimeError("cannot safely resolve capture directory") from None
     try:
-        resolved_inbox.relative_to(resolved_vault)
+        # A concurrent mkdir can make Windows resolve retain the extended prefix
+        # on only one side. Add it to comparison keys, never strip it from an I/O
+        # path: extended paths can preserve otherwise-special trailing dots/spaces.
+        _capture_containment_key(resolved_inbox).relative_to(
+            _capture_containment_key(resolved_vault))
     except ValueError:
         raise RuntimeError("capture directory escapes vault") from None
     return resolved_inbox

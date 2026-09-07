@@ -2,6 +2,10 @@
 
 Date: 2026-09-07. Base: `61474337321d6c2e620d1ec3a2f594daf1f62dac` (v0.9.0).
 
+This is the historical phase 1 checkpoint at `b45a74f`. The subsequent Windows
+Jarvis correction and release verification are recorded in [v0.10.0 verification](v0.10.0.md).
+Results and pending actions below describe that earlier checkpoint.
+
 ## Scope and artifacts
 
 task_id: `openclaw-phase1`

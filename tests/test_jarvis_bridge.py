@@ -15,7 +15,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock, Mock, patch
 
 
@@ -1599,6 +1599,27 @@ class JarvisStateTests(unittest.TestCase):
                 self.vault, "different", "telegram", capture_id="100/../unsafe!?",
                 received_at=received)
 
+    @unittest.skipUnless(os.name == "nt", "Windows extended filesystem paths")
+    def test_capture_publishes_when_resolver_keeps_extended_inbox_prefix(self):
+        inbox = self.vault / "10-inbox" / "jarvis"
+        original_resolve = Path.resolve
+
+        def extended_inbox(path, strict=False):
+            resolved = original_resolve(path, strict=strict)
+            if path == inbox and not str(resolved).startswith("\\\\?\\"):
+                return Path("\\\\?\\" + str(resolved))
+            return resolved
+
+        with patch.object(Path, "resolve", extended_inbox):
+            name = _BRIDGE.do_capture(
+                self.vault, "preserved body", "telegram", capture_id="prefix-race",
+                received_at=datetime(2026, 9, 7, 10, 0, 0))
+
+        self.assertEqual(len(list(inbox.glob("*.md"))), 1)
+        self.assertTrue((inbox / name).read_text(encoding="utf-8").startswith(
+            "preserved body\n"))
+        self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
     def test_capture_rechecks_resolved_parent_before_publishing(self):
         received = datetime(2026, 8, 31, 9, 0, 0)
         inbox = self.vault / "10-inbox" / "jarvis"
@@ -1722,6 +1743,52 @@ class JarvisStateTests(unittest.TestCase):
         inbox = self.vault / "10-inbox" / "jarvis"
         self.assertEqual(list(inbox.glob("*.md")), [])
         self.assertEqual(list(inbox.glob(".*.tmp")), [])
+
+
+class JarvisCapturePathRepresentationTests(unittest.TestCase):
+    """Inject OS-resolved paths without requiring a mounted Windows share."""
+
+    def resolve_pair(self, vault, inbox):
+        with patch.object(Path, "resolve", side_effect=[
+                PureWindowsPath(vault), PureWindowsPath(inbox)]):
+            return _BRIDGE._resolve_capture_directory(Path("vault"), Path("inbox"))
+
+    def test_equivalent_drive_prefixes_keep_original_io_path(self):
+        for vault, inbox in (
+            ("C:\\vault", "\\\\?\\C:\\vault\\10-inbox\\jarvis"),
+            ("\\\\?\\C:\\vault", "C:\\vault\\10-inbox\\jarvis"),
+            ("\\\\?\\C:\\vault", "\\\\?\\c:\\VAULT\\10-inbox\\jarvis"),
+        ):
+            with self.subTest(vault=vault, inbox=inbox):
+                self.assertEqual(self.resolve_pair(vault, inbox), PureWindowsPath(inbox))
+
+    def test_equivalent_unc_prefixes_keep_original_io_path(self):
+        for vault, inbox in (
+            ("\\\\server\\share\\vault", "\\\\?\\UNC\\server\\share\\vault\\inbox"),
+            ("\\\\?\\UNC\\server\\share\\vault", "\\\\server\\share\\vault\\inbox"),
+        ):
+            with self.subTest(vault=vault, inbox=inbox):
+                self.assertEqual(self.resolve_pair(vault, inbox), PureWindowsPath(inbox))
+
+    def test_extended_prefix_does_not_allow_another_location(self):
+        for vault, inbox in (
+            ("C:\\vault", "\\\\?\\D:\\vault\\inbox"),
+            ("C:\\vault", "\\\\?\\C:\\vault-other\\inbox"),
+            ("C:\\vault", "\\\\?\\C:\\outside\\inbox"),
+            ("\\\\server\\share\\vault", "\\\\?\\UNC\\server\\other\\vault\\inbox"),
+            ("\\\\server\\share\\vault", "\\\\?\\UNC\\other\\share\\vault\\inbox"),
+        ):
+            with self.subTest(vault=vault, inbox=inbox):
+                with self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+                    self.resolve_pair(vault, inbox)
+
+    def test_extended_names_are_not_reinterpreted_as_ordinary_names(self):
+        for inbox in ("\\\\?\\C:\\vault.\\inbox", "\\\\?\\C:\\vault \\inbox"):
+            with self.subTest(inbox=inbox):
+                with self.assertRaisesRegex(RuntimeError, "capture directory escapes vault"):
+                    self.resolve_pair("C:\\vault", inbox)
+        inbox = "\\\\?\\C:\\vault\\literal.\\inbox"
+        self.assertEqual(self.resolve_pair("C:\\vault", inbox), PureWindowsPath(inbox))
 
 
 class JarvisUpdateDurabilityTests(unittest.TestCase):
