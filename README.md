@@ -16,7 +16,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-11-F59E0B?style=for-the-badge)](commands/)
+[![Commands](https://img.shields.io/badge/Commands-12-F59E0B?style=for-the-badge)](commands/)
 [![Templates](https://img.shields.io/badge/Templates-13%2B5_rules-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
@@ -61,7 +61,7 @@ flowchart TB
 <details>
 <summary><b>🌐 English summary</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 11 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 12 slash commands on the development branch, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, LLM sessions locked to Read/Grep/Glob), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, and 13 note templates plus five engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: five engine-owned rule files installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -75,6 +75,8 @@ flowchart TB
 
 Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 같은 절차를 공유 스킬로 호출한다. [Codex 설치·사용법](docs/codex.md)에 전체 대응표가 있다. Telegram Jarvis는 Claude CLI를 사용한다.
 
+현재 개발 브랜치에는 **읽기 전용 기억 진단**과 **대상 해시를 확인하는 교훈 수정안 기록·적용**이 추가되어 있다. 아래 `doctor`와 [교훈 제안 도구](docs/lesson-proposals.md)는 v0.9.0 태그 배포본에는 없으며, 정식 버전·설치 안내는 아직 v0.9.0을 가리킨다.
+
 | 입력 | 산출 |
 |:---|:---|
 | `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 5종 + CLAUDE.md 스텁 + AGENTS.md) |
@@ -84,6 +86,7 @@ Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vaul
 | `/vault-day 오늘 미팅 요약…` | `30-journal/YYYY/MM/` 데일리 노트에 위키링크와 함께 기록 |
 | `/vault-trace 키워드` | 저널·미팅·지식·결정 노트 횡단 시계열 추적 → 진화·모순·다음 행동 내러티브 |
 | `/vault-recall 질의` | 출처 경로·행 번호가 있는 어휘 검색, 추정 컨텍스트 예산 적용 (읽기 전용) |
+| `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 (읽기 전용) |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
@@ -104,7 +107,7 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 11종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 12종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>검증 가능한 세대별 스냅샷</i>"]
@@ -275,7 +278,7 @@ agentic-vault/
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
-├── commands/                          ← 11개 슬래시 커맨드
+├── commands/                          ← 12개 슬래시 커맨드
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
 │   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
@@ -285,6 +288,7 @@ agentic-vault/
 │   ├── vault-lint.md                  ← 무결성 검증 + 자가 치유  🛡️
 │   ├── vault-trace.md                 ← 키워드 시계열 횡단 추적
 │   ├── vault-recall.md                ← 출처·예산이 있는 읽기 전용 검색
+│   ├── vault-doctor.md                ← 기억 주입 상태의 읽기 전용 진단
 │   ├── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
 │   └── vault-upgrade.md               ← 기존 볼트를 현재 엔진으로 (멱등)  ⬆️
 │
@@ -303,6 +307,8 @@ agentic-vault/
 │       ├── test_rules_inheritance.py  ← rules 상속 회귀 테스트 (버전 업 시 1회)  🔬
 │       ├── backup_vault.py            ← 세대별 스냅샷 + SHA-256 검증 + 새 경로 복구
 │       ├── vault_recall.py            ← 예산·출처가 있는 어휘 검색
+│       ├── vault_doctor.py            ← 설정·파일·예산 원인별 진단
+│       ├── vault_proposals.py         ← 교훈 제안 이력 + 대상 해시 확인 후 적용
 │       ├── vault_paths.py             ← 노트 읽기 경로 검증
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │

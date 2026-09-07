@@ -50,10 +50,14 @@ Codex 대화 입력란에서 다음처럼 요청한다. 셸 명령이 아니다.
 | 기존 볼트 갱신 | `/vault-upgrade` | `$agentic-vault:agentic-vault upgrade` |
 | 세션 복원 | `/vault-session-start` | `$agentic-vault:agentic-vault session-start` |
 | 출처 검색 | `/vault-recall 배포 롤백` | `$agentic-vault:agentic-vault recall 배포 롤백` |
+| 기억 진단¹ | `/vault-doctor` | `$agentic-vault:agentic-vault doctor` |
 | 인계 저장 | `/vault-session-end` | `$agentic-vault:agentic-vault session-end` |
 | 건강 검사 | `/vault-lint` | `$agentic-vault:agentic-vault lint` |
 
 Codex는 `day`, `ingest`, `process-inbox`, `trace`도 같은 이름으로 호출한다.
+¹ `doctor`와 `proposals`는 현재 개발 브랜치의 추가 기능이며 위 v0.9.0 태그에는 없다.
+기존 파일 교훈 수정안은 `$agentic-vault:agentic-vault proposals <하위 명령과 인자>`로
+[제안·검토·적용 절차](lesson-proposals.md)에 연결한다. 진단 요청은 볼트를 수정하지 않는다.
 `backup`, `verify <스냅샷 경로>`, `restore <스냅샷 경로> <새 복구 경로>`는
 기존 백업 CLI로 연결한다. [전체 연결 규약](../skills/agentic-vault/references/codex.md),
 [공통 검색·백업 사용법](reliability.md)을 참고한다.

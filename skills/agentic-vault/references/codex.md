@@ -36,6 +36,8 @@
 |---|---|
 | `session-start` | [vault-session-start.md](../../../commands/vault-session-start.md) |
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
+| `doctor` | [vault-doctor.md](../../../commands/vault-doctor.md) |
+| `proposals <하위 명령과 인자>` | [교훈 제안 절차](../../../docs/lesson-proposals.md), `scripts/vault_proposals.py` (아래 경로 규칙 적용) |
 | `session-end` | [vault-session-end.md](../../../commands/vault-session-end.md) |
 | `lint` | [vault-lint.md](../../../commands/vault-lint.md) |
 | `init [볼트명] [프로젝트명]` | [vault-init.md](../../../commands/vault-init.md) |
@@ -49,6 +51,14 @@
 | `restore <스냅샷 경로> <새 복구 경로>` | 같은 백업 CLI의 `--restore`·`--destination` |
 
 ## 시작과 읽기 경계
+
+명시적 `doctor` 요청은 config를 수동으로 읽거나 세션 주입을 먼저 시도하지 않고
+`<플러그인 루트>/skills/agentic-vault/scripts/vault_doctor.py --vault <볼트 루트> --format json`으로 보낸다.
+`proposals`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_proposals.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
+인자는 각각 별도 argv로 전달한다. `inspect`·`check`는 읽기 전용이고, `apply --approve`는
+현재 사용자에게 이미 승인받은 정확한 수정안에만 사용한다. `stale`이면 최신 diff를 다시 검토하며,
+설정·경로 오류를 다른 읽기 도구로 우회하지 않는다. 이 두 명시적 작업은 해당 절차로 종료하며
+아래의 일반 세션 복원을 덧붙이지 않는다.
 
 1. 명시적 `verify`·`restore` 요청은 아래 스냅샷 절차로 바로 진행한다.
    `init`·`upgrade` 요청은 현재 config가 없어도 공통 문서의 자체 가드로 진행한다.
