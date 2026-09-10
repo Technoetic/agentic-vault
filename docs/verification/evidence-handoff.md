@@ -50,7 +50,11 @@ checks retain the existing conservative policy.
 
 verified_by: Codex `/root/evidence_design_review`, **2026-09-10 19:53:47 KST**.
 Read-only design/code review and independent 55-test rerun passed. SHA-256 values
-of the ten reviewed files were unchanged before and after verification:
+of the ten reviewed files were unchanged before and after verification. These are
+the raw bytes in the review worktree; another Git checkout may convert Markdown
+line endings. They are historical observation hashes, not expected hashes of
+every subsequent checkout. The integrated implementation is commit `cd1a9da`,
+Git tree `a8aad54900fc5368da34d18614cad38bcd8d3b8c`:
 
 | File | SHA-256 |
 |---|---|
