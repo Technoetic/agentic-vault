@@ -54,4 +54,4 @@ The observation scope is the declared files only. A matching current fingerprint
 - Independently review public contract, implementation, tests and end-to-end stale-evidence behavior; fix material findings.
 - Run project unittest discovery, bilingual recall evaluator, compileall and `git diff --check`; run a temporary-vault lifecycle demo.
 - Baseline: Windows Python3.12, 351 tests, 13 platform/privilege skips, no failures.
-- Commit reviewed changes locally and integrate into the local source checkout when clean. Preserve unrelated D:/NS edits. Record validation and remaining platform/semantic limits; do not claim unrun remote CI or automated verification of claim truth.
+- Commit reviewed changes locally and integrate into the local source checkout when clean. Preserve unrelated vault edits. Record validation and remaining platform/semantic limits; do not claim unrun remote CI or automated verification of claim truth.

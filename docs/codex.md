@@ -1,16 +1,16 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.10.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. Codex CLI `0.150.1`에서 로컬 설치와 스킬·훅 검색을 검증했다.
+`v0.11.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 릴리스별 설치·발견·실행 검증은 [v0.11.0 검증 기록](verification/v0.11.0.md)에 남긴다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
-v0.9.0의 겸용 구조에 기억 진단과 교훈 수정안 도구를 추가했다.
+v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구에 검증 근거·인계를 추가했다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.10.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -18,19 +18,20 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이미 이전 Git 태그에 고정한 `agentic-vault-local` 설치를 v0.10.0으로 갱신할 때는
-같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된 옛 태그만
-새로 읽으므로 새 버전으로 이동하지 않는다. CLI 0.150.1의 임시 home에서 아래 흐름과
-기존 캐시 보존을 확인했다. 로컬 폴더를 소스로 쓰는 설치는 해당 로컬 소스를 갱신한다.
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.11.0 태그로
+전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
+옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.10.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
-갱신 후 `codex plugin list`로 버전·활성화 상태를 확인하고 새 대화를 연다.
-소스 갱신을 훅 신뢰 승인으로 해석하지 않는다.
+등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
+갱신 후 `codex plugin list`로 v0.11.0과 활성화 상태를 확인하고 새 대화를 연다.
+소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
+로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
 로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤
 `.codex-plugin/plugin.json`과 README가 있는 디렉터리를 지정한다:
@@ -65,6 +66,7 @@ Codex 대화 입력란에서 다음처럼 요청한다. 셸 명령이 아니다.
 | 세션 복원 | `/vault-session-start` | `$agentic-vault:agentic-vault session-start` |
 | 출처 검색 | `/vault-recall 배포 롤백` | `$agentic-vault:agentic-vault recall 배포 롤백` |
 | 기억 진단¹ | `/vault-doctor` | `$agentic-vault:agentic-vault doctor` |
+| 검증 근거 인계² | [검증 근거 CLI](evidence.md)의 `handoff ID` | `$agentic-vault:agentic-vault evidence handoff ID` |
 | 인계 저장 | `/vault-session-end` | `$agentic-vault:agentic-vault session-end` |
 | 건강 검사 | `/vault-lint` | `$agentic-vault:agentic-vault lint` |
 
@@ -72,14 +74,18 @@ Codex는 `day`, `ingest`, `process-inbox`, `trace`도 같은 이름으로 호출
 ¹ `doctor`와 `proposals`는 v0.10.0부터 제공한다.
 기존 파일 교훈 수정안은 `$agentic-vault:agentic-vault proposals <하위 명령과 인자>`로
 [제안·검토·적용 절차](lesson-proposals.md)에 연결한다. 진단 요청은 볼트를 수정하지 않는다.
+² `evidence`는 v0.11.0부터 제공한다. `snapshot` → 별도 검증 → `record` 순서로 기록하고,
+`check`·`handoff`로 명시한 ID를 읽기 전용 조회한다. `current`는 파일 해시 연결이
+현재와 일치한다는 뜻이며 모든 검사가 통과했다는 판정이 아니다. [보고서 형식과 경계](evidence.md)를 따른다.
 `backup`, `verify <스냅샷 경로>`, `restore <스냅샷 경로> <새 복구 경로>`는
 기존 백업 CLI로 연결한다. [전체 연결 규약](../skills/agentic-vault/references/codex.md),
 [공통 검색·백업 사용법](reliability.md)을 참고한다.
 
-기존 볼트는 먼저 `upgrade`를 요청한다. 엔진 규칙 다섯 개와 전용 스텁을 합친
+Codex용 계약이 없는 기존 볼트는 먼저 `upgrade`를 요청한다. 엔진 규칙 다섯 개와 전용 스텁을 합친
 `AGENTS.md`가 생성된다. 수제 AGENTS와 사용자 수정은 자동으로 덮어쓰지 않는다.
 볼트 고유 규칙은 `CLAUDE.md`의 관리 마커 밖에 보존하고 Codex에도 읽도록 안내한다.
 `CLAUDE.md`와 `.claude/rules/`는 Claude Code용 계약으로 계속 유지된다.
+v0.10.0에서 v0.11.0의 검증 근거 도구만 추가할 때는 볼트 마이그레이션이 필요 없다.
 
 Claude에서 인계를 저장한 뒤 Codex에서 복원하거나 그 반대로 사용할 수 있다.
 동시에 같은 노트·handoff를 편집하지 않고 세션을 번갈아 마감하는 방식을 권장한다.

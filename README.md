@@ -11,7 +11,7 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.10.0-10B981?style=for-the-badge)](docs/releases/v0.10.0.md)
+[![Version](https://img.shields.io/badge/v0.11.0-10B981?style=for-the-badge)](docs/releases/v0.11.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -77,11 +77,12 @@ Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vaul
 
 v0.10.0에는 **읽기 전용 기억 진단**과 **대상 해시를 확인하는 교훈 수정안 기록·적용**이 추가됐다. `/vault-doctor`와 [교훈 제안 도구](docs/lesson-proposals.md)로 기억 상태와 실제 수정안을 확인한다.
 
-현재 소스에는 아직 배포되지 않은 선택 기능인 [검증 근거·인계 CLI](docs/evidence.md)가 있다.
-소스 루트에서 `python skills/agentic-vault/scripts/vault_evidence.py --vault PATH check ID`로
-명시한 기록을 조회한다. 검증 전에 산출물 스냅샷을 만들고 검증자 보고·근거 파일의 해시를
-연결하며, 파일이 바뀌면 인계의 보존 조건을 비운다. `current`는 파일 연결의 현재성을
-뜻하며 주장 정확성을 보증하지 않는다. 기존 설정·훅의 기본 동작은 그대로다.
+v0.11.0에는 선택해서 사용하는 [검증 근거·인계 CLI](docs/evidence.md)가 추가됐다.
+검증 전에 산출물 스냅샷을 만들고 검증자 보고·근거 파일의 해시를 연결한다.
+다음 세션에 파일이 바뀌었으면 이전 검증에서 가져온 보존 조건을 비운다.
+Codex에서는 `$agentic-vault:agentic-vault evidence handoff ID`로 명시한 기록을 조회한다.
+`current`는 파일 연결의 현재성을 뜻하며 주장 정확성을 보증하지 않는다.
+추가 설정·마이그레이션·자동 훅 없이 기존 세션 기본 동작을 유지한다.
 
 | 입력 | 산출 |
 |:---|:---|
@@ -280,7 +281,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.10.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.11.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -315,6 +316,7 @@ agentic-vault/
 │       ├── vault_recall.py            ← 예산·출처가 있는 어휘 검색
 │       ├── vault_doctor.py            ← 설정·파일·예산 원인별 진단
 │       ├── vault_proposals.py         ← 교훈 제안 이력 + 대상 해시 확인 후 적용
+│       ├── vault_evidence.py          ← 파일 버전·검증 근거 연결 + 현재 상태에 따른 인계
 │       ├── vault_paths.py             ← 노트 읽기 경로 검증
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
@@ -340,7 +342,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.10.0**이며 **Claude Code, Codex 겸용**이다. 기억 진단·교훈 수정안 도구와 Windows Jarvis 동시 캡처 수정을 포함한다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.10.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.10.0.md), [공통 엔진 사용법](docs/reliability.md), [이전 v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.11.0**이며 **Claude Code, Codex 겸용**이다. 파일 버전과 검증 근거를 연결하고 다음 세션에 현재 상태를 전달하는 선택 도구를 포함한다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.11.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.11.0.md), [공통 엔진 사용법](docs/reliability.md), 이전 [v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -381,11 +383,14 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.10.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명령의 `codex`를 `codex.cmd`로 바꾼다. 볼트 디렉터리에서 새 Codex 세션을 열고 `$agentic-vault:agentic-vault session-start`로 시작한다. 자동 세션 훅은 `/hooks`에서 정의를 검토하고 신뢰해야 실행된다. [로컬 설치·기존 볼트 전환·명령 대응·검증 방법](docs/codex.md)을 참고한다.
+
+같은 이름의 로컬 소스나 이전 태그가 이미 등록돼 있으면 먼저 등록 소스를 교체한다.
+[기존 설치 갱신 절차](docs/codex.md#설치)에 `remove` → 새 태그 등록 → 플러그인 설치 순서를 설명한다.
 
 ### 요구사항
 

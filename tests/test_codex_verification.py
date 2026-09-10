@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,83 @@ SPEC.loader.exec_module(verifier)
 
 
 class CodexVerificationTests(unittest.TestCase):
+    def make_plugin_fixture(self, root: Path) -> Path:
+        source = root / "source"
+        resources = (
+            "hooks/session_start.py", "hooks/run_python_hook.sh",
+            "skills/agentic-vault/references/codex.md",
+            "skills/agentic-vault/scripts/vault_recall.py",
+            "skills/agentic-vault/scripts/vault_evidence.py",
+            "docs/evidence.md", "assets/templates/AGENTS-vault-stub.md",
+        )
+        for relative in resources:
+            resource = source / relative
+            resource.parent.mkdir(parents=True, exist_ok=True)
+            resource.write_text(f"Fixture resource: {relative}\n", encoding="utf-8")
+        manifest = source / ".codex-plugin/plugin.json"
+        manifest.parent.mkdir()
+        manifest.write_text('{"version": "0.11.0"}', encoding="utf-8")
+        return source
+
+    def verify_fixture(self, source: Path, inspect_package=None, mutate_cache=None) -> dict:
+        package = None
+
+        def run_json(codex, args, cwd, environment):
+            nonlocal package
+            if args[:3] == ["plugin", "marketplace", "add"]:
+                package = Path(args[3])
+                if inspect_package is not None:
+                    inspect_package(package)
+                return {"marketplaceName": "agentic-vault-local"}
+            self.assertEqual(args[:2], ["plugin", "add"])
+            cached = Path(environment["CODEX_HOME"]) / "plugins/cache/fixture"
+            shutil.copytree(package, cached)
+            if mutate_cache is not None:
+                mutate_cache(cached)
+            return {"installedPath": str(cached), "version": "0.11.0"}
+
+        with patch.object(verifier, "ROOT", source), \
+             patch.object(verifier, "run_json", side_effect=run_json), \
+             patch.object(verifier, "inspect_host", return_value={"host": "fixture"}):
+            return verifier.verify("unused-fixture-executable")
+
+    def test_installed_evidence_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_evidence.py", "docs/evidence.md"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Corrupted installation\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_disposable_package_excludes_nested_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.make_plugin_fixture(Path(temporary))
+            excluded = (".worktrees", "worktrees", ".git", ".superpowers", "__pycache__")
+            for parent in (source, source / "nested"):
+                for name in excluded:
+                    child = parent / name / "other-checkout/private-state.txt"
+                    child.parent.mkdir(parents=True)
+                    child.write_text("Must remain outside the disposable package", encoding="utf-8")
+
+            def inspect_package(package):
+                for parent in (package, package / "nested"):
+                    for name in excluded:
+                        self.assertFalse((parent / name).exists(), str(parent / name))
+                self.assertTrue((package / "docs/evidence.md").is_file())
+
+            result = self.verify_fixture(source, inspect_package=inspect_package)
+            self.assertEqual(result["installed_resources"], "verified")
+            self.assertEqual(result["model_turns"], 0)
+
     def test_direct_executable_returns_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result = verifier.run_json(

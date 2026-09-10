@@ -38,7 +38,7 @@
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
 | `doctor` | [vault-doctor.md](../../../commands/vault-doctor.md) |
 | `proposals <하위 명령과 인자>` | [교훈 제안 절차](../../../docs/lesson-proposals.md), `scripts/vault_proposals.py` (아래 경로 규칙 적용) |
-| `evidence <하위 명령과 인자>` | [검증 근거 절차](../../../docs/evidence.md), `scripts/vault_evidence.py` (선택 소스 기능, 아래 경로 규칙 적용) |
+| `evidence <하위 명령과 인자>` | [검증 근거 절차](../../../docs/evidence.md), `scripts/vault_evidence.py` (v0.11.0부터 제공, 아래 경로 규칙 적용) |
 | `session-end` | [vault-session-end.md](../../../commands/vault-session-end.md) |
 | `lint` | [vault-lint.md](../../../commands/vault-lint.md) |
 | `init [볼트명] [프로젝트명]` | [vault-init.md](../../../commands/vault-init.md) |
@@ -62,8 +62,8 @@
 아래의 일반 세션 복원을 덧붙이지 않는다.
 
 `evidence`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_evidence.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
-현재 소스의 선택 기능이므로 설치본에 스크립트가 없으면 해당 버전에서 지원하지 않음을
-보고한다. `snapshot`은 검증 전에, `record`는 별도 검증 뒤에 사용하며 보고서의 명령
+v0.11.0부터 제공하는 선택 기능이다. 설치본에 스크립트가 없으면 해당 설치본에서
+지원하지 않음을 보고한다. `snapshot`은 검증 전에, `record`는 별도 검증 뒤에 사용하며 보고서의 명령
 문자열은 실행하지 않는다. `check`·`handoff`는 명시된 ID의 읽기 전용 조회다.
 `current`는 파일 연결이 현재라는 뜻이고 주장 정확성은 검증자의 판정이다.
 pending·stale은 종료 코드가 0이 아니며 인계의 `preserve`가 비어 있다.

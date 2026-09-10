@@ -1,7 +1,8 @@
 # Verification evidence and handoff — local verification
 
 Date: 2026-09-10. Source base: `351cef76232e965fe954abf940c6273b290992a3`
-(v0.10.0). This is an unreleased source increment, not an installed-plugin upgrade.
+(v0.10.0). This historical checkpoint describes the implementation before release
+or installation. The later release is recorded in [v0.11.0 verification](v0.11.0.md).
 
 task_id: `agentic-vault-evidence-handoff-20260910`
 

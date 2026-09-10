@@ -166,7 +166,7 @@ def verify(codex: str) -> dict:
         root = Path(temporary).resolve()
         package = root / "agentic-vault"
         shutil.copytree(ROOT, package, ignore=shutil.ignore_patterns(
-            ".git", ".superpowers", "__pycache__", "*.pyc"))
+            ".git", ".worktrees", "worktrees", ".superpowers", "__pycache__", "*.pyc"))
         home = root / "codex-home"
         home.mkdir()
         vault = root / "test vault"
@@ -188,6 +188,8 @@ def verify(codex: str) -> dict:
         for relative in ("hooks/session_start.py", "hooks/run_python_hook.sh",
                          "skills/agentic-vault/references/codex.md",
                          "skills/agentic-vault/scripts/vault_recall.py",
+                         "skills/agentic-vault/scripts/vault_evidence.py",
+                         "docs/evidence.md",
                          "assets/templates/AGENTS-vault-stub.md"):
             if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")
