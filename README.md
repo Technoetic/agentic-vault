@@ -77,6 +77,12 @@ Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vaul
 
 v0.10.0에는 **읽기 전용 기억 진단**과 **대상 해시를 확인하는 교훈 수정안 기록·적용**이 추가됐다. `/vault-doctor`와 [교훈 제안 도구](docs/lesson-proposals.md)로 기억 상태와 실제 수정안을 확인한다.
 
+현재 소스에는 아직 배포되지 않은 선택 기능인 [검증 근거·인계 CLI](docs/evidence.md)가 있다.
+소스 루트에서 `python skills/agentic-vault/scripts/vault_evidence.py --vault PATH check ID`로
+명시한 기록을 조회한다. 검증 전에 산출물 스냅샷을 만들고 검증자 보고·근거 파일의 해시를
+연결하며, 파일이 바뀌면 인계의 보존 조건을 비운다. `current`는 파일 연결의 현재성을
+뜻하며 주장 정확성을 보증하지 않는다. 기존 설정·훅의 기본 동작은 그대로다.
+
 | 입력 | 산출 |
 |:---|:---|
 | `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 5종 + CLAUDE.md 스텁 + AGENTS.md) |
