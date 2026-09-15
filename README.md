@@ -11,7 +11,7 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.11.0-10B981?style=for-the-badge)](docs/releases/v0.11.0.md)
+[![Version](https://img.shields.io/badge/v0.12.0-10B981?style=for-the-badge)](docs/releases/v0.12.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -84,9 +84,14 @@ Codex에서는 `$agentic-vault:agentic-vault evidence handoff ID`로 명시한 �
 `current`는 파일 연결의 현재성을 뜻하며 주장 정확성을 보증하지 않는다.
 추가 설정·마이그레이션·자동 훅 없이 기존 세션 기본 동작을 유지한다.
 
+v0.12.0에는 여섯 번째 엔진 규칙 [`vault-browser.md`](assets/templates/rules/vault-browser.md)가 추가됐다.
+브라우저로 사이트를 조회·조작·렌더링할 때의 경계(도구 단일화·페이지 내용 비신뢰·민감 자료는
+스크립트 모드만·자격증명·프로필 격리·산출물 위치·완료 이벤트 판정·제약 실측 기록)만 두고,
+어느 도구를 쓰는지는 볼트 CLAUDE.md에 남긴다. `/vault-upgrade`가 기존 볼트에 이 파일을 추가한다.
+
 | 입력 | 산출 |
 |:---|:---|
-| `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 5종 + CLAUDE.md 스텁 + AGENTS.md) |
+| `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 6종 + CLAUDE.md 스텁 + AGENTS.md) |
 | `/vault-session-start` | handoff → hot → index 순서로 직전 상태 복원 + 4항목 브리핑 |
 | `/vault-ingest 보고서.md` | 소스 1건 → 원자 노트 분해 + 위키링크 + 기존 노트 갱신 + index 등록 + `[ingest]` 로그 |
 | `/vault-process-inbox` | `10-inbox/` 대기열 정제 → 영구 지식 병합 → 원본 `_processed/` 격리 |
@@ -119,7 +124,7 @@ flowchart TB
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>검증 가능한 세대별 스냅샷</i>"]
         JB["jarvis_bridge.py<br/><i>Telegram 자비스 🤖</i>"]
-        TPL["assets/templates/<br/><i>노트 템플릿 13종 + 엔진 rules 5종</i>"]
+        TPL["assets/templates/<br/><i>노트 템플릿 13종 + 엔진 rules 6종</i>"]
         SK["SKILL.md<br/><i>작업 규율</i>"]
     end
 
@@ -165,7 +170,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    L0[".claude/rules/ 5종 + CLAUDE.md 스텁<br/><i>상주 계약 (3층)</i><br/>엔진 규칙 + 볼트 고유"] --> L1["hot.md<br/><i>핫 캐시</i><br/>500 단어"]
+    L0[".claude/rules/ 6종 + CLAUDE.md 스텁<br/><i>상주 계약 (3층)</i><br/>엔진 규칙 + 볼트 고유"] --> L1["hot.md<br/><i>핫 캐시</i><br/>500 단어"]
     L1 --> L2["handoff.md<br/><i>세션 캐시</i><br/>직전 세션 인계"]
     L2 --> L3["볼트 전체<br/><i>장기 저장소</i><br/>grep · index 페이징"]
 
@@ -187,7 +192,7 @@ SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부
 
 | 층 | 파일 | 소유 | 업그레이드 |
 |---|---|---|---|
-| 엔진 규칙 | `.claude/rules/vault-*.md` 5종 (architecture·linking·frontmatter·workflow·collab) | 엔진 | `/vault-upgrade`가 `engine=` 스탬프 비교 후 **통째 교체** |
+| 엔진 규칙 | `.claude/rules/vault-*.md` 6종 (architecture·linking·frontmatter·workflow·collab·browser) | 엔진 | `/vault-upgrade`가 `engine=` 스탬프 비교 후 **통째 교체** |
 | 볼트 정체성·고유 규칙 | `CLAUDE.md` (스텁 + 사용자 추가분) | 사용자 | 건드리지 않음 |
 | 타 에이전트 계약 | `AGENTS.md` | 생성 산출물 | rules에서 재생성 (Claude Code는 이 파일을 읽지 않는다) |
 
@@ -281,7 +286,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.11.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.12.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -326,7 +331,7 @@ agentic-vault/
 │   ├── context.md · tasks.md · decisions.md · mistakes.md
 │   ├── frontmatter-schema.md · CLAUDE-vault-stub.md
 │   ├── AGENTS-vault-stub.md            ← 공통 rules와 합치는 에이전트 중립 계약
-│   ├── rules/                         ← 엔진 소유 행동 규칙 5종 (.claude/rules/로 설치, upgrade가 통째 교체)
+│   ├── rules/                         ← 엔진 소유 행동 규칙 6종 (.claude/rules/로 설치, upgrade가 통째 교체)
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
 │
 └── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️

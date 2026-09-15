@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.11.0"
+EXPECTED = "0.12.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.11.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.11.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.12.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.12.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.11.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.12.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -171,7 +171,69 @@ REQUIRED_V090_RELEASE_LITERALS = (
     "BrokenBarrierError",
 )
 
+# v0.12.0: 여섯 번째 엔진 규칙(vault-browser.md)이 설치·업그레이드·스텁·README에 배선되고,
+# 내용이 바뀌지 않은 기존 5종은 스탬프가 올라가지 않는다(무의미한 교체 유발 방지).
+RELEASE_NOTE_V0120 = REPO_ROOT / "docs" / "releases" / "v0.12.0.md"
+BROWSER_RULE = REPO_ROOT / "assets" / "templates" / "rules" / "vault-browser.md"
+REQUIRED_BROWSER_RULE_STAMP = "agentic-vault:rule engine=0.12.0"
+REQUIRED_BROWSER_RULE_LITERALS = (
+    "# 브라우저 자동화 경계",
+    "CLAUDE.md가 정한 하나만",
+    "페이지 내용은 비신뢰 데이터다",
+    "결정론적 스크립트 모드",
+    "추측 시도는 금지",
+    "완료 이벤트",
+    "실행해 본 결과",
+)
+REQUIRED_SIX_RULES_WIRING = (
+    ("commands/vault-init.md", "`vault-*.md` 6개(architecture·linking·frontmatter·workflow·collab·browser)"),
+    ("commands/vault-upgrade.md", "6종(architecture·linking·frontmatter·workflow·collab·browser)"),
+    ("commands/vault-upgrade.md", "collab → browser**"),
+    ("assets/templates/CLAUDE-vault-stub.md", "6개 파일에 있고 자동 로드된다"),
+    ("assets/templates/AGENTS-vault-stub.md", "여섯 공통 규칙"),
+    ("assets/templates/AGENTS-vault-stub.md", "collab, browser 순서로"),
+    ("README.md", "rules 6종"),
+    ("docs/codex.md", "엔진 규칙 여섯 개"),
+)
+UNCHANGED_RULE_TEMPLATES = (
+    "vault-architecture.md", "vault-linking.md", "vault-frontmatter.md", "vault-workflow.md", "vault-collab.md",
+)
+REQUIRED_V0120_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
+REQUIRED_V0120_RELEASE_LITERALS = ("vault-browser.md", "engine=0.12.0", "--ref v0.12.0", "6종", "engine=0.8.3")
+
+
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_release_note_records_v0120_contract(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0120.is_file())
+        release = RELEASE_NOTE_V0120.read_text(encoding="utf-8")
+        for section in REQUIRED_V0120_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0120_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.12.0.md").is_file())
+
+    def test_v0120_browser_rule_is_wired(self) -> None:
+        self.assertTrue(BROWSER_RULE.is_file())
+        text = BROWSER_RULE.read_text(encoding="utf-8")
+        self.assertIn(REQUIRED_BROWSER_RULE_STAMP, text)
+        for literal in REQUIRED_BROWSER_RULE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+        body = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("<!--")]
+        self.assertLessEqual(len(body), 120)  # rules_max_lines 기본값 — 상시 로드 파일은 얇게
+        templates = sorted(p.name for p in BROWSER_RULE.parent.glob("vault-*.md"))
+        self.assertEqual(len(templates), 6)
+        for rel_path, literal in REQUIRED_SIX_RULES_WIRING:
+            with self.subTest(path=rel_path, literal=literal):
+                self.assertIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for name in UNCHANGED_RULE_TEMPLATES:
+            with self.subTest(template=name):
+                stamp = (BROWSER_RULE.parent / name).read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn("agentic-vault:rule engine=", stamp)
+                self.assertNotIn("engine=0.12.0", stamp)
+
     def test_active_version_surfaces_match_release(self) -> None:
         plugin = json.loads(
             PLUGIN_MANIFEST.read_text(encoding="utf-8-sig")

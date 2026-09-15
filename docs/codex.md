@@ -1,16 +1,16 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.11.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 릴리스별 설치·발견·실행 검증은 [v0.11.0 검증 기록](verification/v0.11.0.md)에 남긴다.
+`v0.12.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 릴리스별 설치·발견·실행 검증은 [v0.12.0 검증 기록](verification/v0.12.0.md)에 남긴다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
-v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구에 검증 근거·인계를 추가했다.
+v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.12.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -18,18 +18,18 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.11.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.12.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.12.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
-갱신 후 `codex plugin list`로 v0.11.0과 활성화 상태를 확인하고 새 대화를 연다.
+갱신 후 `codex plugin list`로 v0.12.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
@@ -81,11 +81,11 @@ Codex는 `day`, `ingest`, `process-inbox`, `trace`도 같은 이름으로 호출
 기존 백업 CLI로 연결한다. [전체 연결 규약](../skills/agentic-vault/references/codex.md),
 [공통 검색·백업 사용법](reliability.md)을 참고한다.
 
-Codex용 계약이 없는 기존 볼트는 먼저 `upgrade`를 요청한다. 엔진 규칙 다섯 개와 전용 스텁을 합친
+Codex용 계약이 없는 기존 볼트는 먼저 `upgrade`를 요청한다. 엔진 규칙 여섯 개와 전용 스텁을 합친
 `AGENTS.md`가 생성된다. 수제 AGENTS와 사용자 수정은 자동으로 덮어쓰지 않는다.
 볼트 고유 규칙은 `CLAUDE.md`의 관리 마커 밖에 보존하고 Codex에도 읽도록 안내한다.
 `CLAUDE.md`와 `.claude/rules/`는 Claude Code용 계약으로 계속 유지된다.
-v0.10.0에서 v0.11.0의 검증 근거 도구만 추가할 때는 볼트 마이그레이션이 필요 없다.
+v0.10.0에서 v0.11.0의 검증 근거 도구만 추가할 때는 볼트 마이그레이션이 필요 없다. v0.12.0은 `upgrade`가 `.claude/rules/vault-browser.md`를 추가하고 AGENTS.md를 재생성한다.
 
 Claude에서 인계를 저장한 뒤 Codex에서 복원하거나 그 반대로 사용할 수 있다.
 동시에 같은 노트·handoff를 편집하지 않고 세션을 번갈아 마감하는 방식을 권장한다.

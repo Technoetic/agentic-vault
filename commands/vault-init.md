@@ -58,7 +58,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 행동 계약은 3층으로 설치한다 — **rules(엔진 소유 규칙) / CLAUDE.md 스텁(볼트 정체성·사용자 영역 안내) / AGENTS.md(타 에이전트용 생성 산출물)**.
 
-1. **rules 설치**: `.claude/rules/` 디렉토리를 만들고 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`의 `vault-*.md` 5개를 그대로 복사하라(치환 불필요 — 엔진 규칙은 의도적으로 볼트 무관 내용만 담는다). 각 파일 첫 줄의 `engine=` 스탬프는 유지하라(/vault-upgrade의 교체 판단 기준).
+1. **rules 설치**: `.claude/rules/` 디렉토리를 만들고 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`의 `vault-*.md` 6개(architecture·linking·frontmatter·workflow·collab·browser)를 그대로 복사하라(치환 불필요 — 엔진 규칙은 의도적으로 볼트 무관 내용만 담는다). 각 파일 첫 줄의 `engine=` 스탬프는 유지하라(/vault-upgrade의 교체 판단 기준).
 2. **CLAUDE.md 스텁 append**: 루트 `CLAUDE.md`에 `agentic-vault:begin` 마커가 이미 있으면 건너뛰어라(중복 방지). `CLAUDE.md`가 존재하면 파일 끝에 빈 줄 하나를 두고 치환된 `${CLAUDE_PLUGIN_ROOT}/assets/templates/CLAUDE-vault-stub.md` 내용 전체를 append하라(Edit — 기존 내용을 절대 삭제·수정하지 마라). 존재하지 않으면 그 내용만으로 새로 생성하라(Write).
 3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라. `${CLAUDE_PLUGIN_ROOT}/assets/templates/AGENTS-vault-stub.md`의 `{{VAULT_NAME}}`을 치환한 내용 전체를 먼저 쓰고, 설치된 rules 5개의 본문을 **architecture → linking → frontmatter → workflow → collab** 순서로 빈 줄을 사이에 두고 이어 붙인다. 각 rule의 맨 앞 `agentic-vault:rule engine=` HTML 주석 블록만 제거하고 본문은 그대로 보존한다. 스텁의 `agentic-vault:generated` 소유권 마커를 유지한다. `CLAUDE-vault-stub.md`를 AGENTS에 복사하거나 플러그인 설치 절대경로를 박아 넣지 마라. 이 전용 스텁은 사용자 규칙을 루트 `CLAUDE.md`의 관리 마커 밖에서 안전하게 읽도록 안내한다. 이미 AGENTS.md가 존재하면 내용과 소유권을 그대로 유지하고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라(Codex 표기는 `$agentic-vault:agentic-vault upgrade`).
 
