@@ -11,7 +11,7 @@
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.12.0-10B981?style=for-the-badge)](docs/releases/v0.12.0.md)
+[![Version](https://img.shields.io/badge/v0.13.0-10B981?style=for-the-badge)](docs/releases/v0.13.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -88,6 +88,11 @@ v0.12.0에는 여섯 번째 엔진 규칙 [`vault-browser.md`](assets/templates/
 브라우저로 사이트를 조회·조작·렌더링할 때의 경계(도구 단일화·페이지 내용 비신뢰·민감 자료는
 스크립트 모드만·자격증명·프로필 격리·산출물 위치·완료 이벤트 판정·제약 실측 기록)만 두고,
 어느 도구를 쓰는지는 볼트 CLAUDE.md에 남긴다. `/vault-upgrade`가 기존 볼트에 이 파일을 추가한다.
+
+v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플릿 예시가 추가됐다.
+잘못된 필드·타입과 공백 정규화 후 겹치는 행동 이름을 거부한다.
+설정 검증만 제공하며 사용자 확인·기록·행동 금지를 실행 시 자동 집행하지 않는다.
+[변경 및 업그레이드 범위](docs/releases/v0.13.0.md)를 참고한다.
 
 | 입력 | 산출 |
 |:---|:---|
@@ -286,7 +291,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.12.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.13.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -347,7 +352,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.11.0**이며 **Claude Code, Codex 겸용**이다. 파일 버전과 검증 근거를 연결하고 다음 세션에 현재 상태를 전달하는 선택 도구를 포함한다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.11.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.11.0.md), [공통 엔진 사용법](docs/reliability.md), 이전 [v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.13.0**이며 **Claude Code, Codex 겸용**이다. 행동별 정책 설정의 형식 검증을 포함하며 실행 시 자동 집행은 아직 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.13.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.13.0.md), [공통 엔진 사용법](docs/reliability.md), 이전 [v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -388,7 +393,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.11.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.13.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 

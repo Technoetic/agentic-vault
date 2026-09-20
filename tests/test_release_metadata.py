@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.12.0"
+EXPECTED = "0.13.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.12.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.12.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.13.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.13.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.12.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.13.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -134,7 +134,7 @@ REQUIRED_LESSONS_TEMPLATE_LITERALS = (
 # 머무는 것이 옳다(/vault-upgrade가 스탬프 숫자 비교로 교체 여부를 판단하므로,
 # 내용이 같은데 스탬프만 올리면 전 볼트에 무의미한 교체를 유발한다).
 REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.8.3"
-REQUIRED_HEALTHCHECK_STAMP = "agentic-vault:healthcheck engine=0.9.0"
+REQUIRED_HEALTHCHECK_STAMP = "agentic-vault:healthcheck engine=0.13.0"
 REQUIRED_V084_RELEASE_SECTIONS = (
     "## 수정 1 — config 경로 필드의 deny zone 우회 차단 (high)",
     "## 수정 2 — 노트 읽기 실패 fail-soft + §14 신설 (low)",
@@ -249,6 +249,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         codex_market = json.loads((REPO_ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(codex["version"], EXPECTED)
+        self.assertIn(f"v{EXPECTED}", codex["interface"]["longDescription"])
         self.assertEqual(codex["name"], plugin["name"])
         entry = codex_market["plugins"][0]
         self.assertEqual(entry["name"], codex["name"])
@@ -258,6 +259,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "docs/releases" / f"v{EXPECTED}.md").is_file())
         self.assertIn(EXPECTED_BADGE_LINE, readme_lines)
         self.assertIn(EXPECTED_TREE_LINE, readme_lines)
+        self.assertIn(f"현재 버전은 **v{EXPECTED}**", readme)
+        for install_doc in (readme, (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")):
+            refs = [line.strip() for line in install_doc.splitlines() if line.startswith("codex plugin marketplace add Technoetic/agentic-vault --ref ")]
+            self.assertTrue(refs)
+            self.assertEqual(set(refs), {f"codex plugin marketplace add Technoetic/agentic-vault --ref v{EXPECTED}"})
         for origin in EXPECTED_HISTORICAL_ORIGINS:
             with self.subTest(origin=origin):
                 self.assertIn(origin, readme)
@@ -342,7 +348,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(literal, release)
         script = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8")
         self.assertIn(REQUIRED_HEALTHCHECK_STAMP, script)
-        self.assertIn('ENGINE_VERSION = "0.9.0"', script)
+        self.assertIn(f'ENGINE_VERSION = "{EXPECTED}"', script)
 
     def test_release_note_records_v090_contract(self) -> None:
         self.assertTrue(
