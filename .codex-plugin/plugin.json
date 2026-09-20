@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,10 +9,13 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, Korean and English lexical recall, read-only memory diagnosis, reviewed lesson proposals, version-bound verification evidence and verified backup recovery. Release v0.13.0 adds action-policy schema validation; runtime enforcement is not included.",
+    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.14.0 adds optional source-bound Jev judgments. Jev is advisory; deterministic checks and action permissions remain independent.",
     "developerName": "Technoetic",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "defaultPrompt": [
       "Use agentic-vault to restore this vault's session context.",
       "Use agentic-vault to find the sources for our last deployment decision."
@@ -21,5 +24,11 @@
   "homepage": "https://github.com/Technoetic/agentic-vault",
   "repository": "https://github.com/Technoetic/agentic-vault",
   "license": "MIT",
-  "keywords": ["agentic-memory", "obsidian", "codex", "claude-code", "knowledge-vault"]
+  "keywords": [
+    "agentic-memory",
+    "obsidian",
+    "codex",
+    "claude-code",
+    "knowledge-vault"
+  ]
 }
