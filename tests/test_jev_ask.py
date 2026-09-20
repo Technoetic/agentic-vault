@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -335,13 +336,17 @@ class JevAskTests(unittest.TestCase):
             self.assertEqual(len(calls), 1)
 
     def test_cli_only_stdin_json_no_file_reads_and_sanitized_argument_errors(self):
+        # Windows Python 3.10 needs SystemRoot before the CLI can start. Keep only
+        # runtime roots and the fake key, without inheriting unrelated secrets.
+        env = {**{name: os.environ[name] for name in ("SystemRoot", "WINDIR") if name in os.environ},
+               "TYPESAFE_API_KEY": KEY}
         for argv, raw, expected, code in ((["prepare", "--input", "-"], encode(request()), "prepared", 0),
                                            (["run", "--input", "-"], encode(request()), "unverified", 2),
                                            (["prepare", "--input", KEY], b"", "unverified", 2),
                                            (["prepare", "--input", "-", "--input", "-"], b"", "unverified", 2),
                                            (["prepare", "--bogus", KEY], b"", "unverified", 2)):
             completed = subprocess.run([sys.executable, str(SCRIPTS / "jev_ask.py"), *argv],
-                                       input=raw, capture_output=True, timeout=10, env={"TYPESAFE_API_KEY": KEY})
+                                       input=raw, capture_output=True, timeout=10, env=env)
             self.assertEqual(completed.returncode, code, completed.stderr)
             self.assertEqual(completed.stderr, b"")
             result = json.loads(completed.stdout)
