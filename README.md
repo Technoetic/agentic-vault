@@ -437,7 +437,7 @@ claude
 ### 볼트 정책 선언 — vault-config.json
 
 <details>
-<summary><b>📋 기본 템플릿 설정 키 24개 전체 — 클릭하여 펼치기</b></summary>
+<summary><b>📋 기본 템플릿 설정 키 25개 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
 |:---|:---|
@@ -465,6 +465,7 @@ claude
 | `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
 | `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
 | `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체 |
+| `gates` | **행동 게이트 표** — 행동별 확인·기록·반복·수습·금지 요건. 되돌리기 비용이 클수록 높은 게이트. 비우면 검사 생략 |
 
 `required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다. `frontmatter_exempt_paths`는 그 안의 원시 캡처·도구 파일 등을 면제한다. `frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다. staged 차단 모드는 키가 없을 때 표준 5개 루트(`00-meta`·`20-knowledge`·`30-journal`·`40-people`·`50-projects`)를 사용한다.
 

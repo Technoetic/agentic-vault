@@ -34,5 +34,15 @@
     "qa_hourly_limit": 6,
     "qa_timeout_sec": 180,
     "claude_cmd": "claude"
+  },
+  "gates": {
+    "note_create": { "confirm": false },
+    "note_move": { "confirm": false, "log": true, "note": "격리 이동은 파일명을 바꾸지 않는다 — 위키링크가 파일명 기반이다" },
+    "note_delete": { "confirm": true, "log": true, "note": "삭제는 되돌릴 수 없다. 아카이브 이동을 먼저 검토한다" },
+    "lesson_promote": { "repeat": 3, "confirm": true, "probation_days": 14, "note": "3회 반복 관측 전 제안 금지 · 자동 승격 금지 · 수습 기간 내 롤백 가능해야 한다" },
+    "git_commit": { "confirm": false, "log": true },
+    "git_push_local": { "confirm": false },
+    "git_push_remote": { "deny": true, "note": "네트워크 원격 push 는 사용자 승인 전 금지 — pre-push 훅이 강제한다" },
+    "external_send": { "confirm": true, "log": true, "note": "볼트 밖으로 내용을 보내는 모든 행위(게시·메일·외부 API)" }
   }
 }

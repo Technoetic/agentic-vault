@@ -127,6 +127,17 @@ DEFAULT_CONFIG: dict = {
     "index_scopes": [],   # 인덱스 등록 검사 대상 최상위 폴더 목록. 비면 메타 폴더·journal 타입 제외 전체
     "rules_dir": ".claude/rules",   # 행동 계약 rules 디렉토리(v0.6+). 없으면 섹션 10 생략
     "rules_max_lines": 120,         # rules 파일 1개 권장 상한. 초과 시 절차성 장문 유입 경고(관리성)
+    # --- 행동 게이트 (2026-09-20 신설) -------------------------------------
+    # 원칙 5 "Autonomous guidelines corrupt; code enforces" 의 미적용 구간을 닫는다.
+    # 되돌리기 비용이 큰 행동일수록 높은 게이트를 건다. 게이트는 하나의 숫자가 아니다 —
+    # 행동마다 결과가 다르므로 행동마다 다른 값을 갖는다.
+    # 비어 있으면(기본) 검사를 생략한다 — "설정 없으면 무동작" 원칙 유지.
+    #   confirm        : true 면 사용자 확인 없이 수행 금지
+    #   log            : true 면 log_note 에 1줄 기록 의무
+    #   repeat         : 이 횟수만큼 반복 관측되기 전에는 제안 금지 (예: 교훈 승격 3회)
+    #   probation_days : 적용 후 관찰 기간. 기간 내 롤백 가능해야 한다
+    #   deny           : true 면 금지 (설정으로 끄기 전까지 수행 불가)
+    "gates": {},
     # 세션마다 주입되는 노트의 **토큰 예산** (2026-08-06 신설, 관리성).
     # SessionStart 훅이 handoff_note·hot_note를 **통째로** 읽어 주입한다(자르지 않는다).
     # 이 둘은 세션이 쌓일수록 커지는데 상한이 없었다 — 실측(NS): hot 1,785토큰 +
@@ -222,12 +233,61 @@ def _validate_string_list(value: object, label: str) -> list[str]:
     return result
 
 
+_GATE_BOOL_FIELDS = ("confirm", "log", "deny")
+_GATE_INT_FIELDS = ("repeat", "probation_days")
+
+
+def _validate_gates(raw: object) -> dict:
+    """행동 게이트를 검증한다 — 알 수 없는 필드는 거부(fail-closed).
+
+    산문 규칙은 부패하지만 코드는 강제한다(원칙 5). 게이트 표가 곧 그 코드다.
+    오타 난 키를 조용히 무시하면 '걸었다고 믿는 게이트'가 생기므로 거부한다.
+    """
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise HealthcheckError("gates must be a JSON object")
+
+    out: dict = {}
+    for action, spec in raw.items():
+        if not isinstance(action, str) or not action.strip():
+            raise HealthcheckError("gates keys must be non-empty strings")
+        if not isinstance(spec, dict):
+            raise HealthcheckError(f"gates.{action} must be a JSON object")
+
+        clean: dict = {}
+        for field, value in spec.items():
+            if field in _GATE_BOOL_FIELDS:
+                if not isinstance(value, bool):
+                    raise HealthcheckError(f"gates.{action}.{field} must be true/false")
+                clean[field] = value
+            elif field in _GATE_INT_FIELDS:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise HealthcheckError(
+                        f"gates.{action}.{field} must be a non-negative integer")
+                clean[field] = value
+            elif field == "note":
+                if not isinstance(value, str):
+                    raise HealthcheckError(f"gates.{action}.note must be a string")
+                clean[field] = value
+            else:
+                allowed = ", ".join(_GATE_BOOL_FIELDS + _GATE_INT_FIELDS + ("note",))
+                raise HealthcheckError(
+                    f"gates.{action}: unknown field {field!r} (allowed: {allowed})")
+
+        if not clean:
+            raise HealthcheckError(f"gates.{action} must define at least one field")
+        out[action.strip()] = clean
+    return out
+
+
 def validate_config(raw: object) -> dict:
     """Validate untrusted JSON config and return a normalized independent mapping."""
     if not isinstance(raw, dict):
         raise HealthcheckError("vault config top level must be a JSON object")
 
     config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
+    config["gates"] = _validate_gates(config.get("gates"))
 
     for key in _STRING_KEYS:
         value = config.get(key)
