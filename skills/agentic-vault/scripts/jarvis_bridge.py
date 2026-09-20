@@ -528,10 +528,18 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
     cmd = [exe, "-p", prompt,
            "--allowedTools", "Read", "Grep", "Glob",
            "--append-system-prompt", guard]
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
     try:
         r = subprocess.run(cmd, cwd=str(vault), capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
-                           timeout=cfg["qa_timeout_sec"], env=child_process_env())
+                           timeout=cfg["qa_timeout_sec"], env=child_process_env(),
+                           startupinfo=startupinfo,
+                           creationflags=(subprocess.CREATE_NO_WINDOW
+                                          if sys.platform == "win32" else 0))
     except subprocess.TimeoutExpired:
         return GenerationResult(
             False, "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요.")

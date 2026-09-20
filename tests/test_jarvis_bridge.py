@@ -387,6 +387,39 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
         self.assertNotIn("CONTENT-SENTINEL", rendered)
         self.assertNotIn("UPPER-SECRET", rendered)
 
+    def test_background_claude_does_not_create_a_windows_console(self):
+        cfg = {
+            "claude_cmd": "claude", "_deny_zones": [],
+            "_hot_note": "00-meta/hot.md", "_language": "ko",
+            "qa_timeout_sec": 30,
+        }
+        completed = Mock(returncode=0, stdout="answer", stderr="")
+        for platform, expected_flags in (("win32", 0x08000000), ("linux", 0)):
+            startup = Mock(dwFlags=0, wShowWindow=None)
+            with self.subTest(platform=platform), \
+                    patch.object(_BRIDGE.sys, "platform", platform), \
+                    patch.object(_BRIDGE.subprocess, "CREATE_NO_WINDOW", 0x08000000,
+                                 create=True), \
+                    patch.object(_BRIDGE.subprocess, "STARTF_USESHOWWINDOW", 1,
+                                 create=True), \
+                    patch.object(_BRIDGE.subprocess, "SW_HIDE", 0, create=True), \
+                    patch.object(_BRIDGE.subprocess, "STARTUPINFO",
+                                 return_value=startup, create=True), \
+                    patch.object(_BRIDGE.shutil, "which", return_value="claude"), \
+                    patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                result = _BRIDGE.generate_claude(self.vault, cfg, "question")
+                self.assertTrue(result.ok)
+                self.assertEqual(result.text, "answer")
+                self.assertEqual(runner.call_args.kwargs.get("creationflags", 0), expected_flags)
+                self.assertTrue(runner.call_args.kwargs["capture_output"])
+                self.assertEqual(runner.call_args.kwargs["timeout"], 30)
+                if platform == "win32":
+                    self.assertIs(runner.call_args.kwargs.get("startupinfo"), startup)
+                    self.assertEqual(startup.dwFlags & 1, 1)
+                    self.assertEqual(startup.wShowWindow, 0)
+                else:
+                    self.assertIsNone(runner.call_args.kwargs.get("startupinfo"))
+
     def test_user_facing_wrappers_preserve_generation_diagnostics(self):
         cfg = {"unused": True}
         diagnostic = "handled diagnostic"
