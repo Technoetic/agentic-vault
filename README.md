@@ -465,7 +465,9 @@ claude
 | `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
 | `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
 | `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체 |
-| `gates` | **행동 게이트 표** — 행동별 확인·기록·반복·수습·금지 요건. 되돌리기 비용이 클수록 높은 게이트. 비우면 검사 생략 |
+| `gates` | **행동별 정책 선언** — 확인·기록·반복·수습·금지 요건의 설정 형식 검증. 기본 `{}`이며 실행 시 행동 차단은 미연동 |
+
+`gates`는 현재 설정 스키마와 템플릿 예시를 제공한다. `confirm`·`log`·`repeat`·`probation_days`·`deny` 값으로 사용자 확인, 기록, 반복 횟수, 관찰 기간, 행동 금지를 자동 집행하지 않는다. 기존 pre-push 훅의 네트워크 원격 차단은 이 설정과 독립적으로 동작한다. 행동 이름은 사용자 정의 문자열이며 앞뒤 공백을 제거한 뒤 이름이 겹치면 설정 오류로 거부한다.
 
 `required_keys`와 `enums`는 설정된 `frontmatter_roots` 내부 노트에만 적용된다. `frontmatter_exempt_paths`는 그 안의 원시 캡처·도구 파일 등을 면제한다. `frontmatter_roots` 키가 없는 레거시 config의 full 모드는 기존처럼 모든 활성 노트에 적용된다. staged 차단 모드는 키가 없을 때 표준 5개 루트(`00-meta`·`20-knowledge`·`30-journal`·`40-people`·`50-projects`)를 사용한다.
 

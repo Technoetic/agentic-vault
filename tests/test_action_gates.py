@@ -1,8 +1,7 @@
 """행동 게이트(gates) 검증 테스트.
 
-설계 의도: 원칙 5 "Autonomous guidelines corrupt; code enforces" 를 게이트에도 적용한다.
-게이트는 하나의 숫자가 아니다 — 되돌리기 비용이 다르면 게이트도 달라야 한다.
-오타 난 키를 조용히 무시하면 '걸었다고 믿는 게이트'가 생기므로 fail-closed 로 거부한다.
+행동별 정책 선언의 형식과 정규화 충돌을 검증한다.
+실행 시 승인·금지·기록을 강제하는 테스트는 아니다.
 """
 from __future__ import annotations
 
@@ -58,6 +57,20 @@ class GateValidationTests(unittest.TestCase):
         gates = self._validate(raw)
         gates["note_delete"]["confirm"] = False
         self.assertTrue(raw["note_delete"]["confirm"])
+
+    def test_normalizes_unique_action_names(self):
+        self.assertEqual(
+            self._validate({" note_delete\t": {"deny": True}}),
+            {"note_delete": {"deny": True}},
+        )
+
+    def test_rejects_action_names_that_collide_after_normalization(self):
+        for alias in (" note_delete", "note_delete ", "\tnote_delete\n"):
+            entries = [("note_delete", {"deny": True}), (alias, {"confirm": False})]
+            for ordered in (entries, list(reversed(entries))):
+                with self.subTest(names=[name for name, _ in ordered]):
+                    with self.assertRaises(healthcheck.HealthcheckError):
+                        self._validate(dict(ordered))
 
     # --- fail-closed: 잘못된 입력은 거부 -------------------------------
     def test_rejects_unknown_field(self):
