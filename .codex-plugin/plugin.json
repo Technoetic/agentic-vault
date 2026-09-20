@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.14.0 adds optional source-bound Jev judgments. Jev is advisory; deterministic checks and action permissions remain independent.",
+    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.15.0 adds authorized Jev-first direct questions with native Noul, Choice and Score, including outside a vault. Existing file-bound judgments stay compatible. Jev is advisory; execution and action permissions remain with the host.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

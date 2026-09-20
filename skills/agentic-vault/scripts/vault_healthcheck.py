@@ -56,7 +56,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.14.0"
+ENGINE_VERSION = "0.15.0"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 DEFAULT_FRONTMATTER_ROOTS = (
     "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",

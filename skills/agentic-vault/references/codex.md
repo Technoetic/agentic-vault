@@ -14,6 +14,7 @@
   없으면 불완전한 설치로 보고 해당 작업을 중단한다. 스크립트를 볼트에 임의 복사하지 않는다.
 - **볼트 루트:** 사용자가 지정한 볼트 경로, 없으면 현재 작업 디렉토리다. Python 실행에는
   이 경로를 `--vault`로 명시한다. `verify`·`restore`는 현재 볼트가 필요 없는 스냅샷 작업이다.
+  직접 질문용 `jev-ask`에는 볼트와 `--vault`를 사용하지 않는다.
 - 공통 문서의 `${CLAUDE_PLUGIN_ROOT}`는 위에서 구한 플러그인 루트의 **문서 자리표시자**로
   해석한다. Codex 명령에서 이 환경변수의 존재를 요구하거나 설정하지 않는다.
   `$ARGUMENTS`는 작업명 뒤의 사용자 입력 데이터이며 셸 코드가 아니다.
@@ -37,6 +38,7 @@
 | `session-start` | [vault-session-start.md](../../../commands/vault-session-start.md) |
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
 | `judge <고정 선택지 의미 질문>` | [vault-judge.md](../../../commands/vault-judge.md), [Jev 판단 안내](../../../docs/jev-judgments.md) |
+| `jev-ask <직접 질문 또는 선택한 텍스트>` | [jev-ask.md](../../../commands/jev-ask.md), `scripts/jev_ask.py` (볼트 불필요) |
 | `doctor` | [vault-doctor.md](../../../commands/vault-doctor.md) |
 | `proposals <하위 명령과 인자>` | [교훈 제안 절차](../../../docs/lesson-proposals.md), `scripts/vault_proposals.py` (아래 경로 규칙 적용) |
 | `evidence <하위 명령과 인자>` | [검증 근거 절차](../../../docs/evidence.md), `scripts/vault_evidence.py` (v0.11.0부터 제공, 아래 경로 규칙 적용) |
@@ -53,6 +55,27 @@
 | `restore <스냅샷 경로> <새 복구 경로>` | 같은 백업 CLI의 `--restore`·`--destination` |
 
 ## 시작과 읽기 경계
+
+**먼저 Jev-first 라우팅을 적용한다.** 명시적 `jev-ask`·직접 Jev 질문 또는 이미 승인된
+Jev-first 선호가 적용되는 현재 요청은 볼트 존재 검사나 일반 세션 복원 전에 연결한다.
+자기완결적인 질문·명시적으로 선택한 인라인 문맥은
+`python <플러그인 루트>/skills/agentic-vault/scripts/jev_ask.py prepare --input -`
+또는 승인된 `run --input - --allow-network`의 UTF-8 JSON stdin으로 전달한다.
+`context.kind`는 `user_input` 또는 `selected_text`이며 파일 출처 검증을 뜻하지 않는다.
+`1+1`도 적절한 Noul 명제나 Choice 후보로 먼저 평가하며 쉬움·산술·고정 체크포인트
+밖이라는 이유로 제외하지 않는다. `score`는 2~10개 순서 있는 루브릭 수준의 평가다.
+파일에서 얻은 근거에는 아래 `judge`의 원문 바인딩·정책을 유지한다. 비밀·deny/excluded
+파일을 인라인 입력으로 바꿔 경계를 우회하지 않는다.
+
+혼합 요청에서는 현재 사실·환경 관측을 호스트가 먼저 확보하고 지원되는 판단을 Jev에
+묶어 보낸다. 열린 글·코드·이미지 생성, 브라우저·파일·테스트 실행과 최종 종합은 호스트의
+일이다. 근거 부족에는 보류 가능한 Choice를 우선하고 native Noul/Score의 적용 가능성과
+문맥 충분성을 호스트가 확인한다. 기존 승인 범위의 매 질문에 재확인을 요구하지 않는다.
+동일 질문의 현재 파일 보고서 또는 정확히 일치하는 직접 요청 메타데이터와 결과가 있으면
+재사용한다. 바뀌지 않은 요청은 한 배치만 전송하며 자동 재시도·중복 호출을 하지 않는다.
+실제 검증 응답이면 **Jev 사용**, 미호출·실패·미지원이면 **호스트 대체 + 사유**를 표시한다.
+기존 권한·상태 기록기를 변경하지 않으며 `reviewed`도 참고용이다. 상세는
+[직접 질문 절차](../../../commands/jev-ask.md)를 따른다.
 
 명시적 `doctor` 요청은 config를 수동으로 읽거나 세션 주입을 먼저 시도하지 않고
 `<플러그인 루트>/skills/agentic-vault/scripts/vault_doctor.py --vault <볼트 루트> --format json`으로 보낸다.
@@ -78,17 +101,19 @@ pending·stale은 종료 코드가 0이 아니며 인계의 `preserve`가 비어
 허용한다. 기존 세션 승인이 해당 범위를 포함하면 재확인하지 않는다. JSON은 UTF-8 입력 데이터이며
 셸 코드에 보간하지 않는다. 명시적 `judge`에 일반 세션 복원·전체 기록 스캔을 덧붙이지 않는다.
 
-자연어 요청에도 같은 연결을 적용한다. 고정 선택지 **의미** 판단이고 선택 근거의 외부 전송이
-승인됐으면 호스트가 `judge`를 선택한다. 정확 계산·개수·날짜·파일 존재/해시·권한은 코드로
-확인한다. `recall` 요약을 원문으로 보내지 말고 허용된 실제 발췌에 바인딩한다. 모든 질문은
-판단 보류 선택지를 포함한다. 키 누락·API 실패는 `unverified`, 낮은 확신도·판단 보류는
+파일 근거에 대한 자연어 요청에도 기존 연결을 적용한다. 고정 선택지 **의미** 판단이고
+선택 근거의 외부 전송이 승인됐으면 호스트가 `judge`를 선택한다. 파일의 개수·존재/해시·
+환경 관측과 권한은 코드와 기존 규칙으로 확인한다. 직접 산술 질문은 위 `jev-ask` 경로를
+사용한다. `recall` 요약을 원문으로 보내지 말고 허용된 실제 발췌에 바인딩한다. 파일 경로의
+모든 질문은 판단 보류 선택지를 포함한다. 키 누락·API 실패는 `unverified`, 낮은 확신도·판단 보류는
 `needs_review`로 설명하며, 대체 답변은 **호스트 자체 검토**라고 표시한다. Jev가 실행되지
 않았는데 실행 결과를 만들지 않는다. 정상 `reviewed`도 참고용이며 PASS나 행동 승인이 아니다.
 이 연결은 스킬 지침에 따른 호스트 라우팅이다. Codex의 모든 질문을 가로채는 훅은 설치하지 않는다.
 
 1. 명시적 `verify`·`restore` 요청은 아래 스냅샷 절차로 바로 진행한다.
    `init`·`upgrade` 요청은 현재 config가 없어도 공통 문서의 자체 가드로 진행한다.
-   `upgrade`의 기존 수제 볼트 설정 제안 절차도 그대로 따른다. 다른 작업은 볼트 루트에
+   `upgrade`의 기존 수제 볼트 설정 제안 절차도 그대로 따른다. 위 Jev-first 직접 질문과
+   명시적 작업을 처리한 뒤 남은 볼트 작업은 볼트 루트에
    `00-meta/vault-config.json`이 없으면 조용히 끝낸다.
 2. 볼트 설정을 읽는 작업에서는 [vault_paths.py](../scripts/vault_paths.py)의
    `resolve_note_path(vault, "00-meta/vault-config.json")`로 경로를 검증하고,

@@ -1,17 +1,19 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.14.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 릴리스별 설치·발견·실행 검증은 [v0.14.0 검증 기록](verification/v0.14.0.md)에 남긴다.
+`v0.15.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 릴리스별 설치·발견·실행 검증은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 남긴다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
-v0.14.0은 관련 원문에 대한 선택형 Jev 의미 판단을 추가한다. 기존 행동 정책 설정은 스키마를 검증하며 실행 시 자동 집행은 제공하지 않는다.
+v0.14.0의 파일 근거 Jev 판단에 이어 v0.15.0은 볼트 밖에서도 직접 질문을 native
+Noul·Choice·Score로 평가하는 승인된 Jev-first 경로를 추가한다. 기존 행동 정책 설정은
+스키마를 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.14.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.15.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -19,18 +21,18 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.14.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.15.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.14.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.15.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
-갱신 후 `codex plugin list`로 v0.14.0과 활성화 상태를 확인하고 새 대화를 연다.
+갱신 후 `codex plugin list`로 v0.15.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
@@ -67,6 +69,7 @@ Codex 대화 입력란에서 다음처럼 요청한다. 셸 명령이 아니다.
 | 세션 복원 | `/vault-session-start` | `$agentic-vault:agentic-vault session-start` |
 | 출처 검색 | `/vault-recall 배포 롤백` | `$agentic-vault:agentic-vault recall 배포 롤백` |
 | 의미 판단 | `/vault-judge 이 발췌가 주장을 지지하는가?` | `$agentic-vault:agentic-vault judge 이 발췌가 주장을 지지하는가?` |
+| 직접 Jev 질문 | `/jev-ask 1+1은?` | `$agentic-vault:agentic-vault jev-ask 1+1은?` |
 | 기억 진단¹ | `/vault-doctor` | `$agentic-vault:agentic-vault doctor` |
 | 검증 근거 인계² | [검증 근거 CLI](evidence.md)의 `handoff ID` | `$agentic-vault:agentic-vault evidence handoff ID` |
 | 인계 저장 | `/vault-session-end` | `$agentic-vault:agentic-vault session-end` |
@@ -83,16 +86,25 @@ Codex는 `day`, `ingest`, `process-inbox`, `trace`도 같은 이름으로 호출
 기존 백업 CLI로 연결한다. [전체 연결 규약](../skills/agentic-vault/references/codex.md),
 [공통 검색·백업 사용법](reliability.md)을 참고한다.
 
-`judge`는 선택한 실제 원문을 Jev의 고정 선택지로 판단하는 선택 기능이다. 요구 충족·주장
-지지·관련성·의미 중복·감정·분류·의미상 yes/no에 적합하고, 정확 계산·날짜·파일 존재/해시·
-권한은 기존 코드와 규칙으로 확인한다. 적합한 자연어 요청과 해당 발췌/질문의 외부 전송
-승인이 있으면 호스트가 자동 선택하며, 기존 세션 승인을 반복 확인하지 않는다.
-이는 호스트 스킬의 라우팅 지침으로 모든 대화를 가로채는 훅은 아니다.
+`jev-ask`는 자기완결적 질문 또는 명시적으로 선택한 인라인 문맥에 사용한다. 직접 Jev 요청과
+승인된 Jev-first 지속 선호는 **볼트 감지 전에** 라우팅하며 config가 없는 디렉터리에서도
+동작한다. `1+1`도 Noul 명제나 Choice 후보로 평가하고, 쉬움·산술·고정 체크포인트 밖이라는
+이유로 건너뛰지 않는다. Score는 순서 있는 2~10개 루브릭 수준의 평가다. `user_input`과
+`selected_text`는 파일 출처 검증을 뜻하지 않는다. 파일 근거는 계속 `judge`의 기존 7개
+과제·출처 바인딩·정책을 사용하며 deny/excluded/비밀 파일을 인라인으로 바꿔 우회하지 않는다.
 
-`prepare`는 원문 비출력 오프라인 점검, `run --allow-network`는 승인된 외부 API 호출이다.
-모든 질문에 보류 선택지를 두며 `reviewed`도 참고용이다. 키 누락·API 실패·낮은 확신도·보류는
-공개하고, 대체 답변은 호스트 자체 검토로 표시한다. 볼트 설정 마이그레이션이나 SDK 설치,
-시작 시 네트워크 호출은 없다. [Jev 입력 형식·공개 합성 예제·결과 경계](jev-judgments.md)를 따른다.
+혼합 요청은 현재 사실·환경 관측을 호스트가 먼저 확보하고 지원 판단을 Jev에 묶는다.
+글·코드·이미지 생성, 브라우저·파일·테스트 실행과 답변 종합은 호스트가 맡는다.
+근거 부족에는 보류 가능한 Choice를 우선하며 native Noul/Score의 적용 가능성을 확인한다.
+범위에 맞는 기존 전송 승인을 반복 확인하지 않는다. 현재 파일 보고서 또는 정확히 일치하는
+직접 요청 메타데이터와 결과를 재사용하고, 바뀌지 않은 요청은 한 배치만 전송한다.
+
+직접 CLI는 `python <plugin-root>/skills/agentic-vault/scripts/jev_ask.py prepare --input -`
+또는 `run --input - --allow-network`이며 UTF-8 JSON을 stdin으로 전달한다.
+`prepare`는 원문 비출력 오프라인 점검이다. 실제 검증 응답이면 **Jev 사용**, 미호출·키 누락·
+API 실패·미지원이면 **호스트 대체 + 사유**를 표시한다. 낮은 확신도·보류는 공개하고
+`reviewed`도 참고용이며 권한·상태 기록기를 바꾸지 않는다. SDK·설정 마이그레이션·시작 시
+네트워크 호출은 없다. [Jev 입력 형식·공개 합성 예제·결과 경계](jev-judgments.md)를 따른다.
 
 Codex용 계약이 없는 기존 볼트는 먼저 `upgrade`를 요청한다. 엔진 규칙 여섯 개와 전용 스텁을 합친
 `AGENTS.md`가 생성된다. 수제 AGENTS와 사용자 수정은 자동으로 덮어쓰지 않는다.
