@@ -25,6 +25,12 @@ import subprocess
 import sys
 import uuid
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+from vault_paths import relative_parts  # noqa: E402  single source of the segment rule
+
 
 CONFIG_REL = "00-meta/vault-config.json"
 DEFAULT_EXCLUDE_DIRS = [
@@ -68,17 +74,19 @@ def _nonoverlap(first: Path, second: Path):
 
 
 def _relative_name(value):
-    if not isinstance(value, str) or not value or "\\" in value:
+    """Accept a snapshot-relative name that vault_paths also accepts.
+
+    Intended difference from vault_paths.relative_parts: a backslash is refused
+    instead of read as a separator. Manifest names are stored in POSIX form so a
+    snapshot restores the same tree on every OS, and on POSIX a backslash is a
+    literal filename character that Windows would split into folders.
+    """
+    if not isinstance(value, str) or "\\" in value:
         raise BackupError("invalid relative snapshot path")
-    for part in value.split("/"):
-        if (not part or part in (".", "..") or part.endswith((".", " "))
-                or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
-                or re.fullmatch(
-                    r"(?i)(con|prn|aux|nul|conin\$|conout\$|"
-                    r"com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?",
-                    part,
-                )):
-            raise BackupError("invalid relative snapshot path")
+    try:
+        relative_parts(value, "snapshot path")
+    except ValueError:
+        raise BackupError("invalid relative snapshot path") from None
     return value
 
 

@@ -686,6 +686,137 @@ class CliModeTests(unittest.TestCase):
         report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
         self.assertNotIn("External.md", report)
         self.assertNotIn("EXTERNAL-NOTE-SENTINEL", report)
+        # Not silent any more: the skipped junction is listed by its vault path only.
+        self.assertIn("\n- 20-knowledge/\n", self.section_14b(report))
+        self.assertIn("링크·정션 제외 1건(§14b)", result.stdout)
+        self.assertNotIn(str(outside), report + result.stdout)
+
+    @staticmethod
+    def section_14b(report: str) -> str:
+        return report.split("## 14b. 링크·정션 제외", 1)[1]
+
+    def directory_link_or_skip(self, link: Path, target: Path) -> None:
+        if os.name == "nt":
+            self.junction_or_skip(link, target)
+        else:
+            self.symlink_or_skip(link, target, target_is_directory=True)
+
+    def linked_tree_fixture(self, overrides: dict[str, object] | None = None) -> Path:
+        self.write_config(frontmatter_roots=["20-knowledge"], overrides=overrides)
+        self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
+        outside = Path(self._tmp.name) / "external-linked"
+        outside.mkdir(exist_ok=True)
+        (outside / "No Frontmatter.md").write_text("LINKED-SENTINEL\n", encoding="utf-8")
+        link = self.repo / "20-knowledge" / "linked"
+        if not os.path.lexists(link):
+            self.directory_link_or_skip(link, outside)
+        return outside
+
+    def test_full_mode_reports_linked_note_tree_instead_of_skipping_silently(self) -> None:
+        outside = self.linked_tree_fixture()
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        self.assertIn("## 1. 프런트매터 누락 — 치명 (0)", report)
+        section = self.section_14b(report)
+        self.assertTrue(section.splitlines()[0].endswith("관리성 (1)"), section[:200])
+        self.assertIn("\n- 20-knowledge/linked/\n", section)
+        self.assertIn("노트 1개 검사", result.stdout)
+        self.assertIn("(치명 0건)", result.stdout)
+        self.assertIn("링크·정션 제외 1건(§14b)", result.stdout)
+        for hidden in ("LINKED-SENTINEL", "No Frontmatter", str(outside)):
+            self.assertNotIn(hidden, report + result.stdout + result.stderr)
+
+    def test_linked_tree_in_exclude_dirs_or_deny_zones_is_not_reported(self) -> None:
+        for overrides in ({"exclude_dirs": [".git", "linked"]}, {"deny_zones": ["linked"]}):
+            with self.subTest(overrides=overrides):
+                self.linked_tree_fixture(overrides)
+
+                result = self.run_cli()
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+                section = self.section_14b(report)
+                self.assertTrue(section.splitlines()[0].endswith("관리성 (0)"), section[:200])
+                self.assertIn("\n- 없음\n", section)
+                self.assertNotIn("§14b", result.stdout)
+
+    def test_full_mode_reports_linked_note_file_and_rule_file(self) -> None:
+        self.write_config(
+            frontmatter_roots=["20-knowledge"], overrides={"rules_dir": ".claude/rules"})
+        self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
+        self.write(".claude/rules/vault-real.md", "## Real rule\n")
+        outside = Path(self._tmp.name) / "external-files"
+        outside.mkdir()
+        (outside / "note.md").write_text("FILE-SENTINEL\n", encoding="utf-8")
+        (outside / "rule.md").write_text("## RULE-SENTINEL\n", encoding="utf-8")
+        self.symlink_or_skip(self.repo / "20-knowledge" / "Linked note.md", outside / "note.md")
+        self.symlink_or_skip(self.repo / ".claude" / "rules" / "vault-linked.md", outside / "rule.md")
+
+        result = self.run_cli()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        section = self.section_14b(report)
+        self.assertIn("\n- 20-knowledge/Linked note.md\n", section)
+        self.assertIn("\n- .claude/rules/vault-linked.md\n", section)
+        self.assertIn("링크·정션 제외 2건(§14b)", result.stdout)
+        self.assertNotIn("SENTINEL", report + result.stdout + result.stderr)
+
+    def test_refused_note_and_rule_files_are_reported_on_every_platform(self) -> None:
+        # Same path as a real file symlink, without needing symlink privileges.
+        self.write_config(
+            frontmatter_roots=["20-knowledge"], overrides={"rules_dir": ".claude/rules"})
+        self.write("20-knowledge/Inside.md", self.valid_note("Inside"))
+        self.write("20-knowledge/Linked note.md", "FILE-SENTINEL\n")
+        self.write(".claude/rules/vault-real.md", "## Real rule\n")
+        self.write(".claude/rules/vault-linked.md", "## RULE-SENTINEL\n")
+        refused = {"Linked note.md", "vault-linked.md"}
+        original = healthcheck._ensure_vault_path
+
+        def ensure(vault, path, label, deny_zones=()):
+            if Path(path).name in refused:
+                raise HealthcheckError(f"{label} must not traverse a symlink or reparse point")
+            return original(vault, path, label, deny_zones)
+
+        output = io.StringIO()
+        argv = ["vault_healthcheck.py", "--vault", str(self.repo)]
+        with mock.patch.object(healthcheck, "_ensure_vault_path", side_effect=ensure), \
+                mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(output):
+            code = healthcheck.main()
+
+        self.assertEqual(code, 0)
+        report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+        section = self.section_14b(report)
+        self.assertTrue(section.splitlines()[0].endswith("관리성 (2)"), section[:200])
+        self.assertIn("\n- 20-knowledge/Linked note.md\n", section)
+        self.assertIn("\n- .claude/rules/vault-linked.md\n", section)
+        self.assertIn("링크·정션 제외 2건(§14b)", output.getvalue())
+        self.assertNotIn("SENTINEL", report + output.getvalue())
+
+    def test_bom_note_gets_the_same_verdict_in_full_and_staged_modes(self) -> None:
+        self.write_config(frontmatter_roots=["20-knowledge"])
+        note = self.repo / "20-knowledge" / "BOM note.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        cases = (
+            ('---\ntitle: "BOM"\n---\n\nbody\n', 0),
+            ('---\r\ntitle: "BOM"\r\n---\r\n\r\nbody\r\n', 0),
+            ("no frontmatter\n", 1),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                note.write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+                self.git("add", "00-meta/vault-config.json", "20-knowledge/BOM note.md")
+
+                staged = self.run_cli("--staged")
+                full = self.run_cli()
+
+                self.assertEqual(staged.returncode, expected, staged.stderr)
+                self.assertEqual(full.returncode, expected, full.stdout + full.stderr)
+                report = (self.repo / "00-meta/cli-health.md").read_text(encoding="utf-8")
+                self.assertIn(f"## 1. 프런트매터 누락 — 치명 ({expected})", report)
 
     def test_full_mode_rejects_configured_note_junction_outside_vault(self) -> None:
         self.write_config(

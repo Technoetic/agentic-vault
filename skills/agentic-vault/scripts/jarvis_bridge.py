@@ -431,7 +431,9 @@ def load_jarvis_config(vault: Path) -> dict | None:
     """볼트가 아니거나 jarvis 블록이 없거나 enabled=false면 None."""
     cfg_path = vault / "00-meta" / "vault-config.json"
     try:
-        vault_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        # utf-8-sig like healthcheck and session_start: a BOM saved by Windows
+        # editors must not make only the bridge reject a valid config.
+        vault_cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return None
     except (ValueError, OSError, UnicodeError) as error:

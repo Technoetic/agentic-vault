@@ -1,4 +1,9 @@
-"""Small standard-library client for explicitly requested Jev judgments."""
+"""Small standard-library client for explicitly requested Jev judgments.
+
+It also owns the one secret filter for text that leaves the machine for Jev:
+jev_ask (inline context), vault_judge (vault file excerpts) and build_payload
+itself all apply SENSITIVE below, so no path can use a narrower copy.
+"""
 from __future__ import annotations
 
 import http.client
@@ -12,9 +17,43 @@ MODEL = "jev-1.13.0"
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TIMEOUT = 30.0
-_CODES = frozenset({"invalid_input", "missing_api_key", "authentication", "rate_limit",
-                    "timeout", "transport", "malformed_response"})
+_CODES = frozenset({"invalid_input", "sensitive_input", "missing_api_key", "authentication",
+                    "rate_limit", "timeout", "transport", "malformed_response"})
 _ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
+# Known credential shapes. Detection is best effort, not a guarantee.
+# The pattern is the union of the two earlier copies (jev_ask and vault_judge),
+# so merging them never let through anything either copy used to reject.
+SENSITIVE = re.compile(
+    r"apikey_[a-f0-9]{32}_[a-f0-9]{64}|"
+    r"\b(?:sk[-_][a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9]{20,}|"
+    r"github_pat_[a-zA-Z0-9_]{20,}|AKIA[A-Z0-9]{16}|(?:ts|tsk|typesafe)[_-][a-zA-Z0-9_-]{16,})\b|"
+    r"\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b|"
+    r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|"
+    r"\b(?:authorization\s*[:=]\s*(?:bearer|basic)\s+\S+|"
+    r"(?:[A-Z0-9_]*API[_-]?KEY|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
+    r"password|passwd|secret)\s*[\"']?\s*[:=]\s*[\"']?[^\s\"',;]{4,})|"
+    # Earlier vault_judge form: also matches "bearer" without a space and
+    # values that contain quotes, commas or semicolons.
+    r"\b(?:authorization\s*:\s*bearer|api[_-]?key\s*[:=]|"
+    r"password\s*[:=]|secret\s*[:=])\s*[^\s]{8,}", re.IGNORECASE)
+
+
+def contains_sensitive(value, literals=()):
+    """Return True when any string in a JSON-like value (object keys included)
+    matches SENSITIVE or contains one of the non-empty literal strings."""
+    literals = tuple(literal for literal in literals if isinstance(literal, str) and literal)
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if SENSITIVE.search(item) or any(literal in item for literal in literals):
+                return True
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            pending.extend(item)
+    return False
 
 
 class JevError(Exception):
@@ -49,6 +88,9 @@ def build_payload(state, questions):
             if (not _text(choice, 80) or choice != choice.strip()
                     or any(ord(char) < 32 for char in choice) or not _text(definition, 2000)):
                 raise JevError("invalid_input")
+    # Last check before the wire, whatever the caller already filtered.
+    if contains_sensitive(state) or contains_sensitive(questions):
+        raise JevError("sensitive_input")
     try:
         payload = json.dumps({"state": state, "model": MODEL, "questions": questions},
                              ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")

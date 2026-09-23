@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Sequence
 
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
-from vault_paths import resolve_note_path
+from vault_paths import resolve_note_path, zone_matches
 
 
 for _stream in (sys.stdout, sys.stderr):
@@ -89,13 +89,8 @@ def _terms(text: str) -> tuple[str, ...]:
 
 
 def _path_matches_rule(parts: Sequence[str], rule: str) -> bool:
-    rule_parts = tuple(part.casefold() for part in rule.replace("\\", "/").split("/") if part)
-    folded = tuple(part.casefold() for part in parts)
-    if not rule_parts:
-        return False
-    if len(rule_parts) == 1:
-        return rule_parts[0] in folded
-    return folded[:len(rule_parts)] == rule_parts
+    # One zone-matching rule for recall, vault_judge and resolve_note_path.
+    return zone_matches(parts, rule)
 
 
 def _classified_skip(rel_parts: Sequence[str], deny_zones: Sequence[str], exclude_dirs: Sequence[str]) -> str | None:
@@ -241,7 +236,8 @@ def _read_markdown(path: Path, diagnostics: dict) -> str | None:
             _omit(diagnostics, "file_changed")
             return None
         diagnostics["files_read"] += 1
-        return content.decode("utf-8", errors="replace")
+        # utf-8-sig: a BOM must not hide the frontmatter title (same as healthcheck).
+        return content.decode("utf-8-sig", errors="replace")
     except OverflowError:
         diagnostics["omitted_total_byte_limit"] += 1
         _omit(diagnostics, "total_byte_limit")

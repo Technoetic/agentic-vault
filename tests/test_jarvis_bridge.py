@@ -116,8 +116,20 @@ class JarvisConfigLoadingTests(unittest.TestCase):
         self._write({"jarvis": {"enabled": False}})
         self.assertIsNone(_BRIDGE.load_jarvis_config(self.vault))
 
+    def test_utf8_bom_config_loads_like_healthcheck_and_session_start(self):
+        self.path.write_text(json.dumps({"jarvis": self.valid}), encoding="utf-8-sig")
+        self.assertTrue(self.path.read_bytes().startswith(b"\xef\xbb\xbf"))
+
+        loaded = _BRIDGE.load_jarvis_config(self.vault)
+
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["telegram_user_ids"], [111])
+        self.path.write_text("\ufeff{}", encoding="utf-8")
+        self.assertIsNone(_BRIDGE.load_jarvis_config(self.vault))
+
     def test_malformed_read_root_block_and_enabled_values_are_configuration_errors(self):
-        raw_cases = ("{", "\ufeff{}")
+        # One BOM is accepted (utf-8-sig); a second one is not valid JSON.
+        raw_cases = ("{", "\ufeff\ufeff{}")
         for raw in raw_cases:
             with self.subTest(raw=repr(raw)):
                 self.path.write_text(raw, encoding="utf-8")

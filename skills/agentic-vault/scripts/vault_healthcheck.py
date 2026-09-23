@@ -25,6 +25,7 @@
   11  세션 주입 토큰 예산 초과 — hot/handoff 통주입 감시 (관리성)
   12  세션 종료 누락 의심 — handoff anchor와 git HEAD 커밋 거리 (관리성)
   14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
+  14b 링크·정션 제외 — 따라가지 않은 링크 경로를 조용히 빼지 않고 보고 (관리성)
       ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
 
 종료 코드(fail-closed):
@@ -174,15 +175,71 @@ _INTEGER_KEYS = {
     "frontmatter_max_lines", "stale_days", "rules_max_lines",
     "hot_max_tokens", "handoff_max_tokens", "anchor_drift_threshold",
 }
-_WINDOWS_RESERVED_NAMES = {
-    "con", "prn", "aux", "nul", "clock$", "conin$", "conout$",
-    *(f"com{i}" for i in (*range(1, 10), "¹", "²", "³")),
-    *(f"lpt{i}" for i in (*range(1, 10), "¹", "²", "³")),
-}
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
+# This file is copied into vaults and run alone by the pre-commit hook, so it
+# cannot import vault_paths.py. The block below is a verbatim copy of the rule
+# there; tests/test_rule_sources.py fails if the two copies drift apart.
+# --- BEGIN SHARED PATH RULE (verbatim copy of vault_paths.py) ---
+# Windows reserves device names in any letter case and with any extension
+# ("con", "Con.md"). The case-folded set and the IGNORECASE pattern are both
+# applied, so the merged rule is never looser than either earlier copy.
+RESERVED_DEVICE_NAMES = frozenset({
+    "con", "prn", "aux", "nul", "clock$", "conin$", "conout$",
+    *(f"com{i}" for i in (*range(1, 10), "¹", "²", "³")),
+    *(f"lpt{i}" for i in (*range(1, 10), "¹", "²", "³")),
+})
+_RESERVED_DEVICE_PATTERN = re.compile(
+    r"(?i)(?:con|prn|aux|nul|clock\$|conin\$|conout\$"
+    r"|com[1-9¹²³]|lpt[1-9¹²³])"
+)
+UNSAFE_SEGMENT_CHARACTERS = '<>:"|?*'
+
+
+def unsafe_path_segment(part: str) -> bool:
+    """Return True when one '/'-separated segment is not a portable vault name.
+
+    Rejected: empty, '.', '..', a trailing dot or space (Windows drops them),
+    control characters, any of <>:"|?* (':' also blocks NTFS alternate data
+    streams) and reserved device names with or without an extension.
+    """
+    stem = part.split(".", 1)[0]
+    return (
+        part in ("", ".", "..")
+        or part.endswith((".", " "))
+        or any(ord(char) < 32 or char in UNSAFE_SEGMENT_CHARACTERS for char in part)
+        or stem.casefold() in RESERVED_DEVICE_NAMES
+        or _RESERVED_DEVICE_PATTERN.fullmatch(stem) is not None
+    )
+# --- END SHARED PATH RULE ---
+
+
+def _segment_problem(segment: str) -> str:
+    """Explain a segment rejected by unsafe_path_segment (message text only)."""
+    if segment == "":
+        return "contains an empty path segment"
+    if segment in (".", ".."):
+        return f"must stay inside the vault ({segment!r} rejected)"
+    if segment.endswith((" ", ".")):
+        return "contains a Windows-ambiguous trailing dot or space"
+    if ":" in segment:
+        return "must not contain ':' (ADS rejected)"
+    if any(ord(char) < 32 for char in segment):
+        return "contains a control character"
+    if any(char in UNSAFE_SEGMENT_CHARACTERS for char in segment):
+        return f"contains a character Windows cannot store in {segment!r}"
+    return f"contains reserved Windows device name {segment!r}"
+
+
 def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) -> str:
+    """Normalize one config path and apply the shared segment rule.
+
+    Intended difference from vault_paths.relative_parts: config text is trimmed
+    first (surrounding whitespace is JSON formatting, not part of a name). Every
+    later reader receives this normalized value, so both give the same verdict
+    on it. vault_paths never trims because its inputs are already exact paths.
+    """
     if not isinstance(value, str):
         raise HealthcheckError(f"{label} must be a string path")
     raw = value.strip()
@@ -197,25 +254,9 @@ def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) ->
     normalized = raw.replace("\\", "/")
     if normalized.startswith("/"):
         raise HealthcheckError(f"{label} must stay inside the vault (absolute path rejected)")
-    segments = normalized.split("/")
-    if any(segment == "" for segment in segments):
-        raise HealthcheckError(f"{label} contains an empty path segment")
-    for segment in segments:
-        if segment in (".", ".."):
-            raise HealthcheckError(
-                f"{label} must stay inside the vault ({segment!r} rejected)"
-            )
-        if segment.endswith((" ", ".")):
-            raise HealthcheckError(
-                f"{label} contains a Windows-ambiguous trailing dot or space"
-            )
-        if ":" in segment:
-            raise HealthcheckError(f"{label} must not contain ':' (ADS rejected)")
-        device_stem = segment.split(".", 1)[0].casefold()
-        if device_stem in _WINDOWS_RESERVED_NAMES:
-            raise HealthcheckError(
-                f"{label} contains reserved Windows device name {segment!r}"
-            )
+    for segment in normalized.split("/"):
+        if unsafe_path_segment(segment):
+            raise HealthcheckError(f"{label} {_segment_problem(segment)}")
     return normalized
 
 
@@ -663,7 +704,10 @@ SKIP_FILENAMES = {"claude.md", "agents.md", "readme.md"}
 
 
 def read_text(p: Path) -> str:
-    return p.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig like read_index_text (staged mode) and the config readers: a
+    # UTF-8 BOM written by Windows tools must not turn a valid note into
+    # "frontmatter missing" in full mode while the commit gate passes it.
+    return p.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def read_vault_text(vault: Path, p: Path, label: str, deny_zones=()) -> str:
@@ -718,10 +762,14 @@ def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
     return any(part in names for part in rel.split("/"))
 
 
-def collect_md_files(vault: Path, exclude_names: set[str]) -> list[Path]:
+def collect_md_files(vault: Path, exclude_names: set[str],
+                     skipped: list[str] | None = None) -> list[Path]:
     """exclude_dirs(이름 매칭)를 걷기 단계에서 가지치기하며 .md 를 수집한다.
     deny_zones 는 여기서 제외하지 않는다 — 링크 해석 인덱스에는 포함돼야
-    아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다."""
+    아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다.
+    심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다.
+    건너뛴 디렉토리·.md 파일의 볼트 상대 경로는 skipped에 남긴다 — 조용히
+    빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고)."""
     results: list[Path] = []
     for root, dirs, files in os.walk(vault):
         root_path = Path(root)
@@ -733,6 +781,8 @@ def collect_md_files(vault: Path, exclude_names: set[str]) -> list[Path]:
             try:
                 _ensure_vault_path(vault, child, f"scan directory {child.name}")
             except HealthcheckError:
+                if skipped is not None:
+                    skipped.append(rel_posix(child, vault) + "/")
                 continue
             safe_dirs.append(dirname)
         dirs[:] = safe_dirs
@@ -742,6 +792,8 @@ def collect_md_files(vault: Path, exclude_names: set[str]) -> list[Path]:
                 try:
                     _ensure_vault_path(vault, candidate, f"scan file {f}")
                 except HealthcheckError:
+                    if skipped is not None:
+                        skipped.append(rel_posix(candidate, vault))
                     continue
                 results.append(candidate)
     return results
@@ -1003,7 +1055,7 @@ def _norm_heading(h: str) -> str:
 
 
 def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_lines: int,
-                          deny_zones=()
+                          deny_zones=(), skipped: list[str] | None = None
                           ) -> tuple[list[tuple[str, int]], list[str]]:
     """(크기 초과 rules 목록, CLAUDE.md와 제목이 겹치는 rules 목록)을 반환한다.
     - 크기: rules 파일이 max_lines 초과 → 절차성 장문 유입 신호(rules는 상시 로드라 얇아야 함).
@@ -1016,6 +1068,9 @@ def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_line
         try:
             _ensure_vault_path(vault, rule_file, f"rule file {rule_file.name}", deny_zones)
         except HealthcheckError:
+            rel = rel_posix(rule_file, vault)
+            if skipped is not None and not is_denied(rel, *build_deny_rules(deny_zones)):
+                skipped.append(rel)
             continue
         rule_files.append(rule_file)
     # CLAUDE.md 본문(마커/주석 제외)의 규칙 제목 집합
@@ -1176,7 +1231,8 @@ def main() -> int:
     hub_stems = {Path(v).stem for v in special_rels}
 
     # --- 파일 수집 ------------------------------------------------------------
-    all_md = collect_md_files(vault, exclude_names)
+    link_skipped: list[str] = []
+    all_md = collect_md_files(vault, exclude_names, link_skipped)
     # 링크 해석용 인덱스는 deny zone 포함 전체(아카이브로 이동한 노트 링크는 유효),
     # 린트 대상은 deny zone·도구 문서·리포트 자신을 제외한 활성 영역만.
     # 주의: 옵시디언 frontmatter aliases 는 원시 위키링크를 해석하지 못한다 —
@@ -1394,7 +1450,8 @@ def main() -> int:
     if rules_path is not None and rules_path.is_dir() and any(rules_path.glob("*.md")):
         try:
             rules_oversized, rules_dup = scan_rules_integrity(
-                vault, rules_path, vault / "CLAUDE.md", rules_max_lines, cfg.get("deny_zones")
+                vault, rules_path, vault / "CLAUDE.md", rules_max_lines, cfg.get("deny_zones"),
+                link_skipped,
             )
         except HealthcheckError as e:
             print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
@@ -1444,6 +1501,12 @@ def main() -> int:
         print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
         return 1
 
+    # 링크·정션으로 건너뛴 경로 — deny zone 안은 원래 검사 대상이 아니므로 보고하지 않는다.
+    link_skipped = sorted({
+        rel for rel in link_skipped
+        if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names)
+    })
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
@@ -1453,6 +1516,7 @@ def main() -> int:
                     + len(rules_oversized) + len(rules_dup)
                     + len(injection_over)
                     + len(unreadable)
+                    + len(link_skipped)
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
@@ -1588,6 +1652,13 @@ def main() -> int:
         "13은 결번 — 포크 볼트의 루트 allowlist 검사 번호와 충돌 회피)",
         *([f"- {rel} — {err}" for rel, err in unreadable] or ["- 없음"]),
         "",
+        f"## 14b. 링크·정션 제외 — 따라가지 않고 건너뜀(경로 확인 실패 포함) — 관리성 ({len(link_skipped)})",
+        "  (심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다. "
+        "끝이 /인 항목은 폴더 전체다 — 그 아래 노트는 이번 검사에서 프런트매터·링크·고아 "
+        "판정을 받지 않았다. 검사하려면 볼트 안 실제 폴더로 옮기고, 의도한 제외라면 "
+        "config의 exclude_dirs에 이름을 적어라)",
+        *([f"- {rel}" for rel in link_skipped] or ["- 없음"]),
+        "",
     ]
 
     try:
@@ -1603,8 +1674,9 @@ def main() -> int:
 
     drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
     read_note = f" ⚠️읽기 실패 {len(unreadable)}건(§14)" if unreadable else ""
+    link_note = f" ⚠️링크·정션 제외 {len(link_skipped)}건(§14b)" if link_skipped else ""
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
-          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}")
+          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}")
     return 1 if critical > 0 else 0
 
 

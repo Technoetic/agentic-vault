@@ -191,6 +191,18 @@ class VaultRecallTests(unittest.TestCase):
         self.assertIn("[Source: 20-knowledge/rollback.md:2]", result["context"])
         self.assertIn("title: Deployment rollback", result["context"])
 
+    def test_utf8_bom_does_not_hide_the_frontmatter_title(self) -> None:
+        self.write_bytes(
+            "20-knowledge/bom.md",
+            b"\xef\xbb\xbf---\ntitle: Deployment rollback\n---\n# Runbook\nKeep a rollback command ready.\n",
+        )
+
+        result = recall_module.recall(self.vault, "deployment rollback", limit=3, max_tokens=300)
+
+        self.assertEqual(result["matches"][0]["path"], "20-knowledge/bom.md")
+        self.assertEqual(result["matches"][0]["title"], "Deployment rollback")
+        self.assertNotIn("\ufeff", json.dumps(result, ensure_ascii=False))
+
     def test_unicode_ranking_finds_korean_body_evidence(self) -> None:
         self.write("20-knowledge/incident.md", "# 운영 안내\n장애 대응은 먼저 영향을 격리하고 복구 절차를 실행한다.\n")
         self.write("20-knowledge/meeting.md", "# 회의\n다음 분기 운영 예산을 논의한다.\n")
