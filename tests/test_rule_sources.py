@@ -43,12 +43,29 @@ SECRETS = (
     "Authorization: Basic ZmFrZTpmYWtl", "Authorization: Bearer abcdefgh",
     # Shapes only the earlier vault_judge copy caught; the union keeps them.
     "authorization:bearerXXXXXXXX", "api_key: 'abc,defgh'",
+    # Shapes both earlier copies let through (review of 0.15.1): the Telegram
+    # bot token the bridge itself uses, Slack, Google, URL credentials, Korean
+    # labels, and full-width or zero-width disguises of a known label.
+    "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawZ",
+    "xoxb-123456789012-1234567890123-AbCdEfGh",
+    "https://hooks.slack.com/services/T00000000/B00000000/" + "X" * 24,
+    "AIza" + "S" * 35,
+    "postgres://admin:Sup3rS3cret@db:5432/app",
+    "비밀번호: Sup3rS3cret!", "토큰 = abcd1234efgh", "인증키\uff1aabcd1234",
+    "password\uff1aSup3rS3cret!", "pass\u200bword=Sup3rS3cret!",
+    "\uff53\uff4b-" + "a" * 24,
 )
 BENIGN = (
     "CSV export is supported.",
     "The password policy is documented in the handbook.",
     "Ask the team about the secret santa draw.",
     "Tokens are counted per session.",
+    '"R&D" 예산은 얼마인가?',
+    "비밀번호: 8자 이상, 90일마다 변경한다.",
+    "토큰 사용량은 세션마다 센다.",
+    "암호화: AES-256으로 저장한다.",
+    "Docs live at https://example.com:8443/guide and git@github.com:org/repo.git.",
+    "회의는 12:30에 시작한다.",
 )
 
 
@@ -90,6 +107,27 @@ class SecretFilterSourceTests(unittest.TestCase):
     def test_every_jev_path_shares_one_pattern_object(self) -> None:
         self.assertIs(jev_ask.SENSITIVE, jev_client.SENSITIVE)
         self.assertIs(vault_judge.SENSITIVE, jev_client.SENSITIVE)
+
+    def test_only_jev_client_applies_the_raw_pattern(self) -> None:
+        # contains_sensitive also checks the NFKC form without zero-width
+        # characters; a direct SENSITIVE.search elsewhere would skip that.
+        callers = sorted(
+            path.relative_to(ROOT).as_posix()
+            for directory in (SCRIPTS, ROOT / "hooks", ROOT / "scripts")
+            for path in directory.glob("*.py")
+            if "SENSITIVE.search" in path.read_text(encoding="utf-8")
+            or "SENSITIVE.match" in path.read_text(encoding="utf-8")
+            or "SENSITIVE.fullmatch" in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(callers, ["skills/agentic-vault/scripts/jev_client.py"])
+
+    def test_disguised_labels_are_caught_only_after_normalization(self) -> None:
+        # The raw pattern misses these; contains_sensitive must not.
+        for disguised in ("password\uff1aSup3rS3cret!", "pass\u200bword=Sup3rS3cret!",
+                          "api\u2060_key = abcd1234efgh"):
+            with self.subTest(text=disguised):
+                self.assertIsNone(jev_client.SENSITIVE.search(disguised))
+                self.assertTrue(jev_client.contains_sensitive(disguised))
 
     def test_no_other_script_defines_its_own_secret_pattern(self) -> None:
         owners = sorted(

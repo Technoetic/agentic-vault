@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,39 @@ _SPEC.loader.exec_module(_BRIDGE)
 # bridge refuses bare/current-directory hits and, on Windows, non-.exe launchers.
 _FAKE_CLAUDE = str(
     Path(tempfile.gettempdir()).resolve() / "agentic-vault-fake-bin" / "claude.exe")
+
+# log() and serve() write under STATE_ROOT, which defaults to the real
+# ~/.vault-jarvis of a running bridge. Tests that do not patch log() used to
+# append made-up lines to that live log (and could rotate it), so the whole
+# module points STATE_ROOT at a temporary directory.
+_REAL_STATE_ROOT = _BRIDGE.STATE_ROOT
+_MODULE_STATE: tempfile.TemporaryDirectory | None = None
+
+
+def setUpModule() -> None:
+    global _MODULE_STATE
+    _MODULE_STATE = tempfile.TemporaryDirectory()
+    _BRIDGE.STATE_ROOT = Path(_MODULE_STATE.name) / "state"
+
+
+def tearDownModule() -> None:
+    _BRIDGE.STATE_ROOT = _REAL_STATE_ROOT
+    if _MODULE_STATE is not None:
+        _MODULE_STATE.cleanup()
+
+
+class JarvisTestIsolationTests(unittest.TestCase):
+    def test_unpatched_log_writes_to_the_module_state_root_not_the_real_one(self):
+        self.assertIsNotNone(_MODULE_STATE)
+        module_root = Path(_MODULE_STATE.name) / "state"
+        self.assertEqual(_BRIDGE.STATE_ROOT, module_root)
+        self.assertNotEqual(_BRIDGE.STATE_ROOT, _REAL_STATE_ROOT)
+        self.assertEqual(_REAL_STATE_ROOT, Path.home() / ".vault-jarvis")
+        with redirect_stdout(io.StringIO()):
+            _BRIDGE.log("isolation probe")
+        self.assertIn(
+            "isolation probe",
+            (module_root / "jarvis.log").read_text(encoding="utf-8"))
 
 
 class JarvisConfigAuthorizationTests(unittest.TestCase):
@@ -379,7 +413,7 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
         completed = Mock(returncode=0, stdout="answer", stderr="")
         with patch.object(_BRIDGE.os, "environ", self.parent_env), \
                 patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
             self.assertEqual(_BRIDGE.run_claude(self.vault, cfg, "question"), "answer")
 
         self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
@@ -394,7 +428,7 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
             returncode=9, stdout="", stderr="CONTENT-SENTINEL UPPER-SECRET")
         with patch.object(_BRIDGE.os, "environ", self.parent_env), \
                 patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed), \
                 patch.object(_BRIDGE, "log") as logger:
             _BRIDGE.run_claude(self.vault, cfg, "question")
 
@@ -422,12 +456,11 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
                     patch.object(_BRIDGE.subprocess, "STARTUPINFO",
                                  return_value=startup, create=True), \
                     patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                    patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                    patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
                 result = _BRIDGE.generate_claude(self.vault, cfg, "question")
                 self.assertTrue(result.ok)
                 self.assertEqual(result.text, "answer")
                 self.assertEqual(runner.call_args.kwargs.get("creationflags", 0), expected_flags)
-                self.assertTrue(runner.call_args.kwargs["capture_output"])
                 self.assertEqual(runner.call_args.kwargs["timeout"], 30)
                 if platform == "win32":
                     self.assertIs(runner.call_args.kwargs.get("startupinfo"), startup)
@@ -724,10 +757,10 @@ class JarvisBriefingTests(unittest.TestCase):
                 sender = Mock(return_value=True)
                 run_patch = (
                     patch.object(
-                        _BRIDGE.subprocess, "run", side_effect=subprocess_outcome)
+                        _BRIDGE, "run_with_stdin", side_effect=subprocess_outcome)
                     if isinstance(subprocess_outcome, BaseException)
                     else patch.object(
-                        _BRIDGE.subprocess, "run", return_value=subprocess_outcome)
+                        _BRIDGE, "run_with_stdin", return_value=subprocess_outcome)
                 )
 
                 with patch.object(_BRIDGE.shutil, "which", return_value=executable), \
@@ -748,7 +781,7 @@ class JarvisBriefingTests(unittest.TestCase):
                 retry_sender = Mock(return_value=True)
                 completed = Mock(returncode=0, stdout="recovered", stderr="")
                 with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                        patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                        patch.object(_BRIDGE, "run_with_stdin", return_value=completed), \
                         patch.object(_BRIDGE, "_git", return_value="git"), \
                         patch.object(_BRIDGE, "log"):
                     restarted = _BRIDGE.send_due_briefings(
@@ -2422,7 +2455,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                 self.assertEqual(_BRIDGE.route(message), ("qa", message))
                 with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
                         patch.object(
-                            _BRIDGE.subprocess, "run", return_value=completed) as runner:
+                            _BRIDGE, "run_with_stdin", return_value=completed) as runner:
                     self.assertEqual(
                         _BRIDGE.do_qa(self.vault, _claude_cfg(), message), "answer")
                 command = runner.call_args.args[0]
@@ -2436,7 +2469,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
     def test_argv_limits_available_tools_and_skips_mcp_servers(self):
         completed = Mock(returncode=0, stdout="answer", stderr="")
         with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
             result = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "질문")
 
         self.assertTrue(result.ok)
@@ -2456,7 +2489,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         completed = Mock(returncode=0, stdout="brief", stderr="")
         with patch.object(_BRIDGE, "_git", return_value='abc123 "R&D" & echo x'), \
                 patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
             result = _BRIDGE.generate_brief(self.vault, _claude_cfg())
 
         self.assertTrue(result.ok)
@@ -2478,7 +2511,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                         _BRIDGE.shutil, "which",
                         return_value=str(self.root / "npm" / name)), \
                     patch.object(
-                        _BRIDGE.subprocess, "run",
+                        _BRIDGE, "run_with_stdin",
                         side_effect=AssertionError("launched")) as runner:
                 result = _BRIDGE.generate_claude(
                     self.vault, _claude_cfg(), _HOSTILE_MESSAGES[0])
@@ -2510,7 +2543,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                         _BRIDGE.shutil, "which",
                         return_value=str(self.root / "bin" / name)), \
                     patch.object(
-                        _BRIDGE.subprocess, "run", return_value=completed) as runner:
+                        _BRIDGE, "run_with_stdin", return_value=completed) as runner:
                 result = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "질문")
 
             self.assertEqual(result.ok, allowed)
@@ -2520,7 +2553,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         native = str(self.root / "Programs" / "Claude" / "claude.exe")
         completed = Mock(returncode=0, stdout="answer", stderr="")
         with patch.object(_BRIDGE.shutil, "which", side_effect=lambda cmd: cmd) as which, \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
             result = _BRIDGE.generate_claude(
                 self.vault, _claude_cfg(claude_cmd=native), "질문")
 
@@ -2534,7 +2567,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         with patch.dict(os.environ, {"PATH": elsewhere}), \
                 patch.object(_BRIDGE.shutil, "which", return_value=local_hit), \
                 patch.object(
-                    _BRIDGE.subprocess, "run",
+                    _BRIDGE, "run_with_stdin",
                     side_effect=AssertionError("launched")) as runner:
             refused = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "질문")
 
@@ -2546,7 +2579,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         explicit_path = os.pathsep.join([elsewhere, os.getcwd()])
         with patch.dict(os.environ, {"PATH": explicit_path}), \
                 patch.object(_BRIDGE.shutil, "which", return_value=local_hit), \
-                patch.object(_BRIDGE.subprocess, "run", return_value=completed) as runner:
+                patch.object(_BRIDGE, "run_with_stdin", return_value=completed) as runner:
             allowed = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "질문")
 
         self.assertTrue(allowed.ok)
@@ -2567,7 +2600,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
             with self.subTest(overrides=overrides), \
                     patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
                     patch.object(
-                        _BRIDGE.subprocess, "run",
+                        _BRIDGE, "run_with_stdin",
                         side_effect=AssertionError("launched")) as runner:
                 result = _BRIDGE.generate_claude(
                     self.vault, _claude_cfg(**overrides), "질문")
@@ -2578,7 +2611,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
     def test_launch_os_error_is_reported_instead_of_raised(self):
         with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
                 patch.object(
-                    _BRIDGE.subprocess, "run",
+                    _BRIDGE, "run_with_stdin",
                     side_effect=OSError("CONTENT-SENTINEL")):
             result = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "질문")
 
@@ -2590,7 +2623,7 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
     def test_blank_prompt_does_not_launch_claude(self):
         with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
                 patch.object(
-                    _BRIDGE.subprocess, "run",
+                    _BRIDGE, "run_with_stdin",
                     side_effect=AssertionError("launched")) as runner:
             result = _BRIDGE.generate_claude(self.vault, _claude_cfg(), "  \n ")
 
@@ -2664,6 +2697,63 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                 self.assertEqual(data["argv"][:7], _FIXED_ARGV_HEAD)
                 self.assertEqual(len(data["argv"]), 8)
         self.assertFalse((self.vault / "injected.txt").exists())
+
+    def test_full_argv_is_pinned_and_does_not_narrow_setting_sources(self):
+        # SECURITY.md documents what this argv leaves open: Read/Grep/Glob are
+        # pre-approved for any path the OS user can read, and -p skips the
+        # workspace trust dialog, so the vault's project/local settings and
+        # hooks load. --setting-sources/--restricted are deliberately absent:
+        # they would also drop the deny-zone Read rules that /vault-init
+        # offers to merge into the vault's .claude/settings.json.
+        executable = os.path.abspath(_FAKE_CLAUDE)
+        cfg = _claude_cfg()
+        command = _BRIDGE.build_claude_command(executable, cfg)
+        self.assertEqual(
+            command,
+            [executable, *_FIXED_ARGV_HEAD, _BRIDGE._claude_guard(cfg)])
+        for absent in ("--setting-sources", "--restricted", "--settings",
+                       "--add-dir", "--permission-mode", "--mcp-config"):
+            self.assertNotIn(absent, command)
+
+    def test_timeout_bounds_a_large_prompt_that_the_child_never_reads(self):
+        # Review probe: subprocess.run(input=...) wrote stdin before its
+        # timeout started on Windows, so a child that stalled before reading a
+        # prompt larger than the pipe buffer hung the whole bridge loop.
+        child = [sys.executable, "-c", "import time; time.sleep(30)"]
+        prompt = "가" * 100_000  # 300 KB: larger than any OS pipe buffer
+        started = time.monotonic()
+        with patch.object(
+                _BRIDGE, "resolve_claude_executable", return_value=sys.executable), \
+                patch.object(_BRIDGE, "build_claude_command", return_value=child):
+            result = _BRIDGE.generate_claude(
+                self.vault, _claude_cfg(qa_timeout_sec=1), prompt)
+        elapsed = time.monotonic() - started
+
+        self.assertFalse(result.ok)
+        self.assertIn("시간 초과", result.text)
+        self.assertLess(elapsed, 1 + 2 * _BRIDGE.CHILD_KILL_GRACE_SEC + 5)
+
+    def test_stdin_carries_exact_utf8_bytes_and_output_is_decoded(self):
+        script = (
+            "import sys; data = sys.stdin.buffer.read(); "
+            "sys.stdout.buffer.write(data.hex().encode('ascii') + b'\\r\\nend\\r')")
+        prompt = '"R&D" 예산은?\n둘째 줄 --help\n'
+        completed = _BRIDGE.run_with_stdin(
+            [sys.executable, "-c", script], input=prompt, cwd=str(self.vault),
+            timeout=60, env=_BRIDGE.child_process_env())
+
+        self.assertEqual(completed.returncode, 0)
+        # No text-mode newline translation on the way in; universal newlines out.
+        self.assertEqual(completed.stdout, prompt.encode("utf-8").hex() + "\nend\n")
+
+    def test_child_that_exits_without_reading_a_large_prompt_is_not_an_error(self):
+        script = "import sys; sys.stdout.write('done'); sys.exit(3)"
+        completed = _BRIDGE.run_with_stdin(
+            [sys.executable, "-c", script], input="x" * 1_000_000,
+            cwd=str(self.vault), timeout=60, env=_BRIDGE.child_process_env())
+
+        self.assertEqual(completed.returncode, 3)
+        self.assertEqual(completed.stdout, "done")
 
     def test_config_rejects_control_characters_in_claude_cmd(self):
         (self.vault / "00-meta").mkdir()
@@ -2742,44 +2832,160 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
             },
         }
 
-    def test_failing_update_is_skipped_with_notice_and_next_update_is_processed(self):
+    def _isolated_batch(self, updates, offset, sender, failures, saved):
+        return _BRIDGE.process_update_batch(
+            updates, offset,
+            lambda item: _BRIDGE.process_update_isolated(
+                self.vault, {"qa_hourly_limit": 6}, "12345:secret", {111},
+                item, 0.0, deque(), set(), sender, failures),
+            saved.append)
+
+    def test_update_that_keeps_raising_is_skipped_only_after_max_attempts(self):
         # Review probe P4: a file where the capture directory belongs makes
         # do_capture raise RuntimeError; that used to end the daemon.
         (self.vault / "10-inbox").mkdir()
         (self.vault / "10-inbox" / "jarvis").write_text("not a directory", encoding="utf-8")
         sender = Mock(return_value=True)
         saved = []
+        failures = {}
+        updates = [self._update(10, "기억해: CONTENT-SENTINEL"),
+                   self._update(11, "/status")]
+        self.assertEqual(_BRIDGE.UPDATE_MAX_ATTEMPTS, 3)
 
         with patch.object(_BRIDGE, "_git", return_value=None):
-            offset, complete = _BRIDGE.process_update_batch(
-                [self._update(10, "기억해: CONTENT-SENTINEL"),
-                 self._update(11, "/status")],
-                9,
-                lambda item: _BRIDGE.process_update_isolated(
-                    self.vault, {"qa_hourly_limit": 6}, "12345:secret", {111},
-                    item, 0.0, deque(), set(), sender),
-                saved.append)
+            for attempt in (1, 2):
+                with self.subTest(attempt=attempt):
+                    self.assertEqual(
+                        self._isolated_batch(updates, 9, sender, failures, saved),
+                        (9, False))
+                    self.assertEqual(failures, {10: attempt})
+                    self.assertEqual(saved, [])
+                    sender.assert_not_called()
+            offset, complete = self._isolated_batch(
+                updates, 9, sender, failures, saved)
 
         self.assertEqual((offset, complete), (11, True))
         self.assertEqual(saved, [10, 11])
+        self.assertEqual(failures, {})
         self.assertEqual(sender.call_count, 2)
         self.assertIn("건너뛰었습니다", sender.call_args_list[0].args[2])
         self.assertIn("상태", sender.call_args_list[1].args[2])
         logged = self._logged()
-        self.assertIn("update_id=10", logged)
+        self.assertIn("재시도 1/3: update_id=10", logged)
+        self.assertIn("재시도 2/3: update_id=10", logged)
+        self.assertIn("3회 연속 실패로 건너뜀: update_id=10", logged)
         self.assertIn("RuntimeError", logged)
         self.assertNotIn("CONTENT-SENTINEL", logged)
 
+    def test_transient_capture_error_is_retried_and_the_capture_is_saved(self):
+        # Review probe: an antivirus or sync tool briefly locks the capture
+        # file. The first attempt must not commit the offset.
+        sender = Mock(return_value=True)
+        saved = []
+        failures = {}
+        real_capture = _BRIDGE.do_capture
+        calls = []
+
+        def locked_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise PermissionError("locked by AV")
+            return real_capture(*args, **kwargs)
+
+        updates = [self._update(7, "기억해: 우유 사기")]
+        with patch.object(_BRIDGE, "do_capture", side_effect=locked_once):
+            first = self._isolated_batch(updates, 6, sender, failures, saved)
+            self.assertEqual(first, (6, False))
+            self.assertEqual(saved, [])
+            sender.assert_not_called()
+            second = self._isolated_batch(updates, 6, sender, failures, saved)
+
+        self.assertEqual(second, (7, True))
+        self.assertEqual(saved, [7])
+        self.assertEqual(failures, {})
+        sender.assert_called_once()
+        self.assertIn("적어뒀습니다", sender.call_args.args[2])
+        self.assertNotIn("건너뛰었습니다", sender.call_args.args[2])
+        captures = list((self.vault / "10-inbox" / "jarvis").glob("*.md"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("우유 사기", captures[0].read_text(encoding="utf-8"))
+
+    def test_undelivered_skip_notice_keeps_the_update_for_retry(self):
+        failures = {}
+        for notice in (Mock(return_value=False), Mock(side_effect=OSError("down"))):
+            with self.subTest(notice=notice), \
+                    patch.object(_BRIDGE, "process_update", side_effect=OSError("boom")):
+                results = [
+                    _BRIDGE.process_update_isolated(
+                        self.vault, {}, "12345:secret", {111}, self._update(14, "hi"),
+                        0.0, deque(), set(), notice, failures)
+                    for _ in range(4)]
+            self.assertEqual(results, [False] * 4)
+            self.assertEqual(notice.call_count, 2)
+            self.assertGreaterEqual(failures[14], 3)
+            failures.clear()
+
+        delivered = Mock(return_value=True)
+        with patch.object(_BRIDGE, "process_update", side_effect=OSError("boom")):
+            results = [
+                _BRIDGE.process_update_isolated(
+                    self.vault, {}, "12345:secret", {111}, self._update(14, "hi"),
+                    0.0, deque(), set(), delivered, failures)
+                for _ in range(3)]
+        self.assertEqual(results, [False, False, True])
+        delivered.assert_called_once()
+        self.assertEqual(failures, {})
+        self.assertIn(
+            "3회 연속 실패, 소유자 안내를 못 해 건너뛰지 않고 재시도: update_id=14",
+            self._logged())
+        self.assertIn("오류 안내 전송 실패: OSError", self._logged())
+        self.assertIn("3회 연속 실패로 건너뜀: update_id=14", self._logged())
+
+    def test_success_or_handled_delivery_failure_resets_the_exception_streak(self):
+        failures = {15: 2}
+        for outcome in (False, True):
+            with self.subTest(outcome=outcome), \
+                    patch.object(_BRIDGE, "process_update", return_value=outcome):
+                failures[15] = 2
+                self.assertIs(
+                    _BRIDGE.process_update_isolated(
+                        self.vault, {}, "12345:secret", {111}, self._update(15, "hi"),
+                        0.0, deque(), set(), Mock(return_value=True), failures),
+                    outcome)
+                self.assertEqual(failures, {})
+
     def test_failure_notice_is_never_sent_to_an_unauthorized_chat(self):
         sender = Mock(return_value=True)
+        failures = {}
         with patch.object(_BRIDGE, "process_update", side_effect=OSError("boom")):
-            handled = _BRIDGE.process_update_isolated(
-                self.vault, {}, "12345:secret", {111},
-                self._update(12, "hi", chat_type="group"), 0.0, deque(), set(),
-                sender)
+            handled = [
+                _BRIDGE.process_update_isolated(
+                    self.vault, {}, "12345:secret", {111},
+                    self._update(12, "hi", chat_type="group"), 0.0, deque(), set(),
+                    sender, failures)
+                for _ in range(3)]
 
-        self.assertTrue(handled)
+        self.assertEqual(handled, [False, False, True])
+        self.assertEqual(failures, {})
         sender.assert_not_called()
+
+    def test_user_docs_state_the_same_skip_threshold_as_the_code(self):
+        readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            f"같은 업데이트에서 처리 예외가 {_BRIDGE.UPDATE_MAX_ATTEMPTS}회 연속 나면",
+            readme)
+        self.assertIn("이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다.", readme)
+        # The old wording skipped on the first exception, contradicting the
+        # at-least-once sentence in the same paragraph.
+        self.assertNotIn(
+            "처리 중 예외가 난 업데이트는 같은 오류로 뒤 메시지까지 막지 않도록 "
+            "본문 없이 로그를 남기고 소유자에게 알린 뒤 건너뛴다.", readme)
+        setup = (_ROOT / "commands" / "vault-jarvis-setup.md").read_text(encoding="utf-8")
+        self.assertIn(
+            f"같은 메시지에서 처리 예외가 {_BRIDGE.UPDATE_MAX_ATTEMPTS}회 연속 나면", setup)
+        self.assertNotIn(
+            "처리 중 예외가 난 메시지는 본문 없이 로그를 남기고 소유자에게 알린 뒤 건너뛴다.",
+            setup)
 
     def test_configuration_errors_still_stop_the_daemon(self):
         with patch.object(
@@ -2788,7 +2994,7 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
                 self.assertRaises(_BRIDGE.JarvisConfigError):
             _BRIDGE.process_update_isolated(
                 self.vault, {}, "12345:secret", {111}, self._update(13, "hi"),
-                0.0, deque(), set(), Mock(return_value=True))
+                0.0, deque(), set(), Mock(return_value=True), {})
 
     def test_serve_survives_update_and_scheduled_job_errors(self):
         token = "12345:secret-value"
@@ -2798,8 +3004,11 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
             "butler_interval_hours": 24,
             "qa_hourly_limit": 6,
         }
-        responses = iter([{"ok": True, "result": [
-            self._update(20, "CONTENT-SENTINEL"), self._update(21, "second")]}])
+        # Telegram redelivers unacknowledged updates, so the same batch returns
+        # until update 20 has failed UPDATE_MAX_ATTEMPTS times and is skipped.
+        batch = {"ok": True, "result": [
+            self._update(20, "CONTENT-SENTINEL"), self._update(21, "second")]}
+        responses = iter([batch] * _BRIDGE.UPDATE_MAX_ATTEMPTS)
         handled = []
 
         def poll(_token, _method, **_kwargs):
@@ -2825,11 +3034,12 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
                 patch.object(
                     _BRIDGE, "send_butler_if_due",
                     side_effect=_BRIDGE.subprocess.TimeoutExpired(["git"], 1)), \
-                patch.object(_BRIDGE.time, "sleep"), \
+                patch.object(_BRIDGE.time, "sleep") as sleeper, \
                 self.assertRaises(KeyboardInterrupt):
             _BRIDGE.serve(self.vault, cfg)
 
-        self.assertEqual(handled, [20, 21])
+        self.assertEqual(handled, [20, 20, 20, 21])
+        self.assertEqual([call.args[0] for call in sleeper.call_args_list], [5, 10])
         namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
         self.assertEqual((namespace / "offset").read_text(encoding="utf-8"), "21")
         sender.assert_called_once()
@@ -2839,6 +3049,57 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
         self.assertIn("집사 보고 오류", logged)
         self.assertIn("update_id=20", logged)
         self.assertNotIn("CONTENT-SENTINEL", logged)
+
+    def test_serve_retries_a_transient_capture_error_without_losing_the_capture(self):
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [111],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+            "qa_hourly_limit": 6,
+        }
+        batch = {"ok": True, "result": [self._update(40, "기억해: 우유 사기")]}
+        polled_offsets = []
+        responses = iter([batch, batch])
+
+        def poll(_token, _method, **kwargs):
+            polled_offsets.append(kwargs["offset"])
+            try:
+                return next(responses)
+            except StopIteration:
+                raise KeyboardInterrupt
+
+        real_capture = _BRIDGE.do_capture
+        calls = []
+
+        def locked_once(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise PermissionError("locked by AV")
+            return real_capture(*args, **kwargs)
+
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=poll), \
+                patch.object(_BRIDGE, "do_capture", side_effect=locked_once), \
+                patch.object(_BRIDGE, "tg_send", return_value=True) as sender, \
+                patch.object(
+                    _BRIDGE, "send_due_briefings",
+                    side_effect=lambda *args, **kwargs: args[6]), \
+                patch.object(_BRIDGE, "_butler_due", return_value=False), \
+                patch.object(_BRIDGE.time, "sleep") as sleeper, \
+                self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        self.assertEqual(polled_offsets, [1, 1, 41])
+        self.assertEqual([call.args[0] for call in sleeper.call_args_list], [5])
+        namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
+        self.assertEqual((namespace / "offset").read_text(encoding="utf-8"), "40")
+        sender.assert_called_once()
+        self.assertIn("적어뒀습니다", sender.call_args.args[2])
+        captures = list((self.vault / "10-inbox" / "jarvis").glob("*"))
+        self.assertEqual(len(captures), 1)
+        self.assertIn("우유 사기", captures[0].read_text(encoding="utf-8"))
+        self.assertIn("재시도 1/3: update_id=40", self._logged())
 
     def test_offset_write_failure_mid_batch_keeps_committed_progress(self):
         token = "12345:secret-value"

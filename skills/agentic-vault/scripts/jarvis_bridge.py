@@ -32,6 +32,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 import urllib.error
@@ -72,6 +73,11 @@ INBOUND_RETRY_BASE_SEC = 5.0
 INBOUND_RETRY_CAP_SEC = 60.0
 SCHEDULED_RETRY_BASE_SEC = 60.0
 SCHEDULED_RETRY_CAP_SEC = 3600.0
+# 같은 업데이트에서 예외가 연속으로 몇 번 나야 건너뛰는지. 그 전까지는 수신 백오프로
+# 다시 시도해 일시적인 I/O 오류(백신·동기화 도구의 파일 잠금 등)로 캡처를 잃지 않는다.
+UPDATE_MAX_ATTEMPTS = 3
+# 시간 초과로 claude를 끝낸 뒤 남은 출력을 거두는 데 기다리는 최대 시간(초).
+CHILD_KILL_GRACE_SEC = 5.0
 
 
 class JarvisConfigError(ValueError):
@@ -666,6 +672,69 @@ def build_claude_command(executable: str, cfg: dict) -> list[str]:
     return command
 
 
+def _feed_stdin(pipe, data: bytes) -> None:
+    try:
+        pipe.write(data)
+    except (OSError, ValueError):
+        pass  # the child exited or closed stdin before reading everything
+    finally:
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            pass
+
+
+def _decode_output(data: bytes | None) -> str:
+    # Same result as text=True with encoding="utf-8", errors="replace" and
+    # universal newlines, which subprocess.run used to apply.
+    text = (data or b"").decode("utf-8", errors="replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def run_with_stdin(
+        cmd: list[str], *, input: str, cwd: str, timeout: float,
+        env: dict[str, str], startupinfo=None, creationflags: int = 0,
+        ) -> subprocess.CompletedProcess:
+    """Run ``cmd`` with ``input`` on stdin; ``timeout`` bounds the whole run.
+
+    ``subprocess.run(input=...)`` writes stdin on Windows before its timeout
+    starts, with no timeout of its own. A child that stops before reading a
+    prompt larger than the pipe buffer (about 4 KB there) would then hang the
+    daemon forever. Here a daemon thread writes the prompt, so the timeout
+    always applies and the child is killed when it expires. The prompt is
+    written as UTF-8 bytes, so Windows text mode does not turn ``\\n`` into
+    ``\\r\\n``. Raises ``subprocess.TimeoutExpired`` like ``subprocess.run``.
+    """
+    data = input.encode("utf-8")
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, cwd=cwd, env=env, startupinfo=startupinfo,
+        creationflags=creationflags)
+    # communicate() must neither write the prompt again nor close stdin early.
+    stdin, proc.stdin = proc.stdin, None
+    writer = threading.Thread(
+        target=_feed_stdin, args=(stdin, data), name="jarvis-claude-stdin",
+        daemon=True)
+    writer.start()
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except BaseException:
+        proc.kill()
+        try:
+            proc.communicate(timeout=CHILD_KILL_GRACE_SEC)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            # A grandchild may still hold the output pipes. Reap the killed
+            # child and move on; the pipe readers are daemon threads.
+            try:
+                proc.wait(timeout=CHILD_KILL_GRACE_SEC)
+            except subprocess.TimeoutExpired:
+                pass
+        raise
+    writer.join(timeout=CHILD_KILL_GRACE_SEC)
+    return subprocess.CompletedProcess(
+        cmd, proc.returncode, _decode_output(stdout), _decode_output(stderr))
+
+
 def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
     """Run one tool-restricted generation and preserve success separately from text.
 
@@ -686,9 +755,8 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
     try:
-        # 텍스트 모드 stdin이라 Windows에서는 프롬프트의 \n이 \r\n으로 바뀌어 전달된다(내용은 동일).
-        r = subprocess.run(cmd, input=prompt, cwd=str(vault), capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
+        # qa_timeout_sec는 프롬프트 쓰기까지 포함한 전체 실행에 걸린다(run_with_stdin 참조).
+        r = run_with_stdin(cmd, input=prompt, cwd=str(vault),
                            timeout=cfg["qa_timeout_sec"], env=child_process_env(),
                            startupinfo=startupinfo,
                            creationflags=(subprocess.CREATE_NO_WINDOW
@@ -1095,43 +1163,73 @@ def _error_label(error: BaseException) -> str:
 
 def _notify_skipped_update(
         token: str, whitelist: set[int], update: object,
-        sender: Callable[[str, int, str], bool]) -> None:
+        sender: Callable[[str, int, str], bool]) -> bool:
+    """Tell the owner that an update is being skipped.
+
+    Returns True when the notice was delivered or no notice is owed (the
+    sender is not an authorized private chat), and False when it could not be
+    delivered, so the caller keeps the update instead of dropping it silently.
+    """
     try:
         message = (update.get("message") if isinstance(update, dict) else None) or {}
         if not isinstance(message, dict) or not is_authorized_private_message(
                 message, whitelist):
-            return
-        sender(token, message["chat"]["id"],
-               "⚠️ 이 메시지를 처리하다 오류가 나서 건너뛰었습니다. "
-               "브리지 로그를 확인한 뒤 다시 보내 주세요.")
+            return True
+        return bool(sender(
+            token, message["chat"]["id"],
+            "⚠️ 이 메시지를 처리하다 오류가 반복돼 건너뛰었습니다. "
+            "브리지 로그를 확인한 뒤 다시 보내 주세요."))
     except Exception as error:  # 안내 실패가 데몬을 멈추면 안 된다
         log(f"오류 안내 전송 실패: {_error_label(error)}")
+        return False
 
 
 def process_update_isolated(
         vault: Path, cfg: dict, token: str, whitelist: set[int], update: dict,
         started: float, qa_times: deque[float], qa_attempt_ids: set[int],
-        sender: Callable[[str, int, str], bool]) -> bool:
+        sender: Callable[[str, int, str], bool], failures: dict[int, int],
+        max_attempts: int = UPDATE_MAX_ATTEMPTS) -> bool:
     """Contain one update's unexpected failure so it cannot stop the daemon.
 
-    A handled delivery failure still returns False, so the same update is retried.
-    An exception would recur on every retry and block all later messages (a
-    poison update), so the update is logged without content, the owner gets a
-    best-effort notice, and processing moves on. Configuration errors still stop
-    the daemon.
+    A handled delivery failure returns False, so the same update is retried.
+    An exception also returns False (retry after the inbound backoff) until the
+    same update has raised ``max_attempts`` times in a row, counted in
+    ``failures`` by ``update_id`` (one dict for the daemon's lifetime; a fresh
+    dict per call would never skip): a transient error such as a locked capture
+    file must not lose the message. Only an update that keeps raising (a poison
+    update that would block all later messages) is skipped: it is logged without
+    content, the owner is told, and only a delivered notice (or none owed) lets
+    processing move on. Configuration errors still stop the daemon.
     """
+    update_id = update.get("update_id") if isinstance(update, dict) else None
+    key = update_id if type(update_id) is int else None
     try:
-        return process_update(
+        handled = process_update(
             vault, cfg, token, whitelist, update, started, qa_times,
             qa_attempt_ids, sender)
     except JarvisConfigError:
         raise
     except Exception as error:
-        update_id = update.get("update_id") if isinstance(update, dict) else None
-        label = update_id if type(update_id) is int else "?"
-        log(f"업데이트 처리 오류 — 건너뜀: update_id={label} {_error_label(error)}")
-        _notify_skipped_update(token, whitelist, update, sender)
+        label = key if key is not None else "?"
+        # An update without an integer id cannot be tracked across retries.
+        attempts = failures.get(key, 0) + 1 if key is not None else max_attempts
+        if attempts < max_attempts:
+            failures[key] = attempts
+            log(f"업데이트 처리 오류 — 재시도 {attempts}/{max_attempts}: "
+                f"update_id={label} {_error_label(error)}")
+            return False
+        if not _notify_skipped_update(token, whitelist, update, sender):
+            if key is not None:
+                failures[key] = attempts
+            log(f"업데이트 처리 오류 — {attempts}회 연속 실패, 소유자 안내를 못 해 "
+                f"건너뛰지 않고 재시도: update_id={label} {_error_label(error)}")
+            return False
+        failures.pop(key, None)
+        log(f"업데이트 처리 오류 — {attempts}회 연속 실패로 건너뜀: "
+            f"update_id={label} {_error_label(error)}")
         return True
+    failures.pop(key, None)
+    return handled
 
 
 def process_update_batch(
@@ -1301,6 +1399,8 @@ def serve(vault: Path, cfg: dict) -> None:
     started = time.time()
     qa_times: deque[float] = deque()
     qa_attempt_ids: set[int] = set()
+    # update_id → 연속 예외 횟수. 확정(commit)되거나 건너뛰면 지운다.
+    update_failures: dict[int, int] = {}
     state_dir = state_dir_for(vault, token, STATE_ROOT)
     migrate_legacy_state(STATE_ROOT, state_dir, state_dir.name)
     offset_file = state_dir / "offset"
@@ -1323,6 +1423,13 @@ def serve(vault: Path, cfg: dict) -> None:
         nonlocal offset
         atomic_write_text(offset_file, str(committed))
         offset = committed
+
+    def forget_update(update: dict) -> None:
+        # 확정된 업데이트의 질의 한도 표시와 연속 예외 횟수를 지운다. Telegram이
+        # 더 이상 보내지 않는 옛 업데이트의 횟수도 함께 지워 사전이 자라지 않게 한다.
+        qa_attempt_ids.discard(update["update_id"])
+        for stale in [key for key in update_failures if key <= update["update_id"]]:
+            del update_failures[stale]
 
     while True:
         # --- 스케줄 ---
@@ -1350,9 +1457,8 @@ def serve(vault: Path, cfg: dict) -> None:
                 resp.get("result", []), offset,
                 lambda update: process_update_isolated(
                     vault, cfg, token, whitelist, update, started, qa_times,
-                    qa_attempt_ids, tg_send),
-                save_offset,
-                lambda update: qa_attempt_ids.discard(update["update_id"]))
+                    qa_attempt_ids, tg_send, update_failures),
+                save_offset, forget_update)
         except JarvisConfigError:
             raise
         except Exception as error:

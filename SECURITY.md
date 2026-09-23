@@ -71,8 +71,28 @@ them being bypassed in a way the documentation does not describe is still welcom
   zones and `.env`. This is a Claude CLI tool restriction, not an operating-system
   boundary. A steered session can still read what those tools and your Claude
   settings allow and put it in the reply to the whitelisted user. Claude Code hooks
-  that you configured yourself are not covered by this restriction. Protect
-  sensitive files with file permissions or a sandbox.
+  are not covered by this restriction (see the next two items). Protect sensitive
+  files with file permissions or a sandbox.
+- **Read, Grep and Glob are not confined to the vault.** The bridge pre-approves
+  the three tools with `--allowedTools Read,Grep,Glob`, which has no path
+  condition. A steered session can therefore read any file that the bridge's
+  operating-system user can read, such as `~/.ssh`, `~/.vault-jarvis` or other
+  projects, unless a Read deny rule in your Claude settings blocks it. The deny
+  zones in the prompt are policy only. If that matters, run the bridge as an
+  operating-system user that cannot read files outside the vault, or in a sandbox.
+  This follows from the Claude Code permission model; it was not confirmed by
+  running the real CLI.
+- **The vault's Claude settings and hooks load without a trust prompt.** Sessions
+  start in the vault directory, and `claude -p` skips the workspace trust dialog.
+  The vault's project and local settings (`.claude/settings.json`,
+  `.claude/settings.local.json`), including their hooks, therefore load on every
+  Q&A and every scheduled briefing, with no one present to approve them. A hook
+  added by anyone who can write to the vault (another agent, a sync partner or a
+  shared-folder member, not only you) runs as the bridge's operating-system user.
+  Treat write access to the vault's `.claude/` folder as permission to run code.
+  The bridge does not pass `--setting-sources` or `--restricted`, because both
+  would also drop the deny-zone Read rules that `/vault-init` offers to merge
+  into the vault's `.claude/settings.json`.
 - **Deny zones are policy, not permissions.** Deny zones are enforced by the plugin's
   own scripts, by prompts and by any Read deny rules you install in Claude settings.
   They do not change file-system permissions.
@@ -82,9 +102,27 @@ them being bypassed in a way the documentation does not describe is still welcom
 - **Telegram access equals account access.** Anyone who controls a whitelisted
   Telegram account (for example a stolen phone or web session) can capture to the
   inbox and ask read-only questions.
-- **The outbound secret filter is pattern-based.** It blocks common credential
-  formats before a Jev request, but it cannot recognize every secret. Send only the
-  minimal, approved text.
+- **The outbound secret filter is pattern-based.** Before a Jev request it rejects
+  text that matches a known credential shape. Text is checked as written and again
+  after NFKC normalization with invisible format characters (such as zero-width
+  spaces) removed, so full-width or zero-width disguises of the shapes below are
+  caught too.
+  - Caught: `sk-`/`sk_` keys, GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`,
+    `github_pat_`), AWS access key IDs (`AKIA…`), Jev/TypeSafe keys, JWTs, PEM
+    private-key headers, Telegram bot tokens, Slack tokens (`xoxb-` and the other
+    `xox?-` forms, `xapp-`) and webhook URLs, Google API keys (`AIza…`),
+    credentials in URLs (`scheme://user:password@host`), `Authorization: Bearer`
+    or `Basic` values, and a value of four or more characters after a label such as
+    `password`, `passwd`, `secret`, `api_key`, `access_token`, `refresh_token` or
+    `client_secret`, or after the Korean labels `비밀번호`, `비번`, `패스워드`,
+    `암호`, `토큰`, `인증키`, `액세스 키`, `시크릿` and `API 키` (Korean labels only
+    when the value is ASCII).
+  - Not caught: passwords or keys with no label and no known prefix, other
+    vendors' formats, values after other labels or in other languages, secrets
+    split across lines or encoded (base64, hex), and anything inside images or
+    attachments.
+
+  Send only the minimal, approved text.
 - **Windows requires a native `claude.exe` for Jarvis.** Since 0.15.1 the bridge
   refuses `.cmd` and `.bat` launchers because `cmd.exe` re-parses their arguments.
 
@@ -96,3 +134,11 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 범위: Jarvis 브리지, SessionStart·git 훅, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
 - Jarvis의 읽기 전용은 Claude CLI 도구 제한과 프롬프트 정책이며 OS 경계가 아니다.
   프롬프트 인젝션은 완화할 뿐 막지 못한다.
+- Read·Grep·Glob은 볼트로 한정되지 않는다. 경로 조건 없이 사전 승인되므로 브리지를 실행한
+  OS 사용자가 읽을 수 있는 파일(`~/.ssh`, `~/.vault-jarvis` 등)은 Claude 설정의 Read 거부
+  규칙이 없으면 읽힐 수 있다.
+- `claude -p`는 작업 공간 신뢰 확인을 건너뛴다. 볼트의 project·local Claude 설정과 훅이
+  Q&A·예약 브리핑마다 사람 없이 로드되므로, 볼트를 쓸 수 있는 누구든(다른 에이전트·동기화
+  상대 포함) 넣은 훅이 브리지 사용자 권한으로 실행된다.
+- Jev로 보내기 전 비밀 필터는 패턴 기반이다. 잡는 형식과 못 잡는 형식은 위 영어 목록에 있다.
+  라벨·알려진 접두사가 없는 비밀, 여러 줄로 나뉘거나 인코딩된 비밀은 통과한다.

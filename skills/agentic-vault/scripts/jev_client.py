@@ -11,6 +11,7 @@ import json
 import math
 import re
 import time
+import unicodedata
 
 
 MODEL = "jev-1.13.0"
@@ -35,18 +36,49 @@ SENSITIVE = re.compile(
     # Earlier vault_judge form: also matches "bearer" without a space and
     # values that contain quotes, commas or semicolons.
     r"\b(?:authorization\s*:\s*bearer|api[_-]?key\s*[:=]|"
-    r"password\s*[:=]|secret\s*[:=])\s*[^\s]{8,}", re.IGNORECASE)
+    r"password\s*[:=]|secret\s*[:=])\s*[^\s]{8,}|"
+    # Added in 0.15.1 after review: Telegram bot tokens (the bridge's own
+    # credential shape), Slack tokens and webhooks, Google API keys,
+    # credentials embedded in URLs, and Korean labels followed by an ASCII value.
+    r"(?<![0-9])[0-9]{5,12}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])|"
+    r"\bxox[abposr]-[A-Za-z0-9-]{10,}|\bxapp-[0-9]-[A-Za-z0-9-]{10,}|"
+    r"hooks\.slack\.com/services/[A-Za-z0-9_/-]{20,}|"
+    r"\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])|"
+    r"\b[a-z][a-z0-9+.-]*://[^\s:/?#@]*:[^\s/?#@]+@|"
+    r"(?:비밀\s?번호|비번|패스워드|암호|토큰|인증\s?키|액세스\s?키|시크릿|api\s?키)"
+    r"\s*[\"']?\s*[:=]\s*[\"']?(?:(?![\"',;])[\x21-\x7e]){4,}", re.IGNORECASE)
+
+
+def _normalized(text):
+    """NFKC (full-width colon to ``:``, full-width ``sk`` to ``sk``) without
+    invisible format characters (Unicode category Cf, such as zero-width
+    spaces and joiners) that can split a keyword without changing how it looks.
+    """
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(char for char in folded if unicodedata.category(char) != "Cf")
+
+
+def _matches_sensitive(text):
+    # The raw text is checked too, so normalization can only add matches.
+    # ASCII text is already NFKC and contains no format characters.
+    if SENSITIVE.search(text):
+        return True
+    if text.isascii():
+        return False
+    normalized = _normalized(text)
+    return normalized != text and SENSITIVE.search(normalized) is not None
 
 
 def contains_sensitive(value, literals=()):
     """Return True when any string in a JSON-like value (object keys included)
-    matches SENSITIVE or contains one of the non-empty literal strings."""
+    matches SENSITIVE, before or after NFKC normalization and removal of
+    invisible format characters, or contains one of the non-empty literal strings."""
     literals = tuple(literal for literal in literals if isinstance(literal, str) and literal)
     pending = [value]
     while pending:
         item = pending.pop()
         if isinstance(item, str):
-            if SENSITIVE.search(item) or any(literal in item for literal in literals):
+            if _matches_sensitive(item) or any(literal in item for literal in literals):
                 return True
         elif isinstance(item, dict):
             pending.extend(item.keys())
