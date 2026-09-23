@@ -2427,6 +2427,7 @@ _FIXED_ARGV_HEAD = [
     "--tools", "Read,Grep,Glob",
     "--allowedTools", "Read,Grep,Glob",
     "--strict-mcp-config",
+    "--settings", '{"disableAllHooks":true}',
     "--append-system-prompt",
 ]
 
@@ -2475,9 +2476,9 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         self.assertTrue(result.ok)
         command = runner.call_args.args[0]
         self.assertEqual(command[0], os.path.abspath(_FAKE_CLAUDE))
-        self.assertEqual(command[1:8], _FIXED_ARGV_HEAD)
-        self.assertEqual(len(command), 9)
-        guard = command[8]
+        self.assertEqual(command[1:len(_FIXED_ARGV_HEAD) + 1], _FIXED_ARGV_HEAD)
+        self.assertEqual(len(command), len(_FIXED_ARGV_HEAD) + 2)
+        guard = command[-1]
         self.assertTrue(guard.startswith("너는"))
         self.assertIn("90-assets, 10-inbox/_processed", guard)
         for forbidden in (
@@ -2498,8 +2499,8 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         self.assertIn('abc123 "R&D" & echo x', prompt)
         self.assertIn("\n", prompt)
         command = runner.call_args.args[0]
-        self.assertEqual(command[1:8], _FIXED_ARGV_HEAD)
-        self.assertEqual(len(command), 9)
+        self.assertEqual(command[1:len(_FIXED_ARGV_HEAD) + 1], _FIXED_ARGV_HEAD)
+        self.assertEqual(len(command), len(_FIXED_ARGV_HEAD) + 2)
         for argument in command:
             self.assertNotIn("정기 브리핑", argument)
 
@@ -2701,8 +2702,9 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
     def test_full_argv_is_pinned_and_does_not_narrow_setting_sources(self):
         # SECURITY.md documents what this argv leaves open: Read/Grep/Glob are
         # pre-approved for any path the OS user can read, and -p skips the
-        # workspace trust dialog, so the vault's project/local settings and
-        # hooks load. --setting-sources/--restricted are deliberately absent:
+        # workspace trust dialog, so the vault's project/local settings load.
+        # Hooks are switched off with --settings '{"disableAllHooks":true}'.
+        # --setting-sources/--restricted are deliberately absent:
         # they would also drop the deny-zone Read rules that /vault-init
         # offers to merge into the vault's .claude/settings.json.
         executable = os.path.abspath(_FAKE_CLAUDE)
@@ -2711,7 +2713,8 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
         self.assertEqual(
             command,
             [executable, *_FIXED_ARGV_HEAD, _BRIDGE._claude_guard(cfg)])
-        for absent in ("--setting-sources", "--restricted", "--settings",
+        self.assertEqual(command.count("--settings"), 1)
+        for absent in ("--setting-sources", "--restricted",
                        "--add-dir", "--permission-mode", "--mcp-config"):
             self.assertNotIn(absent, command)
 
@@ -2766,6 +2769,14 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                 }}), encoding="utf-8")
                 with self.assertRaises(_BRIDGE.JarvisConfigError):
                     _BRIDGE.load_jarvis_config(self.vault)
+
+    def test_sessions_disable_every_hook(self):
+        command = _BRIDGE.build_claude_command(str(self.root / "claude.exe"), dict(_BRIDGE.DEFAULTS, **{
+            "_deny_zones": [], "_language": "ko", "_hot_note": "00-meta/hot.md"}))
+        self.assertIn("--settings", command)
+        settings = json.loads(command[command.index("--settings") + 1])
+        self.assertEqual(settings, {"disableAllHooks": True})
+        self.assertLess(command.index("--settings"), command.index("--append-system-prompt"))
 
     def test_docs_describe_tool_restriction_instead_of_absolute_guarantees(self):
         contracts = (

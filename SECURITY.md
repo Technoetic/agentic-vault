@@ -70,9 +70,12 @@ them being bypassed in a way the documentation does not describe is still welcom
   servers (`--strict-mcp-config`) and receive a prompt policy that forbids deny
   zones and `.env`. This is a Claude CLI tool restriction, not an operating-system
   boundary. A steered session can still read what those tools and your Claude
-  settings allow and put it in the reply to the whitelisted user. Claude Code hooks
-  are not covered by this restriction (see the next two items). Protect sensitive
-  files with file permissions or a sandbox.
+  settings allow and put it in the reply to the whitelisted user. Hooks are not
+  tools, so the tool restriction does not stop them; the sessions therefore also
+  pass `--settings '{"disableAllHooks":true}'`, which turns off user, plugin and
+  vault hooks. With Claude Code 2.1.252 a user-scope plugin Stop hook wrote five
+  files into the session directory without this setting and none with it. Protect
+  sensitive files with file permissions or a sandbox.
 - **Read, Grep and Glob are not confined to the vault.** The bridge pre-approves
   the three tools with `--allowedTools Read,Grep,Glob`, which has no path
   condition. A steered session can therefore read any file that the bridge's
@@ -82,14 +85,15 @@ them being bypassed in a way the documentation does not describe is still welcom
   operating-system user that cannot read files outside the vault, or in a sandbox.
   This follows from the Claude Code permission model; it was not confirmed by
   running the real CLI.
-- **The vault's Claude settings and hooks load without a trust prompt.** Sessions
+- **The vault's Claude settings load without a trust prompt.** Sessions
   start in the vault directory, and `claude -p` skips the workspace trust dialog.
   The vault's project and local settings (`.claude/settings.json`,
-  `.claude/settings.local.json`), including their hooks, therefore load on every
-  Q&A and every scheduled briefing, with no one present to approve them. A hook
-  added by anyone who can write to the vault (another agent, a sync partner or a
-  shared-folder member, not only you) runs as the bridge's operating-system user.
-  Treat write access to the vault's `.claude/` folder as permission to run code.
+  `.claude/settings.local.json`) therefore load on every Q&A and every scheduled
+  briefing, with no one present to approve them. Hooks in them do not run because
+  of `disableAllHooks`, but other settings still apply, so anyone who can write to
+  the vault's `.claude/` folder (another agent, a sync partner or a shared-folder
+  member, not only you) can still change how these sessions behave. Treat that
+  write access as sensitive.
   The bridge does not pass `--setting-sources` or `--restricted`, because both
   would also drop the deny-zone Read rules that `/vault-init` offers to merge
   into the vault's `.claude/settings.json`.

@@ -8,6 +8,7 @@
 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
 LLM 호출은 전부 `claude -p` 세션이다. 프롬프트는 argv가 아니라 표준 입력으로 넘기고,
 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다.
+`--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트의 훅도 끈다.
 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다.
 Windows에서는 cmd.exe가 인자를 다시 해석하는 `.cmd`·`.bat` 런처를 실행하지 않는다.
 
@@ -63,6 +64,10 @@ DEFAULTS = {
 # claude CLI에 허용하는 내장 도구. --tools가 가용 도구 자체를 줄이고,
 # --allowedTools는 같은 도구를 묻지 않고 승인한다.
 CLAUDE_READ_ONLY_TOOLS = "Read,Grep,Glob"
+# Hooks are not tools: --tools does not stop user, plugin or vault hooks, and a
+# plugin Stop hook was observed writing files into the vault from a -p session
+# (Claude Code 2.1.252). disableAllHooks turns every hook off for these sessions.
+CLAUDE_SESSION_SETTINGS = '{"disableAllHooks":true}'
 # cmd.exe가 명령줄을 다시 파싱하는 Windows 배치 런처(npm 설치의 claude.cmd 등).
 _WINDOWS_BATCH_SUFFIXES = frozenset({".bat", ".cmd"})
 # argv 요소에 들어가면 안 되는 C0·DEL·C1 제어문자(줄바꿈·NUL 포함).
@@ -662,6 +667,7 @@ def build_claude_command(executable: str, cfg: dict) -> list[str]:
         "--tools", CLAUDE_READ_ONLY_TOOLS,
         "--allowedTools", CLAUDE_READ_ONLY_TOOLS,
         "--strict-mcp-config",
+        "--settings", CLAUDE_SESSION_SETTINGS,
         "--append-system-prompt", _claude_guard(cfg),
     ]
     if any(_contains_control_character(argument) for argument in command):
