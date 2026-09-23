@@ -6,7 +6,10 @@
 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
-LLM 호출은 전부 읽기 전용 `claude -p --allowedTools Read Grep Glob` 세션이다.
+LLM 호출은 전부 `claude -p` 세션이다. 프롬프트는 argv가 아니라 표준 입력으로 넘기고,
+`--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다.
+이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다.
+Windows에서는 cmd.exe가 인자를 다시 해석하는 `.cmd`·`.bat` 런처를 실행하지 않는다.
 
 사용:
   python jarvis_bridge.py --vault D:/NS            # 상시 실행
@@ -30,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -55,9 +59,60 @@ DEFAULTS = {
     "claude_cmd": "claude",
 }
 
+# claude CLI에 허용하는 내장 도구. --tools가 가용 도구 자체를 줄이고,
+# --allowedTools는 같은 도구를 묻지 않고 승인한다.
+CLAUDE_READ_ONLY_TOOLS = "Read,Grep,Glob"
+# cmd.exe가 명령줄을 다시 파싱하는 Windows 배치 런처(npm 설치의 claude.cmd 등).
+_WINDOWS_BATCH_SUFFIXES = frozenset({".bat", ".cmd"})
+# argv 요소에 들어가면 안 되는 C0·DEL·C1 제어문자(줄바꿈·NUL 포함).
+_ARGV_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+# 실패한 작업의 재시도 간격(초): 첫 대기는 base, 연속 실패마다 2배, cap에서 멈춘다.
+INBOUND_RETRY_BASE_SEC = 5.0
+INBOUND_RETRY_CAP_SEC = 60.0
+SCHEDULED_RETRY_BASE_SEC = 60.0
+SCHEDULED_RETRY_CAP_SEC = 3600.0
+
 
 class JarvisConfigError(ValueError):
     pass
+
+
+class ClaudeLaunchError(RuntimeError):
+    """A refused claude launch. ``str()`` is the user-facing diagnostic."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class RetryBackoff:
+    """Exponential delay between retries of one failing job, bounded by ``cap``."""
+
+    def __init__(
+            self, base: float, cap: float,
+            clock: Callable[[], float] | None = None,
+            ) -> None:
+        if not 0 < base <= cap:
+            raise ValueError("backoff requires 0 < base <= cap")
+        self.base = base
+        self.cap = cap
+        self.clock = clock if clock is not None else time.monotonic
+        self.failures = 0
+        self.not_before: float | None = None
+
+    def ready(self) -> bool:
+        return self.not_before is None or self.clock() >= self.not_before
+
+    def record_failure(self) -> float:
+        self.failures += 1
+        delay = min(self.cap, self.base * 2 ** min(self.failures - 1, 32))
+        self.not_before = self.clock() + delay
+        return delay
+
+    def record_success(self) -> None:
+        self.failures = 0
+        self.not_before = None
 
 
 class TelegramAPIError(RuntimeError):
@@ -413,6 +468,8 @@ def load_jarvis_config(vault: Path) -> dict | None:
     claude_cmd = cfg["claude_cmd"]
     if not isinstance(claude_cmd, str) or not claude_cmd.strip():
         raise JarvisConfigError("jarvis.claude_cmd must be a non-empty string")
+    if _ARGV_CONTROL_CHARACTERS.search(claude_cmd):
+        raise JarvisConfigError("jarvis.claude_cmd must not contain control characters")
     # Q&A 가드에 필요한 볼트 수준 키를 함께 전달
     cfg["_deny_zones"] = vault_cfg.get("deny_zones", [])
     cfg["_language"] = vault_cfg.get("language", "ko")
@@ -509,14 +566,77 @@ def do_capture(
     return name
 
 
-def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
-    """Run one read-only generation and preserve success separately from text."""
-    exe = shutil.which(cfg["claude_cmd"])
-    if not exe:
-        return GenerationResult(
-            False, "⚠️ claude CLI를 찾을 수 없습니다. PATH를 확인하세요.")
-    deny = ", ".join(cfg["_deny_zones"]) or "(없음)"
-    guard = (
+def _contains_control_character(value: str) -> bool:
+    return _ARGV_CONTROL_CHARACTERS.search(value) is not None
+
+
+def _found_only_in_current_directory(executable: str) -> bool:
+    """True when a bare-name lookup hit the implicit current-directory search.
+
+    Windows ``shutil.which`` may search the current directory before PATH. A
+    ``claude`` placed in the working directory (for example the vault root) must
+    not win over the one on PATH unless that directory is an explicit PATH entry.
+    """
+    current = os.path.normcase(os.path.abspath(os.getcwd()))
+    if os.path.normcase(os.path.dirname(executable)) != current:
+        return False
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if os.path.normcase(os.path.abspath(entry or os.curdir)) == current:
+            return False
+    return True
+
+
+def resolve_claude_executable(claude_cmd: object) -> str:
+    """Return an absolute claude executable, refusing shell-interpreted launchers.
+
+    On Windows, CreateProcess hands a ``.cmd``/``.bat`` target to cmd.exe, which
+    re-parses quotes, ``&``, ``|`` and ``>`` and cuts the command line at the first
+    line feed; list arguments cannot prevent that. There is no reliable rule for
+    locating the native binary behind an npm launcher, so it is refused instead of
+    guessed. Only a native ``.exe`` runs on Windows.
+    """
+    if (not isinstance(claude_cmd, str) or not claude_cmd.strip()
+            or _contains_control_character(claude_cmd)):
+        raise ClaudeLaunchError(
+            "invalid-command",
+            "⚠️ jarvis.claude_cmd 설정이 올바르지 않아 claude를 실행하지 않습니다.")
+    found = shutil.which(claude_cmd)
+    if not found:
+        raise ClaudeLaunchError(
+            "not-found", "⚠️ claude CLI를 찾을 수 없습니다. PATH를 확인하세요.")
+    executable = os.path.abspath(found)
+    if sys.platform == "win32":
+        suffix = PureWindowsPath(executable).suffix.lower()
+        if suffix in _WINDOWS_BATCH_SUFFIXES:
+            raise ClaudeLaunchError(
+                "batch-launcher",
+                "⚠️ claude가 Windows 배치 런처(.cmd/.bat, npm 설치 방식)로 잡혀 "
+                "실행하지 않습니다. cmd.exe가 메시지를 명령으로 다시 해석할 수 있기 "
+                "때문입니다. 네이티브 claude.exe를 설치하거나 vault-config.json의 "
+                "jarvis.claude_cmd에 claude.exe 전체 경로를 지정하세요.")
+        if suffix != ".exe":
+            raise ClaudeLaunchError(
+                "not-native-executable",
+                "⚠️ Windows에서는 네이티브 claude.exe만 실행합니다. "
+                "vault-config.json의 jarvis.claude_cmd에 claude.exe 전체 경로를 지정하세요.")
+    if (os.path.basename(claude_cmd) == claude_cmd
+            and _found_only_in_current_directory(executable)):
+        raise ClaudeLaunchError(
+            "current-directory",
+            "⚠️ 현재 폴더에 있는 claude 실행 파일은 실행하지 않습니다. "
+            "PATH의 claude를 쓰거나 jarvis.claude_cmd에 전체 경로를 지정하세요.")
+    return executable
+
+
+def _claude_guard(cfg: dict) -> str:
+    deny_zones = cfg["_deny_zones"]
+    if not isinstance(deny_zones, list) or not all(
+            isinstance(zone, str) for zone in deny_zones):
+        raise ClaudeLaunchError(
+            "invalid-guard",
+            "⚠️ deny_zones 설정 형식이 잘못돼 claude를 실행하지 않습니다.")
+    deny = ", ".join(deny_zones) or "(없음)"
+    return (
         "너는 이 옵시디언 볼트의 개인 비서다. 규칙: "
         f"(1) 탐색 순서 {cfg['_hot_note']} → 00-meta/index.md → Grep. "
         f"(2) 다음 경로는 절대 읽지 마라: {deny}, **/.env, 90-assets/. "
@@ -525,17 +645,48 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
         "(5) 출력은 Telegram 메시지다 — 마크다운 표를 절대 쓰지 마라(렌더링 불가). "
         "표가 필요한 내용은 항목별 불릿(·)으로 풀고, 제목은 짧은 굵은 줄로, 전체를 모바일 가독 길이로."
     )
-    cmd = [exe, "-p", prompt,
-           "--allowedTools", "Read", "Grep", "Glob",
-           "--append-system-prompt", guard]
+
+
+def build_claude_command(executable: str, cfg: dict) -> list[str]:
+    """Build the fixed argv. The prompt is never part of it (it goes to stdin)."""
+    command = [
+        executable, "-p",
+        "--tools", CLAUDE_READ_ONLY_TOOLS,
+        "--allowedTools", CLAUDE_READ_ONLY_TOOLS,
+        "--strict-mcp-config",
+        "--append-system-prompt", _claude_guard(cfg),
+    ]
+    if any(_contains_control_character(argument) for argument in command):
+        raise ClaudeLaunchError(
+            "control-character",
+            "⚠️ claude 실행 인자에 줄바꿈 같은 제어문자가 있어 실행하지 않습니다. "
+            "vault-config.json의 deny_zones·hot_note·language·jarvis.claude_cmd를 확인하세요.")
+    return command
+
+
+def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
+    """Run one tool-restricted generation and preserve success separately from text.
+
+    The prompt (Telegram text or briefing request) is passed on stdin only, so it
+    can never be parsed as a CLI option or reach a shell.
+    """
+    if not prompt.strip():
+        return GenerationResult(False, "(빈 질문 — 질문 내용을 보내 주세요)")
+    try:
+        cmd = build_claude_command(
+            resolve_claude_executable(cfg["claude_cmd"]), cfg)
+    except ClaudeLaunchError as error:
+        log(f"claude 실행 거부: {error.reason}")
+        return GenerationResult(False, str(error))
     startupinfo = None
     if sys.platform == "win32":
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
     try:
-        r = subprocess.run(cmd, cwd=str(vault), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace",
+        # 텍스트 모드 stdin이라 Windows에서는 프롬프트의 \n이 \r\n으로 바뀌어 전달된다(내용은 동일).
+        r = subprocess.run(cmd, input=prompt, cwd=str(vault), capture_output=True,
+                           text=True, encoding="utf-8", errors="replace",
                            timeout=cfg["qa_timeout_sec"], env=child_process_env(),
                            startupinfo=startupinfo,
                            creationflags=(subprocess.CREATE_NO_WINDOW
@@ -543,6 +694,10 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
     except subprocess.TimeoutExpired:
         return GenerationResult(
             False, "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요.")
+    except OSError as error:
+        log(f"claude 실행 실패({type(error).__name__})")
+        return GenerationResult(
+            False, "⚠️ claude CLI를 실행하지 못했습니다. 로그를 확인하세요.")
     if r.returncode != 0:
         log(f"claude 실패 rc={r.returncode}")
         return GenerationResult(False, "⚠️ 응답 생성에 실패했습니다. 로그를 확인하세요.")
@@ -730,12 +885,17 @@ def do_butler(vault: Path, cfg: dict) -> str:
     lines = ["🧹 집사 보고"]
     hc = Path(__file__).parent / "vault_healthcheck.py"
     if hc.is_file():
-        r = subprocess.run([sys.executable, str(hc), "--vault", str(vault)],
-                           cwd=str(vault), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=300,
-                           env=child_process_env())
-        lines.append("· healthcheck: " + ("치명 없음 ✅" if r.returncode == 0
-                     else "치명 위반 감지 🚨 — 세션에서 /vault-lint 필요"))
+        try:
+            r = subprocess.run([sys.executable, str(hc), "--vault", str(vault)],
+                               cwd=str(vault), capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=300,
+                               env=child_process_env())
+        except (OSError, subprocess.TimeoutExpired) as error:
+            log(f"healthcheck 실행 실패({type(error).__name__})")
+            lines.append("· healthcheck: 실행 실패 ⚠️ — 브리지 로그 확인")
+        else:
+            lines.append("· healthcheck: " + ("치명 없음 ✅" if r.returncode == 0
+                         else "치명 위반 감지 🚨 — 세션에서 /vault-lint 필요"))
     else:
         lines.append("· healthcheck: 스크립트 없음(생략)")
     remotes = (_git(vault, "remote") or "").split()
@@ -922,6 +1082,56 @@ def process_update(
     return bool(sender(token, chat_id, do_qa(vault, cfg, body)))
 
 
+def _error_label(error: BaseException) -> str:
+    """Content-free exception label: the type and the innermost frame location."""
+    frames = traceback.extract_tb(error.__traceback__)
+    if not frames:
+        return type(error).__name__
+    frame = frames[-1]
+    return f"{type(error).__name__} at {Path(frame.filename).name}:{frame.lineno}"
+
+
+def _notify_skipped_update(
+        token: str, whitelist: set[int], update: object,
+        sender: Callable[[str, int, str], bool]) -> None:
+    try:
+        message = (update.get("message") if isinstance(update, dict) else None) or {}
+        if not isinstance(message, dict) or not is_authorized_private_message(
+                message, whitelist):
+            return
+        sender(token, message["chat"]["id"],
+               "⚠️ 이 메시지를 처리하다 오류가 나서 건너뛰었습니다. "
+               "브리지 로그를 확인한 뒤 다시 보내 주세요.")
+    except Exception as error:  # 안내 실패가 데몬을 멈추면 안 된다
+        log(f"오류 안내 전송 실패: {_error_label(error)}")
+
+
+def process_update_isolated(
+        vault: Path, cfg: dict, token: str, whitelist: set[int], update: dict,
+        started: float, qa_times: deque[float], qa_attempt_ids: set[int],
+        sender: Callable[[str, int, str], bool]) -> bool:
+    """Contain one update's unexpected failure so it cannot stop the daemon.
+
+    A handled delivery failure still returns False, so the same update is retried.
+    An exception would recur on every retry and block all later messages (a
+    poison update), so the update is logged without content, the owner gets a
+    best-effort notice, and processing moves on. Configuration errors still stop
+    the daemon.
+    """
+    try:
+        return process_update(
+            vault, cfg, token, whitelist, update, started, qa_times,
+            qa_attempt_ids, sender)
+    except JarvisConfigError:
+        raise
+    except Exception as error:
+        update_id = update.get("update_id") if isinstance(update, dict) else None
+        label = update_id if type(update_id) is int else "?"
+        log(f"업데이트 처리 오류 — 건너뜀: update_id={label} {_error_label(error)}")
+        _notify_skipped_update(token, whitelist, update, sender)
+        return True
+
+
 def process_update_batch(
         updates: list[dict], offset: int, handler: Callable[[dict], bool],
         save_offset: Callable[[int], None],
@@ -1010,7 +1220,7 @@ def send_butler_if_due(
         state_file: Path, now_epoch: float,
         sender: Callable[[str, int, str], bool],
         ) -> float:
-    if now_epoch - last_butler <= cfg["butler_interval_hours"] * 3600:
+    if not _butler_due(cfg, last_butler, now_epoch):
         return last_butler
     if not sender(token, chat_id, do_butler(vault, cfg)):
         return last_butler
@@ -1018,7 +1228,65 @@ def send_butler_if_due(
     return now_epoch
 
 
+def _butler_due(cfg: dict, last_butler: float, now_epoch: float) -> bool:
+    return now_epoch - last_butler > cfg["butler_interval_hours"] * 3600
+
+
 # ---------------------------------------------------------------- 메인 루프
+
+def run_scheduled_briefings(
+        vault: Path, cfg: dict, token: str, chat_id: int, now: datetime,
+        slots: list[tuple[int, int]], state: BriefingState, state_file: Path,
+        backoff: RetryBackoff,
+        ) -> BriefingState:
+    """Run due briefings unless a previous failure is still backing off.
+
+    A failed generation or send keeps the slot pending (see send_due_briefings);
+    without a delay every loop pass would start another ``claude -p`` run.
+    """
+    if not backoff.ready():
+        return state
+    try:
+        state = send_due_briefings(
+            vault, cfg, token, chat_id, now, slots, state, state_file, tg_send)
+    except JarvisConfigError:
+        raise
+    except Exception as error:
+        delay = backoff.record_failure()
+        log(f"스케줄 브리핑 오류({_error_label(error)}) — {delay:.0f}초 뒤 재시도")
+        return state
+    if state.pending:
+        delay = backoff.record_failure()
+        log(f"스케줄 브리핑 미완료 — pending 유지, {delay:.0f}초 뒤 재시도")
+    else:
+        backoff.record_success()
+    return state
+
+
+def run_scheduled_butler(
+        vault: Path, cfg: dict, token: str, chat_id: int, last_butler: float,
+        state_file: Path, now_epoch: float, backoff: RetryBackoff,
+        ) -> float:
+    """Run the due butler report unless a previous failure is still backing off."""
+    if not backoff.ready() or not _butler_due(cfg, last_butler, now_epoch):
+        return last_butler
+    try:
+        updated = send_butler_if_due(
+            vault, cfg, token, chat_id, last_butler, state_file, now_epoch,
+            tg_send)
+    except JarvisConfigError:
+        raise
+    except Exception as error:
+        delay = backoff.record_failure()
+        log(f"집사 보고 오류({_error_label(error)}) — {delay:.0f}초 뒤 재시도")
+        return last_butler
+    if updated == last_butler:
+        delay = backoff.record_failure()
+        log(f"집사 보고 전송 실패 — {delay:.0f}초 뒤 재시도")
+    else:
+        backoff.record_success()
+    return updated
+
 
 def serve(vault: Path, cfg: dict) -> None:
     token = os.environ.get("JARVIS_TELEGRAM_TOKEN", "")
@@ -1043,38 +1311,57 @@ def serve(vault: Path, cfg: dict) -> None:
         brief_file, brief_slots, datetime.now())
     log(f"jarvis 브리지 시작 — vault={vault}, whitelist={sorted(whitelist) or '(비어있음)'}, "
         f"브리핑 {['%02d:%02d' % s for s in brief_slots]}")
+    briefing_backoff = RetryBackoff(SCHEDULED_RETRY_BASE_SEC, SCHEDULED_RETRY_CAP_SEC)
+    butler_backoff = RetryBackoff(SCHEDULED_RETRY_BASE_SEC, SCHEDULED_RETRY_CAP_SEC)
+    inbound_backoff = RetryBackoff(INBOUND_RETRY_BASE_SEC, INBOUND_RETRY_CAP_SEC)
+
+    def save_offset(committed: int) -> None:
+        # 저장에 성공한 offset만 메모리에 반영한다 — 배치 도중 오류가 나도
+        # 이미 확정한 업데이트를 다시 처리하거나 미확정 업데이트를 건너뛰지 않는다.
+        nonlocal offset
+        atomic_write_text(offset_file, str(committed))
+        offset = committed
 
     while True:
         # --- 스케줄 ---
         now = datetime.now()
         if whitelist:
             first = sorted(whitelist)[0]
-            briefing_state = send_due_briefings(
+            briefing_state = run_scheduled_briefings(
                 vault, cfg, token, first, now, brief_slots, briefing_state,
-                brief_file, tg_send)
-            last_butler = send_butler_if_due(
+                brief_file, briefing_backoff)
+            last_butler = run_scheduled_butler(
                 vault, cfg, token, first, last_butler, butler_file,
-                time.time(), tg_send)
+                time.time(), butler_backoff)
         # --- 수신 ---
         try:
             resp = tg_call(token, "getUpdates", http_timeout=65, offset=offset + 1,
                            timeout=50, allowed_updates='["message"]')
         except (TelegramAPIError, urllib.error.URLError, OSError,
                 json.JSONDecodeError) as error:
-            log(f"getUpdates 오류(재시도): {_telegram_error_label(error)}")
-            time.sleep(5)
+            delay = inbound_backoff.record_failure()
+            log(f"getUpdates 오류({delay:.0f}초 뒤 재시도): {_telegram_error_label(error)}")
+            time.sleep(delay)
             continue
-        offset, complete = process_update_batch(
-            resp.get("result", []), offset,
-            lambda update: process_update(
-                vault, cfg, token, whitelist, update, started, qa_times,
-                qa_attempt_ids, tg_send),
-            lambda committed: atomic_write_text(offset_file, str(committed)),
-            lambda update: qa_attempt_ids.discard(update["update_id"]))
-        if not complete:
-            log("수신 업데이트 처리 미완료 — offset 유지 후 재시도")
-            time.sleep(5)
+        try:
+            _committed, complete = process_update_batch(
+                resp.get("result", []), offset,
+                lambda update: process_update_isolated(
+                    vault, cfg, token, whitelist, update, started, qa_times,
+                    qa_attempt_ids, tg_send),
+                save_offset,
+                lambda update: qa_attempt_ids.discard(update["update_id"]))
+        except JarvisConfigError:
+            raise
+        except Exception as error:
+            log(f"수신 배치 처리 오류: {_error_label(error)}")
+            complete = False
+        if complete:
+            inbound_backoff.record_success()
             continue
+        delay = inbound_backoff.record_failure()
+        log(f"수신 업데이트 처리 미완료 — offset 유지 후 {delay:.0f}초 뒤 재시도")
+        time.sleep(delay)
 
 
 # ---------------------------------------------------------------- self-test
@@ -1123,7 +1410,12 @@ def self_test() -> int:
         check("html: 표 → 불릿 변환·구분선 제거",
               "• 순위 · 방식" in tbl and "• 1위 · CLI 사내" in tbl and "---" not in tbl)
         # ⑤ 환경 (실패 아닌 경고)
-        check("env: claude CLI 탐지", shutil.which(DEFAULTS["claude_cmd"]) is not None, warn=True)
+        try:
+            resolve_claude_executable(DEFAULTS["claude_cmd"])
+            claude_runnable = True
+        except ClaudeLaunchError:
+            claude_runnable = False
+        check("env: claude CLI 탐지(배치 런처 제외)", claude_runnable, warn=True)
         check("env: JARVIS_TELEGRAM_TOKEN 설정", bool(os.environ.get("JARVIS_TELEGRAM_TOKEN")), warn=True)
         # ⑤ 로그 쓰기
         try:
@@ -1170,6 +1462,11 @@ def main() -> None:
     except JarvisConfigError as error:
         log(f"configuration error: {error}")
         sys.exit(2)
+    except Exception as error:
+        # pythonw·작업 스케줄러 실행에서는 traceback이 사라진다. 본문 없이
+        # 유형과 위치만 로그에 남기고 비정상 종료 코드로 끝낸다.
+        log(f"예상하지 못한 오류로 브리지 종료: {_error_label(error)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

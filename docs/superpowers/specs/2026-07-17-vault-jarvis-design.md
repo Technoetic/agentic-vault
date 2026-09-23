@@ -12,7 +12,7 @@ agentic-vault에 "자비스" 계층을 추가한다: **먼저 말 걸고(브리�
 - 음성 웨이크 — 후순위
 - 무인 지식 노트 생성 — 인박스 정제는 사람 있는 세션에서만 (품질 게이트)
 - 자기개선 스킬 루프(Hermes 흡수 핵심) — **독립 스펙으로 2단계**
-- 원격 셸/쓰기 명령 실행 — Q&A는 영구히 읽기 전용
+- 원격 셸/쓰기 명령 실행 — Q&A 세션에는 읽기 도구만 제공한다(3.3의 도구 제한, OS 샌드박스 아님)
 
 ## 3. 아키텍처
 
@@ -44,10 +44,14 @@ Telegram ⟷ jarvis_bridge.py(상시 데몬) ─┬─ 캡처: 10-inbox/jarvis/ 
 
 ### 3.3 Q&A 세션 (읽기 전용)
 
-- `claude -p "<질문>" --allowedTools Read Grep Glob` — 쓰기·Bash·네트워크 도구 불허, cwd=볼트.
+- `claude -p --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config --append-system-prompt <가드>`, cwd=볼트. 질문은 argv가 아니라 표준 입력으로 전달한다.
+- Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다.
+- 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다.
+- Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다.
+- 2026-09-23 정정: 이전 호출은 `--allowedTools`(자동 승인 목록)만 넘겨 가용 도구를 줄이지 않았고, 질문을 argv에 넣어 Windows npm 런처에서 cmd.exe가 `&`·따옴표를 명령으로 재해석하고 첫 줄바꿈에서 가드 인자를 잘랐다.
 - 시스템 프롬프트(append)가 강제: hot → index → grep 순서로 탐색, deny zone(`vault-config.json` `deny_zones`)·`.env`·비밀 경로 접근 금지, 한국어(`language` 키) 답변, 근거 노트명 인용.
 - **비용 가드**: `jarvis.qa_hourly_limit`(기본 6) 초과 시 "시간당 한도 도달" 응답. 타임아웃(기본 180초) 시 사과 응답.
-- 프롬프트 주입 분석: 공격 표면 = 화이트리스트 통과 메시지뿐. 주입이 성공해도 도구가 읽기 3종뿐이라 변조·유출 실행 불가. 잔여 리스크: 응답 내용에 볼트 정보 포함 — 화이트리스트가 본인뿐이므로 수용.
+- 프롬프트 주입 분석: 공격 표면 = 화이트리스트 통과 메시지뿐. 주입이 성공해도 세션이 쓸 수 있는 도구 목록에는 읽기 3종만 있어 쓰기·명령 실행 도구를 호출할 수 없다. 이 방어는 Claude CLI의 도구 제한에 기대며, 읽은 내용이 응답으로 나가는 것은 막지 못한다. 잔여 리스크: 응답 내용에 볼트 정보 포함 — 화이트리스트가 본인뿐이므로 수용.
 
 ### 3.4 브리핑·집사
 

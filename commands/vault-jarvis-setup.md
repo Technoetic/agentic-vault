@@ -23,7 +23,7 @@ description: Vault Jarvis 설정 — Telegram 봇 연동으로 브리핑·캡처
 
 ## 2. self-test
 
-`python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/jarvis_bridge.py" --self-test`를 실행하라. FAIL이 있으면 원인을 해결한 뒤 진행한다. (`env: JARVIS_TELEGRAM_TOKEN` WARN은 1단계 완료 전이면 정상)
+`python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/jarvis_bridge.py" --self-test`를 실행하라. FAIL이 있으면 원인을 해결한 뒤 진행한다. (`env: JARVIS_TELEGRAM_TOKEN` WARN은 1단계 완료 전이면 정상) `env: claude CLI 탐지(배치 런처 제외)`가 WARN이면 PATH에 claude가 없거나, Windows에서 npm 설치의 `claude.cmd`만 잡힌 경우다. 이때는 네이티브 `claude.exe`를 설치하거나 `jarvis.claude_cmd`에 `claude.exe` 전체 경로를 지정하라.
 
 ## 3. 본인 숫자 ID 확인 → 화이트리스트
 
@@ -58,7 +58,10 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 ## 접근 정책과 잔여 위험 (사용자에게 요약 고지)
 
 - 화이트리스트 숫자 ID 외 발신자는 무응답 폐기된다.
-- Q&A·브리핑 세션은 읽기 전용(Read·Grep·Glob) — 볼트 변경·명령 실행 불가.
+- Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다.
+- 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다.
+- Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다.
+- 처리 중 예외가 난 메시지는 본문 없이 로그를 남기고 소유자에게 알린 뒤 건너뛴다. 실패한 브리핑·집사 보고는 간격을 늘려 가며(최대 1시간) 재시도한다.
 - 메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
 - 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
 - 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
