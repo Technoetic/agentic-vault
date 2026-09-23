@@ -2695,8 +2695,8 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                 self.assertTrue(result.ok, result.text)
                 data = json.loads(record.read_text(encoding="utf-8"))
                 self.assertEqual(data["stdin"], message)
-                self.assertEqual(data["argv"][:7], _FIXED_ARGV_HEAD)
-                self.assertEqual(len(data["argv"]), 8)
+                self.assertEqual(data["argv"][:len(_FIXED_ARGV_HEAD)], _FIXED_ARGV_HEAD)
+                self.assertEqual(len(data["argv"]), len(_FIXED_ARGV_HEAD) + 1)
         self.assertFalse((self.vault / "injected.txt").exists())
 
     def test_full_argv_is_pinned_and_does_not_narrow_setting_sources(self):
