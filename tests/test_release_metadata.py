@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.15.1"
+EXPECTED = "0.16.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.15.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.15.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.16.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.16.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.15.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.16.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -130,10 +130,11 @@ REQUIRED_LESSONS_TEMPLATE_LITERALS = (
     "구판 표기 `승격완료(→대상)`(승격일·anchor 없음)는 검증을 통과한 "
     "확정분으로 간주한다",
 )
-# rules 템플릿은 v0.8.4에서 내용 무변경 — 스탬프는 마지막 내용 변경 버전(0.8.3)에
-# 머무는 것이 옳다(/vault-upgrade가 스탬프 숫자 비교로 교체 여부를 판단하므로,
-# 내용이 같은데 스탬프만 올리면 전 볼트에 무의미한 교체를 유발한다).
-REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.8.3"
+# rules 스탬프는 마지막 내용 변경 버전을 가리킨다 — /vault-upgrade가 스탬프 숫자 비교로
+# 교체 여부를 판단하므로, 내용이 같은데 스탬프만 올리면 전 볼트에 무의미한 교체를 유발한다.
+# workflow 규칙은 v0.8.3 이후 무변경이었다가 v0.16.0에서 긴 작업 추적·파괴적 git 명령
+# 조항이 추가돼 0.16.0으로 올라갔다.
+REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.16.0"
 # v0.15.1에서 healthcheck 내용(경로 규칙 사본·§14b·utf-8-sig)이 바뀌어 스탬프가 ENGINE_VERSION과
 # 같은 값으로 올라갔다. 스탬프 = ENGINE_VERSION = 매니페스트 버전 대조는 test_readme_truth.py가 맡는다.
 REQUIRED_HEALTHCHECK_STAMP = f"agentic-vault:healthcheck engine={EXPECTED}"
@@ -174,7 +175,8 @@ REQUIRED_V090_RELEASE_LITERALS = (
 )
 
 # v0.12.0: 여섯 번째 엔진 규칙(vault-browser.md)이 설치·업그레이드·스텁·README에 배선되고,
-# 내용이 바뀌지 않은 기존 5종은 스탬프가 올라가지 않는다(무의미한 교체 유발 방지).
+# v0.12.0에서 내용이 바뀌지 않은 기존 5종은 스탬프가 0.12.0으로 올라가지 않는다(무의미한 교체
+# 유발 방지). workflow·collab은 이후 v0.16.0에서 내용이 바뀌어 0.16.0 스탬프를 가진다.
 RELEASE_NOTE_V0120 = REPO_ROOT / "docs" / "releases" / "v0.12.0.md"
 BROWSER_RULE = REPO_ROOT / "assets" / "templates" / "rules" / "vault-browser.md"
 REQUIRED_BROWSER_RULE_STAMP = "agentic-vault:rule engine=0.12.0"
@@ -202,6 +204,57 @@ UNCHANGED_RULE_TEMPLATES = (
 )
 REQUIRED_V0120_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
 REQUIRED_V0120_RELEASE_LITERALS = ("vault-browser.md", "engine=0.12.0", "--ref v0.12.0", "6종", "engine=0.8.3")
+
+# v0.16.0: 긴 작업 규율 — 두 엔진 규칙(workflow·collab)과 세션·lint·trace·recall 명령에 배선된다.
+# handoff 섹션 명칭(▶ NEXT)과 AGENTS 생성의 rules 6개 입력도 함께 정합한다.
+RELEASE_NOTE_V0160 = REPO_ROOT / "docs" / "releases" / "v0.16.0.md"
+REQUIRED_COLLAB_RULE_STAMP = "agentic-vault:rule engine=0.16.0"
+REQUIRED_V0160_WIRING = (
+    ("assets/templates/rules/vault-workflow.md", "**긴 작업은 파일로 추적:**"),
+    ("assets/templates/rules/vault-workflow.md", "진행 위치는 대화 기록이 아니라 이 파일로 판단한다"),
+    ("assets/templates/rules/vault-workflow.md", "`git reset --hard`"),
+    ("assets/templates/rules/vault-workflow.md", "강제 push(`--force`·`-f`·`--force-with-lease`·`+<refspec>`)도 삭제로 보고"),
+    ("assets/templates/rules/vault-workflow.md", "조회·진단만 요청받은 세션에서는 tasks 노트에 단계를 적거나 추적 파일을 만들지 않는다"),
+    ("assets/templates/rules/vault-collab.md", "돌아온 보고는 주장으로 취급하라"),
+    ("assets/templates/rules/vault-collab.md", "대조하지 못한 것은 `미확인`으로 남긴다"),
+    ("assets/templates/tasks.md", "하위 체크박스"),
+    ("assets/templates/handoff.md", "완료 기준"),
+    ("commands/vault-session-end.md", "▶ NEXT 다음 세션이 바로 이어서 할 일 / §1 최근 완료된 작업"),
+    ("commands/vault-session-end.md", "**완료 기준**"),
+    ("commands/vault-session-end.md", "`사용자 지정 멈춤:`"),
+    ("commands/vault-session-end.md", "1. **사용자 결정 필요**"),
+    ("commands/vault-session-end.md", "3. **발견·생략**"),
+    ("commands/vault-session-start.md", "handoff의 ▶ NEXT는 후보이지 착수 승인이 아니다"),
+    ("commands/vault-trace.md", "**확인하지 못한 것**"),
+    ("commands/vault-recall.md", "사용한 검색어"),
+    ("commands/vault-lint.md", "**상태 노트 교차 대조"),
+    ("commands/vault-init.md", "rules 6개의 본문을 **architecture → linking → frontmatter → workflow → collab → browser**"),
+    ("commands/vault-upgrade.md", "rules 여섯 본문"),
+    ("skills/agentic-vault/SKILL.md", "4섹션(▶ NEXT / 최근 완료 / 확인 필요 / 보류)"),
+    ("commands/vault-session-end.md", "요약하지 말고 그대로 붙인다"),
+    ("commands/vault-session-end.md", "승격 초안은 실행 가능한 조항으로 써라"),
+    ("commands/vault-lint.md", "결정적 계산"),
+    ("commands/vault-process-inbox.md", "파일 자체를 판독하라"),
+    ("commands/vault-process-inbox.md", "b~d를 진행하지 말고 인박스에 그대로 남겨라"),
+    ("commands/vault-process-inbox.md", "덮어쓰지 않는 이동"),
+    ("commands/vault-ingest.md", "그림 자체를 판독해"),
+    ("commands/vault-upgrade.md", "`승인 대기(기존 유지)`"),
+    ("commands/vault-jarvis-setup.md", "텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며"),
+    ("docs/reliability.md", "`hot_max_tokens`·`handoff_max_tokens`를 잠시 0으로"),
+    ("skills/agentic-vault/scripts/jarvis_bridge.py", "'인간의 확인이 필요한 사항' 주목"),
+    ("SECURITY.md", "훅은 `disableAllHooks`로 꺼지지만"),
+)
+FORBIDDEN_V0160_STALE_LITERALS = (
+    ("commands/vault-init.md", "rules 5개"),
+    ("commands/vault-init.md", "세 파일의 `engine=0.8.2` 스탬프"),
+    ("commands/vault-upgrade.md", "rules 다섯"),
+    ("commands/vault-upgrade.md", "나머지 5종은 스탬프가 같아"),
+    ("skills/agentic-vault/SKILL.md", "다음 세션 지시)"),
+    ("SECURITY.md", "넣은 훅이 브리지 사용자 권한으로 실행된다"),
+    ("README.md", "settings and hooks load without a trust prompt"),
+)
+REQUIRED_V0160_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증과 경계")
+REQUIRED_V0160_RELEASE_LITERALS = ("engine=0.16.0", "--ref v0.16.0", "vault-workflow.md", "vault-collab.md")
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -235,6 +288,36 @@ class ReleaseMetadataTests(unittest.TestCase):
                 stamp = (BROWSER_RULE.parent / name).read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.12.0", stamp)
+
+    def test_v0160_run_discipline_is_wired(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0160.is_file())
+        release = RELEASE_NOTE_V0160.read_text(encoding="utf-8")
+        for section in REQUIRED_V0160_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0160_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.16.0.md").is_file())
+        collab = (REPO_ROOT / "assets/templates/rules/vault-collab.md").read_text(encoding="utf-8")
+        self.assertIn(REQUIRED_COLLAB_RULE_STAMP, collab.splitlines()[0])
+        for rel_path, literal in REQUIRED_V0160_WIRING:
+            with self.subTest(path=rel_path, literal=literal):
+                self.assertIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for rel_path, literal in FORBIDDEN_V0160_STALE_LITERALS:
+            with self.subTest(path=rel_path, stale=literal):
+                self.assertNotIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for name in ("vault-workflow.md", "vault-collab.md"):
+            with self.subTest(rule=name):
+                text = (BROWSER_RULE.parent / name).read_text(encoding="utf-8")
+                body = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("<!--")]
+                self.assertLessEqual(len(body), 120)  # rules_max_lines 기본값 — 상시 로드 파일은 얇게
+        # 내용이 바뀌지 않은 규칙은 스탬프를 올리지 않는다(무의미한 전 볼트 교체 방지).
+        for name in ("vault-architecture.md", "vault-linking.md", "vault-frontmatter.md"):
+            with self.subTest(unchanged_rule=name):
+                stamp = (BROWSER_RULE.parent / name).read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn("agentic-vault:rule engine=", stamp)
+                self.assertNotIn("engine=0.16.0", stamp)
 
     def test_active_version_surfaces_match_release(self) -> None:
         plugin = json.loads(

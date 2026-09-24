@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.15.1 (latest) | Yes. Fixes ship as the next 0.15.x patch. |
-| 0.15.0 and earlier | No. Upgrade to 0.15.1. |
+| 0.16.0 (latest) | Yes. Fixes ship as the next 0.16.x patch. |
+| 0.15.1 and earlier | No. Upgrade to 0.16.0. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -132,7 +132,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정은 최신 릴리스(현재 0.15.1)에 다음 0.15.x 패치로 낸다. 0.15.0 이하는 0.15.1로 올린다.
+- 보안 수정은 최신 릴리스(현재 0.16.0)에 다음 0.16.x 패치로 낸다. 0.15.1 이하는 0.16.0으로 올린다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
@@ -141,8 +141,9 @@ them being bypassed in a way the documentation does not describe is still welcom
 - Read·Grep·Glob은 볼트로 한정되지 않는다. 경로 조건 없이 사전 승인되므로 브리지를 실행한
   OS 사용자가 읽을 수 있는 파일(`~/.ssh`, `~/.vault-jarvis` 등)은 Claude 설정의 Read 거부
   규칙이 없으면 읽힐 수 있다.
-- `claude -p`는 작업 공간 신뢰 확인을 건너뛴다. 볼트의 project·local Claude 설정과 훅이
-  Q&A·예약 브리핑마다 사람 없이 로드되므로, 볼트를 쓸 수 있는 누구든(다른 에이전트·동기화
-  상대 포함) 넣은 훅이 브리지 사용자 권한으로 실행된다.
+- `claude -p`는 작업 공간 신뢰 확인을 건너뛴다. 볼트의 project·local Claude 설정은
+  Q&A·예약 브리핑마다 사람 없이 로드된다. 훅은 `disableAllHooks`로 꺼지지만 그 밖의 설정은
+  적용되므로, 볼트의 `.claude/`를 쓸 수 있는 누구든(다른 에이전트·동기화 상대·공유 폴더
+  구성원 포함) 세션 동작을 바꿀 수 있다.
 - Jev로 보내기 전 비밀 필터는 패턴 기반이다. 잡는 형식과 못 잡는 형식은 위 영어 목록에 있다.
   라벨·알려진 접두사가 없는 비밀, 여러 줄로 나뉘거나 인코딩된 비밀은 통과한다.

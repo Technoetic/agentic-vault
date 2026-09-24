@@ -1,7 +1,7 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.15.1`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 로컬 검증은 [v0.15.1 검증 기록](verification/v0.15.1.md)에 남긴다.
+`v0.16.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 로컬 검증은 [v0.16.0 검증 기록](verification/v0.16.0.md)에 남긴다.
 Codex 설치·발견·실행 실측의 마지막 기록은 [v0.15.0 검증 기록](verification/v0.15.0.md)이다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
@@ -9,13 +9,16 @@ v0.14.0의 파일 근거 Jev 판단에 이어 v0.15.0은 볼트 밖에서도 직
 Noul·Choice·Score로 평가하는 승인된 Jev-first 경로를 추가한다. 기존 행동 정책 설정은
 스키마를 검증하며 실행 시 자동 집행은 제공하지 않는다. v0.15.1은 Telegram Jarvis의 Claude
 실행을 보강한 보안·내구성 패치이며 Codex 진입점과 명령 대응은 바뀌지 않았다.
+v0.16.0은 workflow·collab 규칙과 세션·lint·trace·recall 명령 문서에 긴 작업 규율을
+더했다. Codex 진입점과 명령 대응은 그대로이며, 기존 볼트는 `$agentic-vault:agentic-vault upgrade`로 두 규칙과
+생성 AGENTS.md를 갱신한다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.15.1
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.16.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -23,18 +26,18 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.15.1 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.16.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.15.1
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.16.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
-갱신 후 `codex plugin list`로 v0.15.1과 활성화 상태를 확인하고 새 대화를 연다.
+갱신 후 `codex plugin list`로 v0.16.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 

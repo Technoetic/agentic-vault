@@ -33,6 +33,18 @@ hot=2000, handoff=4000을 사용한다. 새 볼트 템플릿은 hot=2500을 명�
 잘못 요약되면 저장 장치만으로 의미를 복원할 수 없다. anchor 차이는 조사할
 변경 범위를 알려주는 신호이며, 모델의 해석이 올바르다는 증명은 아니다.
 
+Claude Code에서 안전 장치가 메시지를 표시하면 세션이 이전 모델로 전환될 수 있다.
+2026-09-22 Anthropic 안내는 Claude 앱에서 이 판정이 파일·검색 결과를 포함한 대화 내용을
+본다고 설명한다(Claude Code에서도 같은지는 확인하지 않았다). 이 훅이 주입한 handoff/hot도 대화의 일부이고 `startup`·`clear`·`resume`마다 다시
+들어가므로, 표시된 작업을 `/vault-session-end`가 handoff/hot에 요약했다면 새 세션이나
+`/clear`로 시작해도 전환이 반복될 수 있다(실제 판정 동작은 확인하지 않았다). 관련 없는
+작업에서도 세션마다 전환이 반복되면 `hot_max_tokens`·`handoff_max_tokens`를 잠시 0으로
+두고 새 세션을 연 뒤, 첫 메시지에서 `/vault-session-start`와 볼트 노트 읽기를 하지 말라고
+지시하고 확인한다(스킬은 주입이 없으면 이 명령으로 복원하며, 이 명령은 index와, hot/handoff가
+비면 log 상단도 읽는다). 원인이 주입 내용이면 끝난 작업의 서술은 주입되지
+않는 노트로 옮기고 hot/handoff에는 위키링크만 남긴 뒤 예산을 되돌린다. 플러그인은 어떤
+문구가 표시되는지 판정하지 않는다.
+
 ## 기억 주입 진단 (v0.10.0)
 
 `/vault-doctor` 또는 Codex의 `$agentic-vault:agentic-vault doctor`는 설정·경로·

@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.15.1 is a security and durability patch: the optional Telegram Jarvis bridge passes prompts on stdin, refuses Windows .cmd/.bat launchers and limits Claude sessions to Read, Grep and Glob. It keeps v0.15.0's authorized Jev-first direct questions with native Noul, Choice and Score, including outside a vault. Jev is advisory; execution and action permissions remain with the host.",
+    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.16.0 adds long-run discipline to the shared rules and commands: multi-step work is tracked in the tasks note, subagent claims are written as fact only after their cited notes are checked and are otherwise marked unconfirmed, handoff NEXT items carry completion criteria, the session-end report lists decisions needed from the user first, and lint cross-checks state notes for contradictions. It keeps v0.15.1's hardened Telegram Jarvis bridge and v0.15.0's authorized Jev-first direct questions with native Noul, Choice and Score. Jev is advisory; execution and action permissions remain with the host.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

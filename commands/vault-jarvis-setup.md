@@ -66,6 +66,7 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 - Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다.
 - 처리 중 예외가 난 메시지는 offset을 전진시키지 않고 5초부터 간격을 늘려 다시 처리한다. 같은 메시지에서 처리 예외가 3회 연속 나면 본문 없이 로그를 남기고 소유자에게 알린 뒤 건너뛴다. 이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다. 실패한 브리핑·집사 보고는 간격을 늘려 가며(최대 1시간) 재시도한다.
 - 메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
+- 사진·파일·음성 등 텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며 응답·로그 없이 무시된다. 차트·스크린샷은 볼트의 `10-inbox/`에 파일로 넣고 `/vault-process-inbox`로 정제하라.
 - 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다.
 - 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다.
 - 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.

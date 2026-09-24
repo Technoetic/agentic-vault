@@ -13,7 +13,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 
 ## 1. 업그레이드 체크리스트 (누락분만, 순서대로)
 
-각 항목을 검사하고 상태를 기록하라: `이미 있음(건너뜀)` / `추가함` / `사용자 거부`.
+각 항목을 검사하고 상태를 기록하라: `이미 있음(건너뜀)` / `추가함` / `사용자 거부` / `승인 대기(기존 유지)`.
 
 1. **vault-config 일반 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `jarvis` 블록(기본 `enabled: false`), `stale_days`, `index_scopes`.
    - 기존 config에 `jarvis` 블록 자체가 없으면 새 블록 전체를 템플릿 기본값으로 추가하는 기존 동작을 유지하라.
@@ -23,7 +23,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
    - `frontmatter_exempt_paths`가 없고 `fm_exempt_zones`가 있으면 기존 키가 호환 alias로 계속 적용된다. 템플릿 기본 `frontmatter_exempt_paths`를 넣어 alias를 가리지 마라.
    - 두 키 중 빠진 키를 추가하는 작업은 별도 **검사 범위 마이그레이션**이다. 추가 전 현재 full 모드의 유효 범위와 템플릿 값을 적용한 뒤의 범위를 비교해 보여주고, 범위가 넓어지거나 좁아지는 경로와 기존 alias 대체 여부를 설명하라. 그 뒤 사용자가 해당 키 추가를 명시적으로 승인한 경우에만 추가하고, 거부하거나 답이 없으면 config를 그대로 유지하라.
 1-1. **행동 계약 rules 구조 (v0.6.0+)** — 3단계로 검사하라:
-   - **rules 설치/교체**: `.claude/rules/vault-*.md` 6종(architecture·linking·frontmatter·workflow·collab·browser)이 없으면 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`에서 복사하라(v0.12.0에서 `vault-browser.md`가 추가됐다 — 구판 볼트에는 이 파일만 새로 들어가고, 내용이 바뀌지 않은 나머지 5종은 스탬프가 같아 교체되지 않는다). 있으면 각 파일 첫 줄의 `engine=` 스탬프를 **대응하는 원본 템플릿 파일의 스탬프**와 비교해 **낮은 파일만 통째로 교체**하라(엔진 소유 파일 — 아래 안전 규칙의 명시적 예외). 전체 플러그인 버전이나 prerelease 문자열로 rules 버전을 추정하지 마라. 교체 전 diff에서 템플릿에 없는 로컬 추가분이 보이면, 그 줄들을 사용자에게 보여주고 CLAUDE.md로 옮길지 물어본 뒤 진행하라.
+   - **rules 설치/교체**: `.claude/rules/vault-*.md` 6종(architecture·linking·frontmatter·workflow·collab·browser)이 없으면 `${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/`에서 복사하라(v0.12.0에서 `vault-browser.md`가 추가됐고, v0.16.0에서 workflow·collab의 스탬프가 `engine=0.16.0`으로 올라갔다 — v0.12.0 이전 볼트에는 browser가 새로 들어가고 스탬프가 낮은 workflow·collab이 교체되며, 내용이 바뀌지 않은 architecture·linking·frontmatter는 스탬프가 같아 교체되지 않는다). 있으면 각 파일 첫 줄의 `engine=` 스탬프를 **대응하는 원본 템플릿 파일의 스탬프**와 비교해 **낮은 파일만 통째로 교체**하라(엔진 소유 파일 — 아래 안전 규칙의 명시적 예외). 전체 플러그인 버전이나 prerelease 문자열로 rules 버전을 추정하지 마라. 교체 전 diff에서 템플릿에 없는 로컬 추가분이 보이면, 그 줄들을 사용자에게 보여주고 CLAUDE.md로 옮길지 물어본 뒤 진행하라.
    - **구판 모놀리스 마이그레이션**: 루트 CLAUDE.md의 `agentic-vault:begin`~`end` 마커 사이에 상세 규칙 섹션(`## 볼트 아키텍처 맵`, `## Hard Rules:` 등)이 남아 있으면 구판(v0.5.x 이하) 설치다. **사용자 확인 후** 마이그레이션하라: ①마커 사이 내용을 rules 템플릿 5종과 대조해 **볼트 고유 추가·수정분을 식별**하고(예: 프로젝트명·SSOT 규칙·커스텀 deny 경로) ②마커 사이를 치환된 `CLAUDE-vault-stub.md` 내용으로 교체하되 ③식별한 볼트 고유분은 마커 **밖**(CLAUDE.md 본문, "볼트 고유 규칙" 섹션 신설)으로 보존 이동하라. 고유분인지 엔진 표준인지 판단이 서지 않는 줄은 **삭제하지 말고 보존 쪽을 택하라**. 마이그레이션 전 CLAUDE.md 원본을 `00-meta/scratch/step_archive/CLAUDE-premigration-<날짜>.md`로 백업하라.
    - **AGENTS.md 생성/재생성**: AGENTS.md가 없으면 생성하고, `agentic-vault:generated` 주석이 있으면 생성 산출물로 재생성하라. 입력은 `${CLAUDE_PLUGIN_ROOT}/assets/templates/AGENTS-vault-stub.md`의 `{{VAULT_NAME}}`을 현재 볼트명으로 치환한 내용 전체와 설치된 rules 6개 본문이다. **architecture → linking → frontmatter → workflow → collab → browser** 순서로 빈 줄을 두고 연결하며, 각 rule의 맨 앞 `agentic-vault:rule engine=` HTML 주석 블록만 제거한다. 스텁의 소유권 마커와 사용자 CLAUDE.md 관리 블록 밖을 안전하게 읽으라는 안내를 유지한다. Claude 전용 스텁을 재사용하거나 설치 절대경로를 넣지 마라. 기존 생성 파일에 사용자 추가·수정분이 보이면 먼저 CLAUDE.md 관리 마커 밖으로 보존 이동하는 변경안을 확인하고, 판단이 불명확하면 원본을 유지한다. 주석 없는 AGENTS.md(수제작)가 있으면 덮어쓰지 말고, 생성판으로의 전환 여부를 사용자에게 물어라(수제작 내용 중 rules에 없는 것은 CLAUDE.md 관리 마커 밖으로 보존 이동 대상).
 2. **교훈 대장**: `00-meta/lessons.md`가 없으면 템플릿 `lessons.md`를 `{{DATE}}` 치환해 생성하라 — 자기개선 루프가 이 파일 존재로 켜진다. 이미 있는데 `## 기각 대장` 섹션이 없으면(v0.8.2 이하 생성분) 두 가지를 함께 하라 — 하나만 하면 파일이 자기모순이 된다: ①템플릿의 `## 기각 대장` 섹션을 파일 끝에 멱등 추가 ②`## 규칙` 섹션의 구판 보일러플레이트를 신판으로 정합 — 구판 문장 "기각하면 … 다시 제안하지 않는다"와 구판 형식 줄(상태 enum에 `검증중`·`롤백` 없음)을 템플릿의 해당 줄로 치환하고, 없는 규칙 불릿(승격 검증·하위 호환)을 추가하라. `## 규칙`·형식 줄은 엔진 보일러플레이트라 이 치환이 비파괴 계약의 예외이며, **`## 대장` 이하의 교훈·기각 데이터 줄은 절대 건드리지 마라.** 사용자가 규칙 섹션을 로컬 수정한 흔적(템플릿 구판과도 다른 문구)이 보이면 자동 치환하지 말고 diff를 보여주고 물어라.
@@ -41,7 +41,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 
 ## 2. 검증
 
-- `0.9.0`은 Codex에서도 같은 엔진을 사용한다. `$agentic-vault:agentic-vault session-start`·`recall <질의>`·`session-end`·`lint`·`backup` 진입점을 안내하라. Codex 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰해야 실행되며, 주입이 없으면 스킬의 `session-start`로 복원한다. 생성 AGENTS의 사용자 규칙 참조와 rules 다섯 본문이 모두 보존됐는지 확인한다. 이 업그레이드로 Codex 전역 설정이나 Claude 권한 설정을 변경하지 않는다. Jarvis의 실행기는 계속 Claude CLI다.
+- `0.9.0`은 Codex에서도 같은 엔진을 사용한다. `$agentic-vault:agentic-vault session-start`·`recall <질의>`·`session-end`·`lint`·`backup` 진입점을 안내하라. Codex 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰해야 실행되며, 주입이 없으면 스킬의 `session-start`로 복원한다. 생성 AGENTS의 사용자 규칙 참조와 rules 여섯 본문이 모두 보존됐는지 확인한다. 이 업그레이드로 Codex 전역 설정이나 Claude 권한 설정을 변경하지 않는다. Jarvis의 실행기는 계속 Claude CLI다.
 - `0.9.0`의 세션 주입은 예산을 실제 출력에 적용하며 0은 주입 비활성화다. 주입은 검사기 `validate_config` 전체를 통과해야 동작한다 — 어떤 키든 형식 오류(정수 키에 문자열·실수, `null`, `./` 접두·끝 슬래시 경로, 빈 enum 등)면 handoff·hot이 둘 다 조용히 빠지고 stderr 한 줄만 남으니, 업그레이드 직후 healthcheck로 config 오류부터 확인하라. 구판 설정값은 유지하고 이 의미 변경을 안내하라. 절대경로·상위 경로·deny zone·심볼릭 링크/정션을 가리키는 상태 파일은 주입되지 않으므로, 설정 오류를 우회하지 말고 사용자에게 정상적인 볼트 내부 경로를 제시하라.
 - 새 `/vault-recall`은 플러그인 안의 `vault_recall.py`와 `vault_paths.py`, `vault_healthcheck.py`를 함께 사용한다. 스크립트 하나만 볼트에 복사하지 마라. 플러그인 갱신으로 세 파일을 같은 버전에서 로드한다. 기존 standalone healthcheck·git 훅 설치 절차는 유지한다.
 - 새 백업은 `backup_target/snapshots/`에 독립 사본을 추가한다. 기존 `mirror/`·`bundles/`를 삭제하거나 덮어쓰지 않는다. 새 스냅샷을 검증한 뒤 필요하면 새 디렉터리로 복구할 수 있음을 `docs/reliability.md`의 CLI로 안내하라.
@@ -51,7 +51,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 
 ## 3. 보고
 
-표로 보고하라: 항목 | 상태(이미 있음/추가함/거부) | 비고. 추가분이 있으면 git 볼트에선 커밋을 권하라(`ops:` 태그). `log_note` 최상단에 `[ops] /vault-upgrade — <추가 항목 요약>` 1줄을 남겨라.
+표로 보고하라: 항목 | 상태(승인 대기/이미 있음/추가함/거부) | 비고. `승인 대기` 행(답을 받지 못한 마이그레이션·로컬 수정 때문에 교체를 보류한 구버전 엔진 파일·다른 hooksPath 등)을 표 맨 위에 두고, 비고에 무엇을 결정해야 하는지 한 줄로 적어라. 추가분이 있으면 git 볼트에선 커밋을 권하라(`ops:` 태그). `log_note` 최상단에 `[ops] /vault-upgrade — <추가 항목 요약>` 1줄을 남겨라.
 
 ## 안전 규칙
 

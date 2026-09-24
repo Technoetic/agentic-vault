@@ -18,7 +18,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [evidence.md](evidence.md) | 검증 근거·인계 CLI (v0.11.0+) |
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.15.1](releases/v0.15.1.md) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.16.0](releases/v0.16.0.md) |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
 
 ## 내부 작업 기록 / Internal work records

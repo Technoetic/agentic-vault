@@ -931,10 +931,10 @@ def _briefing_prompt(vault: Path, cfg: dict) -> str:
     parts = [f"오늘({date.today().isoformat()}) 정기 브리핑을 만들어라.",
              f"다음 노트를 읽어라: {cfg['_hot_note']}"]
     if cfg["_handoff_note"]:
-        parts.append(f"그리고 {cfg['_handoff_note']} (직전 세션 인계·NEXT 섹션 주목)")
+        parts.append(f"그리고 {cfg['_handoff_note']} (직전 세션 인계 — NEXT와 '인간의 확인이 필요한 사항' 주목)")
     parts.append(f"그리고 {cfg['_log_note']} 최상단 10줄.")
     parts.append("아래는 브리지가 수집한 최근 git 활동이다(참고용 — 직접 git 실행 불가):\n" + git_lines)
-    parts.append("형식: ① 지금 상태(2줄) ② 최우선 미결(최대 3개) ③ 오늘의 제안(1개). 전체 12줄 이내.")
+    parts.append("형식: ① 지금 상태(2줄) ② 최우선 미결 — 내 결정·승인 대기를 먼저(최대 3개) ③ 오늘의 제안(1개). 전체 12줄 이내.")
     return "\n".join(parts)
 
 

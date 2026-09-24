@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.15.1
+# agentic-vault:healthcheck engine=0.16.0
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -57,7 +57,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.15.1"
+ENGINE_VERSION = "0.16.0"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 DEFAULT_FRONTMATTER_ROOTS = (
     "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",

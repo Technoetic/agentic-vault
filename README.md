@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.15.1-10B981?style=for-the-badge)](docs/releases/v0.15.1.md)
+[![Version](https://img.shields.io/badge/v0.16.0-10B981?style=for-the-badge)](docs/releases/v0.16.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -94,7 +94,7 @@ For Codex, register the release tag and add the plugin as described in [the Code
 
 - Summaries, lessons and upgrade decisions still depend on the model. The checker enforces schema and links, not judgement.
 - The git hooks are local gates that `--no-verify` bypasses, not a security boundary.
-- Jarvis "read-only" is a Claude CLI tool restriction (`--tools Read,Grep,Glob`) plus prompt policy, not an OS sandbox. On Windows it runs only a native `claude.exe` and refuses the npm `claude.cmd` launcher. The three tools are pre-approved for any file the bridge's OS user can read, not only the vault, and the vault's project Claude settings and hooks load without a trust prompt (see [SECURITY.md](SECURITY.md)).
+- Jarvis "read-only" is a Claude CLI tool restriction (`--tools Read,Grep,Glob`) plus prompt policy, not an OS sandbox. On Windows it runs only a native `claude.exe` and refuses the npm `claude.cmd` launcher. The three tools are pre-approved for any file the bridge's OS user can read, not only the vault, and the vault's project Claude settings load without a trust prompt; hooks are turned off with `disableAllHooks` (see [SECURITY.md](SECURITY.md)).
 - Recall is lexical (no embeddings), and token budgets use a character-based estimate.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
@@ -346,7 +346,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.15.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.16.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -412,7 +412,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.15.1**이며 **Claude Code, Codex 겸용**이다. v0.15.1은 보안·내구성 패치다. 선택 기능인 Telegram Jarvis가 질문을 표준 입력으로 넘기고, Windows의 `.cmd`·`.bat` 런처를 실행하지 않으며, Claude 세션의 도구를 Read·Grep·Glob으로 제한한다. npm으로 설치해 `claude.cmd`만 있는 Windows에서는 Jarvis Q&A·`/brief`가 오류 안내로 답하고 예약 브리핑이 전송되지 않으므로 네이티브 `claude.exe`가 필요하다(캡처·집사 보고는 계속 동작). v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)과 기존 파일 근거 판단은 그대로다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.15.1)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.15.1.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.16.0**이며 **Claude Code, Codex 겸용**이다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 workflow·collab 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며, 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.16.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.16.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -453,7 +453,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.15.1
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.16.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -567,11 +567,11 @@ claude
 | 💬 볼트 Q&A | 자유 질문 → hot→index→grep 탐색 후 근거 노트 인용 답변 | 읽기전용 |
 | 🧹 집사 보고 | 주기적으로 healthcheck·mirror push·인박스 현황 보고 (치유는 안 함) | 무관여 |
 
-메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다. 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다. 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다. 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
+메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다. 사진·파일·음성 등 텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며 응답·로그 없이 무시된다. 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다. 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다. 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
 
 수신 업데이트는 `process-then-ack` 순서를 지킨다. 라우팅·저장·응답이 성공한 뒤에만 `offset`을 원자적으로 전진시키며, 응답 전송이 실패하거나 처리 중 예외가 나면 그 업데이트부터 다음 poll에서 재시도한다. 따라서 손실보다 중복을 택하는 at-least-once 전달이고, 동일 `update_id` 캡처는 같은 파일로 수렴한다. 이 보장에는 조건이 하나 붙는다. 같은 업데이트에서 처리 예외가 3회 연속 나면 같은 오류로 뒤 메시지까지 막지 않도록 본문 없이 로그를 남기고 소유자에게 알린 뒤 그 업데이트만 건너뛴다. 이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다. 수신 재시도 대기는 5초에서 시작해 연속 실패마다 두 배로 늘고 60초에서 멈춘다. 실패한 정기 브리핑·집사 보고는 60초에서 시작해 최대 1시간 간격으로 재시도한다.
 
-**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다. 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다. 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅도 끈다. Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다. 읽기 3종은 경로 조건 없이 사전 승인되어 볼트 밖 파일에도 적용되고, 볼트의 project·local Claude 설정과 훅은 `-p` 모드에서 신뢰 확인 없이 로드된다([SECURITY.md](SECURITY.md) 참조).
+**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다. 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다. 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅도 끈다. Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다. 읽기 3종은 경로 조건 없이 사전 승인되어 볼트 밖 파일에도 적용되고, 볼트의 project·local Claude 설정은 `-p` 모드에서 신뢰 확인 없이 로드되고 훅은 `disableAllHooks`로 꺼진다([SECURITY.md](SECURITY.md) 참조).
 
 브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 
