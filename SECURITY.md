@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.16.0 (latest) | Yes. Fixes ship as the next 0.16.x patch. |
-| 0.15.1 and earlier | No. Upgrade to 0.16.0. |
+| 0.17.0 (latest) | Yes. Fixes ship as the next 0.17.x patch. |
+| 0.16.0 and earlier | No. Upgrade to 0.17.0. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -50,6 +50,10 @@ In scope:
 - **Hooks**: the SessionStart injection hook (`hooks/`) and the vault git hooks
   and staged checker (`assets/git-hooks/`, `vault_healthcheck.py --staged`),
   including path containment, deny zones and link or junction handling.
+- **Optional Aside adapter** (`assets/adapters/aside/`, `vault_adapters.py`): the
+  PreToolUse hook that a user may merge into a vault's `.claude/settings.json`
+  (it runs Windows PowerShell before `aside` commands only), the helper script it
+  runs from `00-meta/scripts/`, and the read-only adapter report.
 - **External judgment API transmission** (`jev_client.py`, `jev_ask.py`,
   `vault_judge.py`): what can be sent to the Jev API, the approval flag
   (`run --allow-network`), the secret filter and API key handling.
@@ -132,10 +136,11 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정은 최신 릴리스(현재 0.16.0)에 다음 0.16.x 패치로 낸다. 0.15.1 이하는 0.16.0으로 올린다.
+- 보안 수정은 최신 릴리스(현재 0.17.0)에 다음 0.17.x 패치로 낸다. 0.16.0 이하는 0.17.0으로 올린다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
-- 범위: Jarvis 브리지, SessionStart·git 훅, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
+- 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
+- Aside 어댑터 훅은 볼트의 `.claude/settings.json`에 사용자가 승인해 병합한 경우에만 존재하며, `00-meta/scripts/aside-up.ps1`을 실행한다. 볼트의 `.claude/`나 `00-meta/scripts/`를 쓸 수 있는 누구든 이 명령을 바꿀 수 있으므로 공유·동기화 볼트에서는 켜기 전에 쓰기 권한을 확인한다.
 - Jarvis의 읽기 전용은 Claude CLI 도구 제한과 프롬프트 정책이며 OS 경계가 아니다.
   프롬프트 인젝션은 완화할 뿐 막지 못한다.
 - Read·Grep·Glob은 볼트로 한정되지 않는다. 경로 조건 없이 사전 승인되므로 브리지를 실행한

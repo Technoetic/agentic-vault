@@ -62,6 +62,20 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 2. **CLAUDE.md 스텁 append**: 루트 `CLAUDE.md`에 `agentic-vault:begin` 마커가 이미 있으면 건너뛰어라(중복 방지). `CLAUDE.md`가 존재하면 파일 끝에 빈 줄 하나를 두고 치환된 `${CLAUDE_PLUGIN_ROOT}/assets/templates/CLAUDE-vault-stub.md` 내용 전체를 append하라(Edit — 기존 내용을 절대 삭제·수정하지 마라). 존재하지 않으면 그 내용만으로 새로 생성하라(Write).
 3. **AGENTS.md 생성**: 루트에 `AGENTS.md`가 없을 때만 생성하라. `${CLAUDE_PLUGIN_ROOT}/assets/templates/AGENTS-vault-stub.md`의 `{{VAULT_NAME}}`을 치환한 내용 전체를 먼저 쓰고, 설치된 rules 6개의 본문을 **architecture → linking → frontmatter → workflow → collab → browser** 순서로 빈 줄을 사이에 두고 이어 붙인다. 각 rule의 맨 앞 `agentic-vault:rule engine=` HTML 주석 블록만 제거하고 본문은 그대로 보존한다. 스텁의 `agentic-vault:generated` 소유권 마커를 유지한다. `CLAUDE-vault-stub.md`를 AGENTS에 복사하거나 플러그인 설치 절대경로를 박아 넣지 마라. 이 전용 스텁은 사용자 규칙을 루트 `CLAUDE.md`의 관리 마커 밖에서 안전하게 읽도록 안내한다. 이미 AGENTS.md가 존재하면 내용과 소유권을 그대로 유지하고 "/vault-upgrade가 재생성 경로"라고 한 줄 안내하라(Codex 표기는 `$agentic-vault:agentic-vault upgrade`).
 
+## 4-1. 도구 어댑터 (선택 — 사용자 승인 후에만)
+
+선택 기능이다. 설치된 도구에 맞춘 볼트 조항을 제안할 뿐 엔진 규칙을 바꾸지 않는다. 지금 제공하는 어댑터는 Aside(AI 브라우저 CLI) 하나다.
+
+- `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행해 `adapters.aside`를 읽는다. 읽기 전용 진단이며 아무것도 설치하지 않는다.
+- `cli_on_path`가 false면 이 단계를 조용히 건너뛴다. 브라우저 도구는 사용자가 나중에 CLAUDE.md에 정한다(vault-browser 규칙 1).
+- true면 "Aside CLI가 설치되어 있습니다. 이 볼트의 브라우저 도구를 Aside로 정하는 어댑터를 켤까요? (CLAUDE.md 조항과 운영 가이드 노트를 추가하고, Windows에서는 창 포커스를 뺏지 않는 기동 도우미도 설치합니다)"를 묻는다. 거부하거나 답이 없으면 아무것도 설치하지 않는다.
+- 승인하면 아래 순서로 진행한다. 원본은 `${CLAUDE_PLUGIN_ROOT}/assets/adapters/aside/`에 있다.
+  1. **CLAUDE.md 조항:** `browser-clause.md` 전체를 루트 `CLAUDE.md` 끝에 빈 줄 하나를 두고 append한다. `agentic-vault:begin`~`end` 관리 블록 **밖**에 둔다. `agentic-vault:adapter aside begin` 마커가 이미 있으면 건너뛴다. 기존 내용은 삭제·수정하지 않는다. CLAUDE.md에 다른 브라우저 도구 조항이 이미 있으면 append하지 말고 두 조항을 보여 주고 어느 쪽을 쓸지 묻는다.
+  2. **기동 도우미(Windows만):** `platform`이 `windows`면 `aside-up.ps1`을 `00-meta/scripts/aside-up.ps1`로 바이트 그대로 복사한다(`agentic-vault:adapter aside-up engine=` 스탬프 보존). 다른 플랫폼에서는 복사하지 않고, 조항의 macOS·Linux 줄이 적용된다고 알린다.
+  3. **운영 가이드 노트:** `20-knowledge/tools/Aside CLI 운영 가이드.md`가 없을 때만 `operations-guide.md`의 `{{DATE}}`를 치환해 생성하고 index에 등록한다. 이 노트의 「엔진 개발 실측」 표는 참고용이다. 이 기기에서 실행해 본 뒤 「이 볼트의 실측」 표를 채우고 `status: active`로 바꾸라고 안내한다.
+  4. **자동 기동 훅(Claude Code·Windows만, 따로 확인):** `settings-hooks.json`을 보여 주고 "aside 명령 앞에서 기동 도우미를 자동으로 실행하는 훅을 `.claude/settings.json`에 병합할까요?"를 따로 묻는다. 승인하면 JSON을 파싱해 `hooks.PreToolUse` 배열에 이 그룹을 추가한다. `aside-up.ps1`을 부르는 훅이 이미 있으면 건너뛰고, 기존 키와 훅은 모두 보존한다. 훅은 `if` 조건(`Bash(aside *)`·`PowerShell(aside *)`) 때문에 aside 명령에서만 실행되고 결과와 상관없이 명령을 막지 않는다. Codex에서는 이 단계를 생략하고 조항의 기동 절차를 따르게 한다.
+- 끝나면 같은 진단을 다시 실행해 `clause.state=present`를 확인한다. Windows에서는 `helper.state=current`도, 훅을 병합했다면 `hook.state=configured`도 확인한다.
+
 ## 5. 권한 병합 (사용자 확인 후에만)
 
 - **Claude Code 전용 단계다.** Codex에서 시작한 초기화는 생략한다. 사용자가 Claude Code 권한 설정도 명시적으로 요청한 경우에만 아래 절차를 적용한다. 이 deny 블록을 Codex 권한 설정으로 변환하지 마라.
@@ -114,4 +128,4 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 ## 9. 완료 보고
 
-사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`, Codex는 `$agentic-vault:agentic-vault <작업>`)으로 처리, 세션 시작 시 이미 주입된 컨텍스트를 재사용하고 없으면 검증·예산이 적용된 session-start 절차로 복원. Codex의 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰한 뒤 실행된다.
+사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·도구 어댑터·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`, Codex는 `$agentic-vault:agentic-vault <작업>`)으로 처리, 세션 시작 시 이미 주입된 컨텍스트를 재사용하고 없으면 검증·예산이 적용된 session-start 절차로 복원. Codex의 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰한 뒤 실행된다.

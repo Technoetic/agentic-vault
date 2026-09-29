@@ -1,5 +1,5 @@
 ---
-description: 기억 주입의 설정·경로·예산 상태를 읽기 전용으로 진단
+description: 기억 주입의 설정·경로·예산 상태와 도구 어댑터 상태를 읽기 전용으로 진단
 ---
 
 현재 볼트의 기억 주입 상태를 진단하라. 스크립트 경로는 실제 설치된 플러그인에서
@@ -20,3 +20,8 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    실제로 실행했는지, 모델이 기억을 올바르게 사용했는지는 증명하지 않는다.
 5. 진단 요청만으로 수리를 시작하지 않는다. 사용자가 이미 수정을 요청했다면 해당
    범위에서 원인에 맞는 수정을 진행하고 같은 진단으로 결과를 확인한다.
+6. 도구 어댑터 상태도 함께 본다:
+   `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault "<현재 볼트 절대 경로>" --format json`.
+   이 진단도 읽기 전용이다. `adapters.aside`의 `actions`는 제안으로만 보고하고 설치·교체는
+   `/vault-upgrade`(Codex `$agentic-vault:agentic-vault upgrade`)로 안내한다. `cli_on_path`가 false이고
+   설치된 것이 없으면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
