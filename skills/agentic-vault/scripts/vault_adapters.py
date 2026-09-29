@@ -4,6 +4,8 @@
 The only adapter today is Aside (an AI browser with a CLI). The report tells
 /vault-init, /vault-upgrade and /vault-doctor what is installed and what may be
 offered; it never installs, copies, runs the helper or edits settings itself.
+Paths that pass through a symlink or a Windows reparse point (junction) are not
+read.
 """
 from __future__ import annotations
 
@@ -13,6 +15,8 @@ import re
 import shutil
 import sys
 from pathlib import Path
+
+from vault_paths import _is_link_or_reparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +29,14 @@ GUIDE_REL = "20-knowledge/tools/Aside CLI 운영 가이드.md"
 SETTINGS_RELS = (".claude/settings.json", ".claude/settings.local.json")
 CLAUSE_BEGIN = "agentic-vault:adapter aside begin"
 CLAUSE_END = "agentic-vault:adapter aside end"
-HELPER_STAMP_RE = re.compile(r"agentic-vault:adapter aside-up engine=(\d+(?:\.\d+)*)")
+CLAUSE_BEGIN_RE = re.compile(r"^[ \t]*<!--[ \t]*agentic-vault:adapter aside begin\b", re.MULTILINE)
+CLAUSE_END_RE = re.compile(r"^[ \t]*<!--[ \t]*agentic-vault:adapter aside end[ \t]*-->", re.MULTILINE)
+HELPER_STAMP_RE = re.compile(r"agentic-vault:adapter aside-up engine=(\S+)")
+VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+HOOK_FILTERS = {"Bash(aside *)", "PowerShell(aside *)"}
+# `$CLAUDE_PROJECT_DIR` written for one shell: empty under a PowerShell hook
+# shell, which makes `-File "$CLAUDE_PROJECT_DIR/..."` point at the drive root.
+SHELL_BOUND_VAR_RE = re.compile(r"(?<!env:)\$CLAUDE_PROJECT_DIR(?!\})")
 
 
 def _utf8_streams() -> None:
@@ -48,19 +59,35 @@ def _version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
 
+def _compare(left: str, right: str) -> int:
+    a, b = _version(left), _version(right)
+    width = max(len(a), len(b))
+    a, b = a + (0,) * (width - len(a)), b + (0,) * (width - len(b))
+    return (a > b) - (a < b)
+
+
 def _inside(vault: Path, rel: str) -> Path | None:
-    """Return the path when it stays inside the vault without links, else None."""
-    path = vault / rel
+    """Return the path when no component is a link or reparse point, else None."""
     current = vault
+    try:
+        if _is_link_or_reparse(vault):
+            return None
+    except OSError:
+        return None
     for part in Path(rel).parts:
         current = current / part
-        if current.is_symlink():
+        try:
+            if _is_link_or_reparse(current):
+                return None
+        except FileNotFoundError:
+            break
+        except OSError:
             return None
     try:
-        path.resolve().relative_to(vault.resolve())
+        (vault / rel).resolve().relative_to(vault.resolve())
     except (OSError, ValueError):
         return None
-    return path
+    return vault / rel
 
 
 def _read(path: Path) -> str | None:
@@ -88,16 +115,17 @@ def helper_status(vault: Path) -> dict:
         return {**report, "state": "unsafe_path"}
     if not path.exists():
         return {**report, "state": "missing"}
-    text = _read(path)
-    if text is None or not path.is_file():
+    text = _read(path) if path.is_file() else None
+    if text is None:
         return {**report, "state": "unreadable"}
     installed = _stamp(text)
     report["installed_stamp"] = installed
-    if installed is None or bundled is None:
+    if installed is None or bundled is None or not VERSION_RE.match(installed) or not VERSION_RE.match(bundled):
         return {**report, "state": "unstamped"}
-    if _version(installed) < _version(bundled):
+    order = _compare(installed, bundled)
+    if order < 0:
         state = "outdated"
-    elif _version(installed) > _version(bundled):
+    elif order > 0:
         state = "newer"
     else:
         state = "current" if _normalized(text) == _normalized(bundled_text) else "modified"
@@ -106,35 +134,45 @@ def helper_status(vault: Path) -> dict:
 
 def clause_status(vault: Path) -> dict:
     path = _inside(vault, "CLAUDE.md")
-    text = _read(path) if path is not None and path.is_file() else None
+    if path is None:
+        return {"path": "CLAUDE.md", "state": "unsafe_path"}
+    if not path.exists():
+        return {"path": "CLAUDE.md", "state": "missing"}
+    text = _read(path) if path.is_file() else None
     if text is None:
-        return {"path": "CLAUDE.md", "state": "missing" if path is not None else "unsafe_path"}
-    begin, end = text.count(CLAUSE_BEGIN), text.count(CLAUSE_END)
-    if begin == 0 and end == 0:
+        return {"path": "CLAUDE.md", "state": "unreadable"}
+    begins = list(CLAUSE_BEGIN_RE.finditer(text))
+    ends = list(CLAUSE_END_RE.finditer(text))
+    if not begins and not ends:
         state = "absent"
-    elif begin == 1 and end == 1 and text.index(CLAUSE_BEGIN) < text.index(CLAUSE_END):
+    elif len(begins) == 1 and len(ends) == 1 and begins[0].start() < ends[0].start():
         state = "present"
     else:
         state = "broken_markers"
     return {"path": "CLAUDE.md", "state": state}
 
 
-def _hook_commands(data: object) -> list[str]:
-    commands: list[str] = []
-    if not isinstance(data, dict):
-        return commands
-    groups = data.get("hooks", {}).get("PreToolUse", []) if isinstance(data.get("hooks"), dict) else []
+def _hook_handlers(data: object) -> list[dict]:
+    handlers: list[dict] = []
+    if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
+        return handlers
+    groups = data["hooks"].get("PreToolUse", [])
     for group in groups if isinstance(groups, list) else []:
-        handlers = group.get("hooks", []) if isinstance(group, dict) else []
-        for handler in handlers if isinstance(handlers, list) else []:
+        items = group.get("hooks", []) if isinstance(group, dict) else []
+        for handler in items if isinstance(items, list) else []:
             if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                commands.append(handler["command"])
-    return commands
+                handlers.append(handler)
+    return handlers
+
+
+def _hook_commands(data: object) -> list[str]:
+    return [handler["command"] for handler in _hook_handlers(data)]
 
 
 def hook_status(vault: Path) -> dict:
     configured: list[str] = []
     unreadable: list[str] = []
+    problems: list[str] = []
     for rel in SETTINGS_RELS:
         path = _inside(vault, rel)
         if path is None:
@@ -150,10 +188,24 @@ def hook_status(vault: Path) -> dict:
         if data is None:
             unreadable.append(rel)
             continue
-        if any("aside-up.ps1" in command for command in _hook_commands(data)):
-            configured.append(rel)
-    state = "configured" if configured else ("unreadable" if unreadable else "absent")
-    return {"state": state, "configured_in": configured, "unreadable": unreadable}
+        handlers = [h for h in _hook_handlers(data) if "aside-up.ps1" in h["command"]]
+        if not handlers:
+            continue
+        configured.append(rel)
+        for handler in handlers:
+            if handler.get("if") not in HOOK_FILTERS:
+                problems.append(f"{rel}: handler without an aside `if` filter")
+            if SHELL_BOUND_VAR_RE.search(handler["command"]):
+                problems.append(f"{rel}: command uses $CLAUDE_PROJECT_DIR that a PowerShell hook shell leaves empty")
+    if problems:
+        state = "needs_review"
+    elif configured:
+        state = "configured"
+    elif unreadable:
+        state = "unreadable"
+    else:
+        state = "absent"
+    return {"state": state, "configured_in": configured, "unreadable": unreadable, "problems": problems}
 
 
 def guide_status(vault: Path) -> dict:
@@ -167,11 +219,11 @@ def _actions(platform: str, cli: bool, helper: dict, clause: dict, hook: dict, g
         actions.append("offer_helper_update")
     elif helper["state"] in {"modified", "unstamped", "newer", "unreadable", "unsafe_path"}:
         actions.append("review_helper")
-    if clause["state"] == "broken_markers":
-        actions.append("review_clause_markers")
-    if hook["state"] == "unreadable":
+    if clause["state"] in {"broken_markers", "unreadable", "unsafe_path"}:
+        actions.append("review_clause")
+    if hook["unreadable"] or hook["problems"]:
         actions.append("review_settings")
-    installed_any = clause["state"] == "present" or helper["state"] != "missing"
+    installed_any = clause["state"] not in {"missing", "absent"} or helper["state"] != "missing"
     if cli and not installed_any:
         actions.append("offer_install")
     elif clause["state"] == "present":
@@ -212,7 +264,7 @@ def _format_text(report: dict) -> str:
     if report["status"] != "ok":
         return f"agentic-vault adapters: {report['status']} ({report['reason_code']})"
     aside = report["adapters"]["aside"]
-    return "\n".join([
+    lines = [
         f"agentic-vault adapters: ok (platform={report['platform']})",
         f"aside.cli_on_path: {str(aside['cli_on_path']).lower()}",
         f"aside.helper: {aside['helper']['state']} "
@@ -221,7 +273,9 @@ def _format_text(report: dict) -> str:
         f"aside.hook: {aside['hook']['state']}",
         f"aside.guide_note: {str(aside['guide_note']['present']).lower()}",
         f"aside.actions: {', '.join(aside['actions']) or 'none'}",
-    ])
+    ]
+    lines.extend(f"aside.hook.problem: {problem}" for problem in aside["hook"]["problems"])
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:

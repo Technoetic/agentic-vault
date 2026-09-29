@@ -5,7 +5,7 @@ description: 새 프로젝트에 에이전틱 지식 볼트를 스캐폴딩 — 
 # /vault-init — 볼트 스캐폴딩
 
 현재 프로젝트 디렉토리에 에이전틱 지식 볼트를 새로 구축하라. 인자: `$ARGUMENTS` = `<볼트명> [프로젝트명]` (둘 다 선택 — 없으면 질문).
-아래 절차를 순서대로 수행하되, 사용자 확인이 필요한 단계(5·6)는 반드시 물어본 뒤 진행하라.
+아래 절차를 순서대로 수행하되, 사용자 확인이 필요한 단계(4-1·5·6)는 반드시 물어본 뒤 진행하라.
 
 ## 0. 가드 (이미 볼트면 중단)
 
@@ -67,13 +67,13 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 선택 기능이다. 설치된 도구에 맞춘 볼트 조항을 제안할 뿐 엔진 규칙을 바꾸지 않는다. 지금 제공하는 어댑터는 Aside(AI 브라우저 CLI) 하나다.
 
 - `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행해 `adapters.aside`를 읽는다. 읽기 전용 진단이며 아무것도 설치하지 않는다.
-- `cli_on_path`가 false면 이 단계를 조용히 건너뛴다. 브라우저 도구는 사용자가 나중에 CLAUDE.md에 정한다(vault-browser 규칙 1).
-- true면 "Aside CLI가 설치되어 있습니다. 이 볼트의 브라우저 도구를 Aside로 정하는 어댑터를 켤까요? (CLAUDE.md 조항과 운영 가이드 노트를 추가하고, Windows에서는 창 포커스를 뺏지 않는 기동 도우미도 설치합니다)"를 묻는다. 거부하거나 답이 없으면 아무것도 설치하지 않는다.
+- `actions`에 `offer_install`이 없으면 이 단계를 조용히 건너뛴다. 브라우저 도구는 사용자가 나중에 CLAUDE.md에 정한다(vault-browser 규칙 1).
+- 있으면 "Aside CLI가 설치되어 있습니다. Aside를 이 볼트의 유일한 브라우저 도구로 정하는 어댑터를 켤까요? (CLAUDE.md 조항과 운영 가이드 노트를 추가하고, Windows에서는 기동할 때 새 창을 바로 최소화하고 포커스를 돌려주는 도우미도 설치합니다)"를 묻는다. 거부하거나 답이 없으면 아무것도 설치하지 않는다.
 - 승인하면 아래 순서로 진행한다. 원본은 `${CLAUDE_PLUGIN_ROOT}/assets/adapters/aside/`에 있다.
   1. **CLAUDE.md 조항:** `browser-clause.md` 전체를 루트 `CLAUDE.md` 끝에 빈 줄 하나를 두고 append한다. `agentic-vault:begin`~`end` 관리 블록 **밖**에 둔다. `agentic-vault:adapter aside begin` 마커가 이미 있으면 건너뛴다. 기존 내용은 삭제·수정하지 않는다. CLAUDE.md에 다른 브라우저 도구 조항이 이미 있으면 append하지 말고 두 조항을 보여 주고 어느 쪽을 쓸지 묻는다.
   2. **기동 도우미(Windows만):** `platform`이 `windows`면 `aside-up.ps1`을 `00-meta/scripts/aside-up.ps1`로 바이트 그대로 복사한다(`agentic-vault:adapter aside-up engine=` 스탬프 보존). 다른 플랫폼에서는 복사하지 않고, 조항의 macOS·Linux 줄이 적용된다고 알린다.
-  3. **운영 가이드 노트:** `20-knowledge/tools/Aside CLI 운영 가이드.md`가 없을 때만 `operations-guide.md`의 `{{DATE}}`를 치환해 생성하고 index에 등록한다. 이 노트의 「엔진 개발 실측」 표는 참고용이다. 이 기기에서 실행해 본 뒤 「이 볼트의 실측」 표를 채우고 `status: active`로 바꾸라고 안내한다.
-  4. **자동 기동 훅(Claude Code·Windows만, 따로 확인):** `settings-hooks.json`을 보여 주고 "aside 명령 앞에서 기동 도우미를 자동으로 실행하는 훅을 `.claude/settings.json`에 병합할까요?"를 따로 묻는다. 승인하면 JSON을 파싱해 `hooks.PreToolUse` 배열에 이 그룹을 추가한다. `aside-up.ps1`을 부르는 훅이 이미 있으면 건너뛰고, 기존 키와 훅은 모두 보존한다. 훅은 `if` 조건(`Bash(aside *)`·`PowerShell(aside *)`) 때문에 aside 명령에서만 실행되고 결과와 상관없이 명령을 막지 않는다. Codex에서는 이 단계를 생략하고 조항의 기동 절차를 따르게 한다.
+  3. **운영 가이드 노트:** `20-knowledge/tools/Aside CLI 운영 가이드.md`가 없을 때만 `operations-guide.md`의 `{{DATE}}`를 치환해 생성하고 index의 도구 절에 서술 규격대로 등록한다. 프로젝트 decisions 노트가 있으면 "브라우저 도구 = Aside" 결정을 ADR로 남긴다. 이 노트의 「엔진 개발 실측」 표는 참고용이다. 이 기기에서 실행해 본 뒤 「이 볼트의 실측」 표를 채우고 `status: active`로 바꾸라고 안내한다.
+  4. **자동 기동 훅(Claude Code·Windows만, 따로 확인):** `settings-hooks.json`을 보여 주고 "aside 명령 앞에서 기동 도우미를 자동으로 실행하는 훅을 이 기기의 `.claude/settings.local.json`에 병합할까요?"를 따로 묻는다. 훅은 기기마다 다르므로 기본 병합 대상은 공유되지 않는 `settings.local.json`이다. 공유 `.claude/settings.json`에 넣으려면 이유를 설명하고 따로 확인받는다. 거부하거나 답이 없으면 병합하지 않는다. 승인하면 JSON을 파싱해 `hooks.PreToolUse` 배열에 이 그룹을 추가한다. `aside-up.ps1`을 부르는 훅이 이미 있으면 건너뛰고, 기존 키와 훅은 모두 보존한다. 폴더 동기화(OneDrive 등)를 쓰는 볼트는 local 파일도 다른 기기로 퍼진다는 점을 알린다. 훅은 `if` 조건(`Bash(aside *)`·`PowerShell(aside *)`) 때문에 aside 명령에서만 실행되고, 도우미도 훅 입력을 다시 확인해 명령 위치에 aside가 없으면 곧바로 끝낸다. 결과와 상관없이 명령을 막지 않는다. 훅 명령은 작은따옴표로 감싼 `-Command` 안에서 `$env:CLAUDE_PROJECT_DIR`를 PowerShell이 풀도록 되어 있어 Git Bash·PowerShell 어느 훅 셸에서도 같은 경로를 가리킨다. 이 형태를 고치지 마라. Codex에서는 이 단계를 생략하고 조항의 기동 절차를 따르게 한다.
 - 끝나면 같은 진단을 다시 실행해 `clause.state=present`를 확인한다. Windows에서는 `helper.state=current`도, 훅을 병합했다면 `hook.state=configured`도 확인한다.
 
 ## 5. 권한 병합 (사용자 확인 후에만)
@@ -94,6 +94,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 90-assets/
 .obsidian/
 **/.env
+.claude/settings.local.json
 00-meta/health-report.md
 00-meta/scratch/step_archive/
 *.pptx

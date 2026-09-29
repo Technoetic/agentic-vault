@@ -51,9 +51,11 @@ In scope:
   and staged checker (`assets/git-hooks/`, `vault_healthcheck.py --staged`),
   including path containment, deny zones and link or junction handling.
 - **Optional Aside adapter** (`assets/adapters/aside/`, `vault_adapters.py`): the
-  PreToolUse hook that a user may merge into a vault's `.claude/settings.json`
-  (it runs Windows PowerShell before `aside` commands only), the helper script it
-  runs from `00-meta/scripts/`, and the read-only adapter report.
+  PreToolUse hook that a user may merge into a vault's Claude settings (by default
+  `.claude/settings.local.json`; with Claude Code's `if` filter it runs Windows
+  PowerShell before `aside` commands), the helper script it runs from
+  `00-meta/scripts/`, how the hook command resolves the vault path, and the
+  read-only adapter report.
 - **External judgment API transmission** (`jev_client.py`, `jev_ask.py`,
   `vault_judge.py`): what can be sent to the Jev API, the approval flag
   (`run --allow-network`), the secret filter and API key handling.
@@ -104,6 +106,19 @@ them being bypassed in a way the documentation does not describe is still welcom
 - **Deny zones are policy, not permissions.** Deny zones are enforced by the plugin's
   own scripts, by prompts and by any Read deny rules you install in Claude settings.
   They do not change file-system permissions.
+- **The Aside hook runs a file from the vault.** Once merged, the hook runs
+  `00-meta/scripts/aside-up.ps1` with `-ExecutionPolicy Bypass` before `aside`
+  commands, and Claude Code runs PreToolUse hooks before its own permission check
+  for the command (documented host behavior, not measured here). Anyone or anything
+  that can write that file or the vault's `.claude/` settings (another agent allowed
+  to edit files, a sync partner, a shared folder) can therefore run code without a
+  shell approval, and a change to the script does not show up as a settings change.
+  Keep the hook in `.claude/settings.local.json`, and turn it on only where those
+  paths are trusted. The command resolves the vault through
+  `$env:CLAUDE_PROJECT_DIR` inside PowerShell, so it points at the same file under a
+  Git Bash or a PowerShell hook shell; if the variable is missing it runs nothing.
+  Output that an `aside repl` script prints goes back to the calling agent and its
+  model provider.
 - **Git hooks are local gates.** Anyone who controls the repository can bypass them
   with `--no-verify` or by changing `core.hooksPath`. Use server-side checks if you
   need enforcement that cannot be bypassed.
@@ -140,7 +155,8 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
-- Aside 어댑터 훅은 볼트의 `.claude/settings.json`에 사용자가 승인해 병합한 경우에만 존재하며, `00-meta/scripts/aside-up.ps1`을 실행한다. 볼트의 `.claude/`나 `00-meta/scripts/`를 쓸 수 있는 누구든 이 명령을 바꿀 수 있으므로 공유·동기화 볼트에서는 켜기 전에 쓰기 권한을 확인한다.
+- Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
+- `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
 - Jarvis의 읽기 전용은 Claude CLI 도구 제한과 프롬프트 정책이며 OS 경계가 아니다.
   프롬프트 인젝션은 완화할 뿐 막지 못한다.
 - Read·Grep·Glob은 볼트로 한정되지 않는다. 경로 조건 없이 사전 승인되므로 브리지를 실행한

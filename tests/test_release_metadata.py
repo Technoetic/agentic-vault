@@ -264,7 +264,7 @@ RELEASE_NOTE_V0170 = REPO_ROOT / "docs" / "releases" / "v0.17.0.md"
 REQUIRED_V0170_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증과 경계")
 REQUIRED_V0170_RELEASE_LITERALS = (
     "engine=0.17.0", "--ref v0.17.0", "vault-browser.md", "aside-up.ps1", "vault_adapters.py",
-    "Bash(aside *)",
+    "Bash(aside *)", "$env:CLAUDE_PROJECT_DIR", "ProductName", "settings.local.json",
 )
 REQUIRED_V0170_WIRING = (
     ("assets/templates/rules/vault-browser.md", "9. **창 기반 앱의 수명과 포커스.**"),
@@ -275,6 +275,14 @@ REQUIRED_V0170_WIRING = (
     ("commands/vault-upgrade.md", "6. **도구 어댑터(선택)**"),
     ("commands/vault-upgrade.md", "`offer_helper_update`"),
     ("commands/vault-upgrade.md", "자동 덮어쓰기 금지 — diff만 보여 주고"),
+    ("commands/vault-upgrade.md", "`review_settings`"),
+    ("commands/vault-upgrade.md", "`agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다"),
+    ("commands/vault-init.md", "`.claude/settings.local.json`에 병합할까요?"),
+    ("commands/vault-init.md", ".claude/settings.local.json\n00-meta/health-report.md"),
+    ("assets/adapters/aside/browser-clause.md", "`console.log()`로 출력한 내용은 이 명령을 부른 에이전트"),
+    ("SECURITY.md", "**The Aside hook runs a file from the vault.**"),
+    ("README.md", "releases/tag/v0.17.0"),
+    ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.0.md)"),
     ("commands/vault-doctor.md", "vault_adapters.py"),
     ("skills/agentic-vault/references/codex.md", "vault_adapters.py"),
     ("skills/agentic-vault/SKILL.md", "도구 어댑터(Aside) 상태"),
