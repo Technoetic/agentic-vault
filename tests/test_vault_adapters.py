@@ -366,12 +366,15 @@ def _hermetic_env() -> dict:
 
 
 def _browser_running() -> bool:
+    # Evaluated when the class is defined, also on hosts without PowerShell.
+    if _powershell() is None:
+        return False
     script = ("@(Get-Process -Name Aside -ErrorAction SilentlyContinue | Where-Object { "
               "-not $_.Path -or (Get-Item -LiteralPath $_.Path).VersionInfo.ProductName -eq 'Aside' }).Count")
     try:
         out = subprocess.run([_powershell(), "-NoProfile", "-NonInteractive", "-Command", script],
                              capture_output=True, timeout=60).stdout
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, TypeError, subprocess.SubprocessError):
         return True  # unknown: treat as running so the launch-path tests skip
     return (out or b"").strip() not in (b"", b"0")
 
