@@ -144,7 +144,7 @@ class AdapterReportTests(unittest.TestCase):
     def bundled_helper(self) -> str:
         return HELPER.read_text(encoding="utf-8")
 
-    def hook_settings(self, command: str | None = None, if_filter: str | None = "Bash(aside *)") -> str:
+    def hook_settings(self, command: str | None = None, if_filter: object = "Bash(aside *)") -> str:
         handler: dict = {"type": "command",
                          "command": command or json.loads((ASSETS / "settings-hooks.json").read_text(
                              encoding="utf-8"))["hooks"]["PreToolUse"][0]["hooks"][0]["command"]}
@@ -287,7 +287,10 @@ class AdapterReportTests(unittest.TestCase):
 
     def test_old_shell_bound_command_and_missing_filter_need_review(self) -> None:
         old = 'powershell -NoProfile -ExecutionPolicy Bypass -File "$CLAUDE_PROJECT_DIR/00-meta/scripts/aside-up.ps1" -Hook'
-        for command, if_filter in ((old, "Bash(aside *)"), (None, None), (None, "Bash(*)")):
+        braced = 'powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}/00-meta/scripts/aside-up.ps1" -Hook'
+        relative = 'powershell -NoProfile -ExecutionPolicy Bypass -File 00-meta/scripts/aside-up.ps1 -Hook'
+        for command, if_filter in ((old, "Bash(aside *)"), (braced, "Bash(aside *)"), (relative, "Bash(aside *)"),
+                                   (None, None), (None, "Bash(*)"), (None, ["Bash(aside *)"])):
             with self.subTest(command=command, if_filter=if_filter):
                 self.write(".claude/settings.json", self.hook_settings(command, if_filter))
                 aside = self.report()
@@ -380,6 +383,7 @@ class HelperScriptTests(unittest.TestCase):
         'git commit -m "set aside old notes"', "tasklist | grep -i aside.exe", "which aside",
         "Get-Command aside", "Stop-Process -Name Aside", "taskkill //IM aside.exe //F",
         "rg -n aside 20-knowledge", 'echo "put it aside for now"', "grep -rn aside .",
+        "echo 한국어 aside 설명",
     )
     TRUE_POSITIVES = (
         "aside repl \"1\"", "ASIDE repl 1", "aside.exe repl 1", "& aside repl 1",
@@ -387,6 +391,7 @@ class HelperScriptTests(unittest.TestCase):
         "FOO=1 aside repl 1", "C:/tools/aside.exe repl 1",
         "\"C:\\Program Files\\Aside CLI\\aside.exe\" repl 1", ".\\aside.exe repl 1",
         "aside \"search the web\"", "x | aside repl 1",
+        "aside \"한국어로 검색\"", "aside \"한국어\" && echo 끝",
     )
 
     def run_helper(self, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
@@ -417,6 +422,11 @@ class HelperScriptTests(unittest.TestCase):
                 result = self.run_helper("-Hook", "-CheckOnly", stdin=self.payload(command))
                 self.assertEqual(result.returncode, 0)
                 self.assertEqual(result.stdout.strip(), expected)
+
+    def test_check_only_without_hook_only_classifies(self) -> None:
+        result = self.run_helper("-CheckOnly", stdin=self.payload("aside repl 1"))
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "aside-command")
 
     def test_hook_ignores_commands_that_do_not_run_aside(self) -> None:
         for command in self.FALSE_POSITIVES[:6]:

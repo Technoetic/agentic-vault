@@ -409,7 +409,7 @@ agentic-vault/
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
 │
 ├── assets/adapters/aside/             ← 선택형 Aside 어댑터 (/vault-init·/vault-upgrade가 승인 후 설치)
-│   ├── aside-up.ps1                   ← Windows용 포커스 없는 기동 도우미
+│   ├── aside-up.ps1                   ← Windows 기동 도우미(새 창 최소화·포커스 복귀)
 │   ├── browser-clause.md              ← CLAUDE.md 브라우저 도구 조항
 │   ├── operations-guide.md            ← 운영 가이드 노트 뼈대
 │   └── settings-hooks.json            ← aside 명령에만 걸리는 PreToolUse 훅
@@ -427,7 +427,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.17.0**이며 **Claude Code, Codex 겸용**이다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않고, 업그레이드하면 규칙 9번(AGENTS.md에도 포함)만 추가된다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.17.0**이며 **Claude Code, Codex 겸용**이다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않는다. 업그레이드하면 규칙 9번(AGENTS.md에도 포함)이 추가되고 git 볼트의 healthcheck가 0.17.0으로 교체된다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 

@@ -65,5 +65,5 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 ## 안전 규칙
 
 - 기존 파일·키·값을 덮어쓰지 마라. 충돌이 의심되면 멈추고 물어라.
-- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 6번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
+- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 6번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 6번에서 사용자가 승인한 aside-up 훅 명령 교체도 같은 예외에 든다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
 - 이 명령은 볼트 내용(지식 노트)에 손대지 않는다 — 엔진 표면(설정·훅·시스템 파일)만 다룬다. 단, 6번에서 사용자가 승인한 어댑터 설치(운영 가이드 노트 생성과 index·log 기록, CLAUDE.md 관리 블록 밖 조항 추가)는 예외다.

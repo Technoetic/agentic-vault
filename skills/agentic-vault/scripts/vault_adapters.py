@@ -193,10 +193,13 @@ def hook_status(vault: Path) -> dict:
             continue
         configured.append(rel)
         for handler in handlers:
-            if handler.get("if") not in HOOK_FILTERS:
+            if_filter = handler.get("if")
+            if not isinstance(if_filter, str) or if_filter not in HOOK_FILTERS:
                 problems.append(f"{rel}: handler without an aside `if` filter")
-            if SHELL_BOUND_VAR_RE.search(handler["command"]):
-                problems.append(f"{rel}: command uses $CLAUDE_PROJECT_DIR that a PowerShell hook shell leaves empty")
+            command = handler["command"]
+            if SHELL_BOUND_VAR_RE.search(command) or "$env:CLAUDE_PROJECT_DIR" not in command:
+                problems.append(f"{rel}: command does not resolve the vault through $env:CLAUDE_PROJECT_DIR "
+                                "inside PowerShell, so the path depends on the hook shell or working directory")
     if problems:
         state = "needs_review"
     elif configured:
@@ -210,7 +213,8 @@ def hook_status(vault: Path) -> dict:
 
 def guide_status(vault: Path) -> dict:
     path = _inside(vault, GUIDE_REL)
-    return {"path": GUIDE_REL, "present": bool(path is not None and path.is_file())}
+    return {"path": GUIDE_REL, "present": bool(path is not None and path.is_file()),
+            "unsafe_path": path is None}
 
 
 def _actions(platform: str, cli: bool, helper: dict, clause: dict, hook: dict, guide: dict) -> list[str]:
@@ -229,7 +233,7 @@ def _actions(platform: str, cli: bool, helper: dict, clause: dict, hook: dict, g
     elif clause["state"] == "present":
         if platform == "windows" and helper["state"] == "missing":
             actions.append("offer_helper")
-        if not guide["present"]:
+        if not guide["present"] and not guide["unsafe_path"]:
             actions.append("offer_guide_note")
         if platform == "windows" and helper["state"] == "current" and hook["state"] == "absent":
             actions.append("hook_optional")

@@ -1,7 +1,7 @@
 # agentic-vault:adapter aside-up engine=0.17.0
 <#
-  aside-up.ps1 - start the Aside app for the aside CLI without keeping the
-  user's window focus. Windows only. ASCII only so Windows PowerShell 5.1
+  aside-up.ps1 - start the Aside app for the aside CLI and hand the window
+  focus straight back to the user. Windows only. ASCII only so Windows PowerShell 5.1
   reads it correctly without a byte order mark.
 
   Contract:
@@ -18,8 +18,9 @@
     - -Hook (Claude Code PreToolUse): reads the hook input on stdin and acts
       only when a command segment starts with aside / aside.exe; always exits 0
       so the hook never blocks the command.
-    - The whole run stays inside -TimeoutSec (1-45 s), so a hook with a 60 s
-      timeout is not cut off.
+    - A run takes about -TimeoutSec (1-45 s); after a launch one more bounded
+      CLI check (at most 5 s) and short waits can follow, so a hook with a
+      60 s timeout is not cut off.
 
   Measured on Windows 11 (Aside app 1.0.928.2, CLI 1.26.916.1741, 2026-09-29):
     1. The aside CLI talks to aside-daemon.exe. The browser starts the daemon
@@ -44,6 +45,7 @@ param(
 )
 $ErrorActionPreference = 'SilentlyContinue'
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
+if ($CheckOnly) { $Hook = [switch]$true }   # -CheckOnly only classifies; it never launches
 
 # A command segment (start, or after ; | & ( newline $( ) whose first token,
 # after an optional & or . call operator, VAR=value prefixes and a path, is
@@ -118,7 +120,14 @@ if ($env:OS -ne 'Windows_NT') { Out-One 'Windows only - skipped'; Stop-With 1 }
 # that ignores it would call this before every shell command.
 if ($Hook) {
     $raw = ''
-    try { if ([Console]::IsInputRedirected) { $raw = [Console]::In.ReadToEnd() } } catch { $raw = '' }
+    # Read stdin as UTF-8: [Console]::In uses the console code page and breaks
+    # the JSON when the command holds non-ASCII text.
+    try {
+        if ([Console]::IsInputRedirected) {
+            $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), (New-Object System.Text.UTF8Encoding($false)))
+            $raw = $reader.ReadToEnd()
+        }
+    } catch { $raw = '' }
     $cmd = ''
     try { $cmd = [string](($raw | ConvertFrom-Json).tool_input.command) } catch { $cmd = '' }
     $isAside = ($cmd -match $AsideCommandPattern)
