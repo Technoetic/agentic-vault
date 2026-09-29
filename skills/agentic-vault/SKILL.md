@@ -61,7 +61,7 @@ description: "Use when working in an agentic-vault directory with Claude Code or
 | `/vault-recall` | 질의에 맞는 노트를 출처 경로·행 번호와 함께 추정 예산 안에서 검색 (읽기 전용, 어휘 일치 기반) |
 | `/vault-judge` | 선택한 원문 근거의 고정 선택지 의미 판단을 Jev에 요청 (외부 전송 승인 필요, 결과는 참고용) |
 | `/jev-ask` | 직접 질문·선택한 인라인 문맥을 native `noul`·`choice`·`score`로 Jev에 요청 (볼트 불필요, 승인 범위 내) |
-| `/vault-doctor` | 기억이 주입되지 않거나 설정·파일·예산 상태를 확인할 때 (읽기 전용, 원문 비출력) |
+| `/vault-doctor` | 기억이 주입되지 않거나 설정·파일·예산 상태, 도구 어댑터(Aside) 상태를 확인할 때 (읽기 전용, 원문 비출력) |
 | `/vault-upgrade` | 기존 볼트의 엔진 파일을 사용자 수정 보존 절차에 따라 갱신 |
 | `/vault-jarvis-setup` | 사용자가 Telegram 연동을 요청했을 때 설정 |
 

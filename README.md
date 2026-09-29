@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.16.0-10B981?style=for-the-badge)](docs/releases/v0.16.0.md)
+[![Version](https://img.shields.io/badge/v0.17.0-10B981?style=for-the-badge)](docs/releases/v0.17.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -101,7 +101,7 @@ For Codex, register the release tag and add the plugin as described in [the Code
 <details>
 <summary><b>Full feature summary (English)</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and LLM sessions limited to the Read/Grep/Glob tools by Claude CLI flags — a tool restriction, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), and 14 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and LLM sessions limited to the Read/Grep/Glob tools by Claude CLI flags — a tool restriction, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 14 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -147,6 +147,14 @@ v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플
 미지원·실패이면 **호스트 대체 + 사유**를 표시하고 낮은 확신도·보류를 공개한다. 결과는
 참고용이며 PASS나 행동 승인이 아니다. SDK·설정 마이그레이션·시작 시 네트워크 호출은 없다.
 
+v0.17.0에는 선택형 **도구 어댑터**가 추가됐다. 첫 어댑터는 Aside(AI 브라우저 CLI)다.
+`/vault-init`·`/vault-upgrade`는 `aside` CLI가 있을 때만 제안하고, 승인하면 CLAUDE.md 조항과
+운영 가이드 노트를 넣는다. Windows에서는 기동할 때 새 창을 바로 최소화하고 이전 창에 포커스를
+돌려주는 기동 도우미 `aside-up.ps1`을 설치하고, Claude Code에서는 aside 명령 앞에서만 실행되는 PreToolUse 훅(`if: Bash(aside *)`)을
+따로 확인받아 병합한다. 상태는 `vault_adapters.py`가 읽기 전용으로 보고하며 `/vault-doctor`가
+함께 보여 준다. 엔진 규칙 `vault-browser.md`에는 도구와 무관한 9번 원칙(창 기반 앱은 포커스를
+뺏지 않게 기동하고 작업이 끝나도 창을 닫지 않는다)이 더해졌다. [변경과 실측](docs/releases/v0.17.0.md)
+
 | 입력 | 산출 |
 |:---|:---|
 | `/vault-init 연구볼트` | 표준 트리 19 디렉토리 + `vault-config.json` + 시스템 노트·템플릿 + 행동 계약(rules 6종 + CLAUDE.md 스텁 + AGENTS.md) |
@@ -158,7 +166,7 @@ v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플
 | `/vault-recall 질의` | 출처 경로·행 번호가 있는 어휘 검색, 추정 컨텍스트 예산 적용 (읽기 전용) |
 | `/vault-judge 의미 질문` | 승인된 원문 발췌의 고정 선택지 판단 + 확률/확신도 + 로컬 출처 (외부 API, 참고용) |
 | `/jev-ask 1+1은?` | 볼트 없이 직접 질문·선택한 인라인 문맥을 native Noul·Choice·Score로 평가 (승인 범위 내) |
-| `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 (읽기 전용) |
+| `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 + 도구 어댑터(Aside) 상태 (읽기 전용) |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
@@ -346,7 +354,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.16.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.17.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -385,6 +393,7 @@ agentic-vault/
 │       ├── jev_ask.py                 ← 인라인 Noul·Choice·Score · prepare/run --input -
 │       ├── jev_client.py              ← Jev 고정 선택지 API (stdlib-only, 한 번 호출) · 비밀 필터 단일 출처
 │       ├── vault_doctor.py            ← 설정·파일·예산 원인별 진단
+│       ├── vault_adapters.py          ← 선택형 도구 어댑터(Aside) 상태 읽기 전용 진단
 │       ├── vault_proposals.py         ← 교훈 제안 이력 + 대상 해시 확인 후 적용
 │       ├── vault_evidence.py          ← 파일 버전·검증 근거 연결 + 현재 상태에 따른 인계
 │       ├── vault_paths.py             ← 경로·deny zone·링크 규칙 단일 출처 (healthcheck는 테스트로 고정한 사본)
@@ -399,6 +408,12 @@ agentic-vault/
 │   ├── rules/                         ← 엔진 소유 행동 규칙 6종 (.claude/rules/로 설치, upgrade가 통째 교체)
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
 │
+├── assets/adapters/aside/             ← 선택형 Aside 어댑터 (/vault-init·/vault-upgrade가 승인 후 설치)
+│   ├── aside-up.ps1                   ← Windows 기동 도우미(새 창 최소화·포커스 복귀)
+│   ├── browser-clause.md              ← CLAUDE.md 브라우저 도구 조항
+│   ├── operations-guide.md            ← 운영 가이드 노트 뼈대
+│   └── settings-hooks.json            ← aside 명령에만 걸리는 PreToolUse 훅
+│
 └── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️
     ├── pre-commit                     ← 커밋 시점 fail-closed 검증 (프런트매터·YAML 위키링크)
     └── pre-push                       ← 원격 push 차단 (로컬 전용 기계 강제)
@@ -412,7 +427,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.16.0**이며 **Claude Code, Codex 겸용**이다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 workflow·collab 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며, 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.16.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.16.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.17.0**이며 **Claude Code, Codex 겸용**이다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않는다. 업그레이드하면 규칙 9번(AGENTS.md에도 포함)이 추가되고 git 볼트의 healthcheck가 0.17.0으로 교체된다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -453,7 +468,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.16.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 

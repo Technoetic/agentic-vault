@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.16.0"
+EXPECTED = "0.17.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.16.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.16.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.17.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.17.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.16.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.17.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -179,7 +179,8 @@ REQUIRED_V090_RELEASE_LITERALS = (
 # 유발 방지). workflow·collab은 이후 v0.16.0에서 내용이 바뀌어 0.16.0 스탬프를 가진다.
 RELEASE_NOTE_V0120 = REPO_ROOT / "docs" / "releases" / "v0.12.0.md"
 BROWSER_RULE = REPO_ROOT / "assets" / "templates" / "rules" / "vault-browser.md"
-REQUIRED_BROWSER_RULE_STAMP = "agentic-vault:rule engine=0.12.0"
+# v0.17.0에서 9번(창 기반 앱의 수명과 포커스) 조항이 추가돼 browser 스탬프가 0.17.0으로 올라갔다.
+REQUIRED_BROWSER_RULE_STAMP = "agentic-vault:rule engine=0.17.0"
 REQUIRED_BROWSER_RULE_LITERALS = (
     "# 브라우저 자동화 경계",
     "CLAUDE.md가 정한 하나만",
@@ -257,6 +258,42 @@ REQUIRED_V0160_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이�
 REQUIRED_V0160_RELEASE_LITERALS = ("engine=0.16.0", "--ref v0.16.0", "vault-workflow.md", "vault-collab.md")
 
 
+# v0.17.0: 선택형 도구 어댑터(Aside) — 어댑터 자산·진단 스크립트·init/upgrade/doctor 배선,
+# browser 규칙 9번. 내용이 바뀌지 않은 나머지 다섯 규칙은 스탬프를 올리지 않는다.
+RELEASE_NOTE_V0170 = REPO_ROOT / "docs" / "releases" / "v0.17.0.md"
+REQUIRED_V0170_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증과 경계")
+REQUIRED_V0170_RELEASE_LITERALS = (
+    "engine=0.17.0", "--ref v0.17.0", "vault-browser.md", "aside-up.ps1", "vault_adapters.py",
+    "Bash(aside *)", "$env:CLAUDE_PROJECT_DIR", "ProductName", "settings.local.json",
+)
+REQUIRED_V0170_WIRING = (
+    ("assets/templates/rules/vault-browser.md", "9. **창 기반 앱의 수명과 포커스.**"),
+    ("assets/templates/rules/vault-browser.md", "연 탭만 닫는다"),
+    ("commands/vault-init.md", "## 4-1. 도구 어댑터 (선택 — 사용자 승인 후에만)"),
+    ("commands/vault-init.md", "관리 블록 **밖**에 둔다"),
+    ("commands/vault-init.md", "Codex에서는 이 단계를 생략하고"),
+    ("commands/vault-upgrade.md", "6. **도구 어댑터(선택)**"),
+    ("commands/vault-upgrade.md", "`offer_helper_update`"),
+    ("commands/vault-upgrade.md", "자동 덮어쓰기 금지 — diff만 보여 주고"),
+    ("commands/vault-upgrade.md", "`review_settings`"),
+    ("commands/vault-upgrade.md", "`agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다"),
+    ("commands/vault-init.md", "`.claude/settings.local.json`에 병합할까요?"),
+    ("commands/vault-init.md", ".claude/settings.local.json\n00-meta/health-report.md"),
+    ("assets/adapters/aside/browser-clause.md", "`console.log()`로 출력한 내용은 이 명령을 부른 에이전트"),
+    ("SECURITY.md", "**The Aside hook runs a file from the vault.**"),
+    ("README.md", "releases/tag/v0.17.0"),
+    ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.0.md)"),
+    ("commands/vault-doctor.md", "vault_adapters.py"),
+    ("skills/agentic-vault/references/codex.md", "vault_adapters.py"),
+    ("skills/agentic-vault/SKILL.md", "도구 어댑터(Aside) 상태"),
+    ("docs/codex.md", "Claude Code 전용 자동 기동 훅 대신"),
+    ("README.md", "├── assets/adapters/aside/"),
+    ("README.md", "vault_adapters.py"),
+    ("SECURITY.md", "**Optional Aside adapter**"),
+    ("SECURITY.md", "선택형 Aside 어댑터 훅·도우미"),
+)
+
+
 class ReleaseMetadataTests(unittest.TestCase):
     def test_release_note_records_v0120_contract(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0120.is_file())
@@ -318,6 +355,29 @@ class ReleaseMetadataTests(unittest.TestCase):
                 stamp = (BROWSER_RULE.parent / name).read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.16.0", stamp)
+
+
+    def test_v0170_aside_adapter_is_wired(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0170.is_file())
+        release = RELEASE_NOTE_V0170.read_text(encoding="utf-8")
+        for section in REQUIRED_V0170_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0170_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.17.0.md").is_file())
+        for rel_path, literal in REQUIRED_V0170_WIRING:
+            with self.subTest(path=rel_path, literal=literal):
+                self.assertIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for name in ("aside-up.ps1", "browser-clause.md", "operations-guide.md", "settings-hooks.json"):
+            with self.subTest(asset=name):
+                self.assertTrue((REPO_ROOT / "assets" / "adapters" / "aside" / name).is_file())
+        self.assertTrue((REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_adapters.py").is_file())
+        for name in UNCHANGED_RULE_TEMPLATES:
+            with self.subTest(unchanged_rule=name):
+                stamp = (BROWSER_RULE.parent / name).read_text(encoding="utf-8").splitlines()[0]
+                self.assertNotIn("engine=0.17.0", stamp)
 
     def test_active_version_surfaces_match_release(self) -> None:
         plugin = json.loads(

@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(aside *)",
+            "timeout": 60,
+            "statusMessage": "Aside 기동 확인 중...",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command '& (Join-Path $env:CLAUDE_PROJECT_DIR 00-meta/scripts/aside-up.ps1) -Hook'"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(aside *)",
+            "timeout": 60,
+            "statusMessage": "Aside 기동 확인 중...",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command '& (Join-Path $env:CLAUDE_PROJECT_DIR 00-meta/scripts/aside-up.ps1) -Hook'"
+          }
+        ]
+      }
+    ]
+  }
+}
