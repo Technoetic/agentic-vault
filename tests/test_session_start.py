@@ -639,6 +639,34 @@ class ComposeContextTests(unittest.TestCase):
         for start, title in headings:
             self.assertTrue(text[start:].lstrip("# ").startswith(title))
 
+    def test_long_one_line_paragraph_is_cut_at_a_word_not_dropped(self) -> None:
+        # Snapping back to the previous newline would drop most of this long
+        # line, so the cut keeps at least three quarters of the fitting head
+        # and ends on a word instead.
+        text = "intro\n" + "word " * 400
+        result = session_hook._truncate_to_fit(
+            "P\n", text, lambda candidate: len(candidate) <= 1000,
+            lambda cut: "\n[m]", len(text),
+        )
+
+        self.assertIsNotNone(result)
+        body = result[len("P\n"):-len("\n[m]")]
+        self.assertTrue(text.startswith(body))
+        self.assertTrue(body.endswith("word"))
+        self.assertGreaterEqual(len(body), (1000 - len("P\n") - len("\n[m]")) * 3 // 4)
+
+    def test_heading_left_without_its_body_moves_into_the_omitted_part(self) -> None:
+        # The line cut lands right after "# H"; a heading with no body left
+        # moves behind the cut so the marker (here: the cut offset) lists it.
+        text = "a" * 40 + "\n# H\n" + "c" * 100
+
+        result = session_hook._truncate_to_fit(
+            "P\n", text, lambda candidate: len(candidate) <= 60,
+            lambda cut: f"\n[{cut}]", len(text), frozenset({41}),
+        )
+
+        self.assertEqual(result, "P\n" + "a" * 40 + "\n[41]")
+
     def test_output_within_the_cap_is_not_rendered_again(self) -> None:
         sources = [
             self.source(HANDOFF_HEADER, "Continue the checklist.", 4000),

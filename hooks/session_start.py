@@ -191,12 +191,17 @@ def _truncate_to_fit(
     fits: Callable[[str], bool],
     marker_for: Callable[[int], str],
     high: int,
+    heading_starts: frozenset[int] = frozenset(),
 ) -> str | None:
-    """Keep the longest fitting head of text, then cut back to a whole line.
+    """Keep the longest fitting head of text, then cut back to a readable boundary.
 
     The binary search only moves `low` to cuts that fit. The cut then moves
-    back to the last newline inside the kept head; a head without a newline
-    keeps the character cut. None means this marker does not fit.
+    back to the last newline inside the kept head when that still keeps at
+    least three quarters of it, so a long one-line paragraph is not dropped
+    whole; otherwise it moves back to the last space or tab in that range, or
+    stays at the character cut. A heading left as the last kept line has lost
+    its body, so it moves into the omitted part where the marker lists it.
+    None means this marker does not fit.
     """
     if not fits(prefix + marker_for(0)):
         return None
@@ -207,11 +212,21 @@ def _truncate_to_fit(
             low = midpoint
         else:
             high = midpoint - 1
-    boundary = text.rfind("\n", 0, low)
-    if boundary < 0:
-        return prefix + text[:low] + marker_for(low)
-    candidate = prefix + text[:boundary].rstrip() + marker_for(boundary)
-    # A heading moved into the omitted part can lengthen a marker that lists it.
+    floor = low - low // 4
+    cut = text.rfind("\n", 0, low)
+    if cut < floor:
+        cut = max(text.rfind(" ", 0, low), text.rfind("\t", 0, low))
+        if cut < floor:
+            cut = low
+    head = text[:cut].rstrip()
+    while True:
+        last_line = head.rfind("\n") + 1
+        if last_line == 0 or last_line not in heading_starts:
+            break
+        cut = last_line
+        head = text[:cut].rstrip()
+    candidate = prefix + head + marker_for(cut)
+    # Moving the cut back can put more headings into a marker that lists them.
     return candidate if fits(candidate) else None
 
 
@@ -262,8 +277,9 @@ def _render_section(
 
     # A head of n characters is at least n UTF-16 units long.
     high = len(text) if max_chars is None else min(len(text), max_chars)
+    heading_starts = frozenset(starts)
     for marker_for in (rich_marker, short_marker):
-        rendered = _truncate_to_fit(prefix, text, fits, marker_for, high)
+        rendered = _truncate_to_fit(prefix, text, fits, marker_for, high, heading_starts)
         if rendered is not None:
             return rendered, True
     return None, False
