@@ -75,6 +75,21 @@ class VaultDoctorTests(unittest.TestCase):
             timeout=10,
         )
 
+    def run_hook_bytes(self) -> bytes:
+        """Return the hook stdout as bytes, without newline translation on read."""
+        result = subprocess.run(
+            [sys.executable, str(SESSION_HOOK), "--vault", str(self.vault)],
+            cwd=REPO_ROOT,
+            env=os.environ.copy(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, b"")
+        return result.stdout
+
     def json_report(self) -> tuple[subprocess.CompletedProcess[str], dict]:
         result = self.run_doctor("--format", "json")
         return result, json.loads(result.stdout)
@@ -325,6 +340,62 @@ class VaultDoctorTests(unittest.TestCase):
         self.assertIn("ready", result.stdout)
         self.assertIn("diagnosis_only_host_hook_execution_unverified", result.stdout)
         self.assertNotIn("Keep these bytes", result.stdout)
+
+    def test_combined_output_over_the_host_cap_is_a_section_warning(self) -> None:
+        self.write_config(
+            handoff_note="00-meta/handoff.md", handoff_max_tokens=4000, hot_max_tokens=2500,
+        )
+        line = "- Keep the verified decision near the top of the note.\n"
+        self.write("00-meta/handoff.md", line * 40)
+        self.write("00-meta/hot.md", line * 140)
+
+        result, report = self.json_report()
+        emitted = self.run_hook_bytes().decode("utf-8")
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(report["status"], "degraded")
+        handoff = report["sections"]["handoff"]
+        hot = report["sections"]["hot"]
+        self.assertEqual((handoff["status"], handoff["reason_code"]), ("ready", "section_ready"))
+        self.assertEqual((hot["status"], hot["reason_code"]), ("truncated", "host_char_cap"))
+        self.assertEqual(hot["next_action"], "reduce_the_note_or_review_the_budget")
+        # Each note fits its own token budget; only the joined output is too long.
+        self.assertLessEqual(hot["independently_estimated_tokens"], 2500)
+        self.assertLess(hot["estimated_emitted_tokens"], hot["independently_estimated_tokens"])
+        hook = report["hook"]
+        self.assertEqual(hook["host_char_cap"], 9500)
+        self.assertLessEqual(hook["estimated_emitted_chars"], hook["host_char_cap"])
+        # The doctor reports exactly what the hook writes.
+        self.assertEqual(hook["estimated_emitted_chars"], len(emitted.encode("utf-16-le")) // 2)
+        self.assertEqual(
+            hook["estimated_emitted_chars"],
+            handoff["estimated_emitted_chars"] + len("\n\n") + hot["estimated_emitted_chars"] + 1,
+        )
+        self.assertIn("[... truncated: 00-meta/hot.md", emitted)
+
+    def test_text_report_prints_emitted_characters_and_host_cap(self) -> None:
+        self.write_config()
+        self.write("00-meta/hot.md", "Ship the verified change.")
+
+        result = self.run_doctor()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("estimated_emitted_chars: 46\n", result.stdout)
+        self.assertIn("host_char_cap: 9500\n", result.stdout)
+
+    def test_terminal_and_fatal_reports_emit_no_characters(self) -> None:
+        result, report = self.json_report()
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(report["hook"]["estimated_emitted_chars"], 0)
+        self.assertEqual(report["hook"]["host_char_cap"], 9500)
+
+        self.write_config(hot_note="../outside.md")
+        result, report = self.json_report()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report["hook"]["estimated_emitted_chars"], 0)
+        self.assertEqual(report["sections"]["hot"]["estimated_emitted_chars"], 0)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,20 @@ def load_module(name: str, path: Path):
 healthcheck = load_module(
     "session_test_healthcheck", SCRIPTS_DIR / "vault_healthcheck.py"
 )
+_SAVED_SYS_PATH = list(sys.path)
+try:
+    session_hook = load_module("session_test_hook", SESSION_HOOK)
+finally:
+    sys.path[:] = _SAVED_SYS_PATH
+HOST_CAP = session_hook.HOST_MAX_OUTPUT_CHARS
+HANDOFF_HEADER = session_hook.HANDOFF_HEADER
+HOT_HEADER = session_hook.HOT_HEADER
+RECALL_HINT = "; for a topic run /vault-recall <topic> (Codex: recall) ...]"
+
+
+def utf16_units(text: str) -> int:
+    """Length as a JavaScript host counts it (supplementary characters count 2)."""
+    return len(text.encode("utf-16-le")) // 2
 
 
 class SessionStartTests(unittest.TestCase):
@@ -66,13 +80,7 @@ class SessionStartTests(unittest.TestCase):
             json.dumps(config, ensure_ascii=False),
         )
 
-    def run_hook(
-        self,
-        *arguments: str,
-        codex: bool = False,
-        cwd: Path | None = None,
-        claude_project_dir: str | None = None,
-    ) -> subprocess.CompletedProcess[str]:
+    def hook_env(self, *, codex: bool, claude_project_dir: str | None) -> dict[str, str]:
         env = {
             key: value for key, value in os.environ.items()
             if not key.upper().startswith("CLAUDE_")
@@ -81,10 +89,19 @@ class SessionStartTests(unittest.TestCase):
             env["CLAUDE_PROJECT_DIR"] = str(self.vault)
         if claude_project_dir is not None:
             env["CLAUDE_PROJECT_DIR"] = claude_project_dir
+        return env
+
+    def run_hook(
+        self,
+        *arguments: str,
+        codex: bool = False,
+        cwd: Path | None = None,
+        claude_project_dir: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SESSION_HOOK), *arguments],
             cwd=cwd if cwd is not None else (self.vault if codex else REPO_ROOT),
-            env=env,
+            env=self.hook_env(codex=codex, claude_project_dir=claude_project_dir),
             input='{"source":"startup"}',
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -94,6 +111,30 @@ class SessionStartTests(unittest.TestCase):
             check=False,
             timeout=10,
         )
+
+    def run_hook_bytes(self, *, codex: bool = False) -> subprocess.CompletedProcess[bytes]:
+        """Run the hook and keep stdout as bytes: no newline translation on read."""
+        return subprocess.run(
+            [sys.executable, str(SESSION_HOOK)],
+            cwd=self.vault if codex else REPO_ROOT,
+            env=self.hook_env(codex=codex, claude_project_dir=None),
+            input=b'{"source":"startup"}',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+
+    def emitted(self) -> str:
+        """Return the exact text the host would receive, checked for both entry points."""
+        claude = self.run_hook_bytes()
+        codex = self.run_hook_bytes(codex=True)
+
+        self.assertEqual(claude.returncode, 0, claude.stderr)
+        self.assertEqual(claude.stderr, b"")
+        self.assertEqual(codex.returncode, 0, codex.stderr)
+        self.assertEqual(codex.stdout, claude.stdout)
+        return claude.stdout.decode("utf-8")
 
     def test_injects_korean_and_english_notes(self) -> None:
         self.write_config()
@@ -364,6 +405,254 @@ class SessionStartTests(unittest.TestCase):
         self.assertNotIn("TAIL_MARKER_MUST_NOT_BE_READ", result.stdout)
         self.assertIn("truncated", result.stdout.casefold())
         self.assertLess(len(result.stdout.encode("utf-8")), 512 * 1024)
+
+    def test_template_budgets_keep_english_output_under_the_host_cap(self) -> None:
+        # Unbounded, these budgets emitted about 21,700 characters for English
+        # notes; the host then kept only a 2,000-character preview.
+        self.write_config(handoff_max_tokens=4000, hot_max_tokens=2500)
+        line = "- Continue the release checklist and verify the CI matrix.\n"
+        self.write("00-meta/handoff.md", "# Handoff\n\n" + line * 600)
+        self.write("00-meta/hot.md", "# Hot\n\n" + line * 600)
+
+        output = self.emitted()
+
+        self.assertLessEqual(utf16_units(output), HOST_CAP)
+        self.assertGreater(utf16_units(output), HOST_CAP - 300)
+        self.assertNotIn("\r", output)
+        handoff, hot = output.split("\n\n" + HOT_HEADER + "\n")
+        self.assertTrue(handoff.startswith(HANDOFF_HEADER + "\n# Handoff\n"))
+        self.assertTrue(handoff.endswith("[... truncated: 00-meta/handoff.md" + RECALL_HINT))
+        self.assertTrue(hot.startswith("# Hot\n"))
+        self.assertTrue(hot.endswith("[... truncated: 00-meta/hot.md" + RECALL_HINT + "\n"))
+        self.assertGreater(len(handoff), len(hot))
+
+    def test_korean_prose_within_budget_is_emitted_unchanged(self) -> None:
+        self.write_config(handoff_max_tokens=4000, hot_max_tokens=2500)
+        handoff = "## 다음 작업\n" + "오늘은 안정성 검증을 마치고 릴리스 노트를 정리한다.\n" * 40
+        hot = "# 지금 상태\n" + "핵심 결정은 볼트 파일에 남기고 세션마다 다시 확인한다.\n" * 30
+        self.write_bytes("00-meta/handoff.md", handoff.encode("utf-8"))
+        self.write_bytes("00-meta/hot.md", hot.encode("utf-8"))
+
+        output = self.emitted()
+
+        self.assertEqual(
+            output,
+            f"{HANDOFF_HEADER}\n{handoff.strip()}\n\n{HOT_HEADER}\n{hot.strip()}\n",
+        )
+
+    def test_supplementary_characters_count_as_two_units(self) -> None:
+        self.write_config(handoff_max_tokens=0, hot_max_tokens=1_000_000)
+        line = "\U0001F600" * 49
+        note = "\n".join([line] * 100)
+        self.write_bytes("00-meta/hot.md", note.encode("utf-8"))
+        # About 5,000 code points would pass a code-point count, but the host
+        # counts each of these characters as two UTF-16 units.
+        self.assertLess(len(f"{HOT_HEADER}\n{note}\n"), HOST_CAP)
+        self.assertGreater(utf16_units(f"{HOT_HEADER}\n{note}\n"), HOST_CAP)
+
+        output = self.emitted()
+
+        self.assertLessEqual(utf16_units(output), HOST_CAP)
+        body, _ = output.split("\n\n[... truncated", 1)
+        self.assertEqual(set(body.split("\n")[1:]), {line})
+
+    def test_crlf_and_lone_cr_notes_are_emitted_with_lf_only(self) -> None:
+        self.write_config()
+        self.write_bytes(
+            "00-meta/handoff.md", b"first line\r\nsecond line\r\n\r\nthird\rfourth\r\n"
+        )
+        self.write_bytes("00-meta/hot.md", "﻿한글 줄\r\n다음 줄\r\n".encode("utf-8"))
+
+        output = self.emitted()
+
+        self.assertNotIn("\r", output)
+        self.assertEqual(
+            output,
+            f"{HANDOFF_HEADER}\nfirst line\nsecond line\n\nthird\nfourth\n\n"
+            f"{HOT_HEADER}\n한글 줄\n다음 줄\n",
+        )
+
+    def test_truncated_section_ends_on_a_complete_line(self) -> None:
+        self.write_config(handoff_note="", hot_max_tokens=300)
+        lines = [
+            f"- entry {index:03d}: keep the verified decision near the top."
+            for index in range(200)
+        ]
+        self.write_bytes("00-meta/hot.md", "\n".join(lines).encode("utf-8"))
+
+        output = self.emitted()
+
+        body, _ = output.split("\n\n[... truncated", 1)
+        kept = body.split("\n")[1:]
+        self.assertGreater(len(kept), 1)
+        self.assertEqual(kept, lines[: len(kept)])
+        self.assertLessEqual(healthcheck.estimate_tokens(output.rstrip("\n")), 300)
+
+    def test_marker_names_the_note_and_omitted_headings_without_absolute_paths(self) -> None:
+        titles = [f"Heading {index}" for index in range(1, 13)]
+        titles[6] = "A very long heading that runs well past the forty character limit"
+        text = "# Hot\n" + "".join(
+            f"## {title}\n" + "Body text for this section.\n" * 8 for title in titles
+        ) + "```sh\n# not a heading\n```\n"
+        self.write_bytes("00-meta/hot.md", text.encode("utf-8"))
+        self.write_config(handoff_note="", hot_note="00-meta\\hot.md", hot_max_tokens=400)
+
+        output = self.emitted()
+
+        kept = [line[3:] for line in output.split("\n") if line.startswith("## ")]
+        omitted = titles[len(kept):]
+        self.assertGreater(len(omitted), 5)
+        shown = [
+            title if len(title) <= 40 else title[:39] + "…" for title in omitted[:5]
+        ]
+        self.assertIn(titles[6][:39] + "…", shown)
+        self.assertTrue(output.endswith(
+            "\n\n[... truncated: 00-meta/hot.md; omitted headings: "
+            + " | ".join(shown) + f" (+{len(omitted) - 5} more)" + RECALL_HINT + "\n"
+        ))
+        self.assertLessEqual(healthcheck.estimate_tokens(output.rstrip("\n")), 400)
+        self.assertNotIn(str(self.root), output)
+        self.assertNotIn("\\", output)
+        self.assertNotIn("not a heading", output)
+
+    def test_tiny_budget_falls_back_to_the_short_marker(self) -> None:
+        self.write_config(handoff_note="", hot_max_tokens=30)
+        self.write_bytes(
+            "00-meta/hot.md", ("# Hot\n" + "Visible context line.\n" * 50).encode("utf-8")
+        )
+        # Even without any heading, the marker that names the note costs more
+        # than this budget, so only the short marker can fit.
+        self.assertGreater(
+            healthcheck.estimate_tokens(
+                f"{HOT_HEADER}\n\n\n[... truncated: 00-meta/hot.md{RECALL_HINT}"
+            ),
+            30,
+        )
+
+        output = self.emitted()
+
+        self.assertTrue(output.startswith(f"{HOT_HEADER}\n# Hot\n"))
+        self.assertTrue(output.endswith(session_hook.TRUNCATION_MARKER + "\n"))
+        self.assertLessEqual(healthcheck.estimate_tokens(output.rstrip("\n")), 30)
+
+    def test_long_heading_line_does_not_stall_the_hook(self) -> None:
+        # A backtracking heading pattern took minutes on a heading line with a
+        # long run of spaces; the subprocess timeout guards the linear parser.
+        self.write_config(handoff_note="", hot_max_tokens=2000)
+        self.write_bytes(
+            "00-meta/hot.md", ("# a" + " " * 200_000 + "b\n## Next\ntext\n").encode("utf-8")
+        )
+
+        output = self.emitted()
+
+        self.assertLessEqual(utf16_units(output), HOST_CAP)
+        self.assertTrue(output.endswith(
+            "[... truncated: 00-meta/hot.md; omitted headings: Next" + RECALL_HINT + "\n"
+        ))
+
+
+class ComposeContextTests(unittest.TestCase):
+    """The shared composition keeps every section header under the host cap."""
+
+    @staticmethod
+    def source(header: str, text: str, budget: int) -> object:
+        return session_hook.SectionSource(header, text, budget, False, "00-meta/note.md")
+
+    def test_output_fits_the_cap_and_keeps_every_header(self) -> None:
+        units = (
+            "- a line of English context for the session start hook\n",
+            "- 세션 시작 훅이 주입하는 한국어 문맥 줄이다\n",
+            "\U0001F600" * 20 + "\n",
+        )
+        sizes = ((0, 400), (400, 0), (30, 400), (400, 30), (400, 400))
+        budgets = ((4000, 2500), (1_000_000, 40), (40, 1_000_000), (1_000_000, 1_000_000))
+        for unit in units:
+            for handoff_lines, hot_lines in sizes:
+                for handoff_budget, hot_budget in budgets:
+                    with self.subTest(
+                        unit=unit[:8], sizes=(handoff_lines, hot_lines),
+                        budgets=(handoff_budget, hot_budget),
+                    ):
+                        sources = [
+                            self.source(
+                                HANDOFF_HEADER, (unit * handoff_lines).strip(), handoff_budget,
+                            ) if handoff_lines else None,
+                            self.source(
+                                HOT_HEADER, (unit * hot_lines).strip(), hot_budget,
+                            ) if hot_lines else None,
+                        ]
+
+                        context = session_hook.compose_context(sources)
+
+                        self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
+                        for source, section in zip(sources, context.sections):
+                            if source is None:
+                                self.assertIsNone(section)
+                                continue
+                            self.assertTrue(section.text.startswith(source.header + "\n"))
+                            self.assertLessEqual(
+                                healthcheck.estimate_tokens(section.text), source.token_budget,
+                            )
+
+    def test_short_section_is_kept_whole_and_passes_its_room_on(self) -> None:
+        text = "\n".join(f"- line {index:04d} of the hot note" for index in range(2000))
+        sources = [
+            self.source(HANDOFF_HEADER, "Short handoff.", 4000),
+            self.source(HOT_HEADER, text, 10_000),
+        ]
+
+        context = session_hook.compose_context(sources)
+
+        handoff, hot = context.sections
+        self.assertEqual(handoff, (f"{HANDOFF_HEADER}\nShort handoff.", False, False))
+        self.assertTrue(hot.truncated)
+        self.assertTrue(hot.host_capped)
+        self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
+        # The hot section may use all the room the short handoff left.
+        self.assertGreater(utf16_units(hot.text), HOST_CAP - utf16_units(handoff.text) - 60)
+
+    def test_extreme_budget_ratio_still_keeps_the_small_section_header(self) -> None:
+        text = "\n".join(f"- line {index:04d} of context" for index in range(3000))
+        sources = [
+            self.source(HANDOFF_HEADER, text, 1_000_000),
+            self.source(HOT_HEADER, text, 40),
+        ]
+
+        context = session_hook.compose_context(sources)
+
+        handoff, hot = context.sections
+        self.assertEqual(hot.text, f"{HOT_HEADER}\n{session_hook.TRUNCATION_MARKER}")
+        self.assertTrue(hot.host_capped)
+        self.assertTrue(handoff.host_capped)
+        self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
+
+    def test_heading_index_skips_fenced_code_and_non_headings(self) -> None:
+        text = "\n".join((
+            "# Title ##", "#hashtag", "####### seven", "    # indented code",
+            "```sh", "# shell comment", "```", "## Kept", "~~~", "# tilde fenced",
+            "~~~~", "### C#", "## ###",
+        ))
+
+        headings = session_hook._heading_index(text)
+
+        self.assertEqual([title for _, title in headings], ["Title", "Kept", "C#"])
+        for start, title in headings:
+            self.assertTrue(text[start:].lstrip("# ").startswith(title))
+
+    def test_output_within_the_cap_is_not_rendered_again(self) -> None:
+        sources = [
+            self.source(HANDOFF_HEADER, "Continue the checklist.", 4000),
+            None,
+        ]
+
+        context = session_hook.compose_context(sources)
+
+        self.assertEqual(
+            context.sections,
+            ((f"{HANDOFF_HEADER}\nContinue the checklist.", False, False), None),
+        )
+        self.assertEqual(context.stdout, f"{HANDOFF_HEADER}\nContinue the checklist.\n")
+        self.assertEqual(session_hook.compose_context([None, None]).stdout, "")
 
 
 class ResolveNotePathTests(unittest.TestCase):

@@ -53,6 +53,7 @@ def _hook_report(
     configured_budget: int | None,
     effective_budget: int | None,
     emitted_tokens: int,
+    emitted_chars: int,
     would_emit: bool,
 ) -> dict:
     return {
@@ -60,6 +61,10 @@ def _hook_report(
         "configured_token_budget": configured_budget,
         "effective_token_budget": effective_budget,
         "estimated_emitted_tokens": emitted_tokens,
+        # UTF-16 units of the exact stdout, final newline included: the length
+        # the host compares with its hook output limit.
+        "estimated_emitted_chars": emitted_chars,
+        "host_char_cap": session_hook.HOST_MAX_OUTPUT_CHARS,
         "trust_boundary": TRUST_BOUNDARY,
     }
 
@@ -74,6 +79,7 @@ def _terminal_report(status: str, reason_code: str, next_action: str) -> dict:
             configured_budget=None,
             effective_budget=None,
             emitted_tokens=0,
+            emitted_chars=0,
             would_emit=False,
         ),
         "sections": {},
@@ -98,8 +104,28 @@ def _base_section(status: str, reason_code: str, budget: int, next_action: str) 
         "independently_estimated_tokens": 0,
         "would_emit": False,
         "estimated_emitted_tokens": 0,
+        "estimated_emitted_chars": 0,
         "next_action": next_action,
     }
+
+
+def _truncation_state(
+    source_truncated: bool, rendered: session_hook.RenderedSection,
+) -> tuple[str, str, str]:
+    """Return status, reason_code and next_action for one rendered section.
+
+    The source byte limit is reported first: the note is too large to read
+    whole, which also explains any later cut.
+    """
+    if source_truncated:
+        reason_code = "source_byte_limit"
+    elif rendered.host_capped:
+        reason_code = "host_char_cap"
+    elif rendered.truncated:
+        reason_code = "token_budget_limit"
+    else:
+        return "ready", "section_ready", "none"
+    return "truncated", reason_code, "reduce_the_note_or_review_the_budget"
 
 
 def _diagnose_section(
@@ -109,7 +135,7 @@ def _diagnose_section(
     path_key: str,
     budget_key: str,
     header: str,
-) -> tuple[dict, str | None]:
+) -> tuple[dict, session_hook.SectionSource | None]:
     budget = config[budget_key]
     rel_path = config[path_key]
     if budget == 0:
@@ -159,12 +185,9 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
-    rendered = session_hook._render_section(
-        header,
-        text,
-        budget,
-        source_truncated=source_truncated,
-    )
+    source = session_hook.SectionSource(header, text, budget, source_truncated, rel_path)
+    # This section alone, under the same token budget and host output cap.
+    rendered = session_hook.compose_context([source]).sections[0]
     if rendered is None:
         section = _base_section(
             "budget_too_small", "section_header_exceeds_budget", budget,
@@ -173,30 +196,18 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
-    emitted_tokens = estimate_tokens(rendered)
-    if source_truncated:
-        status = "truncated"
-        reason_code = "source_byte_limit"
-    elif rendered.endswith(session_hook.TRUNCATION_MARKER):
-        status = "truncated"
-        reason_code = "token_budget_limit"
-    else:
-        status = "ready"
-        reason_code = "section_ready"
-    section = _base_section(
-        status,
-        reason_code,
-        budget,
-        "reduce_the_note_or_review_the_budget" if status == "truncated" else "none",
-    )
+    emitted_tokens = estimate_tokens(rendered.text)
+    status, reason_code, next_action = _truncation_state(source_truncated, rendered)
+    section = _base_section(status, reason_code, budget, next_action)
     section.update(
         effective_token_budget=budget,
         independently_would_emit=True,
         independently_estimated_tokens=emitted_tokens,
         would_emit=True,
         estimated_emitted_tokens=emitted_tokens,
+        estimated_emitted_chars=session_hook.utf16_len(rendered.text),
     )
-    return section, rendered
+    return section, source
 
 
 def _isolated_configs(raw: dict) -> tuple[dict, dict] | None:
@@ -288,7 +299,7 @@ def diagnose(vault: Path) -> tuple[dict, int]:
         ), 2
 
     sections: dict[str, dict] = {}
-    rendered: dict[str, str | None] = {}
+    sources: dict[str, session_hook.SectionSource | None] = {}
     for name, path_key, budget_key, header in SECTION_SPECS:
         config = configs[name]
         if config[path_key] is None:
@@ -297,9 +308,9 @@ def diagnose(vault: Path) -> tuple[dict, int]:
                 "unsafe_path", "note_path_unsafe", budget,
                 "choose_a_vault_local_allowed_note",
             )
-            rendered[name] = None
+            sources[name] = None
             continue
-        sections[name], rendered[name] = _diagnose_section(
+        sections[name], sources[name] = _diagnose_section(
             vault,
             config,
             path_key=path_key,
@@ -318,14 +329,30 @@ def diagnose(vault: Path) -> tuple[dict, int]:
             section["effective_token_budget"] = 0
             section["would_emit"] = False
             section["estimated_emitted_tokens"] = 0
-        joined = ""
+            section["estimated_emitted_chars"] = 0
+        context = session_hook.compose_context([])
         status = "invalid_config"
         reason_code = "section_fatal"
         next_action = "repair_fatal_section_diagnostics"
         exit_code = 2
     else:
-        emitted = [rendered[name] for name, *_ in SECTION_SPECS if rendered[name]]
-        joined = "\n\n".join(emitted)
+        # The hook's own composition: the host output cap applies to the
+        # sections together, exactly as they would be emitted.
+        ordered = [sources[name] for name, *_ in SECTION_SPECS]
+        context = session_hook.compose_context(ordered)
+        for (name, *_), source, rendered in zip(SECTION_SPECS, ordered, context.sections):
+            if source is None or rendered is None:
+                continue
+            section_status, section_reason, section_action = _truncation_state(
+                source.source_truncated, rendered
+            )
+            sections[name].update(
+                status=section_status,
+                reason_code=section_reason,
+                next_action=section_action,
+                estimated_emitted_tokens=estimate_tokens(rendered.text),
+                estimated_emitted_chars=session_hook.utf16_len(rendered.text),
+            )
         if any(section["status"] in WARNING_STATES for section in sections.values()):
             status = "degraded"
             reason_code = "section_warning"
@@ -334,7 +361,7 @@ def diagnose(vault: Path) -> tuple[dict, int]:
         else:
             status = "ready"
             reason_code = (
-                "context_ready" if joined else "context_intentionally_disabled"
+                "context_ready" if context.text else "context_intentionally_disabled"
             )
             next_action = "none"
             exit_code = 0
@@ -349,8 +376,9 @@ def diagnose(vault: Path) -> tuple[dict, int]:
             effective_budget=(
                 0 if fatal else sum(s["effective_token_budget"] for s in sections.values())
             ),
-            emitted_tokens=estimate_tokens(joined) if joined else 0,
-            would_emit=bool(joined),
+            emitted_tokens=estimate_tokens(context.text) if context.text else 0,
+            emitted_chars=session_hook.utf16_len(context.stdout),
+            would_emit=bool(context.text),
         ),
         "sections": sections,
     }
@@ -366,6 +394,8 @@ def _format_text(report: dict) -> str:
         f"configured_token_budget: {hook['configured_token_budget']}",
         f"effective_token_budget: {hook['effective_token_budget']}",
         f"estimated_emitted_tokens: {hook['estimated_emitted_tokens']}",
+        f"estimated_emitted_chars: {hook['estimated_emitted_chars']}",
+        f"host_char_cap: {hook['host_char_cap']}",
         f"trust_boundary: {hook['trust_boundary']}",
     ]
     for name in ("handoff", "hot"):
