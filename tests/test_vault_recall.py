@@ -412,6 +412,24 @@ class VaultRecallTests(unittest.TestCase):
             ],
         )
 
+    def test_text_cli_counts_oversized_files_beyond_the_listed_ones(self) -> None:
+        # Beyond the bounded name list, the remaining skipped files are still
+        # disclosed as a count instead of vanishing from the text report.
+        extra = 2
+        for number in range(recall_module.MAX_RESULTS + extra):
+            self.write_bytes(f"20-knowledge/large-{number:03d}.md", b"needle " + b"x" * 2042)
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        with self.module_limits(MAX_FILE_BYTES=2048), redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = recall_module.main(["--vault", str(self.vault), "--query", "needle"])
+
+        self.assertEqual(exit_code, 0)
+        lines = stderr.getvalue().splitlines()
+        self.assertEqual(lines[0], "recall incomplete: omitted file_byte_limit")
+        listed = [line for line in lines if line.startswith("recall skipped (over 2 KiB): ")]
+        self.assertEqual(len(listed), recall_module.MAX_RESULTS)
+        self.assertEqual(lines[-1], f"recall skipped: {extra} more oversized file(s) not listed")
+
     def test_file_and_total_byte_limits_stop_scan_and_report_uncertainty(self) -> None:
         self.write("20-knowledge/a.md", "# A\nfirst evidence\n")
         self.write("20-knowledge/b.md", "# B\nneedle beyond file cap\n")

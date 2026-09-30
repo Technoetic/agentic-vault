@@ -502,6 +502,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"recall skipped (over {limit_kib} KiB): {skipped['path']} ({size_kib} KiB)",
                     file=sys.stderr,
                 )
+            unlisted = diagnostics["skipped_oversized"] - len(diagnostics["oversized_files"])
+            if unlisted > 0:
+                # The name list is bounded; say how many more were skipped.
+                print(f"recall skipped: {unlisted} more oversized file(s) not listed", file=sys.stderr)
     return 0 if result["diagnostics"]["status"] == "ok" else 2
 
 

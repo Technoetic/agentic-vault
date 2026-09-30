@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.17.0 adds an optional tool adapter for the Aside AI browser: when the aside CLI is present, vault init and upgrade offer a CLAUDE.md browser clause and an operations note, a Windows helper that starts Aside without taking the user's window focus, and, for Claude Code only, a PreToolUse hook filtered to aside commands. A read-only adapter report joins the doctor diagnosis, and the shared browser rule gains a tool-neutral clause for window-bound apps. Vaults without Aside behave as before. It keeps v0.16.0's long-run discipline for rules and commands and v0.15.0's authorized Jev-first direct questions with native Noul, Choice and Score. Jev is advisory; execution and action permissions remain with the host.",
+    "longDescription": "Use one Markdown vault for session handoff, source-attributed recall, read-only diagnosis, reviewed lesson proposals, verification evidence and backup recovery. Release v0.17.1 keeps session-start context within the host's hook output limit, marks each truncated note with its path and omitted headings, and names the files recall skipped for size. Release v0.17.0 added an optional tool adapter for the Aside AI browser: when the aside CLI is present, vault init and upgrade offer a CLAUDE.md browser clause and an operations note, a Windows helper that starts Aside without taking the user's window focus, and, for Claude Code only, a PreToolUse hook filtered to aside commands. A read-only adapter report joins the doctor diagnosis, and the shared browser rule gains a tool-neutral clause for window-bound apps. Vaults without Aside behave as before. It keeps v0.16.0's long-run discipline for rules and commands and v0.15.0's authorized Jev-first direct questions with native Noul, Choice and Score. Jev is advisory; execution and action permissions remain with the host.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

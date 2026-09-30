@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.17.0"
+EXPECTED = "0.17.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.17.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.17.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.17.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.17.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.17.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.17.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -281,8 +281,6 @@ REQUIRED_V0170_WIRING = (
     ("commands/vault-init.md", ".claude/settings.local.json\n00-meta/health-report.md"),
     ("assets/adapters/aside/browser-clause.md", "`console.log()`로 출력한 내용은 이 명령을 부른 에이전트"),
     ("SECURITY.md", "**The Aside hook runs a file from the vault.**"),
-    ("README.md", "releases/tag/v0.17.0"),
-    ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.0.md)"),
     ("commands/vault-doctor.md", "vault_adapters.py"),
     ("skills/agentic-vault/references/codex.md", "vault_adapters.py"),
     ("skills/agentic-vault/SKILL.md", "도구 어댑터(Aside) 상태"),
@@ -294,7 +292,53 @@ REQUIRED_V0170_WIRING = (
 )
 
 
+# v0.17.1: 결함 수정 — SessionStart 주입을 호스트 훅 출력 상한 아래로 묶고 잘림 표식에 경로·생략
+# 제목을 싣는다. healthcheck §11의 "통째로 주입 — 자르지 않는다" 설명을 실제 동작에 맞추고,
+# recall이 크기 한도로 건너뛴 파일 이름을 밝힌다. 규칙 템플릿 6종은 내용이 같아 스탬프를 올리지 않는다.
+# (v0.17.0의 README 릴리스 링크 핀은 여기로 옮겼다 — README는 최신 릴리스만 가리킨다.)
+RELEASE_NOTE_V0171 = REPO_ROOT / "docs" / "releases" / "v0.17.1.md"
+REQUIRED_V0171_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증과 경계")
+REQUIRED_V0171_RELEASE_LITERALS = (
+    "HOST_MAX_OUTPUT_CHARS", "9,500", "10,000", "oversized_files", "--ref v0.17.1", "engine=0.17.1",
+)
+REQUIRED_V0171_WIRING = (
+    ("hooks/session_start.py", "HOST_MAX_OUTPUT_CHARS = 9500"),
+    ("hooks/session_start.py", "def compose_context("),
+    ("skills/agentic-vault/scripts/vault_doctor.py", "host_char_cap"),
+    ("skills/agentic-vault/scripts/vault_recall.py", '"oversized_files": []'),
+    ("commands/vault-recall.md", "oversized_files"),
+    ("README.md", "releases/tag/v0.17.1"),
+    ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.1.md)"),
+)
+FORBIDDEN_V0171_STALE_LITERALS = (
+    ("skills/agentic-vault/scripts/vault_healthcheck.py", "자르지 않는다"),
+    ("skills/agentic-vault/scripts/vault_healthcheck.py", "통주입"),
+)
+
+
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_v0171_context_delivery_fixes_are_wired(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0171.is_file())
+        release = RELEASE_NOTE_V0171.read_text(encoding="utf-8")
+        for section in REQUIRED_V0171_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0171_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.17.1.md").is_file())
+        for rel_path, literal in REQUIRED_V0171_WIRING:
+            with self.subTest(path=rel_path, literal=literal):
+                self.assertIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for rel_path, literal in FORBIDDEN_V0171_STALE_LITERALS:
+            with self.subTest(path=rel_path, stale=literal):
+                self.assertNotIn(literal, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        # 규칙 내용은 바뀌지 않았으므로 어느 규칙 템플릿도 0.17.1 스탬프를 달지 않는다.
+        for template in sorted(BROWSER_RULE.parent.glob("vault-*.md")):
+            with self.subTest(rule=template.name):
+                stamp = template.read_text(encoding="utf-8").splitlines()[0]
+                self.assertNotIn("engine=0.17.1", stamp)
+
     def test_release_note_records_v0120_contract(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0120.is_file())
         release = RELEASE_NOTE_V0120.read_text(encoding="utf-8")

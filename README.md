@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.17.0-10B981?style=for-the-badge)](docs/releases/v0.17.0.md)
+[![Version](https://img.shields.io/badge/v0.17.1-10B981?style=for-the-badge)](docs/releases/v0.17.1.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -146,6 +146,12 @@ v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플
 `run --input - --allow-network`로 한 번 실행한다. 실제 검증 응답이면 **Jev 사용**, 미호출·
 미지원·실패이면 **호스트 대체 + 사유**를 표시하고 낮은 확신도·보류를 공개한다. 결과는
 참고용이며 PASS나 행동 승인이 아니다. SDK·설정 마이그레이션·시작 시 네트워크 호출은 없다.
+
+v0.17.1은 결함 수정 릴리스다. 세션 시작 주입을 호스트의 훅 출력 상한(Claude Code 10,000자)
+아래 9,500자로 묶는다. 넘치면 두 섹션에 토큰 예산 비율로 나눠 자르고, 잘린 노트에는 경로와
+생략된 제목을 표시한다. `/vault-recall`은 크기 한도(512KiB)를 넘어 건너뛴 파일 이름을 밝힌다.
+규칙은 바뀌지 않고, git 볼트의 healthcheck는 설명 정정과 함께 0.17.1로 교체된다.
+[변경과 검증](docs/releases/v0.17.1.md)
 
 v0.17.0에는 선택형 **도구 어댑터**가 추가됐다. 첫 어댑터는 Aside(AI 브라우저 CLI)다.
 `/vault-init`·`/vault-upgrade`는 `aside` CLI가 있을 때만 제안하고, 승인하면 CLAUDE.md 조항과
@@ -354,7 +360,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.17.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.17.1 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -427,7 +433,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.17.0**이며 **Claude Code, Codex 겸용**이다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않는다. 업그레이드하면 규칙 9번(AGENTS.md에도 포함)이 추가되고 git 볼트의 healthcheck가 0.17.0으로 교체된다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.17.1**이며 **Claude Code, Codex 겸용**이다. v0.17.1은 결함 수정 릴리스다: 세션 시작 주입을 호스트 훅 출력 상한(Claude Code 10,000자) 아래 9,500자로 묶고, 잘린 노트에 경로와 생략된 제목을 표시하며, `/vault-recall`이 크기 초과로 건너뛴 파일 이름을 밝힌다. 규칙은 바뀌지 않고 git 볼트의 healthcheck가 0.17.1로 교체된다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않는다. 업그레이드하면 규칙 9번(AGENTS.md에도 포함)이 추가되고 git 볼트의 healthcheck가 0.17.0으로 교체된다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.1)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.1.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -468,7 +474,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
