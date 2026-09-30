@@ -61,6 +61,7 @@ def _diagnostics() -> dict:
         "query_terms_used": 0,
         "query_truncated": 0,
         "omissions": [],
+        "oversized_files": [],
         "limits": {
             "directory_entries": MAX_DIRECTORY_ENTRIES,
             "files": MAX_FILES,
@@ -212,7 +213,7 @@ def _markdown_paths(
     return sorted(found, key=lambda item: (item[0].casefold(), item[0]))
 
 
-def _read_markdown(path: Path, diagnostics: dict) -> str | None:
+def _read_markdown(path: Path, diagnostics: dict, rel_path: str) -> str | None:
     try:
         metadata = path.stat()
         if not stat.S_ISREG(metadata.st_mode):
@@ -222,6 +223,10 @@ def _read_markdown(path: Path, diagnostics: dict) -> str | None:
         size = metadata.st_size
         if size > MAX_FILE_BYTES:
             diagnostics["skipped_oversized"] += 1
+            # Still never read partially, but name the file (bounded list) so a
+            # caller can tell which note is missing instead of only how many.
+            if len(diagnostics["oversized_files"]) < MAX_RESULTS:
+                diagnostics["oversized_files"].append({"path": rel_path, "bytes": size})
             _omit(diagnostics, "file_byte_limit")
             return None
         if diagnostics["bytes_read"] + size > MAX_TOTAL_READ_BYTES:
@@ -451,7 +456,7 @@ def recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> d
             diagnostics["omitted_total_byte_limit"] += len(candidates) - index
             _omit(diagnostics, "total_byte_limit")
             break
-        text = _read_markdown(path, diagnostics)
+        text = _read_markdown(path, diagnostics, rel_path)
         if text is None:
             continue
         match = _rank_document(rel_path, text, phrase, query_terms)
@@ -488,6 +493,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif not diagnostics["search_complete"]:
             reasons = ", ".join(diagnostics["omissions"])
             print(f"recall incomplete: omitted {reasons}", file=sys.stderr)
+            limit_kib = MAX_FILE_BYTES // 1024
+            for skipped in diagnostics["oversized_files"]:
+                # Round up (as ls -h does) so a file just over the limit never
+                # prints as if it fit within it.
+                size_kib = -(-skipped["bytes"] // 1024)
+                print(
+                    f"recall skipped (over {limit_kib} KiB): {skipped['path']} ({size_kib} KiB)",
+                    file=sys.stderr,
+                )
     return 0 if result["diagnostics"]["status"] == "ok" else 2
 
 
