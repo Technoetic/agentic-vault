@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.17.0 (latest) | Yes. Fixes ship as the next 0.17.x patch. |
-| 0.16.0 and earlier | No. Upgrade to 0.17.0. |
+| 0.17.1 (latest) | Yes. Fixes ship as the next 0.17.x patch. |
+| 0.17.0 and earlier | No. Upgrade to 0.17.1. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -151,7 +151,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정은 최신 릴리스(현재 0.17.0)에 다음 0.17.x 패치로 낸다. 0.16.0 이하는 0.17.0으로 올린다.
+- 보안 수정은 최신 릴리스(현재 0.17.1)에 다음 0.17.x 패치로 낸다. 0.17.0 이하는 0.17.1로 올린다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.

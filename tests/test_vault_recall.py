@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -277,6 +277,158 @@ class VaultRecallTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"]["skipped_oversized"], 1)
         self.assertFalse(result["diagnostics"]["search_complete"])
         self.assertIn("file_byte_limit", result["diagnostics"]["omissions"])
+
+    def test_oversized_log_is_named_and_never_contributes_matches(self) -> None:
+        # An append-only log that outgrows the per-file limit must be named in the
+        # diagnostics instead of silently dropping its whole history from recall.
+        self.write("20-knowledge/current.md", "# Current\nneedle present evidence\n")
+        baseline = recall_module.recall(self.vault, "needle", limit=10)
+        self.assertTrue(baseline["diagnostics"]["search_complete"])
+        self.assertEqual(baseline["diagnostics"]["oversized_files"], [])
+
+        entry = b"- 2026-09-01 12:00 | agent | [ops] needle LOG_ONLY_MARKER history\n"
+        log_bytes = (b"# Log\n" + entry * (600 * 1024 // len(entry) + 1))[: 600 * 1024]
+        self.assertGreater(len(log_bytes), recall_module.MAX_FILE_BYTES)
+        self.write_bytes("00-meta/log.md", log_bytes)
+
+        result = recall_module.recall(self.vault, "needle", limit=10)
+
+        diagnostics = result["diagnostics"]
+        self.assertEqual([m["path"] for m in result["matches"]], ["20-knowledge/current.md"])
+        self.assertNotIn("LOG_ONLY_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertEqual(diagnostics["skipped_oversized"], 1)
+        self.assertEqual(
+            diagnostics["oversized_files"], [{"path": "00-meta/log.md", "bytes": len(log_bytes)}]
+        )
+        self.assertFalse(diagnostics["search_complete"])
+        self.assertEqual(diagnostics["omissions"], ["file_byte_limit"])
+        # No partial read: the log adds neither a read file nor a single byte.
+        self.assertEqual(diagnostics["files_read"], baseline["diagnostics"]["files_read"])
+        self.assertEqual(diagnostics["bytes_read"], baseline["diagnostics"]["bytes_read"])
+
+    def test_oversized_files_outside_the_search_scope_are_never_named(self) -> None:
+        big = b"needle " + b"x" * 200
+        for relpath in (
+            "20-knowledge/_archive/denied-giant.md",
+            "private/private-giant.md",
+            "nested/private/nested-private-giant.md",
+            "nested/scratch/excluded-giant.md",
+            "20-knowledge/allowed-giant.md",
+        ):
+            self.write_bytes(relpath, big)
+
+        with self.module_limits(MAX_FILE_BYTES=64):
+            result = recall_module.recall(self.vault, "needle")
+
+        diagnostics = result["diagnostics"]
+        self.assertEqual(diagnostics["skipped_oversized"], 1)
+        self.assertEqual(
+            diagnostics["oversized_files"],
+            [{"path": "20-knowledge/allowed-giant.md", "bytes": len(big)}],
+        )
+        serialized = json.dumps(result, ensure_ascii=False)
+        for hidden in ("denied-giant", "private-giant", "excluded-giant"):
+            self.assertNotIn(hidden, serialized)
+        self.assertGreaterEqual(diagnostics["skipped_denied"], 3)
+        self.assertGreaterEqual(diagnostics["skipped_excluded"], 1)
+
+    def test_oversized_symlink_escape_is_never_named(self) -> None:
+        outside = Path(self._tmp.name) / "outside-giant.md"
+        outside.write_bytes(b"needle " + b"x" * 200)
+        link = self.vault / "20-knowledge" / "linked-giant.md"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"file symlinks unavailable: {exc}")
+
+        with self.module_limits(MAX_FILE_BYTES=64):
+            result = recall_module.recall(self.vault, "needle")
+
+        diagnostics = result["diagnostics"]
+        self.assertEqual(diagnostics["oversized_files"], [])
+        self.assertEqual(diagnostics["skipped_oversized"], 0)
+        self.assertGreaterEqual(diagnostics["skipped_unsafe"], 1)
+        self.assertNotIn("giant", json.dumps(result, ensure_ascii=False))
+
+    def test_oversized_file_names_are_capped_while_the_count_continues(self) -> None:
+        cap = recall_module.MAX_RESULTS
+        big = b"needle " + b"x" * 200
+        for index in range(cap + 3):
+            self.write_bytes(f"20-knowledge/giant-{index:03d}.md", big)
+
+        with self.module_limits(MAX_FILE_BYTES=64):
+            result = recall_module.recall(self.vault, "needle")
+
+        diagnostics = result["diagnostics"]
+        self.assertEqual(diagnostics["skipped_oversized"], cap + 3)
+        self.assertEqual(
+            diagnostics["oversized_files"],
+            [{"path": f"20-knowledge/giant-{index:03d}.md", "bytes": len(big)} for index in range(cap)],
+        )
+        self.assertFalse(diagnostics["search_complete"])
+        self.assertEqual(diagnostics["omissions"], ["file_byte_limit"])
+
+    def test_text_cli_names_each_oversized_file_after_the_incomplete_line(self) -> None:
+        self.write("20-knowledge/current.md", "# Current\nneedle present evidence\n")
+        log_bytes = (b"- needle history entry\n" * 30_000)[: 600 * 1024]
+        self.assertGreater(len(log_bytes), recall_module.MAX_FILE_BYTES)
+        self.write_bytes("00-meta/log.md", log_bytes)
+
+        run = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--vault", str(self.vault), "--query", "needle"],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("[Source: 20-knowledge/current.md:2]", run.stdout)
+        self.assertEqual(
+            run.stderr.splitlines(),
+            [
+                "recall incomplete: omitted file_byte_limit",
+                f"recall skipped (over {recall_module.MAX_FILE_BYTES // 1024} KiB): 00-meta/log.md (600 KiB)",
+            ],
+        )
+
+    def test_text_cli_uses_the_current_limit_and_rounds_sizes_up(self) -> None:
+        # 2049 bytes against a 2048-byte limit: rounding up prints 3 KiB, so the
+        # skipped file never reads as if it fit within "over 2 KiB".
+        self.write_bytes("20-knowledge/large.md", b"needle " + b"x" * 2042)
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        with self.module_limits(MAX_FILE_BYTES=2048), redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = recall_module.main(["--vault", str(self.vault), "--query", "needle"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(
+            stderr.getvalue().splitlines(),
+            [
+                "recall incomplete: omitted file_byte_limit",
+                "recall skipped (over 2 KiB): 20-knowledge/large.md (3 KiB)",
+            ],
+        )
+
+    def test_text_cli_counts_oversized_files_beyond_the_listed_ones(self) -> None:
+        # Beyond the bounded name list, the remaining skipped files are still
+        # disclosed as a count instead of vanishing from the text report.
+        extra = 2
+        for number in range(recall_module.MAX_RESULTS + extra):
+            self.write_bytes(f"20-knowledge/large-{number:03d}.md", b"needle " + b"x" * 2042)
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        with self.module_limits(MAX_FILE_BYTES=2048), redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = recall_module.main(["--vault", str(self.vault), "--query", "needle"])
+
+        self.assertEqual(exit_code, 0)
+        lines = stderr.getvalue().splitlines()
+        self.assertEqual(lines[0], "recall incomplete: omitted file_byte_limit")
+        listed = [line for line in lines if line.startswith("recall skipped (over 2 KiB): ")]
+        self.assertEqual(len(listed), recall_module.MAX_RESULTS)
+        self.assertEqual(lines[-1], f"recall skipped: {extra} more oversized file(s) not listed")
 
     def test_file_and_total_byte_limits_stop_scan_and_report_uncertainty(self) -> None:
         self.write("20-knowledge/a.md", "# A\nfirst evidence\n")

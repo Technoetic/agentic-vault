@@ -1,7 +1,7 @@
 # Claude Code · Codex 겸용 사용
 
-`v0.17.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 로컬 검증은 [v0.17.0 검증 기록](verification/v0.17.0.md)에 남긴다.
+`v0.17.1`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 로컬 검증은 [v0.17.1 검증 기록](verification/v0.17.1.md)에 남긴다.
 Codex 설치·발견·실행 실측의 마지막 기록은 [v0.15.0 검증 기록](verification/v0.15.0.md)이다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
@@ -14,13 +14,15 @@ v0.16.0은 workflow·collab 규칙과 세션·lint·trace·recall 명령 문서�
 생성 AGENTS.md를 갱신한다.
 v0.17.0은 선택형 Aside 어댑터와 browser 규칙 9번을 더했다. Codex는 `doctor`에서 어댑터 상태를
 보고받고, Claude Code 전용 자동 기동 훅 대신 CLAUDE.md의 Aside 조항에 적힌 기동 절차를 따른다.
+v0.17.1은 세션 시작 주입을 호스트 출력 상한 아래로 묶고 recall이 건너뛴 파일 이름을 밝히는
+결함 수정이다. 두 클라이언트는 같은 훅 출력을 받으며, Codex 진입점과 명령 대응은 그대로다.
 
 ## 설치
 
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -28,18 +30,18 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.17.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 공개 v0.17.1 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
-갱신 후 `codex plugin list`로 v0.17.0과 활성화 상태를 확인하고 새 대화를 연다.
+갱신 후 `codex plugin list`로 v0.17.1과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
@@ -135,6 +137,9 @@ Claude에서 인계를 저장한 뒤 Codex에서 복원하거나 그 반대로 �
 경로·deny zone 검증과 섹션별 토큰 예산은 두 클라이언트에 동일하게 적용한다.
 예산 0은 해당 섹션 주입을 끈다. 토큰 수는 추정치이며 Codex가 큰 훅 출력을
 추가로 줄일 수 있다. 생략된 내용을 원본 재읽기로 다시 주입하지 않는다.
+추정 토큰 예산은 비용 예산이고, 호스트 전송 상한(Claude Code 훅 출력 10,000자 —
+엔진은 9,500자로 묶는다)은 별도다. 훅은 두 클라이언트에 같은 출력을 내며, 잘린 섹션
+끝의 생략 표시에는 들어가는 한 원문 경로·생략된 제목과 주제 검색용 `recall` 안내가 붙는다.
 Claude의 `.claude/settings.json` 권한을 Codex 권한으로 자동 변환하지 않는다.
 이 접근 검증은 OS나 Codex의 권한 샌드박스를 대체하지 않는다.
 [공식 플러그인 구조](https://developers.openai.com/plugins/build/plugins),
