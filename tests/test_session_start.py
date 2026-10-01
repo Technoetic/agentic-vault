@@ -729,6 +729,50 @@ class ComposeContextTests(unittest.TestCase):
         self.assertTrue(body.endswith(" verification"))
         self.assertGreaterEqual(healthcheck.estimate_tokens(section.text), 301 * 3 // 4)
 
+    def test_line_cut_keeps_every_whole_line_that_fits(self) -> None:
+        # Across budgets the longest fitting head sometimes ends right before
+        # a newline; that last line is whole and must be kept.
+        lines = [f"- line {index:02d} of steady session context" for index in range(60)]
+        text = "\n".join(lines)
+        marker = "\n\n[... truncated: 00-meta/note.md" + RECALL_HINT
+        for budget in range(80, 260):
+            with self.subTest(budget=budget):
+                fitting = max(
+                    count for count in range(len(lines) + 1)
+                    if healthcheck.estimate_tokens(
+                        f"{HOT_HEADER}\n" + "\n".join(lines[:count]) + marker
+                    ) <= budget
+                )
+
+                section = session_hook.compose_context(
+                    [self.source(HOT_HEADER, text, budget)]
+                ).sections[0]
+
+                self.assertEqual(
+                    section.text, f"{HOT_HEADER}\n" + "\n".join(lines[:fitting]) + marker,
+                )
+
+    def test_short_marker_cut_keeps_a_heading_it_cannot_list(self) -> None:
+        # The marker that lists headings does not fit this budget at all, and
+        # the short marker lists none, so "## Next" stays as the last line
+        # instead of moving behind the cut and being named nowhere.
+        text = (
+            "Intro line number one.\nIntro line number two.\nIntro line number six.\n"
+            "## Next\n" + "body " * 40
+        )
+        self.assertGreater(
+            healthcheck.estimate_tokens(
+                f"{HOT_HEADER}\n\n\n[... truncated: 00-meta/note.md; omitted headings: Next"
+                + RECALL_HINT
+            ),
+            39,
+        )
+
+        section = session_hook.compose_context([self.source(HOT_HEADER, text, 39)]).sections[0]
+
+        self.assertTrue(section.text.endswith("\n## Next" + session_hook.TRUNCATION_MARKER))
+        self.assertLessEqual(healthcheck.estimate_tokens(section.text), 39)
+
     def test_long_heading_line_cut_by_the_budget_keeps_its_words(self) -> None:
         # The kept head ends inside this heading line, which starts far before
         # three quarters of it, so the heading is not moved behind the cut.

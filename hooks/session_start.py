@@ -35,8 +35,8 @@ SECTION_SEPARATOR = "\n\n"
 MARKER_MAX_HEADINGS = 5
 MARKER_HEADING_CHARS = 40
 # A marker that lists headings grows when the cut moves back past one, so a
-# cut whose candidate no longer fits is searched again below itself, this
-# many times at most, before the short marker is tried.
+# cut whose candidate no longer fits is searched again below itself. This is
+# the number of searches in all before the short marker is tried.
 MAX_CUT_ROUNDS = 3
 HANDOFF_HEADER = "=== SESSION HANDOFF (직전 세션 인계) ==="
 HOT_HEADER = "=== HOT CONTEXT ==="
@@ -207,17 +207,19 @@ def _lost_body(text: str, line_start: int, heading_starts: frozenset[int]) -> bo
 def _readable_cut(text: str, low: int, heading_starts: frozenset[int]) -> int:
     """Move a fitting cut at `low` back to a readable boundary.
 
-    The cut moves to the last newline before `low` when that keeps at least
-    three quarters of the head, so a long one-line paragraph is not dropped
-    whole; else to the last space or tab in that range; else it stays at
-    `low`. If the last kept line is then a heading whose body was cut off,
-    the cut moves once more, to that heading's line and within the same three
-    quarters, so the marker lists the heading instead.
+    The cut moves to the last newline at or before `low` when that keeps at
+    least three quarters of the head, so a long one-line paragraph is not
+    dropped whole; else to the last space or tab in that range; else it
+    stays at `low`. A newline or space right at `low` already ends a whole
+    line or word, so the cut stays there. If the last kept line is then a
+    heading whose body was cut off, the cut moves once more, to that
+    heading's line and within the same three quarters, so the marker lists
+    the heading instead; heading_starts is empty for a marker that lists none.
     """
     floor = low - low // 4
-    cut = text.rfind("\n", 0, low)
+    cut = text.rfind("\n", 0, low + 1)
     if cut < floor:
-        cut = max(text.rfind(" ", 0, low), text.rfind("\t", 0, low))
+        cut = max(text.rfind(" ", 0, low + 1), text.rfind("\t", 0, low + 1))
         if cut < floor:
             cut = low
     last_line = text.rfind("\n", 0, len(text[:cut].rstrip())) + 1
@@ -244,7 +246,7 @@ def _truncate_to_fit(
     The binary search only moves `low` to cuts that fit, then _readable_cut
     moves the cut back. That can put more headings into a marker that lists
     them, so a candidate that no longer fits is searched again below its cut,
-    at most MAX_CUT_ROUNDS times. None means this marker does not fit.
+    in at most MAX_CUT_ROUNDS searches. None means this marker does not fit.
     """
     if not fits(prefix + marker_for(0)):
         return None
@@ -311,8 +313,9 @@ def _render_section(
 
     # A head of n characters is at least n UTF-16 units long.
     high = len(text) if max_chars is None else min(len(text), max_chars)
-    heading_starts = frozenset(starts)
-    for marker_for in (rich_marker, short_marker):
+    # The short marker lists no headings, so no heading moves behind its cut.
+    passes = ((rich_marker, frozenset(starts)), (short_marker, frozenset()))
+    for marker_for, heading_starts in passes:
         rendered = _truncate_to_fit(prefix, text, fits, marker_for, high, heading_starts)
         if rendered is not None:
             return rendered, True
