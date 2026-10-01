@@ -301,18 +301,24 @@ REQUIRED_V0171_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이�
 REQUIRED_V0171_RELEASE_LITERALS = (
     "HOST_MAX_OUTPUT_CHARS", "9,500", "10,000", "oversized_files", "--ref v0.17.1", "engine=0.17.1",
 )
+# 상한 값(9500)은 tests/test_session_start.py와 tests/test_vault_doctor.py가 동작으로 고정한다.
 REQUIRED_V0171_WIRING = (
-    ("hooks/session_start.py", "HOST_MAX_OUTPUT_CHARS = 9500"),
-    ("hooks/session_start.py", "def compose_context("),
+    ("hooks/session_start.py", "HOST_MAX_OUTPUT_CHARS"),
+    ("hooks/session_start.py", "compose_context"),
     ("skills/agentic-vault/scripts/vault_doctor.py", "host_char_cap"),
-    ("skills/agentic-vault/scripts/vault_recall.py", '"oversized_files": []'),
+    ("skills/agentic-vault/scripts/vault_doctor.py", "shorten_the_notes_below_the_host_cap"),
+    ("commands/vault-doctor.md", "host_char_cap"),
+    ("skills/agentic-vault/scripts/vault_recall.py", "oversized_files"),
     ("commands/vault-recall.md", "oversized_files"),
     ("README.md", "releases/tag/v0.17.1"),
     ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.1.md)"),
 )
+# v0.17.0까지 §11이 쓰던 문구 그대로만 금지한다(일반 표현 "자르지 않는다"는 다른 곳에 쓸 수 있다).
 FORBIDDEN_V0171_STALE_LITERALS = (
-    ("skills/agentic-vault/scripts/vault_healthcheck.py", "자르지 않는다"),
     ("skills/agentic-vault/scripts/vault_healthcheck.py", "통주입"),
+    ("skills/agentic-vault/scripts/vault_healthcheck.py", "주입한다(자르지 않는다)"),
+    ("skills/agentic-vault/scripts/vault_healthcheck.py", "주입한다 — 자르지 않는다"),
+    ("docs/releases/v0.17.1.md", "아주 긴 한 줄을 통째로"),
 )
 
 

@@ -34,6 +34,10 @@ TRUNCATION_MARKER = "\n\n[... truncated ...]"
 SECTION_SEPARATOR = "\n\n"
 MARKER_MAX_HEADINGS = 5
 MARKER_HEADING_CHARS = 40
+# A marker that lists headings grows when the cut moves back past one, so a
+# cut whose candidate no longer fits is searched again below itself, this
+# many times at most, before the short marker is tried.
+MAX_CUT_ROUNDS = 3
 HANDOFF_HEADER = "=== SESSION HANDOFF (직전 세션 인계) ==="
 HOT_HEADER = "=== HOT CONTEXT ==="
 INVALID_CONFIG_DIAGNOSTIC = "agentic-vault: invalid session context configuration"
@@ -42,6 +46,7 @@ INVALID_CONFIG_DIAGNOSTIC = "agentic-vault: invalid session context configuratio
 # headings. Both patterns run in linear time on any line.
 _FENCE_OPEN = re.compile(r" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 _FENCE_CLOSE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
+_NON_SPACE = re.compile(r"\S")
 
 
 class SectionSource(NamedTuple):
@@ -185,6 +190,47 @@ def _rich_marker(source_path: str, shown: Sequence[str], omitted_count: int) -> 
     return "\n\n[" + "; ".join(clauses) + "]"
 
 
+def _lost_body(text: str, line_start: int, heading_starts: frozenset[int]) -> bool:
+    """Return whether the heading at line_start, the last kept line, lost a body.
+
+    Everything kept after the heading is blank, so a body it has lies past
+    the cut. A heading followed only by another heading, or by nothing, has
+    no body to lose.
+    """
+    line_end = text.find("\n", line_start)
+    if line_end < 0:
+        return False
+    body = _NON_SPACE.search(text, line_end)
+    return body is not None and text.rfind("\n", 0, body.start()) + 1 not in heading_starts
+
+
+def _readable_cut(text: str, low: int, heading_starts: frozenset[int]) -> int:
+    """Move a fitting cut at `low` back to a readable boundary.
+
+    The cut moves to the last newline before `low` when that keeps at least
+    three quarters of the head, so a long one-line paragraph is not dropped
+    whole; else to the last space or tab in that range; else it stays at
+    `low`. If the last kept line is then a heading whose body was cut off,
+    the cut moves once more, to that heading's line and within the same three
+    quarters, so the marker lists the heading instead.
+    """
+    floor = low - low // 4
+    cut = text.rfind("\n", 0, low)
+    if cut < floor:
+        cut = max(text.rfind(" ", 0, low), text.rfind("\t", 0, low))
+        if cut < floor:
+            cut = low
+    last_line = text.rfind("\n", 0, len(text[:cut].rstrip())) + 1
+    if (
+        0 < last_line
+        and floor <= last_line
+        and last_line in heading_starts
+        and _lost_body(text, last_line, heading_starts)
+    ):
+        return last_line
+    return cut
+
+
 def _truncate_to_fit(
     prefix: str,
     text: str,
@@ -193,41 +239,29 @@ def _truncate_to_fit(
     high: int,
     heading_starts: frozenset[int] = frozenset(),
 ) -> str | None:
-    """Keep the longest fitting head of text, then cut back to a readable boundary.
+    """Keep the longest fitting head of text that ends at a readable boundary.
 
-    The binary search only moves `low` to cuts that fit. The cut then moves
-    back to the last newline inside the kept head when that still keeps at
-    least three quarters of it, so a long one-line paragraph is not dropped
-    whole; otherwise it moves back to the last space or tab in that range, or
-    stays at the character cut. A heading left as the last kept line has lost
-    its body, so it moves into the omitted part where the marker lists it.
-    None means this marker does not fit.
+    The binary search only moves `low` to cuts that fit, then _readable_cut
+    moves the cut back. That can put more headings into a marker that lists
+    them, so a candidate that no longer fits is searched again below its cut,
+    at most MAX_CUT_ROUNDS times. None means this marker does not fit.
     """
     if not fits(prefix + marker_for(0)):
         return None
-    low = 0
-    while low < high:
-        midpoint = (low + high + 1) // 2
-        if fits(prefix + text[:midpoint] + marker_for(midpoint)):
-            low = midpoint
-        else:
-            high = midpoint - 1
-    floor = low - low // 4
-    cut = text.rfind("\n", 0, low)
-    if cut < floor:
-        cut = max(text.rfind(" ", 0, low), text.rfind("\t", 0, low))
-        if cut < floor:
-            cut = low
-    head = text[:cut].rstrip()
-    while True:
-        last_line = head.rfind("\n") + 1
-        if last_line == 0 or last_line not in heading_starts:
-            break
-        cut = last_line
-        head = text[:cut].rstrip()
-    candidate = prefix + head + marker_for(cut)
-    # Moving the cut back can put more headings into a marker that lists them.
-    return candidate if fits(candidate) else None
+    for _ in range(MAX_CUT_ROUNDS):
+        low = 0
+        while low < high:
+            midpoint = (low + high + 1) // 2
+            if fits(prefix + text[:midpoint] + marker_for(midpoint)):
+                low = midpoint
+            else:
+                high = midpoint - 1
+        cut = _readable_cut(text, low, heading_starts)
+        candidate = prefix + text[:cut].rstrip() + marker_for(cut)
+        if fits(candidate):
+            return candidate
+        high = cut - 1
+    return None
 
 
 def _render_section(
@@ -299,36 +333,49 @@ def _render_source(source: SectionSource, max_chars: int | None) -> RenderedSect
     return RenderedSection(text, truncated, max_chars is not None)
 
 
+def _section_floor(source: SectionSource, need: int) -> int:
+    """Return the fewest UTF-16 units that still emit this section's header.
+
+    That is the header with the short marker, or the whole section when it is
+    shorter. A section whose token budget cannot pay for the short marker is
+    emitted whole or not at all, so its floor is its whole length.
+    """
+    shortest = source.header + "\n" + TRUNCATION_MARKER
+    if estimate_tokens(shortest) > source.token_budget:
+        return need
+    return min(need, utf16_len(shortest))
+
+
 def _share_chars(
     needs: Sequence[int],
     weights: Sequence[int],
     floors: Sequence[int],
     available: int,
 ) -> list[int]:
-    """Split `available` UTF-16 units among sections in proportion to weight.
+    """Split `available` UTF-16 units among sections by weight.
 
-    A section that needs no more than its share keeps its full length and
-    the room it leaves goes to the others. A share below a section's floor
-    (its header and the short marker) is raised to that floor, so no header
-    is lost. The hook's two short headers keep the floors far below the cap.
+    Every section first gets its floor, and the room above the floors is
+    shared in proportion to weight. A section that needs no more than its
+    share keeps its full length and the room it leaves goes to the others.
+    The caps add up to at most `available` whenever the floors fit in it,
+    which the hook's two short headers guarantee.
     """
     caps = list(needs)
     active = list(range(len(needs)))
     remaining = available
     while active:
+        spare = max(0, remaining - sum(floors[index] for index in active))
         total = sum(weights[index] for index in active)
-        shares = {index: remaining * weights[index] // total for index in active}
+        shares = {
+            index: floors[index] + spare * weights[index] // total for index in active
+        }
         settled = [index for index in active if needs[index] <= shares[index]]
-        if not settled:
-            settled = [index for index in active if shares[index] < floors[index]]
-            for index in settled:
-                caps[index] = floors[index]
         if not settled:
             for index in active:
                 caps[index] = shares[index]
             break
         for index in settled:
-            remaining -= caps[index]
+            remaining -= needs[index]
             active.remove(index)
     return caps
 
@@ -345,9 +392,10 @@ def compose_context(sources: Sequence[SectionSource | None]) -> SessionContext:
 
     Output that fits HOST_MAX_OUTPUT_CHARS is returned as rendered. Otherwise
     the room left after the separators and the final newline is shared by
-    token budget (see _share_chars), and each section longer than its share
-    is rendered again under that character cap. Both the hook and the doctor
-    use this function, so the doctor reports exactly what the hook emits.
+    token budget above each section's floor (see _share_chars), and each
+    section longer than its share is rendered again under that character
+    cap, which always keeps its header. Both the hook and the doctor use
+    this function, so the doctor reports exactly what the hook emits.
     """
     rendered = [None if source is None else _render_source(source, None) for source in sources]
     context = _joined(rendered)
@@ -358,8 +406,7 @@ def compose_context(sources: Sequence[SectionSource | None]) -> SessionContext:
     available = HOST_MAX_OUTPUT_CHARS - 1 - len(SECTION_SEPARATOR) * (len(present) - 1)
     needs = [utf16_len(rendered[index].text) for index in present]
     floors = [
-        min(need, utf16_len(sources[index].header + "\n" + TRUNCATION_MARKER))
-        for index, need in zip(present, needs)
+        _section_floor(sources[index], need) for index, need in zip(present, needs)
     ]
     weights = [sources[index].token_budget for index in present]
     caps = _share_chars(needs, weights, floors, available)

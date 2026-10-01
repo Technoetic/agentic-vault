@@ -604,7 +604,9 @@ class ComposeContextTests(unittest.TestCase):
         context = session_hook.compose_context(sources)
 
         handoff, hot = context.sections
-        self.assertEqual(handoff, (f"{HANDOFF_HEADER}\nShort handoff.", False, False))
+        self.assertEqual(handoff.text, f"{HANDOFF_HEADER}\nShort handoff.")
+        self.assertFalse(handoff.truncated)
+        self.assertFalse(handoff.host_capped)
         self.assertTrue(hot.truncated)
         self.assertTrue(hot.host_capped)
         self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
@@ -621,51 +623,196 @@ class ComposeContextTests(unittest.TestCase):
         context = session_hook.compose_context(sources)
 
         handoff, hot = context.sections
-        self.assertEqual(hot.text, f"{HOT_HEADER}\n{session_hook.TRUNCATION_MARKER}")
+        self.assertTrue(hot.text.startswith(HOT_HEADER + "\n"))
+        self.assertTrue(hot.truncated)
         self.assertTrue(hot.host_capped)
         self.assertTrue(handoff.host_capped)
         self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
 
-    def test_heading_index_skips_fenced_code_and_non_headings(self) -> None:
-        text = "\n".join((
+    def test_host_cap_stays_below_the_claude_code_limit(self) -> None:
+        # Claude Code 2.1.252 saves hook stdout over 10,000 UTF-16 units to a
+        # file and passes on only a 2,000-character preview.
+        self.assertEqual(HOST_CAP, 9500)
+        self.assertLess(HOST_CAP, 10_000)
+
+    def test_output_of_exactly_the_cap_is_kept_and_one_unit_more_is_cut(self) -> None:
+        # The final newline counts: header, newline, text and newline make 9,500.
+        text = "x" * (HOST_CAP - len(HOT_HEADER) - 2)
+        exact = session_hook.compose_context([None, self.source(HOT_HEADER, text, 1_000_000)])
+
+        self.assertEqual(exact.stdout, f"{HOT_HEADER}\n{text}\n")
+        self.assertEqual(utf16_units(exact.stdout), HOST_CAP)
+        self.assertFalse(exact.sections[1].truncated)
+
+        over = session_hook.compose_context([None, self.source(HOT_HEADER, text + "x", 1_000_000)])
+
+        self.assertTrue(over.sections[1].host_capped)
+        # A line without spaces is cut at the character, so the cap is filled.
+        self.assertEqual(utf16_units(over.stdout), HOST_CAP)
+        self.assertTrue(over.stdout.endswith("\n\n[... truncated: 00-meta/note.md" + RECALL_HINT + "\n"))
+
+    def test_two_capped_sections_fill_the_cap_exactly(self) -> None:
+        sources = [
+            self.source(HANDOFF_HEADER, "h" * 20_000, 1_000_000),
+            self.source(HOT_HEADER, "t" * 20_000, 1_000_000),
+        ]
+
+        context = session_hook.compose_context(sources)
+
+        self.assertEqual(utf16_units(context.stdout), HOST_CAP)
+        self.assertTrue(all(section.host_capped for section in context.sections))
+
+    def test_budget_ratio_cannot_push_the_output_over_the_cap(self) -> None:
+        # A heavy handoff that fits its share whole used to leave less room
+        # than the hot header needs, and the hot floor then went over the cap.
+        hot = self.source(HOT_HEADER, "\n".join(f"- hot line {i}" for i in range(300)), 100)
+        for handoff_units in range(9430, 9498, 3):
+            with self.subTest(handoff_units=handoff_units):
+                handoff_text = "x" * (handoff_units - utf16_units(HANDOFF_HEADER + "\n"))
+                handoff = self.source(HANDOFF_HEADER, handoff_text, 40_000)
+
+                context = session_hook.compose_context([handoff, hot])
+
+                self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
+                self.assertTrue(context.sections[0].text.startswith(HANDOFF_HEADER + "\n"))
+                self.assertTrue(context.sections[1].text.startswith(HOT_HEADER + "\n"))
+
+    def test_short_section_that_cannot_pay_for_a_marker_is_kept_whole(self) -> None:
+        # Fifteen emoji cost 10 estimated tokens but 30 UTF-16 units; the
+        # short marker alone would cost 12 tokens, so this section can only
+        # be emitted whole, and the cap pass must not drop it.
+        hot_text = "\U0001F600" * 15
+        self.assertGreater(
+            healthcheck.estimate_tokens(f"{HOT_HEADER}\n{session_hook.TRUNCATION_MARKER}"), 10,
+        )
+        sources = [
+            self.source(
+                HANDOFF_HEADER,
+                "\n".join(f"- line {index:04d} of the handoff" for index in range(2000)),
+                1_000_000,
+            ),
+            self.source(HOT_HEADER, hot_text, 10),
+        ]
+
+        context = session_hook.compose_context(sources)
+
+        self.assertEqual(context.sections[1].text, f"{HOT_HEADER}\n{hot_text}")
+        self.assertLessEqual(utf16_units(context.stdout), HOST_CAP)
+
+    def test_marker_lists_only_headings_outside_code(self) -> None:
+        intro = "Intro line before the headings.\n" * 30
+        tail = "\n".join((
             "# Title ##", "#hashtag", "####### seven", "    # indented code",
             "```sh", "# shell comment", "```", "## Kept", "~~~", "# tilde fenced",
             "~~~~", "### C#", "## ###",
         ))
+        source = self.source(HOT_HEADER, intro + tail, 200)
 
-        headings = session_hook._heading_index(text)
+        section = session_hook.compose_context([source]).sections[0]
 
-        self.assertEqual([title for _, title in headings], ["Title", "Kept", "C#"])
-        for start, title in headings:
-            self.assertTrue(text[start:].lstrip("# ").startswith(title))
+        self.assertTrue(section.text.endswith(
+            "\n\n[... truncated: 00-meta/note.md; omitted headings: Title | Kept | C#"
+            + RECALL_HINT
+        ))
 
     def test_long_one_line_paragraph_is_cut_at_a_word_not_dropped(self) -> None:
         # Snapping back to the previous newline would drop most of this long
         # line, so the cut keeps at least three quarters of the fitting head
-        # and ends on a word instead.
-        text = "intro\n" + "word " * 400
-        result = session_hook._truncate_to_fit(
-            "P\n", text, lambda candidate: len(candidate) <= 1000,
-            lambda cut: "\n[m]", len(text),
+        # and ends on a word instead. With this budget the longest fitting
+        # head ends inside a word.
+        source = self.source(HOT_HEADER, "intro\n" + "verification " * 160, 301)
+
+        section = session_hook.compose_context([source]).sections[0]
+
+        body = section.text.split("\n\n[... truncated", 1)[0]
+        self.assertTrue(body.startswith(f"{HOT_HEADER}\nintro\nverification verification"))
+        self.assertTrue(body.endswith(" verification"))
+        self.assertGreaterEqual(healthcheck.estimate_tokens(section.text), 301 * 3 // 4)
+
+    def test_long_heading_line_cut_by_the_budget_keeps_its_words(self) -> None:
+        # The kept head ends inside this heading line, which starts far before
+        # three quarters of it, so the heading is not moved behind the cut.
+        text = "intro\n## " + "verification " * 160 + "\nbody line\n"
+
+        section = session_hook.compose_context([self.source(HOT_HEADER, text, 300)]).sections[0]
+
+        self.assertTrue(section.text.startswith(f"{HOT_HEADER}\nintro\n## verification"))
+        self.assertTrue(section.text.endswith("\n\n[... truncated: 00-meta/note.md" + RECALL_HINT))
+        self.assertGreaterEqual(healthcheck.estimate_tokens(section.text), 300 * 3 // 4)
+
+    def test_heading_cut_off_from_its_body_is_listed_in_the_marker(self) -> None:
+        intro = "".join(f"- intro line {index:02d} keeps steady context\n" for index in range(12))
+        text = intro + "## Next step\n" + "body text " * 40 + "\n## Later\nmore text"
+        marker = "\n\n[... truncated: 00-meta/note.md; omitted headings: {}" + RECALL_HINT
+        # Without the move, the heading itself would be the last kept line.
+        self.assertLessEqual(
+            healthcheck.estimate_tokens(
+                f"{HOT_HEADER}\n{intro}## Next step" + marker.format("Later")
+            ),
+            200,
         )
 
-        self.assertIsNotNone(result)
-        body = result[len("P\n"):-len("\n[m]")]
-        self.assertTrue(text.startswith(body))
-        self.assertTrue(body.endswith("word"))
-        self.assertGreaterEqual(len(body), (1000 - len("P\n") - len("\n[m]")) * 3 // 4)
+        section = session_hook.compose_context([self.source(HOT_HEADER, text, 200)]).sections[0]
 
-    def test_heading_left_without_its_body_moves_into_the_omitted_part(self) -> None:
-        # The line cut lands right after "# H"; a heading with no body left
-        # moves behind the cut so the marker (here: the cut offset) lists it.
-        text = "a" * 40 + "\n# H\n" + "c" * 100
-
-        result = session_hook._truncate_to_fit(
-            "P\n", text, lambda candidate: len(candidate) <= 60,
-            lambda cut: f"\n[{cut}]", len(text), frozenset({41}),
+        self.assertEqual(
+            section.text,
+            f"{HOT_HEADER}\n{intro.rstrip()}" + marker.format("Next step | Later"),
         )
 
-        self.assertEqual(result, "P\n" + "a" * 40 + "\n[41]")
+    def test_heading_without_a_body_of_its_own_stays_kept(self) -> None:
+        # "## Parked" is followed directly by another heading, so it has no
+        # body to lose and stays as the last kept line.
+        intro = "".join(f"- intro line {index:02d} keeps steady context\n" for index in range(12))
+        text = intro + "## Parked\n## Next step\n" + "body text " * 40 + "\n## Later\nmore text"
+        marker = "\n\n[... truncated: 00-meta/note.md; omitted headings: {}" + RECALL_HINT
+
+        section = session_hook.compose_context([self.source(HOT_HEADER, text, 180)]).sections[0]
+
+        self.assertEqual(
+            section.text, f"{HOT_HEADER}\n{intro}## Parked" + marker.format("Next step | Later"),
+        )
+
+    def test_marker_that_grows_after_the_cut_moves_back_is_searched_again(self) -> None:
+        # The longest fitting cut lands in the body under "## Next step".
+        # Moving the cut back to that heading adds it to the marker, which
+        # then no longer fits, so the cut is searched again below the heading
+        # instead of dropping to the short marker or going over the budget.
+        intro = "".join(f"- intro line {index:02d} keeps steady context\n" for index in range(6))
+        text = (
+            intro + "## Next step\n"
+            + "- body line about the verified release and its checks\n" * 6
+            + "## Later\nmore text"
+        )
+        marker = "\n\n[... truncated: 00-meta/note.md; omitted headings: {}" + RECALL_HINT
+        self.assertGreater(
+            healthcheck.estimate_tokens(
+                f"{HOT_HEADER}\n{intro.rstrip()}" + marker.format("Next step | Later")
+            ),
+            109,
+        )
+
+        section = session_hook.compose_context([self.source(HOT_HEADER, text, 109)]).sections[0]
+
+        self.assertLessEqual(healthcheck.estimate_tokens(section.text), 109)
+        self.assertTrue(section.text.startswith(f"{HOT_HEADER}\n- intro line 00"))
+        self.assertTrue(section.text.endswith(marker.format("Next step | Later")))
+
+    def test_heading_outline_keeps_most_of_what_fits(self) -> None:
+        # Headings followed by other headings have no body to lose, so only
+        # a heading whose body was cut off moves behind the cut.
+        outlines = (
+            "\n".join(f"## Section {index:04d}" for index in range(2000)),
+            "\n\n".join(f"## Empty template section {index}" for index in range(2000)),
+        )
+        for outline in outlines:
+            with self.subTest(outline=outline[:30]):
+                section = session_hook.compose_context(
+                    [self.source(HOT_HEADER, outline, 600)]
+                ).sections[0]
+
+                body = section.text.split("\n\n[... truncated", 1)[0]
+                self.assertTrue(outline.startswith(body[len(HOT_HEADER) + 1:]))
+                self.assertGreaterEqual(healthcheck.estimate_tokens(section.text), 600 * 3 // 4)
 
     def test_output_within_the_cap_is_not_rendered_again(self) -> None:
         sources = [
@@ -675,10 +822,11 @@ class ComposeContextTests(unittest.TestCase):
 
         context = session_hook.compose_context(sources)
 
-        self.assertEqual(
-            context.sections,
-            ((f"{HANDOFF_HEADER}\nContinue the checklist.", False, False), None),
-        )
+        handoff, hot = context.sections
+        self.assertIsNone(hot)
+        self.assertEqual(handoff.text, f"{HANDOFF_HEADER}\nContinue the checklist.")
+        self.assertFalse(handoff.truncated)
+        self.assertFalse(handoff.host_capped)
         self.assertEqual(context.stdout, f"{HANDOFF_HEADER}\nContinue the checklist.\n")
         self.assertEqual(session_hook.compose_context([None, None]).stdout, "")
 

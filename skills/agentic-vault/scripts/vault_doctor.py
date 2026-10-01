@@ -110,22 +110,22 @@ def _base_section(status: str, reason_code: str, budget: int, next_action: str) 
 
 
 def _truncation_state(
-    source_truncated: bool, rendered: session_hook.RenderedSection,
+    source_truncated: bool, rendered: session_hook.RenderedSection | None,
 ) -> tuple[str, str, str]:
     """Return status, reason_code and next_action for one rendered section.
 
     The source byte limit is reported first: the note is too large to read
-    whole, which also explains any later cut.
+    whole, which also explains any later cut. A section left with no room
+    at all (rendered is None) was cut by the host output cap.
     """
     if source_truncated:
-        reason_code = "source_byte_limit"
-    elif rendered.host_capped:
-        reason_code = "host_char_cap"
-    elif rendered.truncated:
-        reason_code = "token_budget_limit"
-    else:
-        return "ready", "section_ready", "none"
-    return "truncated", reason_code, "reduce_the_note_or_review_the_budget"
+        return "truncated", "source_byte_limit", "reduce_the_note_or_review_the_budget"
+    if rendered is None or rendered.host_capped:
+        # The cap is fixed, so no budget change makes the whole notes fit.
+        return "truncated", "host_char_cap", "shorten_the_notes_below_the_host_cap"
+    if rendered.truncated:
+        return "truncated", "token_budget_limit", "reduce_the_note_or_review_the_budget"
+    return "ready", "section_ready", "none"
 
 
 def _diagnose_section(
@@ -341,17 +341,19 @@ def diagnose(vault: Path) -> tuple[dict, int]:
         ordered = [sources[name] for name, *_ in SECTION_SPECS]
         context = session_hook.compose_context(ordered)
         for (name, *_), source, rendered in zip(SECTION_SPECS, ordered, context.sections):
-            if source is None or rendered is None:
+            if source is None:
                 continue
             section_status, section_reason, section_action = _truncation_state(
                 source.source_truncated, rendered
             )
+            text = "" if rendered is None else rendered.text
             sections[name].update(
                 status=section_status,
                 reason_code=section_reason,
                 next_action=section_action,
-                estimated_emitted_tokens=estimate_tokens(rendered.text),
-                estimated_emitted_chars=session_hook.utf16_len(rendered.text),
+                would_emit=rendered is not None,
+                estimated_emitted_tokens=estimate_tokens(text),
+                estimated_emitted_chars=session_hook.utf16_len(text),
             )
         if any(section["status"] in WARNING_STATES for section in sections.values()):
             status = "degraded"
