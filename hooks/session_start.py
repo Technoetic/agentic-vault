@@ -210,11 +210,12 @@ def _readable_cut(text: str, low: int, heading_starts: frozenset[int]) -> int:
     The cut moves to the last newline at or before `low` when that keeps at
     least three quarters of the head, so a long one-line paragraph is not
     dropped whole; else to the last space or tab in that range; else it
-    stays at `low`. A newline or space right at `low` already ends a whole
-    line or word, so the cut stays there. If the last kept line is then a
-    heading whose body was cut off, the cut moves once more, to that
-    heading's line and within the same three quarters, so the marker lists
-    the heading instead; heading_starts is empty for a marker that lists none.
+    stays at `low`. A newline right at `low` ends a whole line, so the line
+    cut keeps it; a space right at `low` keeps the word when no line boundary
+    qualifies. If the last kept line is then a heading whose body was cut
+    off, the cut moves once more, to that heading's line and within the same
+    three quarters, so the marker lists the heading instead; heading_starts
+    is empty for a marker that lists none.
     """
     floor = low - low // 4
     cut = text.rfind("\n", 0, low + 1)
