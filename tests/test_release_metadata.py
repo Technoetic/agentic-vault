@@ -18,14 +18,14 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.17.1"
+EXPECTED = "0.18.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.17.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.17.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.18.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.18.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.17.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.18.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -242,8 +242,10 @@ REQUIRED_V0160_WIRING = (
     ("commands/vault-upgrade.md", "`승인 대기(기존 유지)`"),
     ("commands/vault-jarvis-setup.md", "텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며"),
     ("docs/reliability.md", "`hot_max_tokens`·`handoff_max_tokens`를 잠시 0으로"),
-    ("skills/agentic-vault/scripts/jarvis_bridge.py", "'인간의 확인이 필요한 사항' 주목"),
-    ("SECURITY.md", "훅은 `disableAllHooks`로 꺼지지만"),
+    # Keep the approval-first briefing contract and hook disablement wired to
+    # current behavior; the old ambient-settings warning was superseded by bare mode.
+    ("skills/agentic-vault/scripts/jarvis_bridge.py", "내 결정·승인 대기를 먼저"),
+    ("SECURITY.md", "--settings '{\"disableAllHooks\":true}'"),
 )
 FORBIDDEN_V0160_STALE_LITERALS = (
     ("commands/vault-init.md", "rules 5개"),
@@ -295,7 +297,7 @@ REQUIRED_V0170_WIRING = (
 # v0.17.1: 결함 수정 — SessionStart 주입을 호스트 훅 출력 상한 아래로 묶고 잘림 표식에 경로·생략
 # 제목을 싣는다. healthcheck §11의 "통째로 주입 — 자르지 않는다" 설명을 실제 동작에 맞추고,
 # recall이 크기 한도로 건너뛴 파일 이름을 밝힌다. 규칙 템플릿 6종은 내용이 같아 스탬프를 올리지 않는다.
-# (v0.17.0의 README 릴리스 링크 핀은 여기로 옮겼다 — README는 최신 릴리스만 가리킨다.)
+# 최신 README 릴리스 링크는 별도의 현재 메타데이터 검사로 대조한다.
 RELEASE_NOTE_V0171 = REPO_ROOT / "docs" / "releases" / "v0.17.1.md"
 REQUIRED_V0171_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증과 경계")
 REQUIRED_V0171_RELEASE_LITERALS = (
@@ -310,8 +312,6 @@ REQUIRED_V0171_WIRING = (
     ("commands/vault-doctor.md", "host_char_cap"),
     ("skills/agentic-vault/scripts/vault_recall.py", "oversized_files"),
     ("commands/vault-recall.md", "oversized_files"),
-    ("README.md", "releases/tag/v0.17.1"),
-    ("README.md", "[이번 변경·검증 범위](docs/releases/v0.17.1.md)"),
 )
 # v0.17.0까지 §11이 쓰던 문구 그대로만 금지한다(일반 표현 "자르지 않는다"는 다른 곳에 쓸 수 있다).
 FORBIDDEN_V0171_STALE_LITERALS = (
@@ -455,6 +455,9 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(EXPECTED_BADGE_LINE, readme_lines)
         self.assertIn(EXPECTED_TREE_LINE, readme_lines)
         self.assertIn(f"현재 버전은 **v{EXPECTED}**", readme)
+        self.assertIn(f"releases/tag/v{EXPECTED}", readme)
+        self.assertIn(f"[이번 변경·검증 범위](docs/releases/v{EXPECTED}.md)", readme)
+        self.assertTrue((REPO_ROOT / "docs/verification" / f"v{EXPECTED}.md").is_file())
         for install_doc in (readme, (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")):
             refs = [line.strip() for line in install_doc.splitlines() if line.startswith("codex plugin marketplace add Technoetic/agentic-vault --ref ")]
             self.assertTrue(refs)

@@ -5,7 +5,9 @@ import importlib
 import http.client
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -142,6 +144,89 @@ class JevClientTests(ClientTestBase, unittest.TestCase):
         escaped_key = 'synthetic-quote-"-key'
         self.assert_code("invalid_input", state={"evidence": [escaped_key]}, api_key=escaped_key,
                          transport=lambda *_: self.fail("network called"))
+
+    def test_structured_credential_fields_are_rejected_before_transport(self):
+        for label in ("password", "passwd", "client_secret", "access_token", "refresh-token",
+                      "MY_API_KEY", "Authorization", "비밀번호", "ｐａｓｓｗｏｒｄ", "pass\u200bword"):
+            for value in ("fake-test-value-1234", 1234, True):
+                with self.subTest(label=label, value_type=type(value).__name__):
+                    self.assert_code("sensitive_input", state={"config": [{label: value}]},
+                                     transport=lambda *_: self.fail("credential sent"))
+
+    def test_ordinary_secret_questions_and_empty_credential_fields_remain_valid(self):
+        state = {"secret": "What is a secret?", "context": "Explain password hygiene.",
+                 "password policy": "Use long passphrases.",
+                 "optional": {"password": "", "client_secret": None, "API_KEY": "  "}}
+        sent = []
+        result = self.call(state=state, transport=lambda payload, *_: sent.append(json.loads(payload))
+                           or encode(response()))
+        self.assertEqual(result, response())
+        self.assertEqual(sent[0]["state"], state)
+
+    def test_shared_public_containers_remain_valid_and_secret_values_are_still_checked(self):
+        shared = {"evidence": ["Public evidence"]}
+        self.assertEqual(self.call(state={"first": shared, "second": shared}), response())
+        shared["evidence"].append({"password": "fake-test-value-1234"})
+        self.assert_code("sensitive_input", state={"first": shared, "second": shared},
+                         transport=lambda *_: self.fail("credential sent"))
+
+    def test_excessive_input_depth_and_nodes_never_reach_transport(self):
+        nested = "Public evidence"
+        for _ in range(100):
+            nested = [nested]
+        for state in ({"nested": nested}, {"items": [0] * 10000}):
+            with self.subTest(shape=next(iter(state))):
+                self.assert_code("invalid_input", state=state,
+                                 transport=lambda *_: self.fail("over-budget input sent"))
+
+    def test_cycles_shared_fanout_and_huge_integers_are_rejected_without_hanging(self):
+        # Use a real local process so a regressed scanner cannot hang the suite.
+        # No key or environment secrets are inherited; build_payload is offline.
+        program = '''
+import sys
+sys.path.insert(0, sys.argv[1])
+import jev_client
+kind = sys.argv[2]
+if kind == 'dict':
+    state = {}; state['again'] = state
+elif kind == 'list':
+    cycle = []; cycle.append(cycle); state = {'cycle': cycle}
+elif kind == 'integer':
+    # Python builds/environments may disable the interpreter's own digit cap.
+    if hasattr(sys, 'set_int_max_str_digits'):
+        sys.set_int_max_str_digits(0)
+    state = {'integer': 1 << 256000000}
+else:
+    branch = [0]
+    for _ in range(25):
+        branch = [branch, branch]
+    state = {'fanout': branch}
+questions = {'q': {'type': 'choice', 'instructions': 'Assess.',
+                  'criteria': {'yes': 'Supported', 'unknown': 'Unknown'}}}
+try:
+    jev_client.build_payload(state, questions)
+except jev_client.JevError as exc:
+    print(exc.code)
+else:
+    print('accepted')
+'''
+        env = {name: os.environ[name] for name in ("SystemRoot", "WINDIR") if name in os.environ}
+        for kind in ("dict", "list", "fanout", "integer"):
+            with self.subTest(kind=kind):
+                try:
+                    completed = subprocess.run([sys.executable, "-B", "-c", program, str(SCRIPTS), kind],
+                                               env=env, capture_output=True, timeout=3)
+                except subprocess.TimeoutExpired:
+                    self.fail("Input inspection did not reject " + kind + " within three seconds")
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout.strip(), b"invalid_input")
+                self.assertEqual(completed.stderr, b"")
+
+    def test_wire_encoding_expansion_is_rejected_before_transport(self):
+        for text in ("\x00" * 20000, "\U0001f600" * 20000):
+            with self.subTest(kind="escapes" if text[0] == "\x00" else "utf8"):
+                self.assert_code("invalid_input", state={"text": text},
+                                 transport=lambda *_: self.fail("oversized wire request sent"))
 
     def test_rejects_invalid_timeout_and_transport_before_network(self):
         for index, timeout in enumerate((0, -1, 30.01, float("nan"), float("inf"), "10", True, None, 10**400)):

@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.17.1-10B981?style=for-the-badge)](docs/releases/v0.17.1.md)
+[![Version](https://img.shields.io/badge/v0.18.0-10B981?style=for-the-badge)](docs/releases/v0.18.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -94,14 +94,14 @@ For Codex, register the release tag and add the plugin as described in [the Code
 
 - Summaries, lessons and upgrade decisions still depend on the model. The checker enforces schema and links, not judgement.
 - The git hooks are local gates that `--no-verify` bypasses, not a security boundary.
-- Jarvis "read-only" is a Claude CLI tool restriction (`--tools Read,Grep,Glob`) plus prompt policy, not an OS sandbox. On Windows it runs only a native `claude.exe` and refuses the npm `claude.cmd` launcher. The three tools are pre-approved for any file the bridge's OS user can read, not only the vault, and the vault's project Claude settings load without a trust prompt; hooks are turned off with `disableAllHooks` (see [SECURITY.md](SECURITY.md)).
+- Since v0.18.0 the Jarvis bridge passes host-selected bounded evidence on stdin and runs with no model tools, ambient settings, skills, automatic memory or session persistence. Its `--bare` mode requires API authentication rather than subscription OAuth. This is not an OS sandbox; v0.17.1 and earlier bridges have broader Read/Grep/Glob access (see [SECURITY.md](SECURITY.md)).
 - Recall is lexical (no embeddings), and token budgets use a character-based estimate.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 <details>
 <summary><b>Full feature summary (English)</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and LLM sessions limited to the Read/Grep/Glob tools by Claude CLI flags — a tool restriction, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 14 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 14 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Recall is lexical, and summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -146,6 +146,13 @@ v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플
 `run --input - --allow-network`로 한 번 실행한다. 실제 검증 응답이면 **Jev 사용**, 미호출·
 미지원·실패이면 **호스트 대체 + 사유**를 표시하고 낮은 확신도·보류를 공개한다. 결과는
 참고용이며 PASS나 행동 승인이 아니다. SDK·설정 마이그레이션·시작 시 네트워크 호출은 없다.
+
+v0.18.0은 사용자 제공 OWASP 2026 PDF를 기준으로 파일 읽기·외부 판단 전송·무인 Jarvis의
+경계를 보강한다. 하드링크를 읽기 전에 거부하고, 구조화된 비밀값과 순환·과대 입력을 차단한다.
+Jarvis는 호스트가 고른 제한된 근거만 받고 모델 도구와 자동 컨텍스트를 끈다.
+**Jarvis의 `--bare` 모드는 API 인증이 필요하며 구독 로그인만으로는 실행되지 않는다.**
+입력과 stdout/stderr에 각각 64KiB 상한을 적용하고, 시간 초과 뒤 파이프 읽기를 정리한다.
+이는 OS 샌드박스나 OWASP 준수 인증이 아니다. [변경·업그레이드와 검증](docs/releases/v0.18.0.md)
 
 v0.17.1은 결함 수정 릴리스다. 세션 시작 주입을 호스트의 훅 출력 상한(Claude Code 10,000자)
 아래 9,500자로 묶는다. 넘치면 두 섹션에 토큰 예산 비율로 나눠 자르고, 잘린 노트에는 들어가는 한
@@ -360,7 +367,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.17.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.18.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -433,7 +440,9 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.17.1**이며 **Claude Code, Codex 겸용**이다. v0.17.1은 결함 수정 릴리스다: 세션 시작 주입을 호스트 훅 출력 상한(Claude Code 10,000자) 아래 9,500자로 묶고, 잘린 노트에 (들어가면) 경로와 생략된 제목을 표시하며, `/vault-recall`이 크기 초과로 건너뛴 파일 이름을 밝힌다. 규칙은 바뀌지 않고 git 볼트의 healthcheck가 0.17.1로 교체된다. v0.17.0은 선택형 도구 어댑터(Aside)와 도구 중립 브라우저 규칙 9번을 더했다. Aside CLI가 없는 볼트에는 어댑터 파일이 생기지 않았고, v0.17.0 업그레이드는 규칙 9번(AGENTS.md에도 포함)을 추가했다. v0.16.0은 긴 작업 규율을 공통 규칙과 명령에 더했다. 여러 단계 작업은 tasks 노트의 체크리스트로 추적하고, 서브에이전트 보고는 인용한 노트와 대조한 것만 사실로 기록하며, handoff의 ▶ NEXT에 완료 기준을 적고, 세션 종료 보고는 사용자 결정이 필요한 항목부터 보여준다. `/vault-lint`는 상태 노트 사이의 수치·날짜·이름 모순을 원문 인용과 위치로 올린다. v0.15.1의 Telegram Jarvis 보강(표준 입력 전달, Windows `.cmd`·`.bat` 런처 거부로 네이티브 `claude.exe` 필요, Read·Grep·Glob 제한)과 v0.15.0의 승인된 Jev-first 직접 질문(Noul·Choice·Score)은 그대로다. 기존 볼트는 `/vault-upgrade`(Codex는 `$agentic-vault:agentic-vault upgrade`)로 browser 규칙과 생성 AGENTS.md를 갱신해야 새 규칙이 적용되며(v0.16.0 이전에서 올라오면 workflow·collab도), 명령 문서 변경은 플러그인 갱신만으로 적용된다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다. 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.17.1)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.17.1.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+현재 버전은 **v0.18.0**이며 **Claude Code, Codex 겸용**이다. 사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.18.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+
+아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.18.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.18.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -474,7 +483,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.17.1
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.18.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -592,7 +601,7 @@ claude
 
 수신 업데이트는 `process-then-ack` 순서를 지킨다. 라우팅·저장·응답이 성공한 뒤에만 `offset`을 원자적으로 전진시키며, 응답 전송이 실패하거나 처리 중 예외가 나면 그 업데이트부터 다음 poll에서 재시도한다. 따라서 손실보다 중복을 택하는 at-least-once 전달이고, 동일 `update_id` 캡처는 같은 파일로 수렴한다. 이 보장에는 조건이 하나 붙는다. 같은 업데이트에서 처리 예외가 3회 연속 나면 같은 오류로 뒤 메시지까지 막지 않도록 본문 없이 로그를 남기고 소유자에게 알린 뒤 그 업데이트만 건너뛴다. 이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다. 수신 재시도 대기는 5초에서 시작해 연속 실패마다 두 배로 늘고 60초에서 멈춘다. 실패한 정기 브리핑·집사 보고는 60초에서 시작해 최대 1시간 간격으로 재시도한다.
 
-**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다. 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다. 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅도 끈다. Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다. deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다. 읽기 3종은 경로 조건 없이 사전 승인되어 볼트 밖 파일에도 적용되고, 볼트의 project·local Claude 설정은 `-p` 모드에서 신뢰 확인 없이 로드되고 훅은 `disableAllHooks`로 꺼진다([SECURITY.md](SECURITY.md) 참조).
+**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. Q&A·브리핑 세션은 호스트가 선택한 근거와 질문을 표준 입력으로 넘기고 `--tools ""`·`--strict-mcp-config`로 모델 도구와 MCP를 제한한다. 0.18.0은 `--bare`·`--setting-sources ""`·`--disable-slash-commands`·`--no-session-persistence`도 사용한다. **`--bare`는 구독 OAuth/키체인 대신 API 인증이 필요하다.** 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다. 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅도 끈다. Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다. deny zone 제한은 호스트의 경로 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다. 모델이 직접 파일을 읽는 대신 호스트가 경로·파일·크기·알려진 비밀을 검사한 근거를 공급한다([SECURITY.md](SECURITY.md) 참조).
 
 브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 

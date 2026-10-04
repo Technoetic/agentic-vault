@@ -18,7 +18,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [evidence.md](evidence.md) | 검증 근거·인계 CLI (v0.11.0+) |
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.17.1](releases/v0.17.1.md) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.18.0](releases/v0.18.0.md) |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
 
 ## 내부 작업 기록 / Internal work records
@@ -26,6 +26,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | 위치 | 내용 |
 |---|---|
 | [verification/](verification/) | 릴리스·기능별 검증 기록(실행한 명령과 결과, 미해결 항목) |
+| [security/](security/) | 제공된 OWASP 2026 문서를 기준으로 한 보강 계획·위험별 대응·검증 기록 |
 | [validation.md](validation.md) | `0.9.0-local.1` 시점의 로컬 개선판 검증 기록 (역사 기록) |
 | [jev-first-contract.md](jev-first-contract.md) | Jev-first 직접 질문 구현 계약 (2026-09-20 설계 메모) |
 | [plans/](plans/) | 구현 계획 |

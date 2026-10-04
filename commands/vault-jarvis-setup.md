@@ -58,11 +58,11 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 ## 접근 정책과 잔여 위험 (사용자에게 요약 고지)
 
 - 화이트리스트 숫자 ID 외 발신자는 무응답 폐기된다.
-- Q&A·브리핑 세션은 질문을 표준 입력으로 넘기고 `--tools Read,Grep,Glob`·`--strict-mcp-config`로 쓸 수 있는 도구를 읽기 3종으로 제한한다.
+- Q&A·브리핑 세션은 호스트가 선택한 근거와 질문을 표준 입력으로 넘기고 `--tools ""`·`--strict-mcp-config`로 모델 도구와 MCP를 제한한다. v0.18.0은 `--bare`·`--setting-sources ""`·`--disable-slash-commands`·`--no-session-persistence`도 사용한다. **`--bare`는 구독 OAuth/키체인 대신 API 인증이 필요하다.**
 - 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다.
 - 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅을 모두 끈다.
-- 읽기 3종은 경로 조건 없이 사전 승인되므로 볼트 밖이라도 브리지를 실행한 OS 사용자가 읽을 수 있는 파일(`~/.ssh`, `~/.vault-jarvis` 등)은 Claude 설정의 Read 거부 규칙이 없으면 읽힐 수 있다.
-- `claude -p`는 작업 공간 신뢰 확인을 건너뛰므로 볼트의 project·local Claude 설정이 Q&A·예약 브리핑마다 사람 없이 로드된다. 훅은 꺼지지만 그 밖의 설정은 적용되므로, 볼트의 `.claude/` 폴더에 쓸 수 있는 사람이나 에이전트는 세션 동작을 바꿀 수 있다.
+- v0.18.0은 모델의 직접 파일 읽기를 끄고 호스트가 허용 경로·하드링크·크기·알려진 비밀을 검사한 근거만 공급한다. 이전 배포판 0.17.1의 넓은 Read/Grep/Glob 사전 승인과 구분한다.
+- v0.18.0의 `--bare`·`--setting-sources ""`는 자동 CLAUDE.md·메모리 읽기와 기본 설정 소스 로딩을 끈다. CLI 실행 파일·관리 정책·OS 계정은 계속 신뢰하며, 실제 제공자 인증 동작은 설치 전 별도로 확인해야 한다.
 - Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다.
 - 처리 중 예외가 난 메시지는 offset을 전진시키지 않고 5초부터 간격을 늘려 다시 처리한다. 같은 메시지에서 처리 예외가 3회 연속 나면 본문 없이 로그를 남기고 소유자에게 알린 뒤 건너뛴다. 이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다. 실패한 브리핑·집사 보고는 간격을 늘려 가며(최대 1시간) 재시도한다.
 - 메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다.
@@ -72,4 +72,4 @@ schtasks /Create /TN "VaultJarvis" /SC ONLOGON /TR "pythonw <브리지 절대경
 - 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
 - 캡처 정제는 `/vault-process-inbox`가 담당한다.
 - deny zone·`.env`·`90-assets/`는 Q&A 탐색에서 금지된다.
-- deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.
+- deny zone 제한은 호스트의 경로 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다.
