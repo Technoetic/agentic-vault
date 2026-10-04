@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.17.1 (latest) | Yes. Fixes ship as the next 0.17.x patch. |
-| 0.17.0 and earlier | No. Upgrade to 0.17.1. |
+| 0.18.0 (latest) | Yes. Fixes ship as the next 0.18.x patch. |
+| 0.17.1 and earlier | No. Upgrade to 0.18.0 after reviewing the Jarvis API-auth requirement. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -70,12 +70,12 @@ Telegram or the Jev service themselves.
 These are documented design limits, not vulnerabilities. A report that shows one of
 them being bypassed in a way the documentation does not describe is still welcome.
 
-- **Unattended generation uses a bounded, tool-free context.** In this development
-  tree Jarvis calls Claude with `--bare`, `--tools ""`, `--setting-sources ""`,
+- **Unattended generation uses a bounded, tool-free context.** Since v0.18.0
+  Jarvis calls Claude with `--bare`, `--tools ""`, `--setting-sources ""`,
   `--disable-slash-commands`, `--no-session-persistence`, `--strict-mcp-config`
   and `--settings '{"disableAllHooks":true}'`. The host reads permitted Markdown
   through the existing path/stable-file policy, rejects hardlinks and passes
-  bounded evidence on stdin. This replaces the published 0.17.1 bridge's broad
+  bounded evidence on stdin. This replaces the 0.17.1 bridge's broad
   Read/Grep/Glob grants. Prompt injection can still corrupt an answer; none of
   these flags certifies semantic truth or turns the CLI into an OS sandbox.
 - **CLI compatibility and authentication change.** `--bare` skips CLAUDE.md
@@ -153,15 +153,15 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정은 최신 릴리스(현재 0.17.1)에 다음 0.17.x 패치로 낸다. 0.17.0 이하는 0.17.1로 올린다.
+- 보안 수정은 최신 릴리스(현재 0.18.0)에 다음 0.18.x 패치로 낸다. 0.17.1 이하는 Jarvis의 API 인증 요건을 확인한 뒤 0.18.0으로 올린다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
-- 개발 트리의 Jarvis는 호스트가 허용 경로에서 선택한 제한된 근거만 보내며 모델 도구는 없다.
+- 0.18.0의 Jarvis는 호스트가 허용 경로에서 선택한 제한된 근거만 보내며 모델 도구는 없다.
   `--bare`로 자동 CLAUDE.md·자동 기억·OAuth/키체인 읽기를 끄고, 설정·스킬·MCP·훅·세션 저장도 제한한다.
-  이 모드는 API 인증이 필요하고 구독 로그인만으로는 실행되지 않는다. 현재 배포된 0.17.1의 동작과 구분한다.
+  이 모드는 API 인증이 필요하고 구독 로그인만으로는 실행되지 않는다. 0.17.1 이하의 넓은 읽기 권한을 대체한다.
   프롬프트 주입에 의한 오답이나 OS 수준 권한 문제를 모두 해결했다는 뜻은 아니다.
 - 입력64KiB·stdout/stderr 각64KiB를 검사하고, 타임아웃/초과 뒤 reader와파이프를 정리한다.
   임의의 자식 프로세스 트리를 종료하는 OS 샌드박스는 아니다. 라이브 모델 인증·응답은 검증하지 않았다.

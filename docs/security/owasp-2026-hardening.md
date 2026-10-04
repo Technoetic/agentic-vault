@@ -1,5 +1,7 @@
 # OWASP 2026 provided-document hardening and verification
 
+Historical implementation snapshot: commit `aa31663`, before v0.18.0 release metadata and installation. See [v0.18.0 verification](../verification/v0.18.0.md) for the subsequent release and installation record. Hashes in this directory's verification JSON refer to that implementation snapshot.
+
 This development branch strengthens agentic-vault using the user's provided *OWASP Top 10 for LLM Applications 2026* PDF. It is a traceability and regression record, not certification that every OWASP mitigation is implemented or that the PDF is the final official release. The source retains publication placeholders on pages 1 and 2.
 
 Source: 122 pages, SHA256 `ef87993a4e50ae9d83b41ff7a3d3e6320a82dfa8d4ec6bf98d0ce264b2e6108e`. Baseline `ca6b8c2dd74819e11aba587eeef40a9c0aeeaf97`; branch `fix/owasp-2026-hardening`. No dependency or release-version changes.

@@ -1076,7 +1076,7 @@ class JarvisBriefingTests(unittest.TestCase):
                 self.assertIn("없을 때만", text)
 
     def test_user_docs_disclose_deny_zones_are_not_an_os_security_boundary(self):
-        disclosure = "deny zone 제한은 프롬프트·허용 도구 정책이며 OS 수준 보안 경계가 아니다."
+        disclosure = "deny zone 제한은 호스트의 경로 정책이며 OS 수준 보안 경계가 아니다."
         for relative in ("commands/vault-jarvis-setup.md", "README.md"):
             with self.subTest(path=relative):
                 text = (_ROOT / relative).read_text(encoding="utf-8")
