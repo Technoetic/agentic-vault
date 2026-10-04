@@ -26,6 +26,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | 위치 | 내용 |
 |---|---|
 | [verification/](verification/) | 릴리스·기능별 검증 기록(실행한 명령과 결과, 미해결 항목) |
+| [security/](security/) | 제공된 OWASP 2026 문서를 기준으로 한 개발 브랜치의 보강 계획·위험별 대응·검증 기록 |
 | [validation.md](validation.md) | `0.9.0-local.1` 시점의 로컬 개선판 검증 기록 (역사 기록) |
 | [jev-first-contract.md](jev-first-contract.md) | Jev-first 직접 질문 구현 계약 (2026-09-20 설계 메모) |
 | [plans/](plans/) | 구현 계획 |

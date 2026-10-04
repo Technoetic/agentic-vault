@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -323,6 +324,68 @@ class SessionStartTests(unittest.TestCase):
         self.assertNotIn("SAFE_MARKER", result.stderr)
         self.assertNotIn("DENIED_MARKER", result.stderr)
         self.assertIn("invalid", result.stderr.casefold())
+
+    def test_hardlinked_note_yields_no_partial_injection(self) -> None:
+        self.write_config()
+        self.write("00-meta/handoff.md", "SAFE_HANDOFF_MARKER")
+        outside = self.root / "outside-note.md"
+        outside.write_text("SYNTHETIC_OUTSIDE_HARDLINK_MARKER", encoding="utf-8")
+        link = self.vault / "00-meta/hot.md"
+        try:
+            os.link(outside, link)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+
+        for codex in (False, True):
+            with self.subTest(codex=codex):
+                result = self.run_hook(codex=codex)
+
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr.strip(), session_hook.INVALID_CONFIG_DIAGNOSTIC)
+                self.assertNotIn("SYNTHETIC_OUTSIDE_HARDLINK_MARKER", result.stderr)
+                self.assertNotIn("SAFE_HANDOFF_MARKER", result.stderr)
+
+    def test_hardlinked_config_yields_no_injection(self) -> None:
+        self.write_config()
+        self.write("00-meta/hot.md", "SHOULD_NOT_BE_INJECTED")
+        config = self.vault / "00-meta/vault-config.json"
+        outside = self.root / "outside-config.json"
+        outside.write_bytes(config.read_bytes())
+        config.unlink()
+        try:
+            os.link(outside, config)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+
+        result = self.run_hook()
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr.strip(), session_hook.INVALID_CONFIG_DIAGNOSTIC)
+
+    def test_bounded_reader_rejects_hardlink_before_reading_content(self) -> None:
+        outside = self.root / "outside-reader.md"
+        outside.write_text("SYNTHETIC_HARDLINK_SENTINEL", encoding="utf-8")
+        link = self.vault / "linked.md"
+        try:
+            os.link(outside, link)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+
+        with link.open("rb") as handle:
+            tracked = mock.MagicMock(wraps=handle)
+            tracked.__enter__.return_value = tracked
+            with mock.patch.object(Path, "open", return_value=tracked):
+                with self.assertRaises(OSError):
+                    session_hook._read_bounded(link, 1024)
+            tracked.read.assert_not_called()
 
     def test_malformed_config_yields_no_injection_and_safe_diagnostic(self) -> None:
         self.write("00-meta/vault-config.json", '{"hot_note": "SECRET_CONTENT"')

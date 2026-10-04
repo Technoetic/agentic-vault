@@ -267,6 +267,87 @@ class VaultRecallTests(unittest.TestCase):
         self.assertGreaterEqual(result["diagnostics"]["skipped_unsafe"], 1)
         self.assertFalse(result["diagnostics"]["search_complete"])
 
+    def test_hardlink_escape_is_skipped_without_reading_outside_marker(self) -> None:
+        self.write("20-knowledge/allowed.md", "needle PUBLIC_MARKER\n")
+        baseline = recall_module.recall(self.vault, "needle")
+        outside = Path(self._tmp.name) / "outside.md"
+        outside.write_text("needle OUTSIDE_HARDLINK_MARKER\n", encoding="utf-8")
+        link = self.vault / "20-knowledge" / "hardlink.md"
+        try:
+            os.link(outside, link)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+
+        result = recall_module.recall(self.vault, "needle")
+
+        self.assertNotIn("OUTSIDE_HARDLINK_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertEqual([match["path"] for match in result["matches"]], ["20-knowledge/allowed.md"])
+        self.assertEqual(result["diagnostics"]["bytes_read"], baseline["diagnostics"]["bytes_read"])
+        self.assertEqual(result["diagnostics"]["files_read"], baseline["diagnostics"]["files_read"])
+        self.assertGreaterEqual(result["diagnostics"]["skipped_unsafe"], 1)
+        self.assertFalse(result["diagnostics"]["search_complete"])
+        self.assertIn("unsafe_path", result["diagnostics"]["omissions"])
+
+    def test_hardlinked_config_is_rejected_before_recall(self) -> None:
+        config = self.vault / "00-meta/vault-config.json"
+        outside = Path(self._tmp.name) / "outside-config.json"
+        outside.write_bytes(config.read_bytes())
+        config.unlink()
+        try:
+            os.link(outside, config)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+        self.write("20-knowledge/allowed.md", "needle SHOULD_NOT_BE_READ\n")
+
+        result = recall_module.recall(self.vault, "needle")
+
+        self.assertEqual(result["diagnostics"]["status"], "invalid_config")
+        self.assertEqual(result["diagnostics"]["files_read"], 0)
+        self.assertEqual(result["context"], "")
+        self.assertEqual(result["matches"], [])
+
+    def test_regular_reader_rejects_hardlink_before_opening_content_stream(self) -> None:
+        outside = Path(self._tmp.name) / "outside-reader.md"
+        outside.write_text("SYNTHETIC_HARDLINK_SENTINEL", encoding="utf-8")
+        link = self.vault / "linked.md"
+        try:
+            os.link(outside, link)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) in (5, 1314):
+                self.skipTest(f"Windows hardlinks unavailable: {exc}")
+            raise
+
+        with mock.patch.object(recall_module.os, "fdopen", wraps=recall_module.os.fdopen) as content_stream:
+            with self.assertRaises(ValueError):
+                recall_module._read_regular_bytes(link, 1024)
+        content_stream.assert_not_called()
+
+    def test_json_match_title_is_bounded_when_context_budget_is_zero(self) -> None:
+        self.write("20-knowledge/long-title.md", "---\ntitle: needle " + "x" * 400_000 + "\n---\n")
+
+        result = recall_module.recall(self.vault, "needle", max_tokens=0)
+
+        self.assertEqual(result["context"], "")
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertLessEqual(len(result["matches"][0]["title"]), 512)
+        self.assertTrue(result["matches"][0]["title"].endswith("..."))
+        self.assertLess(len(json.dumps(result, ensure_ascii=False).encode("utf-8")), 4096)
+
+    def test_title_truncation_keeps_ranking_and_source_line_from_full_title(self) -> None:
+        self.write("20-knowledge/long-title.md", "---\ntitle: " + "x" * 600 + " needle\n---\n")
+        self.write("20-knowledge/body-match.md", "# Other\nneedle\n")
+
+        result = recall_module.recall(self.vault, "needle", limit=2)
+
+        self.assertEqual(result["matches"][0]["path"], "20-knowledge/long-title.md")
+        self.assertEqual(result["matches"][0]["line"], 2)
+        self.assertLessEqual(len(result["matches"][0]["title"]), 512)
+        self.assertIn("needle", result["matches"][0]["snippet"])
+
     def test_oversized_file_is_not_partially_read_and_is_reported(self) -> None:
         self.write_bytes("20-knowledge/large.md", b"needle " + b"x" * 200)
 

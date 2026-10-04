@@ -242,8 +242,10 @@ REQUIRED_V0160_WIRING = (
     ("commands/vault-upgrade.md", "`승인 대기(기존 유지)`"),
     ("commands/vault-jarvis-setup.md", "텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며"),
     ("docs/reliability.md", "`hot_max_tokens`·`handoff_max_tokens`를 잠시 0으로"),
-    ("skills/agentic-vault/scripts/jarvis_bridge.py", "'인간의 확인이 필요한 사항' 주목"),
-    ("SECURITY.md", "훅은 `disableAllHooks`로 꺼지지만"),
+    # Keep the approval-first briefing contract and hook disablement wired to
+    # current behavior; the old ambient-settings warning was superseded by bare mode.
+    ("skills/agentic-vault/scripts/jarvis_bridge.py", "내 결정·승인 대기를 먼저"),
+    ("SECURITY.md", "--settings '{\"disableAllHooks\":true}'"),
 )
 FORBIDDEN_V0160_STALE_LITERALS = (
     ("commands/vault-init.md", "rules 5개"),

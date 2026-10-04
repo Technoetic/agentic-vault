@@ -33,6 +33,7 @@ MAX_QUERY_CHARS = 1_000
 MAX_QUERY_TERMS = 32
 MAX_RESULTS = 50
 MAX_SNIPPET_CHARS = 500
+MAX_TITLE_CHARS = 512
 
 _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _TITLE_RE = re.compile(r"^\s*title\s*:\s*(.*?)\s*$", re.IGNORECASE)
@@ -106,7 +107,7 @@ def _read_config(vault: Path, diagnostics: dict) -> dict | None:
     try:
         config_path = resolve_note_path(vault, CONFIG_RELPATH)
         metadata = config_path.stat()
-        if not stat.S_ISREG(metadata.st_mode):
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise ValueError("config is not a regular file")
         size = metadata.st_size
         if size > MAX_CONFIG_BYTES:
@@ -141,7 +142,8 @@ def _read_regular_bytes(path: Path, byte_limit: int) -> tuple[bytes, bool]:
     descriptor = os.open(path, flags)
     try:
         before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode):
+        # A hardlink can alias an outside or denied file through an allowed name.
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
             raise ValueError("path is not a regular file")
         if before.st_size > byte_limit:
             raise OverflowError("file exceeds byte limit")
@@ -216,7 +218,7 @@ def _markdown_paths(
 def _read_markdown(path: Path, diagnostics: dict, rel_path: str) -> str | None:
     try:
         metadata = path.stat()
-        if not stat.S_ISREG(metadata.st_mode):
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             diagnostics["skipped_unsafe"] += 1
             _omit(diagnostics, "unsafe_path")
             return None
@@ -336,7 +338,8 @@ def _rank_document(rel_path: str, text: str, phrase: str, query_terms: Sequence[
     return {
         "path": rel_path,
         "line": best_line,
-        "title": title,
+        # Rank using the complete title, but bound metadata outside context budgets.
+        "title": title if len(title) <= MAX_TITLE_CHARS else title[:MAX_TITLE_CHARS - 3].rstrip() + "...",
         "score": score,
         "snippet": _snippet(best_source, phrase, query_terms),
     }
@@ -443,7 +446,7 @@ def recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> d
         diagnostics["files_considered"] += 1
         try:
             metadata = path.stat()
-            if not stat.S_ISREG(metadata.st_mode):
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                 diagnostics["skipped_unsafe"] += 1
                 _omit(diagnostics, "unsafe_path")
                 continue

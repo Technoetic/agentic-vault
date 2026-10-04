@@ -7,6 +7,7 @@ from bisect import bisect_left
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Callable, NamedTuple, Sequence
@@ -98,6 +99,10 @@ def _utf8_streams() -> None:
 
 def _read_bounded(path: Path, byte_limit: int) -> tuple[bytes, bool]:
     with path.open("rb") as handle:
+        metadata = os.fstat(handle.fileno())
+        # Safe names do not prove provenance when a file has another hardlink.
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise OSError("unsafe_file")
         data = handle.read(byte_limit + 1)
     return data[:byte_limit], len(data) > byte_limit
 

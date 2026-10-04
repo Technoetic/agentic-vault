@@ -1,0 +1,235 @@
+{
+  "task_id": "agentic-vault-owasp-hardening-20261004",
+  "recorded_at": "2026-10-04T09:01:11+09:00",
+  "base_commit": "ca6b8c2dd74819e11aba587eeef40a9c0aeeaf97",
+  "branch": "fix/owasp-2026-hardening",
+  "provided_document": {
+    "filename": "OWASP-GenAI-LLM-Top-10-2026-v1.0.pdf",
+    "pages": 122,
+    "sha256": "ef87993a4e50ae9d83b41ff7a3d3e6320a82dfa8d4ec6bf98d0ce264b2e6108e",
+    "official_final_release_confirmed": false,
+    "publication_placeholders": "pages 1 and 2"
+  },
+  "environment": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "python": "3.12.10"
+  },
+  "root_verification": {
+    "baseline": {
+      "command": "python -X utf8 -B -m unittest discover -s tests -v",
+      "tests": 641,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 22,
+      "exit_code": 0,
+      "duration_seconds": 138.577
+    },
+    "final_full_suite": {
+      "command": "python -X utf8 -B -m unittest discover -s tests -v",
+      "tests": 663,
+      "passed": 641,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 22,
+      "exit_code": 0,
+      "duration_seconds": 127.926,
+      "log_filename": "agentic-vault-owasp-20261004-root-verified.log",
+      "log_sha256": "e22d1fc49b40d28feea33a39b83ab2c44856d4c52a435ab514512a8675478c1d"
+    },
+    "focused_jarvis": {
+      "tests": 168,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "exit_code": 0
+    },
+    "lexical": {
+      "command": "python -X utf8 -B scripts/evaluate_recall.py",
+      "query_count": 16,
+      "recall_at_3": 1.0,
+      "mrr": 1.0,
+      "failed_queries": [],
+      "evaluation_errors": [],
+      "exit_code": 0
+    },
+    "compile": {
+      "operation": "builtin compile(bytes, path, 'exec') for hooks and product scripts",
+      "python_files": 14,
+      "exit_code": 0,
+      "generated_files": 0
+    },
+    "whitespace": {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  },
+  "independent_verification": {
+    "verified_by": "Codex /root/semantic_independent_verification",
+    "verified_at": "2026-10-04T08:59:49+09:00",
+    "outcome": "pass_after_impacted_checks",
+    "full_run": {
+      "command": "python -X utf8 -B -m unittest discover -s tests -v",
+      "tests": 663,
+      "failures": 3,
+      "errors": 0,
+      "skipped": 22,
+      "exit_code": 1,
+      "duration_seconds": 126.874,
+      "log_filename": "agentic-vault-owasp-20261004-independent.log",
+      "failure_scope": "Concurrent documentation index and superseded release-text checks; no product behavior failures."
+    },
+    "impacted_checks": [
+      {
+        "command": "python -X utf8 -B -m unittest discover -s tests -p test_release_metadata.py -v",
+        "tests": 12,
+        "failures": 0,
+        "exit_code": 0,
+        "duration_seconds": 0.019
+      },
+      {
+        "command": "python -X utf8 -B -m unittest discover -s tests -p test_readme_truth.py -v",
+        "tests": 11,
+        "failures": 0,
+        "exit_code": 0,
+        "duration_seconds": 0.013
+      }
+    ],
+    "source_stability": "All four changed product files were unchanged across the independent full run. Only release-text assertions and a Jarvis test comment changed; final 36 tracked Python hashes were unchanged across impacted checks.",
+    "lexical": {
+      "command": "python -X utf8 -B scripts/evaluate_recall.py",
+      "query_count": 16,
+      "recall_at_3": 1.0,
+      "mrr": 1.0,
+      "exit_code": 0
+    },
+    "compile": {
+      "operation": "builtin compile(bytes, path, 'exec') for all tracked Python files",
+      "python_files": 36,
+      "exit_code": 0,
+      "generated_files": 0
+    },
+    "whitespace": {
+      "command": "git diff --check ca6b8c2dd74819e11aba587eeef40a9c0aeeaf97",
+      "exit_code": 0
+    },
+    "tracked_python_sha256": {
+      "hooks/session_start.py": "0ca280049ede286ab33cb1f194ff8ae375cb66fb0a25e1b1db572a4760a4b998",
+      "scripts/evaluate_recall.py": "678e942fa96e7373c8f1a6e1fbdcdc324e887a5c2baac06bf62821d98d9ed5d6",
+      "scripts/verify_codex_plugin.py": "76bc2cf9cae4d0f131f796aa2cf1f5d953e75c34625767ff0ab30e14fc100a8b",
+      "skills/agentic-vault/scripts/backup_vault.py": "ba01e1d8f53369cc438e4c627d0de6b5dd6cd3c162dc5ada5bf6503bf5be5773",
+      "skills/agentic-vault/scripts/jarvis_bridge.py": "1ba2bafccd05f1cee0cfe5826eedd4dc3d0ae1e77272858b973e428a9f934778",
+      "skills/agentic-vault/scripts/jev_ask.py": "0dfaa203b4558a202af5061919281609008910a980ee75d6a41c6366dc15508b",
+      "skills/agentic-vault/scripts/jev_client.py": "af5d6ab439af38c3827d6c4fdd2f692d4c0e023df774026bde2819834d9ccd33",
+      "skills/agentic-vault/scripts/test_rules_inheritance.py": "67bfa1a60958877e58568a3c5bf24f748448310acf21ce0cbbde8d600a0840e3",
+      "skills/agentic-vault/scripts/vault_adapters.py": "accf1977878ff004660fa6af55fd11ab7342a0a01c119e04300e9574b391fa2f",
+      "skills/agentic-vault/scripts/vault_doctor.py": "e9ebe4070eb29f16600a1858de75942dbe2c688fb7282e787853d5412ec270ef",
+      "skills/agentic-vault/scripts/vault_evidence.py": "8babe00a8e9d0e150c32bf4a7710d88e49ba6a063fa4284192daaea5816bec93",
+      "skills/agentic-vault/scripts/vault_healthcheck.py": "0f5d06df31ea8784aa99e0376b977304e04d091191db8a3211e5cbdb71a9f76f",
+      "skills/agentic-vault/scripts/vault_judge.py": "797aeb0ed3ee657c2e594c00b9738482ca766c45656d5b78e0a4c3f6eaff990b",
+      "skills/agentic-vault/scripts/vault_paths.py": "c53ef7c6e427789f678a46e669e8f343d3a23e7d4cc915594e020f8285fc658a",
+      "skills/agentic-vault/scripts/vault_proposals.py": "0fc752f07410bd2869aef020ad7c7cdada8681fbb1f6fac0e8d11f4f9009606c",
+      "skills/agentic-vault/scripts/vault_recall.py": "61b2083b6f89a356810312b8dd2710dbfcf2e64c89a0e8733abafefe1a5141b4",
+      "tests/__init__.py": "867021aa6c885eee0914566e3512c255f99de3b4cb0854de19310b5c88418be9",
+      "tests/test_action_gates.py": "22044fc13f2bc03c4c40b3916b554ece2953df93fa861298e9a92b5b5a48d5c5",
+      "tests/test_backup_vault.py": "84cc0a5e38306ea6f2515a8b70905baac395645375016fd4098bfd58092da00d",
+      "tests/test_codex_verification.py": "44e861dde826ad4c44664a8f112bca15dcf4b898435fd2252fdb9c60271b4f64",
+      "tests/test_git_hooks.py": "4ddb37fc623e7718f062a3091e31f6ce42809fdc60099443edcfd95f9b21d598",
+      "tests/test_jarvis_bridge.py": "08479936cfd18304808c8cbdc5a6731db6eac394810163f3a78e8ff0d4a4f459",
+      "tests/test_jev_ask.py": "6f90bd2e5db38661dd5f41bb205a3e9486d5e6da3ab5622f166392d7b17ce192",
+      "tests/test_jev_client.py": "8d7f5c63282b2c5f5c2f1e267a684b43587502fc4d7807609a69e331b517dcd3",
+      "tests/test_memory_recovery.py": "238da2d7ff2855cac0ec1a69cdb2cc53ee05c5fa67dd3d61e02930d65c08f6cc",
+      "tests/test_readme_truth.py": "74e19af48f9c22cd761f7d9b073ed9d87ea91a1595a37ffa3681638d0641c449",
+      "tests/test_release_metadata.py": "cfabc7ffb8039f3b9a33ea595eba5a4cb758659c9092dc3565e70278aec8161f",
+      "tests/test_rule_sources.py": "822fe9690acbfbc21ad6648e78a08751c2157d792baa4f36111138674a8f0a7f",
+      "tests/test_session_start.py": "bd9591af05392e28ab40e6272257b4d087b68d845e35c09ae809b385e035b2aa",
+      "tests/test_vault_adapters.py": "9fb0766eb67d02c91154a3e67f3e03121fefdd847af510c987324c01b9a71363",
+      "tests/test_vault_doctor.py": "826c99b6f0ef9e36246216766e5e3c1cb5fcf507e8b19862368aba1188f38e76",
+      "tests/test_vault_evidence.py": "865c899223230f225a6aa8dbfceea53196a1b4f29ca97f6f8d872ee1b597d281",
+      "tests/test_vault_healthcheck.py": "4613882f8d58a7ea418638e8f633028acf0137700371fa65e1cf4a228ddde356",
+      "tests/test_vault_judge.py": "518089e110fcf4a31d6df8093b95859cb863ffcc0eab6a740ce20b38ea592f60",
+      "tests/test_vault_proposals.py": "b75367d6f459df7c751092d595fdd07ebfb9cb45c4c115ddc04f630b37929f00",
+      "tests/test_vault_recall.py": "9e66d4fa8aba586a1442bdca456f0d41707122c3aea4aedda5dbb8a890ac1d42"
+    }
+  },
+  "independent_boundary_review": {
+    "verified_by": "Codex /root/owasp_repo_controls",
+    "verified_at": "2026-10-04T08:53:22+09:00",
+    "focused_regressions": 8,
+    "passed": 8,
+    "unresolved_material_findings": 0,
+    "resolved_findings": [
+      "Reader threads retained by descendant-held pipes",
+      "Missing recent log and git briefing evidence",
+      "Secret-shaped source filenames omitted from the filter"
+    ],
+    "jarvis_product_sha256": "1ba2bafccd05f1cee0cfe5826eedd4dc3d0ae1e77272858b973e428a9f934778"
+  },
+  "platform_environment_skips": {
+    "total": 22,
+    "symlink_privilege_or_unsupported": 12,
+    "posix_only": 6,
+    "aside_browser_already_running": 3,
+    "case_insensitive_filesystem": 1
+  },
+  "files_sha256": {
+    "hooks/session_start.py": "0ca280049ede286ab33cb1f194ff8ae375cb66fb0a25e1b1db572a4760a4b998",
+    "skills/agentic-vault/scripts/jarvis_bridge.py": "1ba2bafccd05f1cee0cfe5826eedd4dc3d0ae1e77272858b973e428a9f934778",
+    "skills/agentic-vault/scripts/jev_client.py": "af5d6ab439af38c3827d6c4fdd2f692d4c0e023df774026bde2819834d9ccd33",
+    "skills/agentic-vault/scripts/vault_recall.py": "61b2083b6f89a356810312b8dd2710dbfcf2e64c89a0e8733abafefe1a5141b4",
+    "tests/test_session_start.py": "bd9591af05392e28ab40e6272257b4d087b68d845e35c09ae809b385e035b2aa",
+    "tests/test_jarvis_bridge.py": "08479936cfd18304808c8cbdc5a6731db6eac394810163f3a78e8ff0d4a4f459",
+    "tests/test_jev_client.py": "8d7f5c63282b2c5f5c2f1e267a684b43587502fc4d7807609a69e331b517dcd3",
+    "tests/test_vault_recall.py": "9e66d4fa8aba586a1442bdca456f0d41707122c3aea4aedda5dbb8a890ac1d42",
+    "tests/test_release_metadata.py": "cfabc7ffb8039f3b9a33ea595eba5a4cb758659c9092dc3565e70278aec8161f"
+  },
+  "hash_scope": "Raw final working-tree bytes; Git may normalize CRLF during staging/checkouts.",
+  "limitations": [
+    "Provided-document traceability is not OWASP compliance certification.",
+    "Jarvis bare mode requires API/provider authentication; subscription-only OAuth is incompatible.",
+    "Live Claude/provider authentication, Telegram delivery and non-Windows CI were not exercised.",
+    "CLI controls are not OS process-tree, CPU or disk isolation.",
+    "Secret filters are pattern-based; approved model context may leave the device.",
+    "No provider-wide spending quota, local model-training or vector-database subsystem.",
+    "Lexical retrieval score is not answer truth or hallucination accuracy."
+  ],
+  "publication_installation": {
+    "remote_push": false,
+    "release_version_changed": false,
+    "installed_plugin_changed": false,
+    "live_daemon_changed": false
+  },
+  "scope_advisory": {
+    "provider": "Jev",
+    "adapter_version": "installed 0.17.1",
+    "role": "advisory",
+    "actual_batches": 1,
+    "questions": 2,
+    "status": "reviewed",
+    "results": {
+      "scope_claims": {
+        "choice": "explicitly_limited",
+        "confidence": 1.0
+      },
+      "subsystem_scope": {
+        "choice": "supported",
+        "confidence": 1.0
+      }
+    },
+    "source_lines": [
+      27,
+      33
+    ],
+    "evidence_utf8_bytes": 1197,
+    "wire_bytes": 3408,
+    "usage_tokens": {
+      "input": 1242,
+      "output": 94
+    },
+    "source_snapshot_sha256": "10a73ee9e1f201bacf99fee8ddeebf312a1a4c121a89cfef886fd62d2751eba9",
+    "excerpt_sha256": "0ce9cd19ec06621d06599f26769cf34750755803ca28c54701711fd45bbff78a",
+    "canonical_input_sha256": "e0b50f9d35c428e05261b358a5617e5d5879bc055c10aeeeb640410f69e80098",
+    "request_sha256": "be77352608a8beae480c5adab3e0795cebb6328eb488948343fef718f4563df0",
+    "response_artifact_sha256": "940d08f33349c729ba33bd0bf8ab54c176599ac0727b8384b5121c9a34659bd7",
+    "scope": "Three paragraphs in the NS scope note only, prior to final bookkeeping updates; not a code/security/permission verdict and not a live hardened-client integration test."
+  }
+}

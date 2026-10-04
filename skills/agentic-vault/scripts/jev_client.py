@@ -17,6 +17,8 @@ import unicodedata
 MODEL = "jev-1.13.0"
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 MAX_BODY_BYTES = 64 * 1024
+MAX_INPUT_NODES = 8192
+MAX_INPUT_DEPTH = 64
 MAX_TIMEOUT = 30.0
 _CODES = frozenset({"invalid_input", "sensitive_input", "missing_api_key", "authentication",
                     "rate_limit", "timeout", "transport", "malformed_response"})
@@ -47,6 +49,12 @@ SENSITIVE = re.compile(
     r"\b[a-z][a-z0-9+.-]*://[^\s:/?#@]*:[^\s/?#@]+@|"
     r"(?:비밀\s?번호|비번|패스워드|암호|토큰|인증\s?키|액세스\s?키|시크릿|api\s?키)"
     r"\s*[\"']?\s*[:=]\s*[\"']?(?:(?![\"',;])[\x21-\x7e]){4,}", re.IGNORECASE)
+# Whole JSON field names only. A bare "secret" or "token" may be an ordinary
+# question label; their existing assignment/text patterns remain in SENSITIVE.
+_CREDENTIAL_LABEL = re.compile(
+    r"(?:password|passwd|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
+    r"authorization|[a-z0-9_]*api[_-]?key|비밀\s?번호|비번|패스워드|"
+    r"인증\s?키|액세스\s?키|api\s?키)\Z", re.IGNORECASE)
 
 
 def _normalized(text):
@@ -72,20 +80,76 @@ def _matches_sensitive(text):
 def contains_sensitive(value, literals=()):
     """Return True when any string in a JSON-like value (object keys included)
     matches SENSITIVE, before or after NFKC normalization and removal of
-    invisible format characters, or contains one of the non-empty literal strings."""
+    invisible format characters, or contains one of the non-empty literal strings.
+
+    Credential-labelled nonempty JSON scalars are sensitive even when the label
+    and value are separate strings. Cycles, excessive traversal/depth/text and
+    unsupported Python objects raise ValueError before encoding or transport.
+    Shared containers are allowed, but each occurrence uses the traversal budget.
+    """
     literals = tuple(literal for literal in literals if isinstance(literal, str) and literal)
-    pending = [value]
+    active = set()
+    pending = [(iter(((value, None),)), 0, None)]
+    nodes = characters = 0
     while pending:
-        item = pending.pop()
-        if isinstance(item, str):
+        iterator, depth, identity = pending[-1]
+        try:
+            item, label = next(iterator)
+        except StopIteration:
+            pending.pop()
+            if identity is not None:
+                active.remove(identity)
+            continue
+        nodes += 1
+        if nodes > MAX_INPUT_NODES or depth > MAX_INPUT_DEPTH:
+            raise ValueError("invalid_input")
+        kind = type(item)
+        if kind is str:
+            characters += len(item)
+            if characters > MAX_BODY_BYTES:
+                raise ValueError("invalid_input")
+        elif kind is int and item.bit_length() > MAX_BODY_BYTES * 4:
+            # iterencode converts an integer before yielding its chunk. Bound
+            # that conversion even if Python's own decimal digit cap is disabled.
+            raise ValueError("invalid_input")
+        elif kind not in (dict, list, tuple, int, float, bool, type(None)):
+            raise ValueError("invalid_input")
+        if (isinstance(label, str) and _CREDENTIAL_LABEL.fullmatch(_normalized(label).strip())
+                and kind in (str, int, float, bool) and (kind is not str or item.strip())):
+            return True
+        if kind is str:
             if _matches_sensitive(item) or any(literal in item for literal in literals):
                 return True
-        elif isinstance(item, dict):
-            pending.extend(item.keys())
-            pending.extend(item.values())
-        elif isinstance(item, (list, tuple)):
-            pending.extend(item)
+        elif kind in (dict, list, tuple):
+            identity = id(item)
+            if identity in active:
+                raise ValueError("invalid_input")
+            active.add(identity)
+            pending.append((_members(item), depth + 1, identity))
     return False
+
+
+def _members(value):
+    """Visit children lazily: a large container never expands the pending stack."""
+    if type(value) is dict:
+        for key, child in value.items():
+            yield key, None
+            yield child, key
+    else:
+        for child in value:
+            yield child, None
+
+
+def _bounded_payload(value):
+    """Stop encoding at the existing wire cap instead of allocating full output."""
+    encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    payload = bytearray()
+    for chunk in encoder.iterencode(value):
+        encoded = chunk.encode("utf-8")
+        if len(payload) + len(encoded) > MAX_BODY_BYTES:
+            raise ValueError("invalid_input")
+        payload.extend(encoded)
+    return bytes(payload)
 
 
 class JevError(Exception):
@@ -120,16 +184,14 @@ def build_payload(state, questions):
             if (not _text(choice, 80) or choice != choice.strip()
                     or any(ord(char) < 32 for char in choice) or not _text(definition, 2000)):
                 raise JevError("invalid_input")
-    # Last check before the wire, whatever the caller already filtered.
-    if contains_sensitive(state) or contains_sensitive(questions):
-        raise JevError("sensitive_input")
     try:
-        payload = json.dumps({"state": state, "model": MODEL, "questions": questions},
-                             ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        value = {"state": state, "model": MODEL, "questions": questions}
+        # One budget covers the entire request, including repeated shared data.
+        if contains_sensitive(value):
+            raise JevError("sensitive_input")
+        payload = _bounded_payload(value)
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise JevError("invalid_input") from None
-    if len(payload) > MAX_BODY_BYTES:
-        raise JevError("invalid_input")
     return payload
 
 
