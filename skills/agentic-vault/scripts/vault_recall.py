@@ -97,6 +97,11 @@ def _path_matches_rule(parts: Sequence[str], rule: str) -> bool:
 
 
 def _classified_skip(rel_parts: Sequence[str], deny_zones: Sequence[str], exclude_dirs: Sequence[str]) -> str | None:
+    # Reserved engine runtime is never knowledge, even when optional exclusions
+    # are cleared. Keep this exact root path; a business folder named runtime
+    # elsewhere remains eligible.
+    if tuple(part.casefold() for part in rel_parts[:3]) == ("00-meta", ".agentic-vault", "runtime"):
+        return "excluded"
     if any(_path_matches_rule(rel_parts, rule) for rule in deny_zones):
         return "denied"
     if any(_path_matches_rule(rel_parts, rule) for rule in exclude_dirs):
@@ -183,6 +188,7 @@ def _markdown_paths(
     deny_zones: Sequence[str],
     exclude_dirs: Sequence[str],
     diagnostics: dict,
+    *, directory_sink=None,
 ) -> list[tuple[str, Path]]:
     found: list[tuple[str, Path]] = []
     pending: list[tuple[tuple[str, ...], Path]] = [((), vault)]
@@ -191,6 +197,8 @@ def _markdown_paths(
     while pending and not hit_entry_limit:
         rel_parts, directory = pending.pop()
         try:
+            if directory_sink is not None:
+                directory_sink('/'.join(rel_parts), directory)
             with os.scandir(directory) as iterator:
                 entries = []
                 for entry in iterator:
@@ -201,7 +209,7 @@ def _markdown_paths(
                         break
                     diagnostics["entries_scanned"] += 1
                     entries.append(entry)
-        except OSError:
+        except (OSError, ValueError):
             diagnostics["skipped_unreadable"] += 1
             _omit(diagnostics, "unreadable_path")
             continue
@@ -500,15 +508,15 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
 def recall(
     vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     as_of: str | None = None, expand_links: int = 0, backend: str = "lexical",
-    external_candidates=None, excluded_sources=(),
+    external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None,
 ) -> dict:
     """Preserve legacy output by default; advanced options add source review data."""
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == ():
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None:
         return _legacy_recall(vault, query, limit, max_tokens)
     return _advanced_retrieval.retrieve(
         vault, query, limit, max_tokens, as_of=as_of, expand_links=expand_links,
         backend=backend, external_candidates=external_candidates,
-        excluded_sources=excluded_sources,
+        excluded_sources=excluded_sources, expand_query=expand_query, query_mapping=query_mapping,
     )
 
 
@@ -529,6 +537,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", choices=("lexical", "bm25", "hybrid"), default="lexical")
     parser.add_argument("--external-candidates", help="vault-relative JSON sidecar (paths/ranks only)")
     parser.add_argument("--exclude-source", action="append", default=[], help="additional excluded path/zone")
+    parser.add_argument("--expand-query", action="store_true", help="opt-in bounded aliases/plain query mapping")
+    parser.add_argument("--query-mapping", help="vault-relative plain trigger => replacement mapping; requires --expand-query")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
@@ -540,6 +550,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         expand_links=args.expand_links, backend=args.backend,
         external_candidates=args.external_candidates,
         excluded_sources=tuple(args.exclude_source),
+        expand_query=args.expand_query, query_mapping=args.query_mapping,
     )
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))

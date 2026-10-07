@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
+import random
+import re
 import sys
 import time
 from pathlib import Path
@@ -71,8 +74,25 @@ def _load_queries(fixture: Path) -> list[dict]:
             if {path.casefold() for path in expected}.intersection(path.casefold() for path in values):
                 raise ValueError(f"queries[{index}].{field} overlaps expected_paths")
         seen_ids.add(query_id)
+        claims = item.get('required_claims', [])
+        if not isinstance(claims, list) or len(claims) > 32 or any(
+                not isinstance(claim, str) or not claim.strip() or len(claim) > 1000 for claim in claims) or len(set(claims)) != len(claims):
+            raise ValueError(f'queries[{index}].required_claims must contain bounded unique literal claims')
+        if claims and expectation == 'no_answer':
+            raise ValueError('no_answer query cannot require returned claims')
+        relevance = item.get('relevance', {path: 1 for path in expected})
+        if not isinstance(relevance, dict) or len(relevance) > 50:
+            raise ValueError('relevance must contain at most 50 path-to-grade labels')
+        _validate_paths(list(relevance), f'queries[{index}].relevance')
+        if any(type(grade) is not int or not 0 <= grade <= 3 for grade in relevance.values()):
+            raise ValueError('relevance grades must be integers from 0 through 3')
+        if expectation == 'answerable' and any(relevance.get(path, 0) == 0 for path in expected):
+            raise ValueError('expected paths require positive relevance labels')
+        if expectation == 'no_answer' and any(relevance.values()):
+            raise ValueError('no_answer query cannot have positive relevance')
         checked.append({**item, "expectation": expectation, "scenario": scenario,
-                        "forbidden_paths": forbidden, "stale_paths": stale})
+                        "forbidden_paths": forbidden, "stale_paths": stale,
+                        'required_claims': claims, 'relevance': relevance})
     return checked
 
 
@@ -97,6 +117,44 @@ def _ratio(numerator: float, denominator: int) -> float | None:
     return numerator / denominator if denominator else None
 
 
+def _ndcg(retrieved: list[str], relevance: dict[str, int]) -> float | None:
+    ideal = sorted(relevance.values(), reverse=True)[:5]
+    idcg = sum((2**grade-1) / math.log2(rank+2) for rank, grade in enumerate(ideal))
+    if not idcg:
+        return None
+    dcg = sum((2**relevance.get(path, 0)-1) / math.log2(rank+2) for rank, path in enumerate(retrieved[:5]))
+    return dcg / idcg
+
+
+def paired_randomization(baseline, improved, *, seed=1707, permutations=10000) -> dict:
+    """Two-sided paired sign randomization, fixed seed, add-one Monte Carlo p.
+
+    Inputs are aligned observed metric values, not ranks or unpaired summaries.
+    No normality assumptions or optional statistics package is required.
+    """
+    if type(seed) is not int or type(permutations) is not int or not 1 <= permutations <= 100000:
+        raise ValueError('invalid randomization bounds')
+    if not isinstance(baseline, (list, tuple)) or not isinstance(improved, (list, tuple)) or len(baseline) != len(improved):
+        raise ValueError('paired values must have identical lengths')
+    values = (*baseline, *improved)
+    if any(type(v) not in (int, float) or not math.isfinite(v) for v in values):
+        raise ValueError('paired values must be finite numbers')
+    n = len(baseline)
+    delta = [b-a for a, b in zip(baseline, improved)]
+    observed = sum(delta) / n if n else None
+    if n:
+        generator = random.Random(seed)
+        threshold = abs(sum(delta))
+        extreme = sum(abs(sum(value if generator.getrandbits(1) else -value for value in delta)) >= threshold-1e-12
+                      for _ in range(permutations))
+        p_value = (extreme+1) / (permutations+1)
+    else:
+        p_value = None
+    return {'method': 'paired sign randomization; two-sided; add-one Monte Carlo',
+            'seed': seed, 'permutations': permutations, 'paired_query_count': n,
+            'mean_delta': observed, 'p_value': p_value}
+
+
 def _summary(rows: list[dict]) -> dict:
     answerable = [row for row in rows if row["expectation"] == "answerable"]
     no_answer = [row for row in rows if row["expectation"] == "no_answer"]
@@ -109,6 +167,15 @@ def _summary(rows: list[dict]) -> dict:
         "no_answer_query_count": len(no_answer),
         "recall_at_3": _ratio(sum(row["source_recall_at_3"] for row in answerable), len(answerable)),
         "mrr": _ratio(sum(row["reciprocal_rank_at_3"] for row in answerable), len(answerable)),
+        'recall_at_k': _ratio(sum(row['source_recall_at_k'] for row in answerable), len(answerable)),
+        'mrr_at_k': _ratio(sum(row['reciprocal_rank_at_k'] for row in answerable), len(answerable)),
+        'ndcg_at_5': _ratio(sum(row['ndcg_at_5'] for row in answerable), len(answerable)),
+        'ndcg_query_count': len(answerable),
+        'required_claim_query_count': sum(bool(row['required_claims']) for row in rows),
+        'required_claim_count': sum(len(row['required_claims']) for row in rows),
+        'covered_claim_count': sum(len(row['covered_claims']) for row in rows),
+        'returned_context_claim_coverage': _ratio(sum(len(row['covered_claims']) for row in rows),
+                                                sum(len(row['required_claims']) for row in rows)),
         "no_answer": {
             "query_count": len(no_answer),
             "false_positive_query_count": false_positives,
@@ -137,16 +204,21 @@ def _summary(rows: list[dict]) -> dict:
 
 def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
              as_of: str | None = None, expand_links: int | None = None,
-             backend: str | None = None) -> dict:
+             backend: str | None = None, top_k: int = 3, expand_query: bool = False,
+             query_mapping: str | None = None) -> dict:
     """Measure labeled source retrieval and returned exposure, never answer quality."""
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
         raise ValueError("max_tokens must be a non-negative integer")
+    if type(top_k) is not int or top_k not in (3, 5) or type(expand_query) is not bool:
+        raise ValueError('top_k must be 3 or 5 and expand_query must be boolean')
+    if query_mapping is not None and (not isinstance(query_mapping, str) or not expand_query):
+        raise ValueError('query_mapping requires explicit expansion')
     if type(advanced) is not bool or (expand_links is not None and
             (type(expand_links) is not int or expand_links not in (0, 1, 2))):
         raise ValueError('invalid advanced options')
     if backend is not None and backend not in ('lexical', 'bm25', 'hybrid'):
         raise ValueError('invalid retrieval backend')
-    advanced = advanced or as_of is not None or expand_links is not None or backend is not None
+    advanced = advanced or as_of is not None or expand_links is not None or backend is not None or expand_query
     queries = _load_queries(fixture)
     recall_module = _load_recall_module()
     vault = fixture / "vault"
@@ -162,18 +234,27 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
             options.update({key: value for key, value in
                             (('as_of', as_of), ('expand_links', expand_links), ('backend', backend))
                             if value is not None})
+            if expand_query:
+                options.update(expand_query=True, query_mapping=query_mapping)
         started = time.perf_counter()
         reader = recall_module._advanced_retrieval.retrieve if advanced else recall_module.recall
-        result = reader(vault, item["query"], limit=3, max_tokens=max_tokens, **options)
+        result = reader(vault, item["query"], limit=top_k, max_tokens=max_tokens, **options)
         elapsed_ms = (time.perf_counter() - started) * 1000
         retrieved = [match["path"] for match in result["matches"]]
         expected = set(item["expected_paths"])
-        source_recall = _ratio(len(expected.intersection(retrieved)), len(expected))
+        source_recall = _ratio(len(expected.intersection(retrieved[:3])), len(expected))
+        recall_at_k = _ratio(len(expected.intersection(retrieved)), len(expected))
         rank = next(
             (index for index, path in enumerate(retrieved, start=1) if path in expected),
             None,
         )
-        reciprocal_rank = (1.0 / rank if rank is not None else 0.0) if expected else None
+        reciprocal_rank = (1.0 / rank if rank is not None and rank <= 3 else 0.0) if expected else None
+        reciprocal_at_k = (1.0 / rank if rank is not None else 0.0) if expected else None
+        # Assess only actual rendered text. Sources that were found but omitted
+        # by a context budget do not cover claims. Attribution labels are not
+        # factual passages and cannot satisfy path-shaped claim labels.
+        context_text = recall_module._normalize(re.sub(r'^\[Source: .*\]\s*$', '', result['context'], flags=re.MULTILINE))
+        covered = [claim for claim in item['required_claims'] if recall_module._normalize(claim) in context_text]
         diagnostics = result["diagnostics"]
         complete = diagnostics["status"] == "ok" and diagnostics["search_complete"]
         forbidden_retrieved = [path for path in retrieved if path in item["forbidden_paths"]]
@@ -181,8 +262,10 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         reasons: list[str] = []
         if expected:
             outcome = "expected_source_found" if rank is not None else "expected_source_missed"
-            if source_recall < 1.0:
+            if recall_at_k < 1.0:
                 reasons.append("expected_source_missed")
+            if len(covered) < len(item['required_claims']):
+                reasons.append('required_context_claim_missed')
         elif retrieved:
             outcome = "unexpected_sources_returned"
             reasons.append("no_answer_false_positive")
@@ -196,6 +279,9 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
             **item, "retrieved_paths": retrieved,
             "retrieval_options": options,
             "source_recall_at_3": source_recall, "reciprocal_rank_at_3": reciprocal_rank,
+            'source_recall_at_k': recall_at_k, 'reciprocal_rank_at_k': reciprocal_at_k,
+            'ndcg_at_5': _ndcg(retrieved, item['relevance']), 'covered_claims': covered,
+            'returned_context_claim_coverage': _ratio(len(covered), len(item['required_claims'])),
             "outcome": outcome, "forbidden_retrieved_paths": forbidden_retrieved,
             "stale_retrieved_paths": stale_retrieved,
             "top_1_forbidden": bool(retrieved and retrieved[0] in item["forbidden_paths"]),
@@ -220,6 +306,10 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
     return {
         "benchmark": "bilingual source retrieval and data exposure (not LLM answer/attack quality)",
         "method": 'advanced' if advanced else 'legacy',
+        'top_k': top_k,
+        'metric_definitions': {'returned_context_claim_coverage': 'covered literal claims / labeled claims, in rendered context after attribution labels are removed; no semantic answer-quality inference',
+            'ndcg_at_5': 'graded gain 2^grade-1, log2(rank+1) discount; top-k=3 leaves ranks 4/5 unreturned',
+            'legacy_at_3': 'legacy keys always assess first three matches, including when top_k=5'},
         "interpretation": "Empty results describe this fixture scan only; they do not prove world absence. Exposure means returned source matches, not successful instruction following.",
         **_summary(per_query),
         "by_language": {
@@ -232,6 +322,9 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         },
         "costs": {
             "max_context_tokens": max_tokens,
+            'top_k': top_k,
+            'total_source_bytes_read': sum(row['diagnostics']['bytes_read'] for row in per_query),
+            'total_mapping_bytes_read': sum(row['diagnostics'].get('query_expansion', {}).get('mapping_bytes_read', 0) for row in per_query),
             "total_elapsed_ms": round(total_elapsed, 3),
             "mean_elapsed_ms": round(total_elapsed / len(per_query), 3),
             "estimated_returned_context_tokens": sum(row["estimated_returned_context_tokens"] for row in per_query),
@@ -246,11 +339,23 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
 
 def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
     """Identical labeled queries/budget; legacy ignores advanced fixture options."""
-    baseline = evaluate(fixture, max_tokens=max_tokens)
+    top_k = options.get('top_k', 3)
+    baseline = evaluate(fixture, max_tokens=max_tokens, top_k=top_k)
     improved = evaluate(fixture, max_tokens=max_tokens, advanced=True, **options)
-    return {'benchmark': 'paired retrieval comparison',
+    report = {'benchmark': 'paired retrieval comparison',
             'interpretation': 'Same queries and context budget; fixture labels supply explicit retrieval options, never expected paths to the retriever. No model or paper score is inferred.',
             'baseline': baseline, 'improved': improved}
+    if options.get('expand_query'):
+        ablation_options = {key: value for key, value in options.items() if key not in ('expand_query', 'query_mapping')}
+        report['expansion_ablation'] = evaluate(fixture, max_tokens=max_tokens, advanced=True, **ablation_options)
+    paired_baseline = report.get('expansion_ablation', baseline)
+    report['paired_randomization'] = {}
+    for metric in ('source_recall_at_k', 'ndcg_at_5', 'returned_context_claim_coverage'):
+        paired = [(a[metric], b[metric]) for a, b in zip(paired_baseline['per_query'], improved['per_query'])
+                  if a[metric] is not None and b[metric] is not None]
+        report['paired_randomization'][metric] = paired_randomization([p[0] for p in paired], [p[1] for p in paired])
+    report['paired_comparison'] = 'expansion_ablation versus improved' if 'expansion_ablation' in report else 'baseline versus improved'
+    return report
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -259,7 +364,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-recall-at-3", type=float, default=0.85)
     parser.add_argument("--min-mrr", type=float, default=0.75)
     parser.add_argument("--max-tokens", type=int, default=1500,
-                        help="returned context budget (token estimate); retrieval remains top 3")
+                        help="returned context budget (token estimate)")
+    parser.add_argument('--top-k', type=int, choices=(3, 5), default=3)
+    parser.add_argument('--expand-query', action='store_true')
+    parser.add_argument('--query-mapping', help='vault-relative plain mapping; requires --expand-query')
     parser.add_argument("--max-no-answer-false-positive-rate", type=float, default=None)
     parser.add_argument("--max-forbidden-exposure-rate", type=float, default=None)
     parser.add_argument("--max-stale-top-1-rate", type=float, default=None)
@@ -279,7 +387,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("evaluation thresholds must be between 0 and 1", file=sys.stderr)
         return 2
     try:
-        options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend)
+        options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
+                       top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
         report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
                   evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:

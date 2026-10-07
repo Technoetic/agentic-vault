@@ -19,6 +19,7 @@ from pathlib import Path
 
 import vault_recall as _legacy
 from vault_paths import relative_parts, resolve_note_path
+import vault_query_expansion as _query_expansion
 
 MAX_EXTERNAL_BYTES = 64 * 1024
 MAX_EXTERNAL_CANDIDATES = 50
@@ -301,7 +302,7 @@ def _same_policy_stamp(vault: Path, expected: tuple) -> bool:
         return False
 
 
-def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=()) -> dict:
+def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None) -> dict:
     """Retrieve source-bound review context; explicit temporal bounds are half-open.
 
     as_of: ISO date (UTC midnight) or zoned ISO datetime. checked_at is an
@@ -311,7 +312,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     or a vault-relative <=64KiB JSON sidecar. Other provider fields are ignored.
     excluded_sources only adds deny scope. Links use literal unique filenames.
     """
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == ():
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None:
         return _legacy._legacy_recall(vault, query, limit, max_tokens)
     diagnostics = _legacy._diagnostics()
     diagnostics.update({"mode": "advanced", "backend": backend if isinstance(backend, str) else "invalid", "temporal": [], "temporal_rejected": 0, "graph_ambiguous": 0, "graph_unresolved": 0, "graph_links_considered": 0, "external_rejected": 0, "external_bytes_read": 0, "external_provider_status": "not_requested", "abstention": "host_decision", "source_authority": "unverified", "ranking": "lexical/BM25; hybrid uses RRF k=60; graph decays 0.5 per hop"})
@@ -324,6 +325,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             raise ValueError("invalid bounds")
         if not isinstance(expand_links, int) or isinstance(expand_links, bool) or not 0 <= expand_links <= 2 or backend not in ("lexical", "bm25", "hybrid"):
             raise ValueError("invalid advanced mode")
+        if type(expand_query) is not bool or (query_mapping is not None and not expand_query):
+            raise ValueError("query mapping requires explicit expansion")
         temporal_time = None if as_of is None else _time(as_of)
         if not isinstance(excluded_sources, (tuple, list)) or len(excluded_sources) > _legacy.MAX_RESULTS:
             raise ValueError("invalid excluded scope")
@@ -368,7 +371,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     phrase = _legacy._normalize(bounded_query)
     diagnostics["query_terms_used"] = len(query_terms)
     diagnostics["query_truncated"] = int(len(query) > _legacy.MAX_QUERY_CHARS)
-    paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics)
+    alias_directories = {}
+    if expand_query:
+        def bind_alias_directory(rel, path):
+            alias_directories[rel] = _query_expansion.inventory_mark(path, directory=True)
+        paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics, directory_sink=bind_alias_directory)
+    else:
+        paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics)
     # Filename ambiguity is determined before file-count trimming. If the walk
     # itself was incomplete, graph expansion cannot prove global uniqueness.
     filenames = defaultdict(list)
@@ -421,7 +430,18 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             diagnostics["temporal_rejected"] += 1
             continue
         eligible[rel] = doc
-    lexical_matches = {rel: match for rel, doc in eligible.items() if (match := _legacy._rank_document(rel, doc["text"], phrase, query_terms)) is not None}
+    if expand_query:
+        expansion = _query_expansion._expand_documents(safe_vault, query, eligible,
+            mapping=query_mapping, deny=deny, exclude=exclude, inventory_complete=diagnostics["search_complete"],
+            mapping_byte_limit=max(0, _legacy.MAX_TOTAL_READ_BYTES-diagnostics["bytes_read"]))
+        diagnostics["query_expansion"] = expansion
+        diagnostics["bytes_read"] += expansion["mapping_bytes_read"]
+        if expansion["status"] != "ok":
+            return _invalid(diagnostics, "invalid_query_mapping")
+        query_terms = tuple(expansion["terms"])
+        diagnostics["query_terms_used"] = len(query_terms)
+    rank_document = _query_expansion.rank_expanded if expand_query else _legacy._rank_document
+    lexical_matches = {rel: match for rel, doc in eligible.items() if (match := rank_document(rel, doc["text"], phrase, query_terms)) is not None}
     lexical_scores = {rel: match["score"] for rel, match in lexical_matches.items()}
     bm25 = _bm25(eligible, query_terms) if backend != "lexical" else {}
     external_ranks = {}
@@ -513,10 +533,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     ranked = sorted(matches.values(), key=lambda match: (-match["score"], match["path"].casefold(), match["path"]))
     selected = []
     verified_hashes = {}
+    expansion_sources = {entry['source_path'] for entry in diagnostics.get('query_expansion', {}).get('expansions', [])
+                         if entry['source_kind'] == 'frontmatter_alias'}
     for match in ranked:
         if not _same_policy_stamp(safe_vault, policy_stamp):
             return _policy_changed(diagnostics)
         bound_paths = {match["path"]} | {proof["origin_path"] for proof in match["graph"]} | {proof["seed_path"] for proof in match["graph"]}
+        bound_paths |= expansion_sources
         bound_paths |= {documents[rel]["temporal"]["supersession_source"]["path"] for rel in tuple(bound_paths) if "supersession_source" in documents[rel]["temporal"]}
         try:
             for rel in sorted(bound_paths):
@@ -553,7 +576,18 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     # the last data read and render, and check policy on both sides of the sweep.
     if not _same_policy_stamp(safe_vault, policy_stamp):
         return _policy_changed(diagnostics)
+    if expand_query:
+        checked_bytes, fresh = _query_expansion.verify_mapping(safe_vault, diagnostics['query_expansion'],
+            deny=deny, exclude=exclude, byte_limit=max(0, _legacy.MAX_TOTAL_READ_BYTES-diagnostics['bytes_read']))
+        diagnostics['bytes_read'] += checked_bytes
+        diagnostics['query_expansion']['mapping_bytes_read'] += checked_bytes
+        if not fresh:
+            _legacy._omit(diagnostics, 'query_mapping_changed_or_verification_byte_limit')
+            return _invalid(diagnostics, 'source_changed')
+        if not _same_policy_stamp(safe_vault, policy_stamp):
+            return _policy_changed(diagnostics)
     final_bound = {match["path"] for match in selected}
+    final_bound |= expansion_sources
     final_bound |= {proof[key] for match in selected for proof in match["graph"] for key in ("origin_path", "seed_path")}
     final_bound |= {documents[rel]["temporal"]["supersession_source"]["path"] for rel in tuple(final_bound) if "supersession_source" in documents[rel]["temporal"]}
     try:
@@ -567,4 +601,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         return _invalid(diagnostics, "source_changed")
     if not _same_policy_stamp(safe_vault, policy_stamp):
         return _policy_changed(diagnostics)
+    if expansion_sources:
+        checked = _query_expansion.verify_inventory(safe_vault, documents, alias_directories, deny=deny, exclude=exclude)
+        diagnostics['query_expansion']['inventory_verification'] = checked
+        if checked['status'] != 'ok':
+            _query_expansion.invalidate_expansion(diagnostics['query_expansion'], query)
+            _legacy._omit(diagnostics, 'alias_inventory_changed')
+            return _invalid(diagnostics, 'source_changed')
+        if not _same_policy_stamp(safe_vault, policy_stamp):
+            return _policy_changed(diagnostics)
     return {"context": context, "matches": selected, "diagnostics": diagnostics}
