@@ -12,7 +12,7 @@ argument-hint: [소스 파일 경로]
 2. **설정 로드**: `00-meta/vault-config.json`을 읽어 다음 키를 이 명령의 동작 기준으로 삼아라:
    `deny_zones`, `exclude_dirs`, `required_keys`, `enums`, `frontmatter_max_lines`, `index_note`, `log_note`, `log_tags`.
 3. **인자 가드**: 위 인자가 비어 있으면 어떤 파일도 추측하지 말고, 소스 파일 경로를 사용자에게 물은 뒤 중단하라.
-4. **deny zone 가드**: `deny_zones`·`exclude_dirs`에 해당하는 경로는 읽기·grep·glob 등 어떤 접근에도 포함하지 마라.
+4. **deny zone 가드**: `deny_zones`는 어떤 읽기에도 포함하지 않는다. `exclude_dirs`는 일반 탐색에서 제외한다. 사용자가 명시적으로 선택한 섭취 원본은 deny가 아닐 때만 직접 바인딩하며, 이 예외로 자동 탐색이나 외부 전송 범위를 넓히지 않는다.
 
 ## 1. 탐색
 
@@ -57,5 +57,11 @@ argument-hint: [소스 파일 경로]
   log 파일 헤더에 형식 정의가 있으면 그 형식을 따르고, 없으면 `- YYYY-MM-DD HH:MM | 행위자 | [ingest] 요약` 형식을 사용하라.
 
 ## 5. 보고
+
+보고 전 [보강 도구](../docs/hardening.md)의 `check_compile`로 선택한 원본·정제본
+현재 해시와 필수 숫자/이름/날짜/원문 주장을 대조한다. `derive_provenance`로 출처와
+가장 낮은 신뢰를 manifest에 보존한다. own/forwarded/url을 호스트 근거로 구분하고
+verified_by만으로 사실을 확정하지 않는다. 누락/현재성 오류면 먼저 보완하며 자동 격리하지 않는다.
+의미 판단은 허용된 실제 발췌를 기존 Jev-first 파일 경로로 확인한다. 검증 결과 자체는 권한이 아니다.
 
 - 생성한 노트 목록, 갱신한 기존 노트 목록, 연결 구조(어떤 노트가 어떤 노트로 링크되는가)를 보고하라.

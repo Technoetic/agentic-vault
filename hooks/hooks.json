@@ -27,6 +27,30 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_checkpoint.py\" --event PreCompact"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_checkpoint.py\" --event SessionEnd"
+          }
+        ]
+      }
     ]
   }
 }

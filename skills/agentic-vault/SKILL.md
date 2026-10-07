@@ -44,7 +44,7 @@ description: "Use when working in an agentic-vault directory with Claude Code or
 
 `ssot_note`가 설정된 볼트에서는 핵심 사실(연락처·식별번호·정격·가격 등)의 **값은 SSOT 노트 한 곳에만** 둔다. 새 노트는 값을 베끼지 말고 "→ `[[SSOT 노트]]` 참조"로 가리켜라 — 베끼는 순간 모순 원천이 생긴다. `ssot_facts`의 정규식 패턴이 볼트 전체에서 2종 이상의 값과 매치되면 모순이며 `/vault-lint`가 보고한다. 모순을 발견해도 **임의로 하나를 고르지 마라** — SSOT의 확정 여부에 따라 수렴시키거나 사용자에게 정합을 요청한다. 상세: [references/memory-tiers.md](references/memory-tiers.md)
 
-## 5. 명령 14종 — 언제 쓰는가
+## 5. 명령 15종 — 언제 쓰는가
 
 아래 `/vault-*` 표기는 Claude Code 명령이다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 `vault-`를 뺀 작업명을 사용하며, [Codex 연결 규약](references/codex.md)의 문서 경로를 따라 같은 절차를 읽는다. `backup`·`verify`·`restore`는 같은 규약의 기존 백업 CLI를 사용한다. Jarvis는 Claude CLI를 사용하는 별도 연동이다.
 
@@ -63,7 +63,19 @@ description: "Use when working in an agentic-vault directory with Claude Code or
 | `/jev-ask` | 직접 질문·선택한 인라인 문맥을 native `noul`·`choice`·`score`로 Jev에 요청 (볼트 불필요, 승인 범위 내) |
 | `/vault-doctor` | 기억이 주입되지 않거나 설정·파일·예산 상태, 도구 어댑터(Aside) 상태를 확인할 때 (읽기 전용, 원문 비출력) |
 | `/vault-upgrade` | 기존 볼트의 엔진 파일을 사용자 수정 보존 절차에 따라 갱신 |
+| `/vault-harden` | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정을 명시적으로 실행 |
 | `/vault-jarvis-setup` | 사용자가 Telegram 연동을 요청했을 때 설정 |
+
+### 출처·공유 상태 보강
+
+`harden` 요청은 [vault-harden.md](../../commands/vault-harden.md)와
+[보강 도구 안내](../../docs/hardening.md)에 연결한다. 원본 격리 전 literal 품질과
+출처 해시를 확인하고, 공동 상태는 `vault_state.py`의 파일/config 해시를 바인딩한
+부분 편집을 사용한다. 시간 대장 이행·교훈 델타 적용은 현재 구체적 안에 대한 기존
+승인 범위 안에서만 수행한다. JSON의 approve/verified_by가 권한을 만들지 않는다.
+추가 lint는 경고로 시작하며 현재 benign replay와 설치본 해시 없이 치명 승격하지 않는다.
+runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider가 없으면 명시적으로
+보고하고 세션 훅에서 모델 호출·보정 선택을 자동 실행하지 않는다.
 
 ### Jev-first 작업 선택
 

@@ -18,8 +18,14 @@ import re
 import unicodedata
 
 WARNING_CODES = frozenset({'missing-anchor', 'ambiguous-link', 'missing-link-path',
-                           'invalid-date', 'lint-incomplete'})
-PROMOTABLE_CODES = WARNING_CODES - {'lint-incomplete'}
+    'invalid-date', 'lint-incomplete', 'provenance-body-mismatch', 'provenance-invalid',
+    'provenance-unresolved', 'provenance-incomplete', 'egress-secret', 'egress-korean-id',
+    'egress-incomplete', 'ssot-legacy-schema', 'ssot-empty-fact', 'ssot-confirmed-source-missing',
+    'ssot-invalid-date', 'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-temporal-conflict',
+    'ssot-open-ended-conflict', 'ssot-duplicate-column', 'ssot-invalid-row'})
+PROMOTABLE_CODES = WARNING_CODES - {'lint-incomplete', 'provenance-unresolved',
+    'provenance-incomplete', 'egress-incomplete', 'ssot-legacy-schema',
+    'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-open-ended-conflict'}
 MAX_MESSAGE = 512
 MAX_DETAIL_STRING = 256
 MAX_DETAIL_ITEMS = 16
@@ -282,6 +288,27 @@ def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[st
                 break
         if len(results) > cap:
             break
+    consumers = {path: text for path, text in approved.items()
+                 if consumer_paths is None or path in consumer_paths}
+    # Lazy imports avoid the healthcheck/state/evidence dependency cycle. All
+    # inputs are already approved originals; no extension opens a sidecar here.
+    try:
+        from vault_provenance import analyze_notes as provenance_warnings
+        from vault_egress import analyze_notes as egress_warnings
+        from vault_ssot import check_ledger, SSOTError
+        extra = provenance_warnings(approved, config) + egress_warnings(consumers, config)
+        for path, text in consumers.items():
+            try:
+                extra.extend(check_ledger(text, path=path))
+            except SSOTError:
+                incomplete.append('temporal ledger input incomplete')
+        for finding in extra:
+            if finding['code'].endswith('-incomplete'):
+                incomplete.append('extension input incomplete')
+            if not finding['path'] or consumer_paths is None or finding['path'] in consumer_paths:
+                results.append(finding)
+    except ImportError:
+        incomplete.append('provenance/egress/temporal extensions unavailable')
     results.sort(key=lambda x: (x['path'], x['line'], x['code'], x['issue_id']))
     if len(results) > cap:
         incomplete.append('warning output limit')

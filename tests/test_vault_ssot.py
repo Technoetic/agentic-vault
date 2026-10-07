@@ -371,9 +371,9 @@ class LedgerMigrationTests(unittest.TestCase):
     def test_race_immediately_before_partial_replace_does_not_clobber_other_writer(self):
         proposal = ssot.prepare_migration(self.vault, 'notes/facts.md')
         atomic = ssot.state._atomic
-        def racing_atomic(target, data, before_replace):
+        def racing_atomic(target, data, before_replace, **kwargs):
             self.path.write_bytes(self.original + b'Raced writer\n')
-            return atomic(target, data, before_replace)
+            return atomic(target, data, before_replace, **kwargs)
         with mock.patch.object(ssot.state, '_atomic', racing_atomic):
             with self.assertRaisesRegex(ssot.SSOTError, 'stale_base'):
                 ssot.apply_migration(self.vault, proposal, approve=True)

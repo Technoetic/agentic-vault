@@ -13,13 +13,13 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.18.0-10B981?style=for-the-badge)](docs/releases/v0.18.0.md)
+[![Version](https://img.shields.io/badge/v0.19.0-10B981?style=for-the-badge)](docs/releases/v0.19.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-14-F59E0B?style=for-the-badge)](commands/)
-[![Templates](https://img.shields.io/badge/Templates-14%2B6_rules-22C55E?style=for-the-badge)](assets/templates/)
+[![Commands](https://img.shields.io/badge/Commands-15-F59E0B?style=for-the-badge)](commands/)
+[![Templates](https://img.shields.io/badge/Templates-15%2B6_rules-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
 [![Doctrine](https://img.shields.io/badge/플러그인=엔진_·_볼트=데이터-EC4E20?style=for-the-badge)](#-6개-핵심-철학)
@@ -40,7 +40,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 ```mermaid
 flowchart TB
-    U["👤 사용자"] -- "/vault-init 연구볼트" --> T["19 디렉토리 표준 트리(00-meta … 90-assets)<br/>+ vault-config.json + 템플릿 14종 + 엔진 rules 6종"]
+    U["👤 사용자"] -- "/vault-init 연구볼트" --> T["19 디렉토리 표준 트리(00-meta … 90-assets)<br/>+ vault-config.json + 템플릿 15종 + 엔진 rules 6종"]
     subgraph CYCLE["🔄 매 세션 사이클"]
         direction TB
         H["🪝 SessionStart hook — handoff + hot 자동 주입<br/><i>직전 세션의 기억 복원</i>"]
@@ -81,7 +81,14 @@ Apart from this section, the README is in Korean, and so are the commands, rule 
 
 For Codex, register the release tag and add the plugin as described in [the Codex guide](docs/codex.md).
 
-**Core commands** (all 14 are in [commands/](commands/)):
+**Core commands** (all 15 are in [commands/](commands/)):
+
+The local v0.19.0 source adds `/vault-harden` / Codex `harden` for provenance,
+cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
+and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
+Compact constraints and model-free lifecycle checkpoints preserve existing startup
+budgets; new findings warn first. Public installation refs below remain v0.18.0
+until a remote release is actually published.
 
 - `/vault-init <name>` creates the standard folder tree, `vault-config.json`, templates and engine rules, and installs the git hooks when git is enabled.
 - `/vault-session-start` restores the last state; `/vault-session-end` updates the handoff, hot note and log, then commits locally.
@@ -101,7 +108,7 @@ For Codex, register the release tag and add the plugin as described in [the Code
 <details>
 <summary><b>Full feature summary (English)</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 14 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 15 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 15 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -200,12 +207,12 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 14종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 15종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>검증 가능한 세대별 스냅샷</i>"]
         JB["jarvis_bridge.py<br/><i>Telegram 자비스 🤖</i>"]
-        TPL["assets/templates/<br/><i>노트·시스템 템플릿 14종 + 엔진 rules 6종</i>"]
+        TPL["assets/templates/<br/><i>노트·시스템 템플릿 15종 + 엔진 rules 6종</i>"]
         SK["SKILL.md<br/><i>작업 규율</i>"]
     end
 
@@ -367,11 +374,12 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.18.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.19.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
-├── commands/                          ← 14개 슬래시 커맨드
+├── commands/                          ← 15개 슬래시 커맨드
+│   ├── vault-harden.md                ← 출처·공유 상태·시간 대장·교훈·품질·보정
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
 │   ├── vault-session-end.md           ← 세션 마감 — 인계 갱신 + git 커밋  🔥
@@ -421,6 +429,7 @@ agentic-vault/
 │   ├── hot.md · handoff.md · index.md · log.md
 │   ├── context.md · tasks.md · decisions.md · mistakes.md · lessons.md
 │   ├── frontmatter-schema.md · CLAUDE-vault-stub.md
+│   ├── ssot-ledger.md                  ← 선택 시간 대장 v2 (자동 이행 없음)
 │   ├── AGENTS-vault-stub.md            ← 공통 rules와 합치는 에이전트 중립 계약
 │   ├── rules/                         ← 엔진 소유 행동 규칙 6종 (.claude/rules/로 설치, upgrade가 통째 교체)
 │   └── settings-permissions.json      ← deny zone Read 차단 블록
@@ -444,9 +453,9 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.18.0**이며 **Claude Code, Codex 겸용**이다. 사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.18.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+현재 버전은 **v0.19.0**이며 **Claude Code, Codex 겸용**이다. 이 소스는 로컬 개선판이며 원격 tag/Release는 아직 게시하지 않았다. [출처·공유 상태 보강](docs/hardening.md)과 [이번 변경·검증 범위](docs/releases/v0.19.0.md)을 함께 본다. 사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.19.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.18.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.18.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+공개 v0.18.0은 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.18.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.18.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 

@@ -10,7 +10,7 @@ description: 10-inbox 수집 대기열을 정제해 영구 지식(20-knowledge)�
    없으면 여기는 agentic-vault 볼트가 아니다 — "이 디렉토리는 agentic-vault 볼트가 아닙니다(`00-meta/vault-config.json` 없음). 아무 작업도 수행하지 않았습니다."라고 한 줄만 정중히 보고하고 즉시 종료하라. 에러를 반복 출력하거나 파일을 생성하지 마라.
 2. **설정 로드**: `00-meta/vault-config.json`을 읽어 다음 키를 이 명령의 동작 기준으로 삼아라:
    `deny_zones`, `exclude_dirs`, `required_keys`, `enums`, `frontmatter_max_lines`, `index_note`, `log_note`, `log_tags`.
-3. **deny zone 가드**: `deny_zones`·`exclude_dirs`에 해당하는 경로는 읽기·grep·glob 등 어떤 접근에도 포함하지 마라.
+3. **deny zone 가드**: `deny_zones`는 접근하지 않는다. `exclude_dirs`는 일반 탐색에서 제외하며 명시적으로 선택한 인박스 처리 범위만 직접 바인딩할 수 있다. 이 예외가 denied 원본/외부 전송을 허용하지 않는다.
 
 ## 1. 대기열 확인
 
@@ -28,6 +28,7 @@ b. YAML 프런트매터를 갖춘 정제 노트를 `20-knowledge/` 하위의 적
    - 볼트에 `00-meta/schemas/frontmatter.md`가 존재하면 세부 규칙은 그 스키마 문서를 우선 따르라.
 c. 기존 노트와의 연관성을 분석해 본문과 `related`에 위키링크를 주입하라. 고립 노드를 만들지 마라.
 d. **원본 격리 — deny zone 이동 규칙 (순서 엄수)**:
+   - 이동 전 최종 메타데이터 갱신을 끝내고 [보강 도구](../docs/hardening.md)의 `check_compile`로 원본·정제본 현재 해시와 필수 숫자/날짜/이름/호스트 지정 주장을 확인한다. `derive_provenance`로 source/target 해시와 최소 신뢰 manifest를 별도 보존한다. 검토가 필요한 누락/의미 불확실성/해시 변경이면 보완한 뒤 재검사하며 원본을 먼저 옮기지 않는다. 의미 판단은 승인된 실제 원문 발췌를 기존 Jev-first 파일 경로로 수행한다. literal 완료·출처 기록은 실행 권한이 아니다. 아래 1의 메타데이터를 그 뒤 바꾸면 해시와 검사를 새로 생성한다.
    1. 원본 파일에 프런트매터 갱신이 필요하면(예: `status: archive` 표기) **반드시 이동 전에 끝내라**.
       `_processed/`는 deny zone이라 **이동 후에는 그 파일을 다시 읽거나 수정할 수 없다.**
    2. 원본을 **셸 move 명령**(POSIX `mv` / Windows `Move-Item`)으로 `10-inbox/_processed/YYYY-MM/`로 이동하라(대상 폴더가 없으면 먼저 생성). Write/Edit 도구로 복사 후 삭제하는 방식은 금지. 대상 폴더에 같은 이름의 파일이 이미 있을 수 있으니 덮어쓰지 않는 이동(POSIX `mv -n`, Windows `Move-Item`은 `-Force` 없이)을 쓰고, 이동 뒤에도 원본이 `10-inbox/`에 남아 있으면 그 파일은 처리를 멈추고 이름 충돌로 보고하라(종료 코드만 믿지 마라).

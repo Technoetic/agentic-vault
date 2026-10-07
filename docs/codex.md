@@ -1,5 +1,9 @@
 # Claude Code · Codex 겸용 사용
 
+로컬 v0.19.0 개선 소스는 [보강 도구](hardening.md)와 `harden` 진입점을 추가한다.
+공개 tag/Release를 게시하지 않았으므로 아래 공개 설치 ref는 v0.18.0을 유지한다.
+로컬 개선 패키지는 검증된 별도 source 경로로 설치하며 기존 캐시·설정·활성 범위를 보존한다.
+
 `v0.18.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
 사용한다. 이번 릴리스의 코드·CI·설치 검증은 [v0.18.0 검증 기록](verification/v0.18.0.md)에 남긴다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.

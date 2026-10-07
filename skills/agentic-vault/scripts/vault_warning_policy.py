@@ -13,7 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from vault_lint_extensions import PROMOTABLE_CODES, analyze_notes
+from vault_lint_extensions import PROMOTABLE_CODES, WARNING_CODES, analyze_notes
 
 RESOURCE = Path(__file__).resolve().parent / 'resources' / 'lint-benign-v1.json'
 MAX_CORPUS_BYTES = 2_000_000
@@ -26,7 +26,8 @@ def _json_bytes(value):
 def checker_sha256() -> str:
     """Bind analyzer and validator bytes; installed copies compute their own hash."""
     digest = hashlib.sha256()
-    for filename in ('vault_lint_extensions.py', 'vault_warning_policy.py'):
+    for filename in ('vault_lint_extensions.py', 'vault_warning_policy.py',
+                     'vault_provenance.py', 'vault_egress.py', 'vault_ssot.py', 'jev_client.py', 'vault_paths.py'):
         digest.update(filename.encode('utf-8') + b'\0')
         digest.update((Path(__file__).resolve().parent / filename).read_bytes())
     return digest.hexdigest()
@@ -77,8 +78,10 @@ def validate_promotion(policy, checker_hash: str, corpus_hash: str) -> dict:
             errors.append('warning_policy.levels must be an object')
         else:
             for code, severity in sorted(levels.items()):
-                if code not in PROMOTABLE_CODES or severity not in ('warning', 'fatal'):
+                if code not in WARNING_CODES or severity not in ('warning', 'fatal'):
                     errors.append('unknown warning code or severity')
+                elif severity == 'fatal' and code not in PROMOTABLE_CODES:
+                    errors.append('unresolved or incomplete observations cannot be promoted')
                 elif severity == 'fatal':
                     promoted.append(code)
     if promoted and not errors:

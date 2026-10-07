@@ -124,9 +124,9 @@ class LessonDeltaTests(unittest.TestCase):
         p = self.prepare([{'op': 'INC', 'id': 'L-001', 'references': [self.ref()]}])
         state = importlib.import_module('vault_state')
         actual = state._atomic
-        def drift(path, data, before_replace):
+        def drift(path, data, before_replace, **kwargs):
             self.source.write_bytes(self.source.read_bytes() + b'Changed\n')
-            return actual(path, data, before_replace)
+            return actual(path, data, before_replace, **kwargs)
         with mock.patch.object(state, '_atomic', side_effect=drift):
             with self.assertRaisesRegex(self.module.LessonDeltaError, 'source_changed'):
                 self.apply(p)

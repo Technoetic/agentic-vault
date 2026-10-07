@@ -26,7 +26,7 @@ class CodexVerificationTests(unittest.TestCase):
     def make_plugin_fixture(self, root: Path) -> Path:
         source = root / "source"
         resources = (
-            "hooks/session_start.py", "hooks/run_python_hook.sh",
+            "hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
             "skills/agentic-vault/references/codex.md",
             "skills/agentic-vault/scripts/vault_recall.py",
             "skills/agentic-vault/scripts/vault_links.py",
@@ -34,6 +34,21 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_retrieval.py",
             "skills/agentic-vault/scripts/vault_memory.py",
             "skills/agentic-vault/scripts/vault_lesson_metrics.py",
+            "skills/agentic-vault/scripts/vault_query_expansion.py",
+            "skills/agentic-vault/scripts/vault_lint_extensions.py",
+            "skills/agentic-vault/scripts/vault_warning_policy.py",
+            "skills/agentic-vault/scripts/vault_provenance.py",
+            "skills/agentic-vault/scripts/vault_egress.py",
+            "skills/agentic-vault/scripts/vault_state.py",
+            "skills/agentic-vault/scripts/vault_ssot.py",
+            "skills/agentic-vault/scripts/vault_lesson_delta.py",
+            "skills/agentic-vault/scripts/vault_declarative_rules.py",
+            "skills/agentic-vault/scripts/vault_compile_quality.py",
+            "skills/agentic-vault/scripts/vault_token_calibration.py",
+            "skills/agentic-vault/scripts/resources/lint-benign-v1.json",
+            "docs/hardening.md",
+            "assets/templates/ssot-ledger.md",
+            "commands/vault-harden.md",
             "docs/memory-patterns.md",
             "scripts/import_qmd_candidates.py",
             "scripts/evaluate_recall.py",
@@ -48,6 +63,21 @@ class CodexVerificationTests(unittest.TestCase):
         manifest.parent.mkdir()
         manifest.write_text('{"version": "0.11.0"}', encoding="utf-8")
         return source
+
+    def test_installed_hardening_resources_must_exist_and_match(self) -> None:
+        for relative in ('hooks/session_checkpoint.py', 'skills/agentic-vault/scripts/vault_ssot.py',
+                         'skills/agentic-vault/scripts/resources/lint-benign-v1.json'):
+            for mutation in ('changed', 'missing'):
+                with self.subTest(resource=relative, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == 'missing':
+                            resource.unlink()
+                        else:
+                            resource.write_text('Corrupted hardening resource\n', encoding='utf-8')
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
 
     def verify_fixture(self, source: Path, inspect_package=None, mutate_cache=None) -> dict:
         package = None

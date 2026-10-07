@@ -1,20 +1,159 @@
 {
   "schema_version": 1,
   "cases": [
-    {"id": "unicode-nfc", "notes": {"한글.md": "# Café 👩‍💻 점검\n[[#Café 👩‍💻 점검]]"}},
-    {"id": "block-anchor", "notes": {"a.md": "문단 ^한글-블록\n[[#^한글-블록]]"}},
-    {"id": "qualified-duplicates", "notes": {"source.md": "[[a/Shared#One]]\n[[b/Shared#Two]]", "a/Shared.md": "# One", "b/Shared.md": "# Two"}},
-    {"id": "source-relative", "notes": {"folder/source.md": "[[./sub/Target#Real]]", "folder/sub/Target.md": "# Real"}},
-    {"id": "escaped-pipe", "notes": {"a.md": "# A | B\n[[#A \\| B|display]]"}},
-    {"id": "fenced-examples", "notes": {"a.md": "~~~md\n[[Missing#False]]\n# False\n~~~\n`[[Missing#False]]`\n# Real\n[[#Real]]"}},
-    {"id": "calendar-dates", "notes": {"a.md": "---\ncreated: '2024-02-29' # leap day\nupdated: 2026-10-07\n---\n# Body"}},
-    {"id": "setext", "notes": {"a.md": "Real heading\n====\n[[#Real heading]]"}},
-    {"id": "assets", "notes": {"a.md": "![[picture.png]]\n[[report.pdf]]"}},
-    {"id": "exempt-date", "notes": {"scratch/raw.md": "---\ncreated: arbitrary source metadata\n---"}, "config": {"frontmatter_exempt_paths": ["scratch"]}},
-    {"id": "table-display-pipe", "notes": {"a.md": "| Link |\n| --- |\n| [[b#Real\\|shown]] |", "b.md": "# Real"}},
-    {"id": "relative-denied", "notes": {"folder/a.md": "[[../20-knowledge/_archive/Secret#Hidden]]"}, "config": {"deny_zones": ["20-knowledge/_archive"]}},
-    {"id": "uppercase-qualified-extension", "notes": {"a.md": "[[folder/Target.MD#Real]]\n[[folder/Target#Real]]", "folder/Target.MD": "# Real"}},
-    {"id": "normalized-root-denied", "notes": {"a.md": "[[x/../20-knowledge/_archive/Secret#Real]]"}, "config": {"deny_zones": ["20-knowledge/_archive"]}},
-    {"id": "normalized-root-excluded", "notes": {"a.md": "[[x/../node_modules/Skip#Real]]"}, "config": {"exclude_dirs": ["node_modules"]}}
+    {
+      "id": "unicode-nfc",
+      "notes": {
+        "한글.md": "# Café 👩‍💻 점검\n[[#Café 👩‍💻 점검]]"
+      }
+    },
+    {
+      "id": "block-anchor",
+      "notes": {
+        "a.md": "문단 ^한글-블록\n[[#^한글-블록]]"
+      }
+    },
+    {
+      "id": "qualified-duplicates",
+      "notes": {
+        "source.md": "[[a/Shared#One]]\n[[b/Shared#Two]]",
+        "a/Shared.md": "# One",
+        "b/Shared.md": "# Two"
+      }
+    },
+    {
+      "id": "source-relative",
+      "notes": {
+        "folder/source.md": "[[./sub/Target#Real]]",
+        "folder/sub/Target.md": "# Real"
+      }
+    },
+    {
+      "id": "escaped-pipe",
+      "notes": {
+        "a.md": "# A | B\n[[#A \\| B|display]]"
+      }
+    },
+    {
+      "id": "fenced-examples",
+      "notes": {
+        "a.md": "~~~md\n[[Missing#False]]\n# False\n~~~\n`[[Missing#False]]`\n# Real\n[[#Real]]"
+      }
+    },
+    {
+      "id": "calendar-dates",
+      "notes": {
+        "a.md": "---\ncreated: '2024-02-29' # leap day\nupdated: 2026-10-07\n---\n# Body"
+      }
+    },
+    {
+      "id": "setext",
+      "notes": {
+        "a.md": "Real heading\n====\n[[#Real heading]]"
+      }
+    },
+    {
+      "id": "assets",
+      "notes": {
+        "a.md": "![[picture.png]]\n[[report.pdf]]"
+      }
+    },
+    {
+      "id": "exempt-date",
+      "notes": {
+        "scratch/raw.md": "---\ncreated: arbitrary source metadata\n---"
+      },
+      "config": {
+        "frontmatter_exempt_paths": [
+          "scratch"
+        ]
+      }
+    },
+    {
+      "id": "table-display-pipe",
+      "notes": {
+        "a.md": "| Link |\n| --- |\n| [[b#Real\\|shown]] |",
+        "b.md": "# Real"
+      }
+    },
+    {
+      "id": "relative-denied",
+      "notes": {
+        "folder/a.md": "[[../20-knowledge/_archive/Secret#Hidden]]"
+      },
+      "config": {
+        "deny_zones": [
+          "20-knowledge/_archive"
+        ]
+      }
+    },
+    {
+      "id": "uppercase-qualified-extension",
+      "notes": {
+        "a.md": "[[folder/Target.MD#Real]]\n[[folder/Target#Real]]",
+        "folder/Target.MD": "# Real"
+      }
+    },
+    {
+      "id": "normalized-root-denied",
+      "notes": {
+        "a.md": "[[x/../20-knowledge/_archive/Secret#Real]]"
+      },
+      "config": {
+        "deny_zones": [
+          "20-knowledge/_archive"
+        ]
+      }
+    },
+    {
+      "id": "normalized-root-excluded",
+      "notes": {
+        "a.md": "[[x/../node_modules/Skip#Real]]"
+      },
+      "config": {
+        "exclude_dirs": [
+          "node_modules"
+        ]
+      }
+    },
+    {
+      "id": "capture-own-unmodified",
+      "notes": {
+        "20-knowledge/Own.md": "---\nagentic_vault_capture: 1\ntitle: \"Jarvis capture\"\ntype: \"reference\"\nstatus: \"draft\"\nai_priority: \"low\"\ntags: [\"capture\"]\ncreated: \"2026-10-07\"\nupdated: \"2026-10-07\"\ncaptured_via: \"host\"\ncontent_origin: \"own\"\ncaptured_at: \"2026-10-07T00:00:00+00:00\"\nbody_sha256: \"7a8f15373921dbd597119617302473c31ef998119f0d4b044e46ab5a758ee7d6\"\nbody_bytes: 49\nclassification: \"unclassified\"\ncapture_display: \"수신: 2026-10-07 00:00:00 · 채널: host\"\n---\n공개 샘플 메모와 일정.\r\n두 번째 줄.\n"
+      }
+    },
+    {
+      "id": "capture-forwarded-unprivileged",
+      "notes": {
+        "20-knowledge/Forwarded.md": "---\nagentic_vault_capture: 1\ntitle: \"Jarvis capture\"\ntype: \"reference\"\nstatus: \"draft\"\nai_priority: \"low\"\ntags: [\"capture\"]\ncreated: \"2026-10-07\"\nupdated: \"2026-10-07\"\ncaptured_via: \"host\"\ncontent_origin: \"forwarded\"\ncaptured_at: \"2026-10-07T00:00:00+00:00\"\nbody_sha256: \"6966eff23c3fe35a6b1fe705b2654e1ad9157bf11a06892bc15ff6f5e4608b3c\"\nbody_bytes: 30\nclassification: \"unclassified\"\ncapture_display: \"수신: 2026-10-07 00:00:00 · 채널: host\"\n---\nPublic forwarded observation.\n"
+      }
+    },
+    {
+      "id": "benign-korean-dates-and-short-prefix",
+      "notes": {
+        "20-knowledge/Example.md": "공개 예제 2026-10-07, 수량 12개.\n사용법: ghp_ 접두사 설명. 😀 한글\n"
+      }
+    },
+    {
+      "id": "ssot-disjoint-history-v2",
+      "notes": {
+        "20-knowledge/History.md": "| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by |\n|---|---|---|---|---|---|---|---|\n| A | rate | 12 | 2026-01-01 | 2026-07-01 | 2026-10-07 | Public A | |\n| A | rate | 13 | 2026-07-01 | | 2026-10-07 | Public B | |\n"
+      }
+    },
+    {
+      "id": "ssot-fenced-example",
+      "notes": {
+        "20-knowledge/Example.md": "```md\n| subject | relation | value |\n|---|---|---|\n| A | rate | 12 |\n```\n"
+      }
+    },
+    {
+      "id": "privileged-own-plain",
+      "config": {
+        "hot_note": "00-meta/hot.md"
+      },
+      "notes": {
+        "00-meta/hot.md": "Host-owned current narrative without external dependencies.\n"
+      }
+    }
   ]
 }

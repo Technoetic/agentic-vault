@@ -53,6 +53,7 @@
 | `process-inbox` | [vault-process-inbox.md](../../../commands/vault-process-inbox.md) |
 | `trace <키워드>` | [vault-trace.md](../../../commands/vault-trace.md) |
 | `upgrade` | [vault-upgrade.md](../../../commands/vault-upgrade.md) |
+| `harden <작업과 인자>` | [vault-harden.md](../../../commands/vault-harden.md), [보강 helper](../../../docs/hardening.md) |
 | `backup [대상 경로]` | [backup_vault.py](../scripts/backup_vault.py), 아래 스냅샷 절차 |
 | `verify <스냅샷 경로>` | 같은 백업 CLI의 `--verify` |
 | `restore <스냅샷 경로> <새 복구 경로>` | 같은 백업 CLI의 `--restore`·`--destination` |
