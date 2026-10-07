@@ -548,7 +548,16 @@ def _resolve_capture_directory(vault: Path, inbox: Path) -> Path:
 
 def do_capture(
         vault: Path, body: str, source: str, capture_id: str | None = None,
-        received_at: datetime | None = None) -> str:
+        received_at: datetime | None = None, *, content_origin: str = "own",
+        classification: str = "unclassified") -> str:
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from vault_provenance import ProvenanceError, capture_policy, render_capture
+    try:
+        policy = capture_policy(vault)
+    except ProvenanceError:
+        raise RuntimeError("capture destination is denied or unsafe") from None
     inbox = vault / "10-inbox" / "jarvis"
     resolved_inbox = _resolve_capture_directory(vault, inbox)
     try:
@@ -561,9 +570,23 @@ def do_capture(
         safe_capture_id = re.sub(r"[^A-Za-z0-9_-]", "_", capture_id) or "_"
         suffix = f"-{safe_capture_id}"
     name = now.strftime("%Y-%m-%d %H%M%S") + suffix + ".md"
-    content = f"{body}\n\n---\n수신: {now.strftime('%Y-%m-%d %H:%M:%S')} · 채널: {source}\n"
+    try:
+        original = render_capture(body, captured_via=source, content_origin=content_origin,
+                                  captured_at=now, classification=classification)
+    except ProvenanceError:
+        raise RuntimeError("invalid capture metadata or oversized body") from None
+    content = original.decode("utf-8")
     resolved_inbox = _resolve_capture_directory(vault, inbox)
     target = resolved_inbox / name
+    try:
+        current_policy = capture_policy(vault)
+        if (policy is None) != (current_policy is None) or (
+                policy is not None and policy.store.config_sha != current_policy.store.config_sha):
+            raise ProvenanceError("capture_policy_changed")
+        if current_policy is not None:
+            current_policy.path('10-inbox/jarvis/' + name, markdown=True)
+    except ProvenanceError:
+        raise RuntimeError("capture policy changed or destination became unsafe") from None
     try:
         published = _publish_text_no_clobber(target, content)
     except OSError:
@@ -572,10 +595,10 @@ def do_capture(
         try:
             if not stat.S_ISREG(target.lstat().st_mode):
                 raise OSError("capture target is not a regular file")
-            existing = target.read_text(encoding="utf-8")
+            existing = target.read_bytes()
         except (OSError, UnicodeError):
             raise RuntimeError("cannot safely inspect existing capture") from None
-        if existing == content:
+        if existing == original:
             return name
         capture_label = safe_capture_id if capture_id is not None else "timestamp"
         raise RuntimeError(f"conflicting capture content for ID {capture_label}")
@@ -1285,6 +1308,19 @@ def tg_send(token: str, chat_id: int, text: str) -> bool:
     return True
 
 
+def _capture_origin(message: dict, body: str = "") -> str:
+    """Host transport metadata wins over origin/trust statements in message text."""
+    if any(message.get(key) is not None for key in (
+            "forward_origin", "forward_from", "forward_from_chat", "forward_sender_name",
+            "forward_date")):
+        return "forwarded"
+    entities = message.get("entities") or []
+    if re.fullmatch(r'https?://\S+', body.strip(), re.I) and isinstance(entities, list) and any(isinstance(entity, dict) and entity.get("type")
+                                        in ("url", "text_link") for entity in entities):
+        return "url"
+    return "own"
+
+
 def process_update(
         vault: Path, cfg: dict, token: str, whitelist: set[int], update: dict,
         started: float, qa_times: deque[float], qa_attempt_ids: set[int],
@@ -1308,7 +1344,7 @@ def process_update(
         received_at = datetime.fromtimestamp(message["date"])
         name = do_capture(
             vault, body, "telegram", capture_id=str(update_id),
-            received_at=received_at)
+            received_at=received_at, content_origin=_capture_origin(message, body))
         return bool(sender(token, chat_id, f"📝 적어뒀습니다 → 10-inbox/jarvis/{name}"))
     if kind == "status":
         return bool(sender(token, chat_id, do_status(vault, started)))
@@ -1684,8 +1720,10 @@ def self_test() -> int:
         check("route: 일반 질문 → qa", route("어제 뭐 했지?") == ("qa", "어제 뭐 했지?"))
         # ③ 캡처
         name = do_capture(tv, "테스트 본문", "selftest")
-        written = (tv / "10-inbox" / "jarvis" / name).read_text(encoding="utf-8")
-        check("capture: 파일 생성·내용 일치", written.startswith("테스트 본문"))
+        from vault_provenance import parse_capture
+        metadata, written = parse_capture((tv / "10-inbox" / "jarvis" / name).read_bytes())
+        check("capture: 파일 생성·내용 일치", written == "테스트 본문".encode("utf-8")
+              and metadata["content_origin"] == "own")
         # ④ Telegram HTML 변환
         html = md_to_telegram_html("## 제목\n**굵게** `코드` [[노트]] a<b")
         check("html: 헤더 → <b>", "<b>제목</b>" in html)
