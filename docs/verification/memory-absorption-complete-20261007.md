@@ -39,6 +39,8 @@ Each condition has four synthetic scenarios, discovery then two later attempts. 
 
 Actual loopback inference: `Qwen3.5-9B-Q8_0.gguf`, temperature0, thinking=false, max output256, identical1500 memory cap. Proxy/redirect disabled; no private-vault data or credentials enter prompts. Actual selected memory totals differ, so improvement is not a cost-free claim. Model planners/actions, session failures, source paths, quarantine events and elapsed times are in machine results. One tiny deterministic-temperature sample set cannot establish statistical/general effects; basic safety of the bounded simulator is separate from real attacker resistance.
 
+The tracked model ID is the basename of the actual local API model identifier for portable display. `MODEL_ID` in the displayed command is a template placeholder, not the literal invocation. The full original identifier/configuration and actual run output are retained in `.superpowers/memory-complete/workflow-local-model.json`; no credential value is recorded.
+
 ## Independent findings resolved
 
 Reviews reproduced and regression-tested late source/policy mutation, self-excluded config, duplicate/invalid policy keys, malformed timezone offsets, incomplete graph/supersession uniqueness, denied/stale evidence eligibility, bounded malformed-source inventories, ambient HTTP proxy forwarding, malformed model responses and false backend labels. Real `core.autocrlf=true` checkout reproduced quote mismatch and a fixture LF attribute fixes it. Read-only capsule/retrieval tools execute no network/subprocess/note writes. Local observation records preserve applied-receipt state and known/unknown denominators; no automatic promotion or target edit.

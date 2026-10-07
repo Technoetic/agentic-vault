@@ -51,7 +51,9 @@
       "command": "python -X utf8 scripts/evaluate_memory_workflows.py --backend local-model --model MODEL_ID --api-key-env LOCAL_LLM_API_KEY --output-tokens 256",
       "exit_code": 0,
       "model": "Qwen3.5-9B-Q8_0.gguf",
-      "data": "temporary synthetic vaults only"
+      "data": "temporary synthetic vaults only",
+      "command_is_template": true,
+      "model_id_display": "basename of actual loopback API model identifier"
     },
     {
       "command": "python -X utf8 scripts/verify_codex_plugin.py",
@@ -1110,7 +1112,8 @@
         },
         "residual_poison_sources": []
       }
-    ]
+    ],
+    "configuration_display": "model identifier basename for portable display; full original configuration in ignored .superpowers/memory-complete/workflow-local-model.json"
   },
   "code_and_fixture_sha256": {
     ".gitattributes": "cd8a43f6052d6333d739807898d56de7a996b25ad545c6cd878981120e0dc09f",
