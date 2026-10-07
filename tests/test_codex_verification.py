@@ -31,6 +31,13 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_recall.py",
             "skills/agentic-vault/scripts/vault_links.py",
             "skills/agentic-vault/scripts/vault_evidence.py",
+            "skills/agentic-vault/scripts/vault_retrieval.py",
+            "skills/agentic-vault/scripts/vault_memory.py",
+            "skills/agentic-vault/scripts/vault_lesson_metrics.py",
+            "docs/memory-patterns.md",
+            "scripts/import_qmd_candidates.py",
+            "scripts/evaluate_recall.py",
+            "scripts/evaluate_memory_workflows.py",
             "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
         )
         for relative in resources:
@@ -117,6 +124,24 @@ class CodexVerificationTests(unittest.TestCase):
             result = self.verify_fixture(source, inspect_package=inspect_package)
             self.assertEqual(result["installed_resources"], "verified")
             self.assertEqual(result["model_turns"], 0)
+
+    def test_installed_advanced_memory_resources_must_exist_and_match(self) -> None:
+        for relative in ('skills/agentic-vault/scripts/vault_retrieval.py',
+                         'skills/agentic-vault/scripts/vault_memory.py',
+                         'skills/agentic-vault/scripts/vault_lesson_metrics.py',
+                         'docs/memory-patterns.md', 'scripts/import_qmd_candidates.py',
+                         'scripts/evaluate_recall.py', 'scripts/evaluate_memory_workflows.py'):
+            for mutation in ('changed', 'missing'):
+                with self.subTest(resource=relative, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == 'missing':
+                            resource.unlink()
+                        else:
+                            resource.write_text('Changed memory resource\n', encoding='utf-8')
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
 
     def test_direct_executable_returns_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

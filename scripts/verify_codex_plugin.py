@@ -190,6 +190,13 @@ def verify(codex: str) -> dict:
                          "skills/agentic-vault/scripts/vault_recall.py",
                          "skills/agentic-vault/scripts/vault_links.py",
                          "skills/agentic-vault/scripts/vault_evidence.py",
+                         "skills/agentic-vault/scripts/vault_retrieval.py",
+                         "skills/agentic-vault/scripts/vault_memory.py",
+                         "skills/agentic-vault/scripts/vault_lesson_metrics.py",
+                         "docs/memory-patterns.md",
+                         "scripts/import_qmd_candidates.py",
+                         "scripts/evaluate_recall.py",
+                         "scripts/evaluate_memory_workflows.py",
                          "docs/evidence.md",
                          "docs/link-proposals.md",
                          "assets/templates/AGENTS-vault-stub.md"):

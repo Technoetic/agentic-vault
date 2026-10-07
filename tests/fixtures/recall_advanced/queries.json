@@ -1,0 +1,20 @@
+{
+  "queries": [
+    {"id":"en-current","query":"phoenix rollback","language":"en","scenario":"explicit_current_interval","expected_paths":["20-knowledge/phoenix-current.md"],"stale_paths":["20-knowledge/phoenix-old.md"],"as_of":"2026-10-07","backend":"hybrid"},
+    {"id":"ko-current","query":"피닉스 복구","language":"ko","scenario":"explicit_current_interval","expected_paths":["20-knowledge/phoenix-current.md"],"stale_paths":["20-knowledge/phoenix-old.md"],"as_of":"2026-10-07","backend":"hybrid"},
+    {"id":"en-historical","query":"phoenix rollback","language":"en","scenario":"historical_interval","expected_paths":["20-knowledge/phoenix-old.md"],"as_of":"2026-07-01","backend":"hybrid"},
+    {"id":"ko-historical","query":"피닉스 복구","language":"ko","scenario":"historical_interval","expected_paths":["20-knowledge/phoenix-old.md"],"as_of":"2026-07-01","backend":"hybrid"},
+    {"id":"en-graph","query":"atlas recovery","language":"en","scenario":"two_hop_literal_graph","expected_paths":["20-knowledge/Atlas Final.md"],"expand_links":2,"backend":"hybrid"},
+    {"id":"ko-graph","query":"아틀라스 경로","language":"ko","scenario":"two_hop_literal_graph","expected_paths":["20-knowledge/Atlas Final.md"],"expand_links":2,"backend":"hybrid"},
+    {"id":"en-ambiguous","query":"cedar routing","language":"en","scenario":"ambiguous_graph_destination","expected_paths":["20-knowledge/cedar.md"],"forbidden_paths":["20-knowledge/a/Shared.md","20-knowledge/b/Shared.md"],"expand_links":2},
+    {"id":"ko-ambiguous","query":"삼나무 연결","language":"ko","scenario":"ambiguous_graph_destination","expected_paths":["20-knowledge/cedar.md"],"forbidden_paths":["20-knowledge/a/Shared.md","20-knowledge/b/Shared.md"],"expand_links":2},
+    {"id":"en-bm25","query":"orchid common","language":"en","scenario":"term_frequency","expected_paths":["20-knowledge/orchid-rare.md"],"backend":"bm25"},
+    {"id":"ko-bm25","query":"난초 일반","language":"ko","scenario":"term_frequency","expected_paths":["20-knowledge/orchid-rare.md"],"backend":"bm25"},
+    {"id":"en-sidecar","query":"quasar semantic unseen","language":"en","scenario":"optional_external_paths","expected_paths":["20-knowledge/sidecar-evidence.md"],"external_candidates":"00-meta/candidates.json","backend":"hybrid"},
+    {"id":"ko-sidecar","query":"퀘이사 의미 후보","language":"ko","scenario":"optional_external_paths","expected_paths":["20-knowledge/sidecar-evidence.md"],"external_candidates":"00-meta/candidates.json","backend":"hybrid"},
+    {"id":"en-unknown","query":"unverified claim","language":"en","scenario":"currentness_unknown_not_truth_certification","expected_paths":["20-knowledge/unknown.md"],"as_of":"2026-10-07","backend":"hybrid"},
+    {"id":"ko-unknown","query":"미확인 주장","language":"ko","scenario":"currentness_unknown_not_truth_certification","expected_paths":["20-knowledge/unknown.md"],"as_of":"2026-10-07","backend":"hybrid"},
+    {"id":"en-retired","query":"retired policy","language":"en","scenario":"expired_only_no_sources","expectation":"no_answer","expected_paths":[],"stale_paths":["20-knowledge/retired.md"],"as_of":"2026-10-07","backend":"hybrid"},
+    {"id":"ko-retired","query":"퇴역 절차","language":"ko","scenario":"expired_only_no_sources","expectation":"no_answer","expected_paths":[],"stale_paths":["20-knowledge/retired.md"],"as_of":"2026-10-07","backend":"hybrid"}
+  ]
+}

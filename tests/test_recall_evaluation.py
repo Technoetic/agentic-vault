@@ -220,6 +220,47 @@ class RecallEvaluationTests(unittest.TestCase):
                 "--fixture", str(self.fixture), "--max-forbidden-exposure-rate", "0",
             ]), 1)
 
+    def test_per_query_temporal_options_are_opt_in_and_comparison_shares_budget(self) -> None:
+        old = self.vault / '20-knowledge/checklist.md'
+        old.write_text('---\nvalid_until: 2026-01-01\n---\n# Service checklist\nOld rule.\n', encoding='utf-8')
+        self.write('20-knowledge/current.md', '---\nvalid_from: 2026-01-01\n---\n# Service checklist\nNew rule.\n')
+        for query in self.queries:
+            query.update(as_of='2026-10-07', backend='hybrid',
+                         expected_paths=['20-knowledge/current.md'],
+                         stale_paths=['20-knowledge/checklist.md'])
+        self.save_queries()
+        legacy = evaluator.evaluate(self.fixture)
+        advanced = evaluator.evaluate(self.fixture, advanced=True)
+        self.assertGreater(legacy['stale_sources']['exposed_query_count'], 0)
+        self.assertEqual(advanced['stale_sources']['exposed_query_count'], 0)
+        self.assertEqual(advanced['recall_at_3'], 1)
+        compared = evaluator.compare(self.fixture, max_tokens=300)
+        self.assertEqual(compared['baseline']['costs']['max_context_tokens'], 300)
+        self.assertEqual(compared['improved']['costs']['max_context_tokens'], 300)
+        self.assertEqual(compared['improved']['query_count'], compared['baseline']['query_count'])
+
+    def test_advanced_fixture_and_global_override_are_really_executed(self) -> None:
+        fixture = REPO_ROOT / 'tests/fixtures/recall_advanced'
+        report = evaluator.evaluate(fixture, advanced=True)
+        self.assertEqual(report['recall_at_3'], 1)
+        self.assertEqual(report['stale_sources']['exposed_query_count'], 0)
+        self.assertEqual(report['forbidden_sources']['exposed_query_count'], 0)
+        self.assertEqual(report['no_answer']['complete_empty_query_count'], 2)
+        current = evaluator.evaluate(fixture, advanced=True, as_of='2026-10-07')
+        historic = next(row for row in current['per_query'] if row['id']=='en-historical')
+        self.assertEqual(historic['retrieval_options']['as_of'], '2026-10-07')
+        self.assertNotIn('20-knowledge/phoenix-old.md', historic['retrieved_paths'])
+
+    def test_compare_cli_runs_both_conditions_and_gates_improved(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = evaluator.main(['--fixture', str(self.fixture), '--compare'])
+        self.assertEqual(code, 0)
+        report = json.loads(output.getvalue())
+        self.assertIn('baseline', report)
+        self.assertIn('improved', report)
+        self.assertIn('optional_gates', report['improved'])
+
 
 if __name__ == "__main__":
     unittest.main()

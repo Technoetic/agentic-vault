@@ -600,6 +600,15 @@ class VaultRecallTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"]["status"], "invalid_config")
         self.assertEqual(result["matches"], [])
 
+    def test_duplicate_policy_keys_and_nonfinite_config_fail_closed(self) -> None:
+        self.write("private/note.md", "needle SECRET\n")
+        for content in ('{"deny_zones":["private"],"deny_zones":[],"exclude_dirs":[]}', '{"deny_zones":[],"untrusted":Infinity}'):
+            self.write("00-meta/vault-config.json", content)
+            result = recall_module.recall(self.vault, "needle")
+            self.assertEqual(result["diagnostics"]["status"], "invalid_config")
+            self.assertEqual(result["diagnostics"]["files_read"], 0)
+            self.assertNotIn("SECRET", json.dumps(result))
+
     @unittest.skipIf(os.name == "nt", "POSIX FIFO behavior")
     def test_config_fifo_is_rejected_without_blocking(self) -> None:
         config_path = self.vault / "00-meta" / "vault-config.json"
@@ -697,6 +706,13 @@ class VaultRecallTests(unittest.TestCase):
         second = recall_module.recall(self.vault, "phoenix")
 
         self.assertEqual(second["matches"], [])
+
+    def test_wrapper_exposes_explicit_temporal_retrieval_without_lazy_import(self) -> None:
+        self.write("20-knowledge/old.md", "---\nvalid_until: 2025-01-01\n---\n# Needle\nneedle OLD\n")
+        self.write("20-knowledge/new.md", "---\nvalid_from: 2025-01-01\n---\nneedle NEW\n")
+        result = recall_module.recall(self.vault, "needle", as_of="2025-01-01", backend="hybrid")
+        self.assertEqual([match["path"] for match in result["matches"]], ["20-knowledge/new.md"])
+        self.assertEqual(result["diagnostics"]["mode"], "advanced")
 
     def test_filename_fallback_is_not_fabricated_as_line_evidence(self) -> None:
         self.write("20-knowledge/needle-only-in-filename.md", "unrelated body text\n")

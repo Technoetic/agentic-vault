@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import stat
@@ -103,6 +104,26 @@ def _classified_skip(rel_parts: Sequence[str], deny_zones: Sequence[str], exclud
     return None
 
 
+def _unique_config_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate configuration key")
+        result[key] = value
+    return result
+
+
+def _invalid_config_constant(_value):
+    raise ValueError("nonfinite configuration value")
+
+
+def _finite_config_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite configuration value")
+    return number
+
+
 def _read_config(vault: Path, diagnostics: dict) -> dict | None:
     try:
         config_path = resolve_note_path(vault, CONFIG_RELPATH)
@@ -121,7 +142,8 @@ def _read_config(vault: Path, diagnostics: dict) -> dict | None:
             diagnostics["status"] = "invalid_config"
             _omit(diagnostics, "config_byte_limit")
             return None
-        raw = json.loads(raw_bytes.decode("utf-8-sig"))
+        raw = json.loads(raw_bytes.decode("utf-8-sig"), object_pairs_hook=_unique_config_fields,
+                         parse_constant=_invalid_config_constant, parse_float=_finite_config_float)
         return validate_config(raw)
     except FileNotFoundError:
         diagnostics["status"] = "not_vault"
@@ -215,7 +237,7 @@ def _markdown_paths(
     return sorted(found, key=lambda item: (item[0].casefold(), item[0]))
 
 
-def _read_markdown(path: Path, diagnostics: dict, rel_path: str) -> str | None:
+def _read_markdown(path: Path, diagnostics: dict, rel_path: str, *, raw_sink=None) -> str | None:
     try:
         metadata = path.stat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
@@ -243,6 +265,8 @@ def _read_markdown(path: Path, diagnostics: dict, rel_path: str) -> str | None:
             _omit(diagnostics, "file_changed")
             return None
         diagnostics["files_read"] += 1
+        if raw_sink is not None:
+            raw_sink(content)
         # utf-8-sig: a BOM must not hide the frontmatter title (same as healthcheck).
         return content.decode("utf-8-sig", errors="replace")
     except OverflowError:
@@ -388,7 +412,7 @@ def _render_context(matches: list[dict], max_tokens: int, diagnostics: dict) -> 
     return "\n\n".join(blocks)
 
 
-def recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> dict:
+def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> dict:
     """Return bounded lexical context, attributed source matches, and diagnostics."""
     diagnostics = _diagnostics()
     if not isinstance(query, str):
@@ -473,19 +497,50 @@ def recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> d
     return {"context": context, "matches": matches, "diagnostics": diagnostics}
 
 
+def recall(
+    vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
+    as_of: str | None = None, expand_links: int = 0, backend: str = "lexical",
+    external_candidates=None, excluded_sources=(),
+) -> dict:
+    """Preserve legacy output by default; advanced options add source review data."""
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == ():
+        return _legacy_recall(vault, query, limit, max_tokens)
+    return _advanced_retrieval.retrieve(
+        vault, query, limit, max_tokens, as_of=as_of, expand_links=expand_links,
+        backend=backend, external_candidates=external_candidates,
+        excluded_sources=excluded_sources,
+    )
+
+
+# Eager module binding also works when an importlib host removes SCRIPT_DIR
+# from sys.path after loading this file. Import the module, not a partially
+# initialized function: vault_retrieval reuses this module's bounded readers.
+import vault_retrieval as _advanced_retrieval
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault", required=True, type=Path)
     parser.add_argument("--query", required=True)
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--max-tokens", type=int, default=1500)
+    parser.add_argument("--as-of", help="ISO date or ISO datetime with explicit timezone")
+    parser.add_argument("--expand-links", type=int, choices=(0, 1, 2), default=0)
+    parser.add_argument("--backend", choices=("lexical", "bm25", "hybrid"), default="lexical")
+    parser.add_argument("--external-candidates", help="vault-relative JSON sidecar (paths/ranks only)")
+    parser.add_argument("--exclude-source", action="append", default=[], help="additional excluded path/zone")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    result = recall(args.vault, args.query, args.limit, args.max_tokens)
+    result = recall(
+        args.vault, args.query, args.limit, args.max_tokens, as_of=args.as_of,
+        expand_links=args.expand_links, backend=args.backend,
+        external_candidates=args.external_candidates,
+        excluded_sources=tuple(args.exclude_source),
+    )
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

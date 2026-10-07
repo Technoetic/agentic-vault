@@ -3,3 +3,5 @@ assets/git-hooks/* text eol=lf
 hooks/*.sh text eol=lf
 *.py text eol=lf
 *.yml text eol=lf
+# Literal LF-line quotes bind these fixtures; platform conversion changes proof bytes.
+tests/fixtures/memory_units/** text eol=lf

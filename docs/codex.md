@@ -168,6 +168,8 @@ CLI가 PATH에 없으면 `--codex <실행 파일 경로>`를 추가한다. Windo
 python -m unittest discover -s tests -v
 python scripts/evaluate_recall.py
 python scripts/evaluate_recall.py --fixture tests/fixtures/recall_experience
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare
+python scripts/evaluate_memory_workflows.py --backend deterministic
 ```
 
 경험 fixture는 정답 없음과 오래된·오염된 근거의 검색 노출을 추가로 기록한다.

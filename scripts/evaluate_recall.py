@@ -135,10 +135,18 @@ def _summary(rows: list[dict]) -> dict:
     return summary
 
 
-def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
+def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
+             as_of: str | None = None, expand_links: int | None = None,
+             backend: str | None = None) -> dict:
     """Measure labeled source retrieval and returned exposure, never answer quality."""
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
         raise ValueError("max_tokens must be a non-negative integer")
+    if type(advanced) is not bool or (expand_links is not None and
+            (type(expand_links) is not int or expand_links not in (0, 1, 2))):
+        raise ValueError('invalid advanced options')
+    if backend is not None and backend not in ('lexical', 'bm25', 'hybrid'):
+        raise ValueError('invalid retrieval backend')
+    advanced = advanced or as_of is not None or expand_links is not None or backend is not None
     queries = _load_queries(fixture)
     recall_module = _load_recall_module()
     vault = fixture / "vault"
@@ -147,8 +155,16 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
     per_query: list[dict] = []
 
     for item in queries:
+        options = {}
+        if advanced:
+            options = {key: item[key] for key in ('as_of', 'expand_links', 'backend',
+                       'external_candidates', 'excluded_sources') if key in item}
+            options.update({key: value for key, value in
+                            (('as_of', as_of), ('expand_links', expand_links), ('backend', backend))
+                            if value is not None})
         started = time.perf_counter()
-        result = recall_module.recall(vault, item["query"], limit=3, max_tokens=max_tokens)
+        reader = recall_module._advanced_retrieval.retrieve if advanced else recall_module.recall
+        result = reader(vault, item["query"], limit=3, max_tokens=max_tokens, **options)
         elapsed_ms = (time.perf_counter() - started) * 1000
         retrieved = [match["path"] for match in result["matches"]]
         expected = set(item["expected_paths"])
@@ -178,6 +194,7 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
             reasons.append("stale_source_exposure")
         row = {
             **item, "retrieved_paths": retrieved,
+            "retrieval_options": options,
             "source_recall_at_3": source_recall, "reciprocal_rank_at_3": reciprocal_rank,
             "outcome": outcome, "forbidden_retrieved_paths": forbidden_retrieved,
             "stale_retrieved_paths": stale_retrieved,
@@ -201,7 +218,8 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
 
     total_elapsed = sum(row["elapsed_ms"] for row in per_query)
     return {
-        "benchmark": "bilingual lexical source retrieval and data exposure (not semantic or LLM answer/attack quality)",
+        "benchmark": "bilingual source retrieval and data exposure (not LLM answer/attack quality)",
+        "method": 'advanced' if advanced else 'legacy',
         "interpretation": "Empty results describe this fixture scan only; they do not prove world absence. Exposure means returned source matches, not successful instruction following.",
         **_summary(per_query),
         "by_language": {
@@ -226,6 +244,15 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
     }
 
 
+def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
+    """Identical labeled queries/budget; legacy ignores advanced fixture options."""
+    baseline = evaluate(fixture, max_tokens=max_tokens)
+    improved = evaluate(fixture, max_tokens=max_tokens, advanced=True, **options)
+    return {'benchmark': 'paired retrieval comparison',
+            'interpretation': 'Same queries and context budget; fixture labels supply explicit retrieval options, never expected paths to the retriever. No model or paper score is inferred.',
+            'baseline': baseline, 'improved': improved}
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -236,6 +263,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-no-answer-false-positive-rate", type=float, default=None)
     parser.add_argument("--max-forbidden-exposure-rate", type=float, default=None)
     parser.add_argument("--max-stale-top-1-rate", type=float, default=None)
+    parser.add_argument('--advanced', action='store_true', help='apply per-query advanced options')
+    parser.add_argument('--compare', action='store_true', help='legacy versus advanced; gates apply to improved')
+    parser.add_argument('--as-of', help='override all per-query time points')
+    parser.add_argument('--expand-links', type=int, choices=(0, 1, 2))
+    parser.add_argument('--backend', choices=('lexical', 'bm25', 'hybrid'))
     return parser
 
 
@@ -247,26 +279,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("evaluation thresholds must be between 0 and 1", file=sys.stderr)
         return 2
     try:
-        report = evaluate(args.fixture, max_tokens=args.max_tokens)
+        options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend)
+        report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
+                  evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"recall evaluation unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
+    gated = report['improved'] if args.compare else report
     optional_gates = {
-        "no_answer_false_positive_rate": (report["no_answer"]["false_positive_rate"], args.max_no_answer_false_positive_rate),
-        "forbidden_exposure_rate": (report["forbidden_sources"]["exposure_rate"], args.max_forbidden_exposure_rate),
-        "stale_top_1_rate": (report["stale_sources"]["top_1_rate"], args.max_stale_top_1_rate),
+        "no_answer_false_positive_rate": (gated["no_answer"]["false_positive_rate"], args.max_no_answer_false_positive_rate),
+        "forbidden_exposure_rate": (gated["forbidden_sources"]["exposure_rate"], args.max_forbidden_exposure_rate),
+        "stale_top_1_rate": (gated["stale_sources"]["top_1_rate"], args.max_stale_top_1_rate),
     }
-    report["optional_gates"] = {
+    gated["optional_gates"] = {
         name: {"observed": observed, "maximum": maximum,
                "passed": observed is not None and observed <= maximum}
         for name, (observed, maximum) in optional_gates.items() if maximum is not None
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     passed = (
-        (report["recall_at_3"] is None or report["recall_at_3"] >= args.min_recall_at_3)
-        and (report["mrr"] is None or report["mrr"] >= args.min_mrr)
-        and not report["evaluation_errors"]
-        and all(gate["passed"] for gate in report["optional_gates"].values())
+        (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
+        and (gated["mrr"] is None or gated["mrr"] >= args.min_mrr)
+        and not gated["evaluation_errors"]
+        and all(gate["passed"] for gate in gated["optional_gates"].values())
     )
     return 0 if passed else 1
 

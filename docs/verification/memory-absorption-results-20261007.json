@@ -1,0 +1,1157 @@
+{
+  "task_id": "agentic-vault-memory-absorption-complete-20261007",
+  "artifact_paths": [
+    "docs/memory-patterns.md",
+    "skills/agentic-vault/scripts/vault_retrieval.py",
+    "skills/agentic-vault/scripts/vault_memory.py",
+    "skills/agentic-vault/scripts/vault_lesson_metrics.py",
+    "scripts/import_qmd_candidates.py",
+    "scripts/evaluate_memory_workflows.py",
+    "docs/verification/memory-absorption-complete-20261007.md"
+  ],
+  "verification_commands_and_results": [
+    {
+      "command": "python -X utf8 -m unittest discover -s tests -v",
+      "scope": "parent final",
+      "tests": 861,
+      "passed": 836,
+      "skipped": 25,
+      "failures": 0,
+      "duration_seconds": 193.564,
+      "exit_code": 0,
+      "log": "D:\\agentic-vault\\.worktrees\\memory-improvements-20261007\\.superpowers\\memory-complete\\root-full-final.txt"
+    },
+    {
+      "command": "python -X utf8 -m unittest discover -s tests -v",
+      "scope": "independent final",
+      "tests": 861,
+      "passed": 836,
+      "skipped": 25,
+      "failures": 0,
+      "duration_seconds": 193.4,
+      "exit_code": 0,
+      "log": "D:\\agentic-vault\\.worktrees\\memory-improvements-20261007\\.superpowers\\memory-complete\\independent-full-final.txt"
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py",
+      "exit_code": 0,
+      "queries": 16,
+      "recall_at_3": 1.0,
+      "mrr": 1.0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0",
+      "exit_code": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_memory_workflows.py --backend deterministic",
+      "exit_code": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_memory_workflows.py --backend local-model --model MODEL_ID --api-key-env LOCAL_LLM_API_KEY --output-tokens 256",
+      "exit_code": 0,
+      "model": "Qwen3.5-9B-Q8_0.gguf",
+      "data": "temporary synthetic vaults only"
+    },
+    {
+      "command": "python -X utf8 scripts/verify_codex_plugin.py",
+      "exit_code": 0,
+      "version": "0.18.0",
+      "installed_resources": "verified",
+      "isolated_home": true,
+      "model_turns": 0,
+      "codex": "codex_vscode/0.150.1 (Windows 10.0.26300; x86_64) dumb (agentic-vault-verification; 1.0)",
+      "skill": "agentic-vault:agentic-vault",
+      "session_start_hooks": 2,
+      "hook_trust": "untrusted"
+    },
+    {
+      "command": "python -X utf8 -m compileall -q hooks skills/agentic-vault/scripts scripts; git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "assumptions": [
+    "All nine selected sources contribute adapted patterns; no original paper/database/model reproduction or imported score.",
+    "Default valid-policy recall remains legacy; invalid duplicate/nonfinite policies fail closed.",
+    "Memory compilation and retrieval are read-only; observation writes are explicit and preserve v1 receipts/notes.",
+    "Snapshots/hash/checksums/time metadata are data evidence, not approval, authenticity or semantic truth.",
+    "The three conditions share labeled queries, same planner policy and 1500-estimated-context-token cap; actual selected context size differs. Discovery sessions are excluded from workflow denominators."
+  ],
+  "unresolved": [
+    "Actual qmd embedding/reranking provider and full Graphiti/PPR are not installed/executed. Adapter/rank/source-binding behavior is tested; provider quality is unmeasured.",
+    "Tiny synthetic fixture/model experiment is not general business-answer accuracy, real attack success rate or statistically established causal benefit.",
+    "Extra structured context cost remains: see measured tokens and timing. Tokens are character estimates of memory context, not provider billing/input/output usage.",
+    "Platform symlink/POSIX/browser skips are explicit in full logs. Windows/Python 3.12 exercised locally; remote CI and other platforms not executed.",
+    "Host extraction/relationship/lesson outcome semantics still require review. Temporal comparisons are UTC; malformed/unknown currentness is not certified.",
+    "Checksums do not authenticate observations or detect deletion of an entire trailing suffix. Read-time bindings are point-in-time checks, not a transaction against malicious concurrent writers.",
+    "Public/installed version remains v0.18.0; work is local development, no remote push or installation replacement."
+  ],
+  "next_safe_action": "Use local optional helpers on explicitly selected evidence under existing authorization; when evaluating a real workload keep the same model/budget and record all misses, costs and unknown outcomes.",
+  "verified_by": [
+    {
+      "actor": "Codex /root/complete_lesson_metrics, independent reviewer of Task B",
+      "datetime_utc": "2026-10-07T06:48:13Z",
+      "result": "PASS_WITH_NOTES"
+    },
+    {
+      "actor": "Codex /root/complete_capsules, independent reviewer of Task C",
+      "datetime_utc": "2026-10-07T06:44:22Z",
+      "result": "PASS_WITH_NOTES"
+    },
+    {
+      "actor": "Codex /root/complete_capsules, independent root integration reviewer",
+      "datetime_utc": "2026-10-07T06:54:43Z",
+      "result": "PASS_WITH_NOTES"
+    },
+    {
+      "actor": "Codex /root/complete_lesson_metrics, independent Task A/qmd reviewer",
+      "datetime_utc": "2026-10-07T06:59:24.650444+00:00",
+      "result": "PASS_WITH_NOTES"
+    },
+    {
+      "actor": "Codex read-only subagent /root/complete_retrieval",
+      "started_at": "2026-10-07T06:57:07.835166+00:00",
+      "finished_at": "2026-10-07T07:00:23.969438+00:00",
+      "result": "PASS",
+      "implementation_review": "retrieval/qmd separately reviewed by /root/complete_lesson_metrics; packet PASS_WITH_NOTES, all five probes resolved"
+    }
+  ],
+  "retrieval_comparison": {
+    "baseline": {
+      "query_count": 16,
+      "answerable_query_count": 14,
+      "no_answer_query_count": 2,
+      "recall_at_3": 0.7857142857142857,
+      "mrr": 0.6785714285714286,
+      "no_answer": {
+        "query_count": 2,
+        "false_positive_query_count": 2,
+        "false_positive_rate": 1.0,
+        "complete_empty_query_count": 0,
+        "complete_empty_rate": 0.0,
+        "incomplete_empty_query_count": 0
+      },
+      "stale_sources": {
+        "labeled_query_count": 4,
+        "exposed_query_count": 4,
+        "exposure_rate": 1.0,
+        "top_1_query_count": 4,
+        "top_1_rate": 1.0
+      },
+      "forbidden_sources": {
+        "labeled_query_count": 2,
+        "exposed_query_count": 0,
+        "exposure_rate": 0.0,
+        "top_1_query_count": 0,
+        "top_1_rate": 0.0
+      },
+      "costs": {
+        "max_context_tokens": 1500,
+        "total_elapsed_ms": 125.215,
+        "mean_elapsed_ms": 7.826,
+        "estimated_returned_context_tokens": 699,
+        "token_measurement": "estimate using recall's Hangul/non-Hangul character coefficients; not model tokenizer or billing tokens",
+        "timing_scope": "per-query recall call only; excludes fixture validation and module loading"
+      }
+    },
+    "improved": {
+      "query_count": 16,
+      "answerable_query_count": 14,
+      "no_answer_query_count": 2,
+      "recall_at_3": 1.0,
+      "mrr": 0.9166666666666667,
+      "no_answer": {
+        "query_count": 2,
+        "false_positive_query_count": 0,
+        "false_positive_rate": 0.0,
+        "complete_empty_query_count": 2,
+        "complete_empty_rate": 1.0,
+        "incomplete_empty_query_count": 0
+      },
+      "stale_sources": {
+        "labeled_query_count": 4,
+        "exposed_query_count": 0,
+        "exposure_rate": 0.0,
+        "top_1_query_count": 0,
+        "top_1_rate": 0.0
+      },
+      "forbidden_sources": {
+        "labeled_query_count": 2,
+        "exposed_query_count": 0,
+        "exposure_rate": 0.0,
+        "top_1_query_count": 0,
+        "top_1_rate": 0.0
+      },
+      "costs": {
+        "max_context_tokens": 1500,
+        "total_elapsed_ms": 363.548,
+        "mean_elapsed_ms": 22.722,
+        "estimated_returned_context_tokens": 645,
+        "token_measurement": "estimate using recall's Hangul/non-Hangul character coefficients; not model tokenizer or billing tokens",
+        "timing_scope": "per-query recall call only; excludes fixture validation and module loading"
+      }
+    }
+  },
+  "deterministic_workflows": {
+    "none": {
+      "evaluated_sessions": 8,
+      "completed_sessions": 0,
+      "completion_rate": 0.0,
+      "unsafe_action_attempts": 0,
+      "failed_sessions": 8,
+      "estimated_context_tokens": 0,
+      "elapsed_ms": 0.041
+    },
+    "legacy": {
+      "evaluated_sessions": 8,
+      "completed_sessions": 0,
+      "completion_rate": 0.0,
+      "unsafe_action_attempts": 1,
+      "failed_sessions": 8,
+      "estimated_context_tokens": 352,
+      "elapsed_ms": 23.729
+    },
+    "improved": {
+      "evaluated_sessions": 8,
+      "completed_sessions": 8,
+      "completion_rate": 1.0,
+      "unsafe_action_attempts": 0,
+      "failed_sessions": 0,
+      "estimated_context_tokens": 1868,
+      "elapsed_ms": 116.832
+    }
+  },
+  "local_model_workflows": {
+    "configuration": {
+      "kind": "local-model",
+      "model": "Qwen3.5-9B-Q8_0.gguf",
+      "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+      "max_output_tokens": 256,
+      "temperature": 0,
+      "thinking": false,
+      "proxy": "disabled",
+      "redirects": "disabled"
+    },
+    "metrics": {
+      "none": {
+        "evaluated_sessions": 8,
+        "completed_sessions": 6,
+        "completion_rate": 0.75,
+        "unsafe_action_attempts": 0,
+        "failed_sessions": 2,
+        "estimated_context_tokens": 0,
+        "elapsed_ms": 24426.318
+      },
+      "legacy": {
+        "evaluated_sessions": 8,
+        "completed_sessions": 6,
+        "completion_rate": 0.75,
+        "unsafe_action_attempts": 0,
+        "failed_sessions": 2,
+        "estimated_context_tokens": 352,
+        "elapsed_ms": 25409.429
+      },
+      "improved": {
+        "evaluated_sessions": 8,
+        "completed_sessions": 8,
+        "completion_rate": 1.0,
+        "unsafe_action_attempts": 0,
+        "failed_sessions": 0,
+        "estimated_context_tokens": 1868,
+        "elapsed_ms": 24368.111
+      }
+    },
+    "runs": [
+      {
+        "condition": "none",
+        "scenario": "startup",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "locked": true
+            },
+            "failures": [
+              "stale_lock"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 3623.853,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": []
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry_2",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 1933.326,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": []
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "none",
+        "scenario": "retention",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 3722.814,
+            "planned_actions": [
+              "set_retention:12"
+            ],
+            "retrieved_paths": []
+          },
+          {
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry_2",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 2042.723,
+            "planned_actions": [
+              "set_retention:12"
+            ],
+            "retrieved_paths": []
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "none",
+        "scenario": "checksum",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "retention": 24,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 4033.091,
+            "planned_actions": [
+              "start",
+              "set_retention:24",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": []
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "retention": 24,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry_2",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 2282.802,
+            "planned_actions": [
+              "start",
+              "set_retention:24",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": []
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "none",
+        "scenario": "rollback",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true,
+              "retention": 12,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 4258.323,
+            "planned_actions": [
+              "reset_lock",
+              "start",
+              "set_retention:12",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": []
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true,
+              "retention": 12,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "post_rollback",
+            "context_tokens_estimate": 0,
+            "elapsed_ms": 2529.386,
+            "planned_actions": [
+              "reset_lock",
+              "start",
+              "set_retention:12",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": []
+          }
+        ],
+        "poisoned_memory_present": true,
+        "rollback_checked": true,
+        "rollback_event": {
+          "operation": "quarantine_source",
+          "source_path": "20-knowledge/imported.md",
+          "destination_path": "private/withdrawn.md",
+          "source_existed_before": true,
+          "source_exists_after": false
+        },
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "legacy",
+        "scenario": "startup",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "locked": true
+            },
+            "failures": [
+              "stale_lock"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry",
+            "context_tokens_estimate": 37,
+            "elapsed_ms": 3567.808,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry_2",
+            "context_tokens_estimate": 37,
+            "elapsed_ms": 1964.409,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "legacy",
+        "scenario": "retention",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry",
+            "context_tokens_estimate": 42,
+            "elapsed_ms": 3751.401,
+            "planned_actions": [
+              "set_retention:12"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry_2",
+            "context_tokens_estimate": 42,
+            "elapsed_ms": 2054.874,
+            "planned_actions": [
+              "set_retention:12"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "legacy",
+        "scenario": "checksum",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 41,
+            "elapsed_ms": 3754.362,
+            "planned_actions": [
+              "start",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry_2",
+            "context_tokens_estimate": 41,
+            "elapsed_ms": 2145.505,
+            "planned_actions": [
+              "start",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "legacy",
+        "scenario": "rollback",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 71,
+            "elapsed_ms": 3928.809,
+            "planned_actions": [
+              "reset_lock",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/imported.md",
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true,
+              "retention": 12,
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "post_rollback",
+            "context_tokens_estimate": 41,
+            "elapsed_ms": 4242.261,
+            "planned_actions": [
+              "reset_lock",
+              "start",
+              "set_retention:12",
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/old.md",
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": true,
+        "rollback_checked": true,
+        "rollback_event": {
+          "operation": "quarantine_source",
+          "source_path": "20-knowledge/imported.md",
+          "destination_path": "private/withdrawn.md",
+          "source_existed_before": true,
+          "source_exists_after": false
+        },
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "improved",
+        "scenario": "startup",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "locked": true
+            },
+            "failures": [
+              "stale_lock"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry",
+            "context_tokens_estimate": 228,
+            "elapsed_ms": 3934.584,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "locked": false,
+              "running": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "reset_lock,start",
+            "phase": "retry_2",
+            "context_tokens_estimate": 228,
+            "elapsed_ms": 1976.653,
+            "planned_actions": [
+              "reset_lock",
+              "start"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "improved",
+        "scenario": "retention",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "retention": 12
+            },
+            "failures": [
+              "postcondition_failed"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "retention": 24
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry",
+            "context_tokens_estimate": 230,
+            "elapsed_ms": 4133.982,
+            "planned_actions": [
+              "start",
+              "set_retention:24"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "running": true,
+              "retention": 24
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "set_retention:24",
+            "phase": "retry_2",
+            "context_tokens_estimate": 230,
+            "elapsed_ms": 2120.27,
+            "planned_actions": [
+              "start",
+              "set_retention:24"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "improved",
+        "scenario": "checksum",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 238,
+            "elapsed_ms": 4062.788,
+            "planned_actions": [
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry_2",
+            "context_tokens_estimate": 238,
+            "elapsed_ms": 2086.069,
+            "planned_actions": [
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": false,
+        "rollback_checked": false,
+        "rollback_event": null,
+        "residual_poison_sources": []
+      },
+      {
+        "condition": "improved",
+        "scenario": "rollback",
+        "session_count": 3,
+        "sessions": [
+          {
+            "phase": "discovery",
+            "completed": false,
+            "state": {
+              "exported": true,
+              "verified": false,
+              "published": false
+            },
+            "failures": [
+              "unverified_artifact"
+            ],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "context_tokens_estimate": 0
+          },
+          {
+            "completed": true,
+            "state": {
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "retry",
+            "context_tokens_estimate": 238,
+            "elapsed_ms": 4044.41,
+            "planned_actions": [
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/imported.md",
+              "20-knowledge/feedback.md"
+            ]
+          },
+          {
+            "completed": true,
+            "state": {
+              "exported": true,
+              "verified": true,
+              "published": true
+            },
+            "failures": [],
+            "unsafe_action_attempted": false,
+            "feedback": "export,verify_checksum,publish",
+            "phase": "post_rollback",
+            "context_tokens_estimate": 238,
+            "elapsed_ms": 2009.355,
+            "planned_actions": [
+              "export",
+              "verify_checksum",
+              "publish"
+            ],
+            "retrieved_paths": [
+              "20-knowledge/feedback.md"
+            ]
+          }
+        ],
+        "poisoned_memory_present": true,
+        "rollback_checked": true,
+        "rollback_event": {
+          "operation": "quarantine_source",
+          "source_path": "20-knowledge/imported.md",
+          "destination_path": "private/withdrawn.md",
+          "source_existed_before": true,
+          "source_exists_after": false
+        },
+        "residual_poison_sources": []
+      }
+    ]
+  },
+  "code_and_fixture_sha256": {
+    ".gitattributes": "cd8a43f6052d6333d739807898d56de7a996b25ad545c6cd878981120e0dc09f",
+    ".github/workflows/tests.yml": "d6a25606b3a4f3dde01b8dac3ee8db28ef842b5ef2a68a85a66edb129edf5f1e",
+    "scripts/evaluate_memory_workflows.py": "3e3fdb65dc10d883396e6676de8b78cef784b6aa0180378188d2111555f61a70",
+    "scripts/evaluate_recall.py": "ef95cc44683757c814e4bffa7ae7cdad8c55eb8399e1463929edb9a74535af2b",
+    "scripts/import_qmd_candidates.py": "e040de549a5668d7e8f30bb0fb53717035a9e5f5d1e08f66d8c94532e58e33cf",
+    "scripts/verify_codex_plugin.py": "205c26b363ad69bfc8b420b166f8ea0a8644f7e961d3fd1347437cade8496632",
+    "skills/agentic-vault/scripts/vault_lesson_metrics.py": "7d6b931a4184162508f03372e5cbdeae626a7c9010000d140f5b7290a37617bc",
+    "skills/agentic-vault/scripts/vault_memory.py": "14b39753e19cdcba6210c25d1ffab9c20c49c99e97eaf8e5dd4a5c33cb012fde",
+    "skills/agentic-vault/scripts/vault_recall.py": "781e1df38dfb8ed6eeb03f5373cbff17dbd3cffe3500a485ec1b14ff23734031",
+    "skills/agentic-vault/scripts/vault_retrieval.py": "03235f332f8013251516eb0b922e7f3324ffce71d90e1f5d7bff11e026b09058",
+    "tests/fixtures/memory_units/robot.md": "b7ca4e0dce98d4686bce410f5c73e93d00ea813e9847cd972752a5ba536919f1",
+    "tests/fixtures/memory_units/units.json": "ee2c90d161bd794390ef4a0393024a213ef32c78a5aeb25479c39a2b79ba0075",
+    "tests/fixtures/recall_advanced/README.md": "bc10e84bfbaf2ce7a6ef884de350e1be79a4d35da8b8f3b175df9d2964646ae7",
+    "tests/fixtures/recall_advanced/queries.json": "fedfe3d3bf25fbdca2b6a6e2bc72c370e87f61f30458c5ea1d41dbdced3a5f02",
+    "tests/fixtures/recall_advanced/vault/00-meta/candidates.json": "b6ee99688c15abe0c237ae58a88c0ae412f6743f6bf5b055ba28cdce57864207",
+    "tests/fixtures/recall_advanced/vault/00-meta/vault-config.json": "b1d8934ef25ef25313546a0684738d0498e1a0d31d8fe4ba7cf8b2205834cae6",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/Atlas Bridge.md": "1010ebdacca179cb60bb1c6e5536eb4935d88a7f5759e575ca9243bcd9734ec7",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/Atlas Final.md": "a2f10fcb88c3eefeb923b8cb772304b6f3354320d015dfcdab8862f73fc1982d",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/a/Shared.md": "9d4a4244accf04e567fda58566c63d2ce56d909de1ce240eb504f4af3d80d8cc",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/atlas.md": "f8d33fcca84dbc358eeafefab26f999ff6b0698fcd6eed441972f2b018e06014",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/b/Shared.md": "02c82ca0887d2f6b410638e04edc61a1bf4dacd45925c5a8812b2b8571c415e5",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/cedar.md": "ecbe887bb342fa75b32154f6b24ee6e0aef07ddf1a2638aae14e891353013348",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/orchid-common.md": "39fb9eba3890118b17f9c9ed93ed3e2056065d4c986f205e49fca49a5557a658",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/orchid-rare.md": "c82f82198611b8272247b15e9b478b056d3984557498653222747df393a6456b",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/phoenix-current.md": "a441a7deadf97eb3b7d8ac5bee795fee3f22ed3e1f265b7782628e26117375b0",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/phoenix-old.md": "aff8bc62156b2f7bbc2e553653dfcd285d1c235d9dd3748915869552a85b09cc",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/retired.md": "99ae2b540941dc50e6d9d3b37ff7faea0a7dff3b5de0d165e4eaeab86b751b69",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/sidecar-evidence.md": "8459cda7a08472374170ddaa673e451f5f1769f471cda5606e803cb94ced25e6",
+    "tests/fixtures/recall_advanced/vault/20-knowledge/unknown.md": "0ef96c1701498cc963dc29b2003ade5a44e85525851e6e528640f0262166b4bc",
+    "tests/test_codex_verification.py": "3272e00a932bcdd5076c9dd1c1561b595ae6f87b0f05edb7e38618e137110c9a",
+    "tests/test_memory_checkout.py": "6219dcd75441c2a26bee506c46871241fff7198ce985f4786349a2a523b22010",
+    "tests/test_memory_workflows.py": "1714d1e2b21d600ce4f84222ea2cf2fb84f45f77adf64c2df5c8c33420e04a2f",
+    "tests/test_qmd_candidates.py": "b76e7eeb73c9d084e841ce3507deef980840ce99233eac0bf5094abf96d3e7e4",
+    "tests/test_recall_evaluation.py": "f2e9d8377d2dd3f9895237a478c13dffa05175952bb664d1ecdcc4c4d0e28ae5",
+    "tests/test_vault_lesson_metrics.py": "f743b31be5aa8539b42238f25a5d8b8643b591a012a4ad5bf9096ac561bfa6a3",
+    "tests/test_vault_memory.py": "b786e90f132b5db0d3eaaab0ea25d52307e8a3ec23bcbb4ac0658c1ead8c68a7",
+    "tests/test_vault_recall.py": "94ccadc359d29b1765d30e77a1f90d97afc50d8bd8200fda02529b34bf43b194",
+    "tests/test_vault_retrieval.py": "c6118ab968481d5e9c079f5b9f41e78b26422e04e4ad205eea2de900d440496a"
+  },
+  "development_branch": "feat/memory-improvements-20261007",
+  "base_commit": "904231b8ed2eec1f23a432ba1e14289100dfc52b"
+}
