@@ -32,7 +32,8 @@ class QmdCandidatesTests(unittest.TestCase):
         self.assertIsNotNone(adapter, "qmd candidate normalizer is missing")
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.directory = Path(self.tmp.name)
+        # macOS tempfile paths may enter through the /var -> /private/var alias.
+        self.directory = Path(self.tmp.name).resolve()
 
     def test_converts_official_array_shape_without_trusting_provider_content(self):
         result = adapter.convert([{"docid": "#6c90f0", "score": .89, "file": "qmd://qmd/20-knowledge/README.md", "explain": {"text": "FORGED"}, "snippet": "FORGED", "approved": True}], "qmd")

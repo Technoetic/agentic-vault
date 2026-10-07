@@ -195,7 +195,8 @@ class WarningCliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.vault = Path(self.temp.name)
+        # Match healthcheck's resolved root when injecting synthetic walk errors.
+        self.vault = Path(self.temp.name).resolve()
         self.git('init', '-q')
         self.config = {'required_keys': ['title'], 'enums': {}, 'deny_zones': ['private'],
                        'exclude_dirs': ['.git'], 'index_note': '', 'log_note': '', 'hot_note': '',

@@ -25,7 +25,8 @@ class CheckpointTests(unittest.TestCase):
         self.assertTrue(HOOK.is_file(), 'minimal checkpoint hook implementation is missing')
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.vault = Path(self.tmp.name) / 'vault'
+        # Match the runtime's canonical namespace for path-specific drift probes.
+        self.vault = Path(self.tmp.name).resolve() / 'vault'
         self.vault.mkdir()
         self.write('00-meta/vault-config.json', json.dumps({
             'deny_zones': ['private'], 'exclude_dirs': ['excluded', RUNTIME],
