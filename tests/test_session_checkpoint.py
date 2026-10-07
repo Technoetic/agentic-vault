@@ -15,6 +15,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / 'hooks/session_checkpoint.py'
 RUNTIME = '00-meta/.agentic-vault/runtime'
+SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 
 class CheckpointTests(unittest.TestCase):
@@ -150,12 +153,12 @@ class CheckpointTests(unittest.TestCase):
         import vault_state as state
         real_atomic = state._atomic
         originals = {p: p.read_bytes() for p in (self.vault / 'notes').glob('*.md')}
-        def tamper(path, data, before_replace):
+        def tamper(path, data, before_replace, **kwargs):
             lock = next((self.vault / RUNTIME).glob('lock-*.json'))
             record = json.loads(lock.read_bytes())
             record['created_at'] = []
             lock.write_bytes(json.dumps(record).encode())
-            return real_atomic(path, data, before_replace)
+            return real_atomic(path, data, before_replace, **kwargs)
         output, errors = io.StringIO(), io.StringIO()
         with mock.patch.object(state, '_atomic', side_effect=tamper), \
              mock.patch.object(sys, 'stdin', io.StringIO('{"hook_event_name":"PreCompact"}')), \
@@ -169,6 +172,96 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable\n')
         self.assertEqual(self.records(), [])
         self.assertEqual({p: p.read_bytes() for p in originals}, originals)
+
+    def test_fix3_checkpoint_source_read_policy_drift_has_safe_diagnostic(self):
+        spec = importlib.util.spec_from_file_location('checkpoint_fix3_test', HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        import vault_state as state
+        original_config = (self.vault / state.CONFIG_PATH).read_bytes()
+        originals = {p: p.read_bytes() for p in (self.vault / 'notes').glob('*.md')}
+        real_read = state._Policy.read_note
+        switched = []
+        def drift(policy, selected):
+            result = real_read(policy, selected)
+            if selected == 'notes/log.md' and any((self.vault / RUNTIME).glob('.vault-state-*')):
+                config = json.loads(original_config)
+                config['deny_zones'].append('notes')
+                self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                switched.append(True)
+            return result
+        output, errors = io.StringIO(), io.StringIO()
+        with mock.patch.object(state._Policy, 'read_note', drift), \
+             mock.patch.object(sys, 'stdin', io.StringIO('{"hook_event_name":"PreCompact"}')), \
+             mock.patch.object(sys, 'stdout', output), mock.patch.object(sys, 'stderr', errors):
+            result = hook.main(['--vault', str(self.vault), '--event', 'PreCompact'])
+        self.assertEqual(switched, [True])
+        self.assertEqual((result, output.getvalue()), (0, ''))
+        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable\n')
+        self.assertEqual(self.records(), [])
+        self.assertEqual({p: p.read_bytes() for p in originals}, originals)
+
+    def test_fix3_checkpoint_update_rechecks_policy_after_runtime_base_read(self):
+        self.run_hook({'hook_event_name': 'PreCompact', 'session_id': 'same'})
+        record = self.records()[0]
+        original = record.read_bytes()
+        import vault_state as state
+        real_read = state._read
+        switched = []
+        def drift(resolver, limit=state.MAX_BYTES):
+            result = real_read(resolver, limit)
+            selected = resolver()
+            if selected == record and any((self.vault / RUNTIME).glob('.vault-state-*')):
+                config = json.loads((self.vault / state.CONFIG_PATH).read_bytes())
+                config['deny_zones'].append(RUNTIME)
+                self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                switched.append(True)
+            return result
+        with mock.patch.object(state, '_read', side_effect=drift):
+            with self.assertRaisesRegex(state.StateError, 'configuration_changed'):
+                state.write_checkpoint(self.vault, 'SessionEnd', session_id='same')
+        self.assertEqual(switched, [True])
+        self.assertEqual(record.read_bytes(), original)
+
+    def test_fix4_checkpoint_cleanup_preserves_revoked_runtime_without_reads_or_unlinks(self):
+        self.run_hook({'hook_event_name': 'PreCompact', 'session_id': 'cleanup'})
+        record = self.records()[0]
+        original = record.read_bytes()
+        import vault_state as state
+        real_read, real_fresh, real_unlink = state._read, state._Policy.fresh, Path.unlink
+        changed, recognized, reads, unlinks = [], [], [], []
+        def read(resolver, limit=state.MAX_BYTES):
+            selected = resolver()
+            if recognized and selected.as_posix().startswith((self.vault / RUNTIME).as_posix() + '/'):
+                reads.append(selected.name)
+            result = real_read(resolver, limit)
+            if selected == record and any((self.vault / RUNTIME).glob('.vault-state-*')):
+                config = json.loads((self.vault / state.CONFIG_PATH).read_bytes())
+                config['deny_zones'].append(RUNTIME)
+                self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                changed.append(True)
+            return result
+        def fresh(policy):
+            try:
+                return real_fresh(policy)
+            except state.StateError:
+                if changed:
+                    recognized.append(True)
+                raise
+        def unlink(path, *args, **kwargs):
+            if recognized and path.as_posix().startswith((self.vault / RUNTIME).as_posix() + '/'):
+                unlinks.append(path.name)
+            return real_unlink(path, *args, **kwargs)
+        with mock.patch.object(state, '_read', side_effect=read), \
+             mock.patch.object(state._Policy, 'fresh', fresh), mock.patch.object(Path, 'unlink', unlink):
+            with self.assertRaisesRegex(state.StateError, 'configuration_changed'):
+                state.write_checkpoint(self.vault, 'SessionEnd', session_id='cleanup')
+        self.assertTrue(recognized)
+        self.assertEqual(unlinks, [])
+        self.assertEqual(reads, [])
+        self.assertEqual(record.read_bytes(), original)
+        self.assertEqual(len(list((self.vault / RUNTIME).glob('.vault-state-*'))), 1)
+        self.assertEqual(len(list((self.vault / RUNTIME).glob('*.guard'))), 1)
 
 
 if __name__ == '__main__':

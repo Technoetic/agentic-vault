@@ -198,9 +198,19 @@ def _owned(policy, name, token):
     return record
 
 
+def _cleanup_owner(policy, name, token):
+    """Retain recovery evidence if current policy or owner validation fails."""
+    current = policy.fresh()
+    _owned(current, name, token)
+    current = policy.fresh()
+    path = current.runtime(name)
+    policy.fresh()
+    path.unlink()
+
+
 @contextmanager
 def _guard(policy, name, deadline):
-    """Serialize lock-file transitions. Interrupted guards require manual recovery.
+    """Serialize transitions; interrupted or policy-revoked guards need manual recovery.
 
     Guards are deliberately never recovered by TTL; recursively recovering a
     transition guard would reintroduce the ownership race it prevents.
@@ -230,8 +240,7 @@ def _guard(policy, name, deadline):
         yield
     finally:
         try:
-            _owned(policy, guard_name, token)
-            policy.runtime(guard_name).unlink()
+            _cleanup_owner(policy, guard_name, token)
         except (StateError, OSError):
             pass
 
@@ -254,8 +263,8 @@ def _expired(policy, name):
 def advisory_lock(vault, key, *, ttl_seconds=300, wait_seconds=0):
     """Acquire a bounded lease for cooperating writers; yield owner metadata.
 
-    Expired well-formed leases require both UTC and mtime expiry. A stale or
-    interrupted transition guard remains blocked for manual recovery. Callers
+    Expired well-formed leases require both UTC and mtime expiry. A stale,
+    interrupted or policy-revoked guard remains blocked for manual recovery. Callers
     must finish before their TTL; patch_note additionally checks ownership at
     replace time. No process liveness signal or filesystem transaction is used.
     """
@@ -299,8 +308,7 @@ def advisory_lock(vault, key, *, ttl_seconds=300, wait_seconds=0):
         # so a checked owner cannot be swapped between the check and unlink.
         try:
             with _guard(policy, name, time.monotonic() + min(1, MAX_WAIT_SECONDS)):
-                _owned(policy, name, token)
-                policy.runtime(name).unlink()
+                _cleanup_owner(policy, name, token)
         except (StateError, OSError):
             pass
 
@@ -368,7 +376,29 @@ def _edited(original, edits):
     return candidate, sum(end - start + len(replacement) for start, end, replacement in converted)
 
 
-def _atomic(path, data, before_replace):
+def _cleanup_temporary(policy, relative, temporary, *, runtime=False):
+    """Check current policy before cleanup metadata or deletion of our temporary."""
+    current = policy.fresh()
+    try:
+        if runtime:
+            target = current.runtime(relative)
+            checked = current.runtime(temporary.name)
+        else:
+            target = current.note(relative)
+            selected = temporary.relative_to(current.root).as_posix()
+            checked = resolve_note_path(current.vault, selected, current.rules)
+        if checked != temporary or checked.parent != target.parent:
+            raise StateError('unsafe_temporary')
+        regular(checked.lstat())
+    except FileNotFoundError:
+        raise
+    except (EvidenceError, ValueError, OSError, RuntimeError) as exc:
+        raise StateError('unsafe_temporary') from exc
+    policy.fresh()
+
+
+def _atomic(path, data, before_replace, *, cleanup_guard=None):
+    """Retain our temporary for manual recovery when its cleanup guard refuses."""
     mode = stat.S_IMODE(path.lstat().st_mode) if path.exists() else 0o600
     fd, name = tempfile.mkstemp(prefix='.vault-state-', dir=path.parent)
     temporary = Path(name)
@@ -382,8 +412,14 @@ def _atomic(path, data, before_replace):
         before_replace(temporary)
     finally:
         try:
+            if cleanup_guard is not None:
+                cleanup_guard(temporary)
             temporary.unlink()
         except FileNotFoundError:
+            pass
+        except StateError:
+            # A failed current-policy/path check retains our staged file for
+            # conservative manual recovery; do not inspect denied metadata.
             pass
 
 
@@ -433,9 +469,14 @@ def patch_note(vault, path, expected_sha256, edits, *, source_hashes=None,
                 if checked != target:
                     raise StateError('unsafe_path')
                 regular(temporary.lstat())
+                # Source/target reads may have outlasted the earlier policy
+                # observation. Close that observation before this replace;
+                # this remains a point-in-time check, not a filesystem freeze.
+                policy.fresh()
                 os.replace(temporary, checked)
         if candidate != original:
-            _atomic(target, candidate, replace)
+            _atomic(target, candidate, replace,
+                    cleanup_guard=lambda temporary: _cleanup_temporary(policy, canonical, temporary))
         else:
             # Unchanged results still enforce policy, revision and sources.
             with _lease_guard(policy, lease):
@@ -448,6 +489,7 @@ def patch_note(vault, path, expected_sha256, edits, *, source_hashes=None,
                     source, _, _ = current.read_note(relative)
                     if source['sha256'] != expected:
                         raise StateError('source_changed')
+                policy.fresh()
         return dict(status='applied' if candidate != original else 'unchanged', path=canonical,
                     before_sha256=expected_sha256, after_sha256=_sha(candidate), bytes_changed=changed)
 
@@ -623,12 +665,14 @@ def project_handoff(vault, log_path, tasks_path, anchor_path, *, namespace='hand
     result = dict(status='proposed', path=anchor_info['path'], before_sha256=anchor_info['sha256'],
                   after_sha256=_sha(candidate), projection=projection, block=block,
                   warnings=warnings, previous_anchor_checked=previous_checked, edits=edits)
+    # Also protect the default dry-run publication after the optional exact
+    # previous-anchor read, not only the privileged apply path.
+    policy.fresh()
     if apply:
         if expected_sha256 is None:
             raise StateError('expected_hash_required')
         if expected_sha256 != anchor_info['sha256']:
             raise StateError('stale_base')
-        policy.fresh()
         applied = patch_note(vault, anchor_info['path'], expected_sha256, edits,
                              source_hashes=source_hashes, expected_config_sha256=policy.config_sha256)
         result.update(applied)
@@ -719,8 +763,10 @@ def write_checkpoint(vault, event, *, session_id=None, pending_references=None):
                     if info['sha256'] != base_sha:
                         raise StateError('checkpoint_changed')
                 regular(temporary.lstat())
+                policy.fresh()
                 os.replace(temporary, checked)
-        _atomic(target, raw, replace)
+        _atomic(target, raw, replace,
+                cleanup_guard=lambda temporary: _cleanup_temporary(policy, name, temporary, runtime=True))
         return dict(path=RUNTIME_DIR + '/' + name, sha256=_sha(raw), event=event)
 
 

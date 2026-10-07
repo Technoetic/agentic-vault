@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import importlib
 import inspect
 import json
@@ -51,6 +52,38 @@ class VaultStateTests(unittest.TestCase):
     def project(self, **kwargs):
         return state.project_handoff(self.vault, 'notes/log.md', 'notes/tasks.md',
                                      'notes/handoff.md', **kwargs)
+
+    @contextmanager
+    def observe_runtime_cleanup(self, changed, reads, unlinks):
+        real_read, real_unlink = state._read, Path.unlink
+        def relative(path):
+            try:
+                value = path.relative_to(self.vault).as_posix()
+            except ValueError:
+                return None
+            return value if value.startswith(state.RUNTIME_DIR + '/') else None
+        def read(resolver, limit=state.MAX_BYTES):
+            selected = relative(resolver())
+            if changed and selected:
+                reads.append(selected)
+            return real_read(resolver, limit)
+        def unlink(path, *args, **kwargs):
+            selected = relative(path)
+            if changed and selected:
+                unlinks.append(selected)
+            return real_unlink(path, *args, **kwargs)
+        with mock.patch.object(state, '_read', side_effect=read), mock.patch.object(Path, 'unlink', unlink):
+            yield
+
+    def revoked_config(self, original, reason):
+        if reason == 'malformed':
+            return b'{malformed'
+        config = json.loads(original)
+        if reason == 'denied':
+            config['deny_zones'].append(state.RUNTIME_DIR)
+        else:
+            config['vault_name'] = 'Different cleanup generation'
+        return json.dumps(config).encode()
 
     def test_partial_edit_preserves_untouched_mixed_newlines_and_korean(self):
         original = '첫줄\r\nold\nlast\r\n'.encode()
@@ -277,7 +310,7 @@ except StateError as e: print(str(e))
                 state.patch_note(self.vault, 'notes/edit.md', sha(b'old\n'),
                                  [{'start': 0, 'end': 3, 'replacement': 'new'}])
         self.assertEqual(path.read_bytes(), b'old\n')
-        self.assertEqual(list(path.parent.glob('.vault-state-*')), [])
+        self.assertEqual(len(list(path.parent.glob('.vault-state-*'))), 1)
 
     def patch_with_config(self, path, original, edits, expected_config):
         self.assertIn('expected_config_sha256', inspect.signature(state.patch_note).parameters,
@@ -455,7 +488,7 @@ except StateError as e: print(str(e))
             with self.subTest(field=field, invalid=invalid):
                 relative = f'notes/edit-{number}.md'
                 target = self.write(relative, b'old\n')
-                def tamper(path, data, before_replace):
+                def tamper(path, data, before_replace, **kwargs):
                     # Every subcase has a distinct lease and target; preserved
                     # malformed locks from earlier subcases remain untouched.
                     lock_key = 'note:' + relative.casefold()
@@ -463,7 +496,7 @@ except StateError as e: print(str(e))
                     record = json.loads(lock.read_bytes())
                     record[field] = invalid
                     lock.write_bytes(json.dumps(record).encode())
-                    return real_atomic(path, data, before_replace)
+                    return real_atomic(path, data, before_replace, **kwargs)
                 with mock.patch.object(state, '_atomic', side_effect=tamper):
                     try:
                         state.patch_note(self.vault, relative, sha(b'old\n'),
@@ -474,6 +507,159 @@ except StateError as e: print(str(e))
                     else:
                         self.fail('malformed same-token lease authorized a write')
                 self.assertEqual(target.read_bytes(), b'old\n')
+
+    def test_fix3_policy_change_during_last_target_or_source_read_blocks_replace(self):
+        original_config = (self.vault / state.CONFIG_PATH).read_bytes()
+        real_read = state._Policy.read_note
+        for boundary in ('target', 'source'):
+            with self.subTest(boundary=boundary):
+                self.write(state.CONFIG_PATH, original_config)
+                relative = f'notes/edit-{boundary}.md'
+                target = self.write(relative, b'old\r\n')
+                staged_before = set(target.parent.glob('.vault-state-*'))
+                source_relative = f'notes/source-{boundary}.md'
+                self.write(source_relative, b'Host observation only\n')
+                last = source_relative if boundary == 'source' else relative
+                switched = []
+                def drift(policy, selected):
+                    result = real_read(policy, selected)
+                    if selected == last and any(path not in staged_before for path in target.parent.glob('.vault-state-*')):
+                        config = json.loads(original_config)
+                        config['deny_zones'].append('notes')
+                        self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                        switched.append(True)
+                    return result
+                hashes = {source_relative: sha(b'Host observation only\n')} if boundary == 'source' else None
+                with mock.patch.object(state._Policy, 'read_note', drift):
+                    with self.assertRaisesRegex(state.StateError, r'^(configuration_changed|unsafe_configuration)$'):
+                        state.patch_note(self.vault, relative, sha(b'old\r\n'),
+                                         [{'start': 0, 'end': 3, 'replacement': 'new'}],
+                                         source_hashes=hashes, expected_config_sha256=sha(original_config))
+                self.assertEqual(switched, [True])
+                self.assertEqual(target.read_bytes(), b'old\r\n')
+                staged_after = set(target.parent.glob('.vault-state-*'))
+                self.assertEqual(len(staged_after - staged_before), 1)
+                self.assertTrue(staged_before.issubset(staged_after))
+
+    def test_fix3_unchanged_result_rechecks_policy_after_last_source_read(self):
+        original = b'old\n'
+        target = self.write('notes/edit.md', original)
+        self.write('notes/source.md', b'Observation only\n')
+        original_config = (self.vault / state.CONFIG_PATH).read_bytes()
+        real_read = state._Policy.read_note
+        switched = []
+        def drift(policy, selected):
+            result = real_read(policy, selected)
+            if selected == 'notes/source.md':
+                config = json.loads(original_config)
+                config['deny_zones'].append('notes')
+                self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                switched.append(True)
+            return result
+        with mock.patch.object(state._Policy, 'read_note', drift):
+            with self.assertRaisesRegex(state.StateError, r'^(configuration_changed|unsafe_configuration)$'):
+                state.patch_note(self.vault, 'notes/edit.md', sha(original), [],
+                                 source_hashes={'notes/source.md': sha(b'Observation only\n')})
+        self.assertEqual(switched, [True])
+        self.assertEqual(target.read_bytes(), original)
+
+    def test_fix3_projection_dry_run_rechecks_policy_after_last_selected_read(self):
+        original_config = (self.vault / state.CONFIG_PATH).read_bytes()
+        previous = self.project()['block'].encode()
+        self.write('notes/previous.md', previous)
+        anchor = self.vault / 'notes/handoff.md'
+        original = anchor.read_bytes()
+        real_read = state._Policy.read_note
+        for last in ('notes/handoff.md', 'notes/previous.md'):
+            with self.subTest(last=last):
+                self.write(state.CONFIG_PATH, original_config)
+                switched = []
+                def drift(policy, selected):
+                    result = real_read(policy, selected)
+                    if selected == last:
+                        config = json.loads(original_config)
+                        config['deny_zones'].append('notes')
+                        self.write(state.CONFIG_PATH, json.dumps(config).encode())
+                        switched.append(True)
+                    return result
+                kwargs = {'previous_anchor_path': 'notes/previous.md',
+                          'previous_anchor_sha256': sha(previous)} if last.endswith('previous.md') else {}
+                with mock.patch.object(state._Policy, 'read_note', drift):
+                    with self.assertRaisesRegex(state.StateError, r'^(configuration_changed|unsafe_configuration)$'):
+                        self.project(**kwargs)
+                self.assertEqual(switched, [True])
+                self.assertEqual(anchor.read_bytes(), original)
+
+    def test_fix4_guard_cleanup_checks_current_policy_before_owner_read(self):
+        original = (self.vault / state.CONFIG_PATH).read_bytes()
+        for reason in ('denied', 'changed', 'malformed'):
+            with self.subTest(reason=reason):
+                self.write(state.CONFIG_PATH, original)
+                policy = state._Policy(self.vault)
+                name = 'direct-' + reason + '.json'
+                guard = self.vault / state.RUNTIME_DIR / (name + '.guard')
+                changed, reads, unlinks = [], [], []
+                with self.observe_runtime_cleanup(changed, reads, unlinks):
+                    with state._guard(policy, name, time.monotonic() + 1):
+                        self.write(state.CONFIG_PATH, self.revoked_config(original, reason))
+                        changed.append(True)
+                self.assertEqual(reads, [])
+                self.assertEqual(unlinks, [])
+                self.assertTrue(guard.exists(), 'revoked-policy guard must remain for manual recovery')
+
+    def test_fix4_lease_release_checks_policy_after_transition_guard_creation(self):
+        original = (self.vault / state.CONFIG_PATH).read_bytes()
+        real_exclusive = state._exclusive
+        for reason in ('denied', 'changed', 'malformed'):
+            with self.subTest(reason=reason):
+                self.write(state.CONFIG_PATH, original)
+                changed, reads, unlinks, guards = [], [], [], []
+                def revoke(policy, name, record):
+                    result = real_exclusive(policy, name, record)
+                    if name.endswith('.guard'):
+                        guards.append(name)
+                        if len(guards) == 2:
+                            self.write(state.CONFIG_PATH, self.revoked_config(original, reason))
+                            changed.append(True)
+                    return result
+                with self.observe_runtime_cleanup(changed, reads, unlinks), \
+                     mock.patch.object(state, '_exclusive', side_effect=revoke):
+                    with state.advisory_lock(self.vault, 'release-' + reason) as lease:
+                        path = Path(lease['lock_path'])
+                self.assertEqual(reads, [])
+                self.assertEqual(unlinks, [])
+                self.assertTrue(path.exists())
+                self.assertTrue(Path(str(path) + '.guard').exists())
+
+    def test_fix4_cleanup_rechecks_policy_after_guard_or_lease_owner_read(self):
+        original = (self.vault / state.CONFIG_PATH).read_bytes()
+        real_owned = state._owned
+        for kind in ('guard', 'lease'):
+            with self.subTest(kind=kind):
+                self.write(state.CONFIG_PATH, original)
+                changed, reads, unlinks, releasing = [], [], [], []
+                def revoke(policy, name, token):
+                    result = real_owned(policy, name, token)
+                    matches = name.endswith('.guard') if kind == 'guard' else not name.endswith('.guard')
+                    if releasing and matches and not changed:
+                        self.write(state.CONFIG_PATH, self.revoked_config(original, 'denied'))
+                        changed.append(True)
+                    return result
+                with self.observe_runtime_cleanup(changed, reads, unlinks), \
+                     mock.patch.object(state, '_owned', side_effect=revoke):
+                    if kind == 'guard':
+                        policy = state._Policy(self.vault)
+                        path = self.vault / state.RUNTIME_DIR / 'after-owner.json.guard'
+                        with state._guard(policy, 'after-owner.json', time.monotonic() + 1):
+                            releasing.append(True)
+                    else:
+                        with state.advisory_lock(self.vault, 'after-lease-owner') as lease:
+                            path = Path(lease['lock_path'])
+                            releasing.append(True)
+                self.assertEqual(changed, [True])
+                self.assertEqual(reads, [])
+                self.assertEqual(unlinks, [])
+                self.assertTrue(path.exists())
 
 
 if __name__ == '__main__':
