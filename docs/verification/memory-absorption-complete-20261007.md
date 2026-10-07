@@ -1,5 +1,7 @@
 # Memory-pattern absorption completion verification (2026-10-07)
 
+This is the historical experiment snapshot before publication. The subsequent public package and installation/CI receipts are described in [v0.19.0 verification](v0.19.0.md); the measurements and version state below retain their original scope.
+
 - task_id: `agentic-vault-memory-absorption-complete-20261007`
 - artifact_paths: [usage/coverage](../memory-patterns.md), [machine results](memory-absorption-results-20261007.json), local branch `feat/memory-improvements-20261007` based on `904231b8ed2eec1f23a432ba1e14289100dfc52b`; new retrieval, memory-unit and lesson-observation modules, qmd adapter, evaluator/workflow runner, command/installer/CI integration and fixtures.
 - verification_commands_and_results: final parent **861 tests: 836 passed, 25 skipped, zero failures**, 193.564s; independent **861: 836 passed, 25 skipped, zero failures**, 193.4s. Full exact commands, outcomes and code/fixture hashes are in the machine results.

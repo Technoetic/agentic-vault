@@ -19,7 +19,7 @@ HEALTHCHECK_SCRIPT = (
 )
 
 EXPECTED = "0.19.0"
-EXPECTED_PUBLIC_REF = "0.18.0"  # Local source has not been tagged/published.
+EXPECTED_PUBLIC_REF = "0.19.0"
 EXPECTED_BADGE_LINE = (
     "[![Version](https://img.shields.io/badge/v0.19.0-10B981?style=for-the-badge)]"
     "(docs/releases/v0.19.0.md)"

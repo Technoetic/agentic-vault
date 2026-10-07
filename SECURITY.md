@@ -8,9 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.19.0 (latest) | Local hardening source; public tag/Release not published. Fixes are verified against this source before local rollout. |
-| 0.18.0 (public release) | Existing public release; review the local 0.19.0 changes before upgrading. |
-| 0.17.1 and earlier | No. Upgrade to 0.18.0 after reviewing the Jarvis API-auth requirement. |
+| 0.19.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.18.0 and earlier | No. Upgrade to 0.19.0 after reviewing the Jarvis API-auth requirement. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -154,7 +153,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 공개 릴리스는 0.18.0이며 로컬 개선 소스는 미게시 0.19.0이다. 0.17.1 이하는 Jarvis의 API 인증 요건을 확인한 뒤 지원 소스로 갱신한다.
+- 보안 수정 대상은 최신 0.19.0 소스다. 0.18.0 이하는 Jarvis의 API 인증 요건을 확인한 뒤 0.19.0으로 갱신한다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.

@@ -83,12 +83,12 @@ For Codex, register the release tag and add the plugin as described in [the Code
 
 **Core commands** (all 15 are in [commands/](commands/)):
 
-The local v0.19.0 source adds `/vault-harden` / Codex `harden` for provenance,
+v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. Public installation refs below remain v0.18.0
-until a remote release is actually published.
+budgets; new findings warn first. The installation refs below target v0.19.0.
+Code, CI and installation evidence is recorded in the [release verification](docs/verification/v0.19.0.md).
 
 - `/vault-init <name>` creates the standard folder tree, `vault-config.json`, templates and engine rules, and installs the git hooks when git is enabled.
 - `/vault-session-start` restores the last state; `/vault-session-end` updates the handoff, hot note and log, then commits locally.
@@ -453,9 +453,9 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.19.0**이며 **Claude Code, Codex 겸용**이다. 이 소스는 로컬 개선판이며 원격 tag/Release는 아직 게시하지 않았다. [출처·공유 상태 보강](docs/hardening.md)과 [이번 변경·검증 범위](docs/releases/v0.19.0.md)을 함께 본다. 사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.19.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+현재 버전은 **v0.19.0**이며 **Claude Code, Codex 겸용**이다. [출처·공유 상태 보강](docs/hardening.md)과 [이번 변경·검증 범위](docs/releases/v0.19.0.md)을 함께 본다. 사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.19.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-공개 v0.18.0은 아래 GitHub 설치로 받거나 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.18.0)을 내려받아 설치한다. [이번 변경·검증 범위](docs/releases/v0.18.0.md), [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.19.0) 경로는 v0.19.0을 가리킨다. 코드·CI·설치 상태는 [v0.19.0 검증 기록](docs/verification/v0.19.0.md)에서 확인한다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -496,7 +496,7 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.18.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.19.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
