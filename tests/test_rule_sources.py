@@ -66,7 +66,19 @@ BENIGN = (
     "암호화: AES-256으로 저장한다.",
     "Docs live at https://example.com:8443/guide and git@github.com:org/repo.git.",
     "회의는 12:30에 시작한다.",
+    "일반 한글과 ㄱ 자모, café e\u0301 표기는 공개 근거다.",
+    "공개 이모지 ☕\ufe0f 👩\u200d💻와 선택자 漢\U000e0100",
+    "pass한word=fake-test-value-1234",
+    "pass\u0338word=fake-test-value-1234",
+    "pass\u0378word=fake-test-value-1234",
 )
+HANGUL_FILLERS = (0x115F, 0x1160, 0x3164, 0xFFA0)
+SYNTHETIC_CREDENTIALS = {
+    "github": "ghp_" + "a" * 30,
+    "anthropic": "sk-ant-" + "a" * 24,
+    "aws": "AKIA" + "A" * 16,
+    "assignment": "password=fake-test-value-1234",
+}
 
 
 def _choice_questions(instructions: str) -> dict:
@@ -128,6 +140,32 @@ class SecretFilterSourceTests(unittest.TestCase):
             with self.subTest(text=disguised):
                 self.assertIsNone(jev_client.SENSITIVE.search(disguised))
                 self.assertTrue(jev_client.contains_sensitive(disguised))
+
+    def test_hangul_fillers_cannot_split_known_credential_shapes(self) -> None:
+        for family, credential in SYNTHETIC_CREDENTIALS.items():
+            self.assertTrue(jev_client.contains_sensitive(credential), family)
+            for code_point in HANGUL_FILLERS:
+                disguised = credential[:2] + chr(code_point) + credential[2:]
+                with self.subTest(code_point=hex(code_point), family=family):
+                    self.assertIsNone(jev_client.SENSITIVE.search(disguised))
+                    self.assertTrue(jev_client.contains_sensitive({"nested": [disguised]}))
+
+    def test_tags_and_variation_selectors_cannot_split_credential_labels(self) -> None:
+        for code_point in (0xE0000, 0xE0001, 0xE0020, 0xE007F,
+                           0xFE00, 0xFE07, 0xFE0F, 0xE0100, 0xE0180, 0xE01EF):
+            disguised = "pass" + chr(code_point) + "word=fake-test-value-1234"
+            with self.subTest(code_point=hex(code_point)):
+                self.assertIsNone(jev_client.SENSITIVE.search(disguised))
+                self.assertTrue(jev_client.contains_sensitive(disguised))
+
+    def test_other_letters_marks_and_unassigned_codepoints_are_not_discarded(self) -> None:
+        for code_point in (0xD55C, 0x0338, 0x0378, 0xFE20, 0xDFFFF,
+                           0xE0080, 0xE00FF, 0xE01F0):
+            text = "pass" + chr(code_point) + "word=fake-test-value-1234"
+            with self.subTest(code_point=hex(code_point)):
+                self.assertFalse(jev_client.contains_sensitive(text))
+                payload = jev_client.build_payload({"evidence": [text]}, _choice_questions(text))
+                self.assertEqual(json.loads(payload)["state"]["evidence"], [text])
 
     def test_no_other_script_defines_its_own_secret_pattern(self) -> None:
         owners = sorted(
