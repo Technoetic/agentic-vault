@@ -1,0 +1,1106 @@
+{
+  "labeling": {
+    "method": "Host-curated source/claim judgments frozen before evaluation; expected paths are evaluator-only labels.",
+    "languages": {
+      "ko": 32,
+      "en": 32
+    },
+    "scenario_counts_per_language": {
+      "particles": 6,
+      "short": 6,
+      "mixed": 6,
+      "spacing": 6,
+      "update": 4,
+      "abstention": 4
+    },
+    "claims": "Literal action/date/value claims read from note bodies, with grade 3 operational evidence and grade 1 topical overview."
+  },
+  "queries": [
+    {
+      "id": "ko-particles-01",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "격리절차를",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "점검 전에 단로기를 잠근다"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-01",
+      "language": "en",
+      "scenario": "particles",
+      "query": "LOTO's",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "lock the isolator before inspection"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-01",
+      "language": "ko",
+      "scenario": "short",
+      "query": "격리",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "점검 전에 단로기를 잠근다"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-01",
+      "language": "en",
+      "scenario": "short",
+      "query": "LOTO",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "lock the isolator before inspection"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-01",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "LOTO 격리절차는?",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "점검 전에 단로기를 잠근다"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-01",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Switchgear 격리절차",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "lock the isolator before inspection"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-01",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "격 리 절 차",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "점검 전에 단로기를 잠근다"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-01",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "L O T O",
+      "expected_paths": [
+        "20-knowledge/Switchgear isolation procedure.md"
+      ],
+      "required_claims": [
+        "lock the isolator before inspection"
+      ],
+      "relevance": {
+        "20-knowledge/Switchgear isolation procedure.md": 3,
+        "20-knowledge/primers/Switchgear isolation procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-particles-02",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "누전시험은",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "매월 시험 버튼을 누른다"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-02",
+      "language": "en",
+      "scenario": "particles",
+      "query": "RCDs",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "press the test button every month"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-02",
+      "language": "ko",
+      "scenario": "short",
+      "query": "누전",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "매월 시험 버튼을 누른다"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-02",
+      "language": "en",
+      "scenario": "short",
+      "query": "RCD",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "press the test button every month"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-02",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "RCD 누전시험는?",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "매월 시험 버튼을 누른다"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-02",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Residual 누전시험",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "press the test button every month"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-02",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "누 전 시 험",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "매월 시험 버튼을 누른다"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-02",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "R C D",
+      "expected_paths": [
+        "20-knowledge/Residual current device test.md"
+      ],
+      "required_claims": [
+        "press the test button every month"
+      ],
+      "relevance": {
+        "20-knowledge/Residual current device test.md": 3,
+        "20-knowledge/primers/Residual current device test overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-particles-03",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "임대갱신를",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "삼십 초 뒤 임대를 갱신한다"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-03",
+      "language": "en",
+      "scenario": "particles",
+      "query": "TTL's",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "renew the lease after thirty seconds"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-03",
+      "language": "ko",
+      "scenario": "short",
+      "query": "임대",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "삼십 초 뒤 임대를 갱신한다"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-03",
+      "language": "en",
+      "scenario": "short",
+      "query": "TTL",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "renew the lease after thirty seconds"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-03",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "TTL 임대갱신는?",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "삼십 초 뒤 임대를 갱신한다"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-03",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Lease 임대갱신",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "renew the lease after thirty seconds"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-03",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "임 대 갱 신",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "삼십 초 뒤 임대를 갱신한다"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-03",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "T T L",
+      "expected_paths": [
+        "20-knowledge/Lease renewal procedure.md"
+      ],
+      "required_claims": [
+        "renew the lease after thirty seconds"
+      ],
+      "relevance": {
+        "20-knowledge/Lease renewal procedure.md": 3,
+        "20-knowledge/primers/Lease renewal procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-particles-04",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "실패복구은",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "메시지 재처리 전에 오류를 확인한다"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-04",
+      "language": "en",
+      "scenario": "particles",
+      "query": "DLQs",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "inspect the error before replaying the message"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-04",
+      "language": "ko",
+      "scenario": "short",
+      "query": "실패",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "메시지 재처리 전에 오류를 확인한다"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-04",
+      "language": "en",
+      "scenario": "short",
+      "query": "DLQ",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "inspect the error before replaying the message"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-04",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "DLQ 실패복구는?",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "메시지 재처리 전에 오류를 확인한다"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-04",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Failed 실패복구",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "inspect the error before replaying the message"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-04",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "실 패 복 구",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "메시지 재처리 전에 오류를 확인한다"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-04",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "D L Q",
+      "expected_paths": [
+        "20-knowledge/Failed queue recovery procedure.md"
+      ],
+      "required_claims": [
+        "inspect the error before replaying the message"
+      ],
+      "relevance": {
+        "20-knowledge/Failed queue recovery procedure.md": 3,
+        "20-knowledge/primers/Failed queue recovery procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-particles-05",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "체결검사를",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "단자를 사 뉴턴미터로 조인다"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-05",
+      "language": "en",
+      "scenario": "particles",
+      "query": "NMT's",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "tighten the terminal to four newton metres"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-05",
+      "language": "ko",
+      "scenario": "short",
+      "query": "체결",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "단자를 사 뉴턴미터로 조인다"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-05",
+      "language": "en",
+      "scenario": "short",
+      "query": "NMT",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "tighten the terminal to four newton metres"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-05",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "NMT 체결검사는?",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "단자를 사 뉴턴미터로 조인다"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-05",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Fastener 체결검사",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "tighten the terminal to four newton metres"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-05",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "체 결 검 사",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "단자를 사 뉴턴미터로 조인다"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-05",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "N M T",
+      "expected_paths": [
+        "20-knowledge/Fastener torque inspection.md"
+      ],
+      "required_claims": [
+        "tighten the terminal to four newton metres"
+      ],
+      "relevance": {
+        "20-knowledge/Fastener torque inspection.md": 3,
+        "20-knowledge/primers/Fastener torque inspection overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-particles-06",
+      "language": "ko",
+      "scenario": "particles",
+      "query": "경보확인은",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "경보 확인 전에 원인을 기록한다"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-particles-06",
+      "language": "en",
+      "scenario": "particles",
+      "query": "ACKs",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "record the cause before acknowledging the alarm"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-short-06",
+      "language": "ko",
+      "scenario": "short",
+      "query": "경보",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "경보 확인 전에 원인을 기록한다"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-short-06",
+      "language": "en",
+      "scenario": "short",
+      "query": "ACK",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "record the cause before acknowledging the alarm"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-mixed-06",
+      "language": "ko",
+      "scenario": "mixed",
+      "query": "ACK 경보확인는?",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "경보 확인 전에 원인을 기록한다"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-mixed-06",
+      "language": "en",
+      "scenario": "mixed",
+      "query": "Alarm 경보확인",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "record the cause before acknowledging the alarm"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "ko-spacing-06",
+      "language": "ko",
+      "scenario": "spacing",
+      "query": "경 보 확 인",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "경보 확인 전에 원인을 기록한다"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-spacing-06",
+      "language": "en",
+      "scenario": "spacing",
+      "query": "A C K",
+      "expected_paths": [
+        "20-knowledge/Alarm acknowledgement procedure.md"
+      ],
+      "required_claims": [
+        "record the cause before acknowledging the alarm"
+      ],
+      "relevance": {
+        "20-knowledge/Alarm acknowledgement procedure.md": 3,
+        "20-knowledge/primers/Alarm acknowledgement procedure overview.md": 1
+      },
+      "label_rationale": "The procedure states the operational action; the overview only identifies the topic."
+    },
+    {
+      "id": "en-update-01",
+      "language": "en",
+      "scenario": "update",
+      "query": "cedar rollback current",
+      "expected_paths": [
+        "20-knowledge/current/Cedar recovery procedure.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Cedar recovery procedure old.md"
+      ],
+      "required_claims": [
+        "obtain two approvals before recovery"
+      ],
+      "relevance": {
+        "20-knowledge/current/Cedar recovery procedure.md": 3,
+        "20-knowledge/history/Cedar recovery procedure old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "ko-update-01",
+      "language": "ko",
+      "scenario": "update",
+      "query": "삼나무복구는 지금?",
+      "expected_paths": [
+        "20-knowledge/current/Cedar recovery procedure.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Cedar recovery procedure old.md"
+      ],
+      "required_claims": [
+        "복구 전에 승인 두 건을 받는다"
+      ],
+      "relevance": {
+        "20-knowledge/current/Cedar recovery procedure.md": 3,
+        "20-knowledge/history/Cedar recovery procedure old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "en-update-02",
+      "language": "en",
+      "scenario": "update",
+      "query": "maple quota current",
+      "expected_paths": [
+        "20-knowledge/current/Maple quota policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Maple quota policy old.md"
+      ],
+      "required_claims": [
+        "use a quota of twelve requests"
+      ],
+      "relevance": {
+        "20-knowledge/current/Maple quota policy.md": 3,
+        "20-knowledge/history/Maple quota policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "ko-update-02",
+      "language": "ko",
+      "scenario": "update",
+      "query": "단풍할당는 지금?",
+      "expected_paths": [
+        "20-knowledge/current/Maple quota policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Maple quota policy old.md"
+      ],
+      "required_claims": [
+        "요청 할당량은 열두 건이다"
+      ],
+      "relevance": {
+        "20-knowledge/current/Maple quota policy.md": 3,
+        "20-knowledge/history/Maple quota policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "en-update-03",
+      "language": "en",
+      "scenario": "update",
+      "query": "birch retention current",
+      "expected_paths": [
+        "20-knowledge/current/Birch retention policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Birch retention policy old.md"
+      ],
+      "required_claims": [
+        "retain the audit record for ninety days"
+      ],
+      "relevance": {
+        "20-knowledge/current/Birch retention policy.md": 3,
+        "20-knowledge/history/Birch retention policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "ko-update-03",
+      "language": "ko",
+      "scenario": "update",
+      "query": "자작보존는 지금?",
+      "expected_paths": [
+        "20-knowledge/current/Birch retention policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Birch retention policy old.md"
+      ],
+      "required_claims": [
+        "감사 기록을 구십 일 보존한다"
+      ],
+      "relevance": {
+        "20-knowledge/current/Birch retention policy.md": 3,
+        "20-knowledge/history/Birch retention policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "en-update-04",
+      "language": "en",
+      "scenario": "update",
+      "query": "spruce timeout current",
+      "expected_paths": [
+        "20-knowledge/current/Spruce timeout policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Spruce timeout policy old.md"
+      ],
+      "required_claims": [
+        "set the timeout to forty seconds"
+      ],
+      "relevance": {
+        "20-knowledge/current/Spruce timeout policy.md": 3,
+        "20-knowledge/history/Spruce timeout policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "ko-update-04",
+      "language": "ko",
+      "scenario": "update",
+      "query": "가문비시간는 지금?",
+      "expected_paths": [
+        "20-knowledge/current/Spruce timeout policy.md"
+      ],
+      "stale_paths": [
+        "20-knowledge/history/Spruce timeout policy old.md"
+      ],
+      "required_claims": [
+        "제한 시간을 사십 초로 설정한다"
+      ],
+      "relevance": {
+        "20-knowledge/current/Spruce timeout policy.md": 3,
+        "20-knowledge/history/Spruce timeout policy old.md": 0
+      },
+      "as_of": "2026-10-07",
+      "label_rationale": "The current half-open validity interval excludes the previous values."
+    },
+    {
+      "id": "en-abstention-01",
+      "language": "en",
+      "scenario": "abstention",
+      "query": "quartz tax authority",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    },
+    {
+      "id": "en-abstention-02",
+      "language": "en",
+      "scenario": "abstention",
+      "query": "lunar warranty limit",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    },
+    {
+      "id": "en-abstention-03",
+      "language": "en",
+      "scenario": "abstention",
+      "query": "obsolete permit",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07",
+      "stale_paths": [
+        "20-knowledge/history/Obsolete permit.md"
+      ]
+    },
+    {
+      "id": "en-abstention-04",
+      "language": "en",
+      "scenario": "abstention",
+      "query": "switchgear director salary",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    },
+    {
+      "id": "ko-abstention-01",
+      "language": "ko",
+      "scenario": "abstention",
+      "query": "석영세금권한",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    },
+    {
+      "id": "ko-abstention-02",
+      "language": "ko",
+      "scenario": "abstention",
+      "query": "달보증한도",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    },
+    {
+      "id": "ko-abstention-03",
+      "language": "ko",
+      "scenario": "abstention",
+      "query": "폐기허가",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07",
+      "stale_paths": [
+        "20-knowledge/history/Obsolete permit.md"
+      ]
+    },
+    {
+      "id": "ko-abstention-04",
+      "language": "ko",
+      "scenario": "abstention",
+      "query": "격리절차 담당자 급여",
+      "expectation": "no_answer",
+      "expected_paths": [],
+      "required_claims": [],
+      "relevance": {},
+      "label_rationale": "No allowed currently valid note states the requested fact; lexical overlap may remain a false positive.",
+      "as_of": "2026-10-07"
+    }
+  ]
+}

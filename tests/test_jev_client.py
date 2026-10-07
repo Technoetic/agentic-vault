@@ -16,6 +16,13 @@ from contextlib import redirect_stderr, redirect_stdout
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/agentic-vault/scripts"
 KEY = "synthetic-test-key"
+HANGUL_FILLERS = (0x115F, 0x1160, 0x3164, 0xFFA0)
+SYNTHETIC_CREDENTIALS = {
+    "github": "ghp_" + "a" * 30,
+    "anthropic": "sk-ant-" + "a" * 24,
+    "aws": "AKIA" + "A" * 16,
+    "assignment": "password=fake-test-value-1234",
+}
 
 
 def questions():
@@ -85,6 +92,64 @@ class JevClientTests(ClientTestBase, unittest.TestCase):
             with self.subTest(invalid=repr(invalid)), self.assertRaises(self.client.JevError) as caught:
                 builder({"evidence": ["Public evidence"]}, selected)
             self.assertEqual(caught.exception.code, "invalid_input")
+
+    def test_hangul_fillers_cannot_hide_credentials_from_final_payload(self):
+        for code_point in HANGUL_FILLERS:
+            for family, credential in SYNTHETIC_CREDENTIALS.items():
+                disguised = credential[:2] + chr(code_point) + credential[2:]
+                for surface in ("state", "instructions", "choice", "definition"):
+                    state = {"evidence": ["Public evidence"]}
+                    selected = questions()
+                    if surface == "state":
+                        state["evidence"] = [disguised]
+                    elif surface == "instructions":
+                        selected["claim_1"]["instructions"] = disguised
+                    elif surface == "choice":
+                        selected["claim_1"]["criteria"] = {
+                            disguised: "Direct evidence", "unknown": "Insufficient evidence"}
+                    else:
+                        selected["claim_1"]["criteria"]["supported"] = disguised
+                    with self.subTest(code_point=hex(code_point), family=family, surface=surface):
+                        with self.assertRaises(self.client.JevError) as caught:
+                            self.client.build_payload(state, selected)
+                        self.assertEqual(caught.exception.code, "sensitive_input")
+
+    def test_ignorable_ranges_cannot_hide_credentials_from_final_payload(self):
+        for code_point in (0xE0000, 0xE0001, 0xE0020, 0xE007F,
+                           0xFE00, 0xFE07, 0xFE0F, 0xE0100, 0xE0180, 0xE01EF):
+            disguised = "pass" + chr(code_point) + "word=fake-test-value-1234"
+            with self.subTest(code_point=hex(code_point)):
+                with self.assertRaises(self.client.JevError) as caught:
+                    self.client.build_payload({"evidence": [disguised]}, questions())
+                self.assertEqual(caught.exception.code, "sensitive_input")
+
+    def test_hangul_fillers_cannot_hide_structured_credential_labels(self):
+        for code_point in HANGUL_FILLERS:
+            for value in ("fake-test-value-1234", 1234, True):
+                label = "pass" + chr(code_point) + "word"
+                with self.subTest(code_point=hex(code_point), value_type=type(value).__name__):
+                    with self.assertRaises(self.client.JevError) as caught:
+                        self.client.build_payload({"config": {label: value}}, questions())
+                    self.assertEqual(caught.exception.code, "sensitive_input")
+
+    def test_inspection_normalization_preserves_original_public_payload(self):
+        public_texts = (
+            "일반 한글 근거와 ㄱ 자모를 그대로 보낸다.",
+            "café e\u0301 결합 표기와 pass\u0338word=fake-test-value-1234",
+            "이모지 ☕\ufe0f 👩\u200d💻와 문자 선택자 漢\U000e0100",
+            "pass\u0378word=fake-test-value-1234",
+            "공개 filler " + "".join(chr(code_point) for code_point in HANGUL_FILLERS),
+            "공개 tag " + "".join(chr(code_point) for code_point in (0xE0000, 0xE0020, 0xE007F)),
+        )
+        for text in public_texts:
+            state = {"evidence": [text]}
+            selected = questions()
+            selected["claim_1"]["instructions"] = text
+            with self.subTest(text=ascii(text)):
+                payload = self.client.build_payload(state, selected)
+                self.assertEqual(json.loads(payload)["state"], state)
+                self.assertEqual(json.loads(payload)["questions"], selected)
+                self.assertIn(text.encode("utf-8"), payload)
 
     def test_valid_judgment_sends_only_api_payload_and_returns_validated_answer(self):
         calls = []

@@ -55,15 +55,25 @@ _CREDENTIAL_LABEL = re.compile(
     r"(?:password|passwd|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
     r"authorization|[a-z0-9_]*api[_-]?key|비밀\s?번호|비번|패스워드|"
     r"인증\s?키|액세스\s?키|api\s?키)\Z", re.IGNORECASE)
+_HANGUL_FILLERS = frozenset((0x115F, 0x1160, 0x3164, 0xFFA0))
 
 
 def _normalized(text):
-    """NFKC (full-width colon to ``:``, full-width ``sk`` to ``sk``) without
-    invisible format characters (Unicode category Cf, such as zero-width
-    spaces and joiners) that can split a keyword without changing how it looks.
+    """Return an inspection-only NFKC copy without known invisible splitters.
+
+    Remove Cf, four Hangul fillers, tags and variation selectors by explicit
+    range. Keep other letters, combining marks and unassigned code points;
+    the caller's original text and payload bytes are never normalized.
     """
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(char for char in folded if unicodedata.category(char) != "Cf")
+    return "".join(
+        char for char in folded
+        if unicodedata.category(char) != "Cf"
+        and ord(char) not in _HANGUL_FILLERS
+        and not 0xE0000 <= ord(char) <= 0xE007F
+        and not 0xFE00 <= ord(char) <= 0xFE0F
+        and not 0xE0100 <= ord(char) <= 0xE01EF
+    )
 
 
 def _matches_sensitive(text):
@@ -79,8 +89,8 @@ def _matches_sensitive(text):
 
 def contains_sensitive(value, literals=()):
     """Return True when any string in a JSON-like value (object keys included)
-    matches SENSITIVE, before or after NFKC normalization and removal of
-    invisible format characters, or contains one of the non-empty literal strings.
+    matches SENSITIVE, before or after inspection-only normalization of known
+    invisible splitters, or contains one of the non-empty literal strings.
 
     Credential-labelled nonempty JSON scalars are sensitive even when the label
     and value are separate strings. Cycles, excessive traversal/depth/text and

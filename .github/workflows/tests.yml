@@ -31,6 +31,14 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Bilingual lexical retrieval regression
         run: python scripts/evaluate_recall.py
+      - name: Temporal and graph retrieval comparison
+        run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0
+      - name: Interdependent synthetic memory workflows
+        run: python scripts/evaluate_memory_workflows.py --backend deterministic
+      - name: Hard bilingual recall at top3 (explicit query expansion)
+        run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
+      - name: Hard bilingual recall at top5 (same token budget)
+        run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
       - name: Compile Python sources
         run: python -m compileall -q hooks skills/agentic-vault/scripts scripts
       # Compare the committed tree with git's built-in empty tree so every

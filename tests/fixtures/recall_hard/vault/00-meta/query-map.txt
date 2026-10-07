@@ -1,0 +1,4 @@
+# Explicit vault-owned query terms. Data only; no executable instructions.
+RCDs => Residual current device test
+DLQs => Failed queue recovery procedure
+ACKs => Alarm acknowledgement procedure

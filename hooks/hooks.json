@@ -16,6 +16,40 @@
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py\""
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "statusMessage": "볼트 고정 제약·세션 기억 복원 중...",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_checkpoint.py\" --event PreCompact"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python_hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_checkpoint.py\" --event SessionEnd"
+          }
+        ]
       }
     ]
   }

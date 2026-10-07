@@ -18,14 +18,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.18.0"
+EXPECTED = "0.19.0"
+EXPECTED_PUBLIC_REF = "0.19.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.18.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.18.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.19.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.19.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.18.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.19.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -455,13 +456,13 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(EXPECTED_BADGE_LINE, readme_lines)
         self.assertIn(EXPECTED_TREE_LINE, readme_lines)
         self.assertIn(f"현재 버전은 **v{EXPECTED}**", readme)
-        self.assertIn(f"releases/tag/v{EXPECTED}", readme)
+        self.assertIn(f"releases/tag/v{EXPECTED_PUBLIC_REF}", readme)
         self.assertIn(f"[이번 변경·검증 범위](docs/releases/v{EXPECTED}.md)", readme)
         self.assertTrue((REPO_ROOT / "docs/verification" / f"v{EXPECTED}.md").is_file())
         for install_doc in (readme, (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")):
             refs = [line.strip() for line in install_doc.splitlines() if line.startswith("codex plugin marketplace add Technoetic/agentic-vault --ref ")]
             self.assertTrue(refs)
-            self.assertEqual(set(refs), {f"codex plugin marketplace add Technoetic/agentic-vault --ref v{EXPECTED}"})
+            self.assertEqual(set(refs), {f"codex plugin marketplace add Technoetic/agentic-vault --ref v{EXPECTED_PUBLIC_REF}"})
         for origin in EXPECTED_HISTORICAL_ORIGINS:
             with self.subTest(origin=origin):
                 self.assertIn(origin, readme)

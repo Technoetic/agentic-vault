@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.18.0 (latest) | Yes. Fixes ship as the next 0.18.x patch. |
-| 0.17.1 and earlier | No. Upgrade to 0.18.0 after reviewing the Jarvis API-auth requirement. |
+| 0.19.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.18.0 and earlier | No. Upgrade to 0.19.0 after reviewing the Jarvis API-auth requirement. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -144,7 +144,7 @@ them being bypassed in a way the documentation does not describe is still welcom
     remain supported. Such labelled values may require rewording a benign rubric.
   - Not caught: passwords or keys with no label and no known prefix, other
     vendors' formats, values after other labels or in other languages, secrets
-    split across lines or encoded (base64, hex), and anything inside images or
+    with arbitrarily split token values or encoded (base64, hex), and anything inside images or
     attachments.
 
   Send only the minimal, approved text.
@@ -153,7 +153,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정은 최신 릴리스(현재 0.18.0)에 다음 0.18.x 패치로 낸다. 0.17.1 이하는 Jarvis의 API 인증 요건을 확인한 뒤 0.18.0으로 올린다.
+- 보안 수정 대상은 최신 0.19.0 소스다. 0.18.0 이하는 Jarvis의 API 인증 요건을 확인한 뒤 0.19.0으로 갱신한다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
@@ -166,7 +166,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 입력64KiB·stdout/stderr 각64KiB를 검사하고, 타임아웃/초과 뒤 reader와파이프를 정리한다.
   임의의 자식 프로세스 트리를 종료하는 OS 샌드박스는 아니다. 라이브 모델 인증·응답은 검증하지 않았다.
 - Jev로 보내기 전 비밀 필터는 패턴 기반이다. 잡는 형식과 못 잡는 형식은 위 영어 목록에 있다.
-  라벨·알려진 접두사가 없는 비밀, 여러 줄로 나뉘거나 인코딩된 비밀은 통과한다.
+  알려진 라벨 뒤의 줄바꿈 비밀번호·키는 전체 원문 검사로 차단한다. 라벨·알려진 접두사가 없는 비밀, 임의로 쪼갠 토큰 값이나 인코딩된 비밀은 놓칠 수 있다.
 
 ## OWASP provided-document traceability
 

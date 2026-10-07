@@ -37,6 +37,9 @@
 |---|---|
 | `session-start` | [vault-session-start.md](../../../commands/vault-session-start.md) |
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
+| `links <인자>` | [관련 노트 연결 제안](../../../docs/link-proposals.md), `scripts/vault_links.py` (`--vault`·`--source`·`--query` 명시, 읽기 전용) |
+| `memory <인자>` | [구조화 기억](../../../docs/memory-patterns.md), `scripts/vault_memory.py` (`--vault`·vault-relative `--input`·예산 명시, 읽기 전용) |
+| `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |
 | `judge <고정 선택지 의미 질문>` | [vault-judge.md](../../../commands/vault-judge.md), [Jev 판단 안내](../../../docs/jev-judgments.md) |
 | `jev-ask <직접 질문 또는 선택한 텍스트>` | [jev-ask.md](../../../commands/jev-ask.md), `scripts/jev_ask.py` (볼트 불필요) |
 | `doctor` | [vault-doctor.md](../../../commands/vault-doctor.md) |
@@ -50,6 +53,7 @@
 | `process-inbox` | [vault-process-inbox.md](../../../commands/vault-process-inbox.md) |
 | `trace <키워드>` | [vault-trace.md](../../../commands/vault-trace.md) |
 | `upgrade` | [vault-upgrade.md](../../../commands/vault-upgrade.md) |
+| `harden <작업과 인자>` | [vault-harden.md](../../../commands/vault-harden.md), [보강 helper](../../../docs/hardening.md) |
 | `backup [대상 경로]` | [backup_vault.py](../scripts/backup_vault.py), 아래 스냅샷 절차 |
 | `verify <스냅샷 경로>` | 같은 백업 CLI의 `--verify` |
 | `restore <스냅샷 경로> <새 복구 경로>` | 같은 백업 CLI의 `--restore`·`--destination` |

@@ -141,12 +141,16 @@ def inspect_host(codex: str, vault: Path, environment: dict, home: Path) -> dict
                        if skill["name"] == "agentic-vault:agentic-vault" and skill["enabled"]]
             if len(primary) != 1 or not Path(primary[0]["path"]).is_file():
                 raise RuntimeError("The shared agentic-vault skill was not discovered")
-            if len(owned_hooks) != 2 or any(hook["eventName"] != "sessionStart" for hook in owned_hooks):
-                raise RuntimeError("Expected both shared SessionStart hooks")
+            expected_events = {"sessionStart": 3, "preCompact": 1, "sessionEnd": 1}
+            discovered_events = {event: sum(hook["eventName"] == event for hook in owned_hooks)
+                                 for event in expected_events}
+            if len(owned_hooks) != sum(expected_events.values()) or discovered_events != expected_events:
+                raise RuntimeError("Expected startup/compact context and both checkpoint events")
             if any(hook["trustStatus"] != "untrusted" for hook in owned_hooks):
                 raise RuntimeError("Disposable-home hooks unexpectedly trusted")
             return {"codex": initialized["userAgent"], "skill": primary[0]["name"],
-                    "session_start_hooks": len(owned_hooks), "hook_trust": "untrusted"}
+                    "session_start_hooks": discovered_events["sessionStart"],
+                    "hook_events": discovered_events, "hook_trust": "untrusted"}
         finally:
             try:
                 process.stdin.close()
@@ -185,11 +189,35 @@ def verify(codex: str) -> dict:
         if installed["version"] != expected["version"]:
             raise RuntimeError("Codex installed a different version")
         report = inspect_host(codex, vault, environment, home)
-        for relative in ("hooks/session_start.py", "hooks/run_python_hook.sh",
+        for relative in ("hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
                          "skills/agentic-vault/references/codex.md",
                          "skills/agentic-vault/scripts/vault_recall.py",
+                         "skills/agentic-vault/scripts/vault_links.py",
                          "skills/agentic-vault/scripts/vault_evidence.py",
+                         "skills/agentic-vault/scripts/vault_retrieval.py",
+                         "skills/agentic-vault/scripts/vault_memory.py",
+                         "skills/agentic-vault/scripts/vault_lesson_metrics.py",
+                         "skills/agentic-vault/scripts/vault_query_expansion.py",
+                         "skills/agentic-vault/scripts/vault_lint_extensions.py",
+                         "skills/agentic-vault/scripts/vault_warning_policy.py",
+                         "skills/agentic-vault/scripts/vault_provenance.py",
+                         "skills/agentic-vault/scripts/vault_egress.py",
+                         "skills/agentic-vault/scripts/vault_state.py",
+                         "skills/agentic-vault/scripts/vault_ssot.py",
+                         "skills/agentic-vault/scripts/vault_lesson_delta.py",
+                         "skills/agentic-vault/scripts/vault_declarative_rules.py",
+                         "skills/agentic-vault/scripts/vault_compile_quality.py",
+                         "skills/agentic-vault/scripts/vault_token_calibration.py",
+                         "skills/agentic-vault/scripts/resources/lint-benign-v1.json",
+                         "docs/hardening.md",
+                         "assets/templates/ssot-ledger.md",
+                         "commands/vault-harden.md",
+                         "docs/memory-patterns.md",
+                         "scripts/import_qmd_candidates.py",
+                         "scripts/evaluate_recall.py",
+                         "scripts/evaluate_memory_workflows.py",
                          "docs/evidence.md",
+                         "docs/link-proposals.md",
                          "assets/templates/AGENTS-vault-stub.md"):
             if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")

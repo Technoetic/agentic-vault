@@ -1,0 +1,4 @@
+{
+  "deny_zones": ["private", "20-knowledge/_archive"],
+  "exclude_dirs": [".git", "node_modules"]
+}

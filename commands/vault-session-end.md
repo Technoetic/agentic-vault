@@ -12,6 +12,13 @@ description: 세션 종료 — handoff/hot/log 갱신 + git 커밋(로컬 전용
 
 ## 1. handoff 갱신 (handoff_note 설정 시)
 
+공유 상태 적용에는 [보강 도구](../docs/hardening.md)의 `vault_state.patch_note`를 사용해
+원본 파일/config 해시와 자기 UTF-8 바이트 범위를 바인딩한다. 자동 투영이 필요하면
+현재 log/tasks와 정확한 이전 anchor를 명시한 `project_handoff` dry-run을 검토한다.
+투영은 자기 machine block만 변경하고 기존 narrative는 유지한다. Blocked ID의 사라짐을
+완료로 해석하지 않는다. PreCompact/SessionEnd checkpoint는 ignored runtime에 기록만
+남기며 이 종료 절차나 실제 노트 편집/로컬 커밋을 대신하지 않는다.
+
 이번 세션에서 수행한 작업을 회고하여 `handoff_note`의 해당 섹션을 **부분 수정**하라. 다른 에이전트가 남긴 항목을 덮어쓰지 말고, 충돌하는 변경은 병합 전에 확인하라. 500단어는 편집상 권고이며, 다음 세션 주입에는 config의 `handoff_max_tokens` 추정 예산이 적용된다:
 
 - ▶ NEXT 다음 세션이 바로 이어서 할 일 / §1 최근 완료된 작업 / §2 인간의 확인이 필요한 사항 / §3 보류된 작업 — 섹션은 제목으로 찾아 부분 수정하고, 구판의 `§4 다음 세션 지시사항` 섹션은 ▶ NEXT로 취급한다.
@@ -42,6 +49,11 @@ description: 세션 종료 — handoff/hot/log 갱신 + git 커밋(로컬 전용
 
 ## 2. hot 컨텍스트 갱신 (hot_note 설정 시)
 
+내용을 압축할 때 [구조화 기억 helper](../docs/memory-patterns.md)를 선택적으로
+사용하여 출처·시간·조건·불확실성과 잠재 충돌을 보존한다. `vault_memory.py`는
+읽기 전용이다. 반환한 전체 단위를 검토하고 hot/handoff의 자기 항목만 반영한다.
+예산에서 빠진 단위가 없어진 사실이나 해소된 충돌이라고 단정하지 않는다.
+
 `hot_note`의 "지금 상태"와 "최우선 미결" 섹션을 이번 세션 결과로 갱신하라. 500단어는 편집상 권고이며 `hot_max_tokens` 추정 예산 안에 핵심 결정·다음 행동이 앞쪽에 오도록 작성하라. 추측은 사실로 승격하지 말고 출처 노트 또는 미확인 표시를 남겨라.
 
 ## 3. log 기록 (log_note 설정 시)
@@ -57,6 +69,13 @@ description: 세션 종료 — handoff/hot/log 갱신 + git 커밋(로컬 전용
 이번 세션에서 아키텍처/전략 결정이 확정되었으면 볼트의 결정 기록(ADR) 노트에 추가하라. 위치가 불분명하면 `index_note`에서 찾아보고, 볼트에 결정 기록 관행이 없으면 생략하라.
 
 ## 5. 교훈 루프 — 자기개선 (lessons 대장이 있으면)
+
+대장 부분 갱신에는 `vault_lesson_delta.prepare_delta`의 ADD/INC/EDIT/RETIRE 제안과
+현재 diff/base/config 해시를 사용한다. 이미 승인된 정확한 안에만 `apply_delta(approve=True)`를
+호출하고 untouched 바이트·기존 ID·횟수를 유지한다. RETIRE는 삭제하지 않는다.
+관측/영수증 ID는 자료 연결이며 성공·승격 승인으로 계산하지 않는다. 선언 규칙은
+`vault_declarative_rules.evaluate_rules`의 literal 기본값을 쓰며 regex는 명시적으로 선택한다.
+timed-out/unavailable를 통과로 보고하지 않는다. 아래의 기존 승격·기각·롤백 규칙은 유지한다.
 
 `00-meta/lessons.md`가 존재하면 수행하라 (없으면 조용히 생략 — 켜려면 템플릿 `assets/templates/lessons.md`로 생성):
 
@@ -88,6 +107,12 @@ description: 세션 종료 — handoff/hot/log 갱신 + git 커밋(로컬 전용
 제안 JSON과 대상·교훈 대장을 함께 커밋하고, 기각 및 적용 기록을 지우지 않는다.
 
 ## 6. 장기 기억 커밋 (선택 단계)
+
+기존 제안 ID에 대한 후속 실행이 있었다면 [교훈 효과 관측](../docs/memory-patterns.md)의
+`vault_lesson_metrics.py record`로 적용 가능성·성공/재발/역효과·실제 근거 ID를 기록하고
+`summarize`로 미확인/비적용 시도와 효과율의 분모를 확인할 수 있다. 현재 사용자에게
+허용된 기록 범위에서만 수행하며 v1 영수증·대상 노트를 이 도구로 변경하지 않는다.
+관측 수나 성공률만으로 승인·승격·확정·롤백하지 않는다. §5의 검토 절차를 유지한다.
 
 장기 기억 MCP 서버(예: `memoryhub`의 `remember` 류 도구)가 **연결되어 있으면** 핵심 결정·교훈·블로커를 커밋하라.
 

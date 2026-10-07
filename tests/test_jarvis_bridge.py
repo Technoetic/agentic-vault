@@ -1698,8 +1698,10 @@ class JarvisStateTests(unittest.TestCase):
                 received_at=datetime(2026, 9, 7, 10, 0, 0))
 
         self.assertEqual(len(list(inbox.glob("*.md"))), 1)
-        self.assertTrue((inbox / name).read_text(encoding="utf-8").startswith(
-            "preserved body\n"))
+        from vault_provenance import parse_capture
+        metadata, original_body = parse_capture((inbox / name).read_bytes())
+        self.assertEqual(original_body, b"preserved body")
+        self.assertEqual(metadata["captured_via"], "telegram")
         self.assertEqual(list(inbox.glob(".*.tmp")), [])
 
     def test_capture_rechecks_resolved_parent_before_publishing(self):
@@ -1806,9 +1808,10 @@ class JarvisStateTests(unittest.TestCase):
         inbox = self.vault / "10-inbox" / "jarvis"
         captures = list(inbox.glob("*.md"))
         self.assertEqual(len(captures), 1)
-        content = captures[0].read_text(encoding="utf-8")
-        self.assertEqual(sum(body in content for body in ("alpha", "beta")), 1)
-        self.assertTrue(content.endswith("채널: telegram\n"))
+        from vault_provenance import parse_capture
+        metadata, original_body = parse_capture(captures[0].read_bytes())
+        self.assertIn(original_body, (b"alpha", b"beta"))
+        self.assertEqual(metadata["captured_via"], "telegram")
         self.assertEqual(list(inbox.glob(".*.tmp")), [])
 
     def test_unsupported_capture_no_clobber_fails_without_destination(self):

@@ -250,6 +250,23 @@ class VaultRecallTests(unittest.TestCase):
         self.assertGreaterEqual(result["diagnostics"]["skipped_denied"], 2)
         self.assertGreaterEqual(result["diagnostics"]["skipped_excluded"], 1)
 
+    def test_git_metadata_is_never_read_with_empty_configured_exclusions(self) -> None:
+        self.write_config(deny_zones=[], exclude_dirs=[])
+        self.write("20-knowledge/allowed.md", "needle PUBLIC_MARKER\n")
+        self.write(".git/private.md", "needle GIT_METADATA_MARKER\n")
+        self.write("nested/.GIT/metadata.md", "needle NESTED_GIT_MARKER\n")
+
+        with mock.patch.object(recall_module, "_read_regular_bytes",
+                               wraps=recall_module._read_regular_bytes) as reader:
+            result = recall_module.recall(self.vault, "needle", limit=10)
+
+        self.assertEqual([match["path"] for match in result["matches"]], ["20-knowledge/allowed.md"])
+        self.assertNotIn("GIT_METADATA_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertNotIn("NESTED_GIT_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertTrue(all(".git" not in [part.casefold() for part in call.args[0].parts]
+                            for call in reader.call_args_list))
+        self.assertGreaterEqual(result["diagnostics"]["skipped_excluded"], 2)
+
     def test_symlink_escape_is_skipped_without_reading_outside_marker(self) -> None:
         outside = Path(self._tmp.name) / "outside.md"
         outside.write_text("needle OUTSIDE_MARKER", encoding="utf-8")
@@ -583,6 +600,15 @@ class VaultRecallTests(unittest.TestCase):
         self.assertEqual(result["diagnostics"]["status"], "invalid_config")
         self.assertEqual(result["matches"], [])
 
+    def test_duplicate_policy_keys_and_nonfinite_config_fail_closed(self) -> None:
+        self.write("private/note.md", "needle SECRET\n")
+        for content in ('{"deny_zones":["private"],"deny_zones":[],"exclude_dirs":[]}', '{"deny_zones":[],"untrusted":Infinity}'):
+            self.write("00-meta/vault-config.json", content)
+            result = recall_module.recall(self.vault, "needle")
+            self.assertEqual(result["diagnostics"]["status"], "invalid_config")
+            self.assertEqual(result["diagnostics"]["files_read"], 0)
+            self.assertNotIn("SECRET", json.dumps(result))
+
     @unittest.skipIf(os.name == "nt", "POSIX FIFO behavior")
     def test_config_fifo_is_rejected_without_blocking(self) -> None:
         config_path = self.vault / "00-meta" / "vault-config.json"
@@ -680,6 +706,13 @@ class VaultRecallTests(unittest.TestCase):
         second = recall_module.recall(self.vault, "phoenix")
 
         self.assertEqual(second["matches"], [])
+
+    def test_wrapper_exposes_explicit_temporal_retrieval_without_lazy_import(self) -> None:
+        self.write("20-knowledge/old.md", "---\nvalid_until: 2025-01-01\n---\n# Needle\nneedle OLD\n")
+        self.write("20-knowledge/new.md", "---\nvalid_from: 2025-01-01\n---\nneedle NEW\n")
+        result = recall_module.recall(self.vault, "needle", as_of="2025-01-01", backend="hybrid")
+        self.assertEqual([match["path"] for match in result["matches"]], ["20-knowledge/new.md"])
+        self.assertEqual(result["diagnostics"]["mode"], "advanced")
 
     def test_filename_fallback_is_not_fabricated_as_line_evidence(self) -> None:
         self.write("20-knowledge/needle-only-in-filename.md", "unrelated body text\n")
