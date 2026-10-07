@@ -37,6 +37,7 @@
 |---|---|
 | `session-start` | [vault-session-start.md](../../../commands/vault-session-start.md) |
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
+| `links <인자>` | [관련 노트 연결 제안](../../../docs/link-proposals.md), `scripts/vault_links.py` (`--vault`·`--source`·`--query` 명시, 읽기 전용) |
 | `judge <고정 선택지 의미 질문>` | [vault-judge.md](../../../commands/vault-judge.md), [Jev 판단 안내](../../../docs/jev-judgments.md) |
 | `jev-ask <직접 질문 또는 선택한 텍스트>` | [jev-ask.md](../../../commands/jev-ask.md), `scripts/jev_ask.py` (볼트 불필요) |
 | `doctor` | [vault-doctor.md](../../../commands/vault-doctor.md) |

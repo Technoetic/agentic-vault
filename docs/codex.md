@@ -167,7 +167,13 @@ CLI가 PATH에 없으면 `--codex <실행 파일 경로>`를 추가한다. Windo
 ```text
 python -m unittest discover -s tests -v
 python scripts/evaluate_recall.py
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_experience
 ```
+
+경험 fixture는 정답 없음과 오래된·오염된 근거의 검색 노출을 추가로 기록한다.
+해당 노출 지표는 최종 답변 오류나 공격 성공률이 아니며, 기존 어휘 검색의
+한계를 관찰하는 용도다. [연결 제안 helper](link-proposals.md)는 후보·해시·diff만
+반환한다. 검증기는 이 helper와 사용 문서의 설치본도 원본과 대조한다.
 
 실제 모델이 초기화·마감을 수행하는 대화, 신뢰 후 자동 훅 실행, Codex의 출력
 축약 동작은 통합 실세션으로 검증하지 않았다. Telegram Jarvis는 계속 Claude CLI를

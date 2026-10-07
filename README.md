@@ -402,6 +402,7 @@ agentic-vault/
 │       ├── test_rules_inheritance.py  ← rules 상속 회귀 테스트 (버전 업 시 1회)  🔬
 │       ├── backup_vault.py            ← 세대별 스냅샷 + SHA-256 검증 + 새 경로 복구
 │       ├── vault_recall.py            ← 예산·출처가 있는 어휘 검색
+│       ├── vault_links.py             ← 관련 노트 후보·해시·검토용 diff (읽기 전용)
 │       ├── vault_judge.py             ← 원문 발췌 바인딩 · 오프라인 prepare · 승인된 run
 │       ├── jev_ask.py                 ← 인라인 Noul·Choice·Score · prepare/run --input -
 │       ├── jev_client.py              ← Jev 고정 선택지 API (stdlib-only, 한 번 호출) · 비밀 필터 단일 출처
@@ -519,6 +520,14 @@ claude
 ... 작업 ...            # /vault-ingest · /vault-day · /vault-trace
 /vault-session-end     # 다음 세션 예약 — handoff·hot·log 갱신 + git 커밋
 ```
+
+### 관련 노트 연결과 경험 평가
+
+관련 노트를 연결할 때는 [읽기 전용 연결 제안](docs/link-proposals.md) helper로
+후보·원문 해시·검토용 diff를 확인할 수 있다. 기존 검색을 기준으로 한 평가에는
+별도의 [경험 fixture](tests/fixtures/recall_experience/README.md)가 있으며,
+정답 없음·변경된 사실·오염된 근거의 노출을 구분해 기록한다. 합성 평가 결과와
+실제 볼트의 답변 품질·공격 성공률은 별도로 평가한다.
 
 ### 장기 기억 MCP 연동 (선택)
 

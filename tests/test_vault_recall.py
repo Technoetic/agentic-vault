@@ -250,6 +250,23 @@ class VaultRecallTests(unittest.TestCase):
         self.assertGreaterEqual(result["diagnostics"]["skipped_denied"], 2)
         self.assertGreaterEqual(result["diagnostics"]["skipped_excluded"], 1)
 
+    def test_git_metadata_is_never_read_with_empty_configured_exclusions(self) -> None:
+        self.write_config(deny_zones=[], exclude_dirs=[])
+        self.write("20-knowledge/allowed.md", "needle PUBLIC_MARKER\n")
+        self.write(".git/private.md", "needle GIT_METADATA_MARKER\n")
+        self.write("nested/.GIT/metadata.md", "needle NESTED_GIT_MARKER\n")
+
+        with mock.patch.object(recall_module, "_read_regular_bytes",
+                               wraps=recall_module._read_regular_bytes) as reader:
+            result = recall_module.recall(self.vault, "needle", limit=10)
+
+        self.assertEqual([match["path"] for match in result["matches"]], ["20-knowledge/allowed.md"])
+        self.assertNotIn("GIT_METADATA_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertNotIn("NESTED_GIT_MARKER", json.dumps(result, ensure_ascii=False))
+        self.assertTrue(all(".git" not in [part.casefold() for part in call.args[0].parts]
+                            for call in reader.call_args_list))
+        self.assertGreaterEqual(result["diagnostics"]["skipped_excluded"], 2)
+
     def test_symlink_escape_is_skipped_without_reading_outside_marker(self) -> None:
         outside = Path(self._tmp.name) / "outside.md"
         outside.write_text("needle OUTSIDE_MARKER", encoding="utf-8")

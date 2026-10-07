@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -48,80 +49,178 @@ def _load_queries(fixture: Path) -> list[dict]:
         query = item.get("query")
         language = item.get("language")
         expected = item.get("expected_paths")
-        if not isinstance(query_id, str) or not query_id or query_id in seen_ids:
+        if not isinstance(query_id, str) or not query_id.strip() or query_id in seen_ids:
             raise ValueError(f"queries[{index}].id must be unique and non-empty")
         if not isinstance(query, str) or not query.strip():
             raise ValueError(f"queries[{index}].query must be non-empty")
         if language not in ("en", "ko"):
             raise ValueError(f"queries[{index}].language must be en or ko")
-        if not isinstance(expected, list) or not expected or not all(
-            isinstance(value, str) and value.endswith(".md") for value in expected
-        ):
-            raise ValueError(f"queries[{index}].expected_paths must contain literal Markdown paths")
+        expectation = item.get("expectation", "answerable")
+        if expectation not in ("answerable", "no_answer"):
+            raise ValueError(f"queries[{index}].expectation must be answerable or no_answer")
+        _validate_paths(expected, f"queries[{index}].expected_paths")
+        if bool(expected) != (expectation == "answerable"):
+            raise ValueError(f"queries[{index}].expected_paths contradicts expectation")
+        scenario = item.get("scenario", "unspecified")
+        if not isinstance(scenario, str) or not scenario.strip():
+            raise ValueError(f"queries[{index}].scenario must be non-empty")
+        forbidden = item.get("forbidden_paths", [])
+        stale = item.get("stale_paths", [])
+        for field, values in (("forbidden_paths", forbidden), ("stale_paths", stale)):
+            _validate_paths(values, f"queries[{index}].{field}")
+            if {path.casefold() for path in expected}.intersection(path.casefold() for path in values):
+                raise ValueError(f"queries[{index}].{field} overlaps expected_paths")
         seen_ids.add(query_id)
-        checked.append(item)
+        checked.append({**item, "expectation": expectation, "scenario": scenario,
+                        "forbidden_paths": forbidden, "stale_paths": stale})
     return checked
 
 
-def evaluate(fixture: Path) -> dict:
-    """Return recall@3 and MRR@3 for literal expected source paths."""
-    recall_module = _load_recall_module()
+def _validate_paths(values: object, field: str) -> None:
+    """Validate labels without opening labeled files (missing labels can measure misses)."""
+    if not isinstance(values, list):
+        raise ValueError(f"{field} must be a list of literal relative Markdown paths")
+    seen: set[str] = set()
+    for value in values:
+        if (
+            not isinstance(value, str) or not value.endswith(".md")
+            or any(char in value for char in "\\:*?\"<>|")
+            or any(ord(char) < 32 for char in value)
+            or any(part in ("", ".", "..") or part.rstrip(" .") != part for part in value.split("/"))
+            or value.casefold() in seen
+        ):
+            raise ValueError(f"{field} must contain unique safe literal relative Markdown paths")
+        seen.add(value.casefold())
+
+
+def _ratio(numerator: float, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _summary(rows: list[dict]) -> dict:
+    answerable = [row for row in rows if row["expectation"] == "answerable"]
+    no_answer = [row for row in rows if row["expectation"] == "no_answer"]
+    false_positives = sum(bool(row["retrieved_paths"]) for row in no_answer)
+    complete_empty = sum(row["outcome"] == "no_sources_returned_complete_scan" for row in no_answer)
+    incomplete_empty = sum(row["outcome"] == "incomplete_search_no_sources" for row in no_answer)
+    summary = {
+        "query_count": len(rows),
+        "answerable_query_count": len(answerable),
+        "no_answer_query_count": len(no_answer),
+        "recall_at_3": _ratio(sum(row["source_recall_at_3"] for row in answerable), len(answerable)),
+        "mrr": _ratio(sum(row["reciprocal_rank_at_3"] for row in answerable), len(answerable)),
+        "no_answer": {
+            "query_count": len(no_answer),
+            "false_positive_query_count": false_positives,
+            "false_positive_rate": _ratio(false_positives, len(no_answer)),
+            "complete_empty_query_count": complete_empty,
+            "complete_empty_rate": _ratio(complete_empty, len(no_answer)),
+            "incomplete_empty_query_count": incomplete_empty,
+        },
+    }
+    for name, label, retrieved in (
+        ("forbidden_sources", "forbidden_paths", "forbidden_retrieved_paths"),
+        ("stale_sources", "stale_paths", "stale_retrieved_paths"),
+    ):
+        labeled = [row for row in rows if row[label]]
+        exposed = sum(bool(row[retrieved]) for row in labeled)
+        top_one = sum(row["top_1_forbidden" if name == "forbidden_sources" else "top_1_stale"] for row in labeled)
+        summary[name] = {
+            "labeled_query_count": len(labeled),
+            "exposed_query_count": exposed,
+            "exposure_rate": _ratio(exposed, len(labeled)),
+            "top_1_query_count": top_one,
+            "top_1_rate": _ratio(top_one, len(labeled)),
+        }
+    return summary
+
+
+def evaluate(fixture: Path, *, max_tokens: int = 1500) -> dict:
+    """Measure labeled source retrieval and returned exposure, never answer quality."""
+    if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
+        raise ValueError("max_tokens must be a non-negative integer")
     queries = _load_queries(fixture)
+    recall_module = _load_recall_module()
     vault = fixture / "vault"
-    source_recall_sum = 0.0
-    reciprocal_rank_sum = 0.0
     failures: list[dict] = []
     evaluation_errors: list[dict] = []
-    language_totals: dict[str, dict[str, float]] = {}
+    per_query: list[dict] = []
 
     for item in queries:
-        result = recall_module.recall(vault, item["query"], limit=3, max_tokens=0)
+        started = time.perf_counter()
+        result = recall_module.recall(vault, item["query"], limit=3, max_tokens=max_tokens)
+        elapsed_ms = (time.perf_counter() - started) * 1000
         retrieved = [match["path"] for match in result["matches"]]
         expected = set(item["expected_paths"])
-        source_recall = len(expected.intersection(retrieved)) / len(expected)
+        source_recall = _ratio(len(expected.intersection(retrieved)), len(expected))
         rank = next(
             (index for index, path in enumerate(retrieved, start=1) if path in expected),
             None,
         )
-        reciprocal_rank = 1.0 / rank if rank is not None else 0.0
-        source_recall_sum += source_recall
-        reciprocal_rank_sum += reciprocal_rank
-        language = item["language"]
-        bucket = language_totals.setdefault(
-            language, {"count": 0, "recall_sum": 0.0, "rr_sum": 0.0})
-        bucket["count"] += 1
-        bucket["recall_sum"] += source_recall
-        bucket["rr_sum"] += reciprocal_rank
-        if source_recall < 1.0:
+        reciprocal_rank = (1.0 / rank if rank is not None else 0.0) if expected else None
+        diagnostics = result["diagnostics"]
+        complete = diagnostics["status"] == "ok" and diagnostics["search_complete"]
+        forbidden_retrieved = [path for path in retrieved if path in item["forbidden_paths"]]
+        stale_retrieved = [path for path in retrieved if path in item["stale_paths"]]
+        reasons: list[str] = []
+        if expected:
+            outcome = "expected_source_found" if rank is not None else "expected_source_missed"
+            if source_recall < 1.0:
+                reasons.append("expected_source_missed")
+        elif retrieved:
+            outcome = "unexpected_sources_returned"
+            reasons.append("no_answer_false_positive")
+        else:
+            outcome = "no_sources_returned_complete_scan" if complete else "incomplete_search_no_sources"
+        if forbidden_retrieved:
+            reasons.append("forbidden_source_exposure")
+        if stale_retrieved:
+            reasons.append("stale_source_exposure")
+        row = {
+            **item, "retrieved_paths": retrieved,
+            "source_recall_at_3": source_recall, "reciprocal_rank_at_3": reciprocal_rank,
+            "outcome": outcome, "forbidden_retrieved_paths": forbidden_retrieved,
+            "stale_retrieved_paths": stale_retrieved,
+            "top_1_forbidden": bool(retrieved and retrieved[0] in item["forbidden_paths"]),
+            "top_1_stale": bool(retrieved and retrieved[0] in item["stale_paths"]),
+            "elapsed_ms": round(elapsed_ms, 3),
+            "estimated_returned_context_tokens": recall_module.estimate_tokens(result["context"]),
+            "diagnostics": diagnostics,
+        }
+        per_query.append(row)
+        if reasons:
             failures.append({
                 "id": item["id"],
                 "expected_paths": item["expected_paths"],
                 "retrieved_paths": retrieved,
                 "source_recall_at_3": source_recall,
+                "reasons": reasons,
             })
-        if result["diagnostics"]["status"] != "ok" or not result["diagnostics"]["search_complete"]:
-            evaluation_errors.append({
-                "id": item["id"],
-                "status": result["diagnostics"]["status"],
-                "search_complete": result["diagnostics"]["search_complete"],
-                "omissions": result["diagnostics"]["omissions"],
-            })
+        if not complete:
+            evaluation_errors.append({"id": item["id"], **diagnostics})
 
-    count = len(queries)
-    by_language = {
-        language: {
-            "query_count": int(values["count"]),
-            "recall_at_3": values["recall_sum"] / values["count"],
-            "mrr": values["rr_sum"] / values["count"],
-        }
-        for language, values in sorted(language_totals.items())
-    }
+    total_elapsed = sum(row["elapsed_ms"] for row in per_query)
     return {
-        "benchmark": "bilingual lexical source retrieval (not semantic or Claude answer quality)",
-        "query_count": count,
-        "recall_at_3": source_recall_sum / count,
-        "mrr": reciprocal_rank_sum / count,
-        "by_language": by_language,
+        "benchmark": "bilingual lexical source retrieval and data exposure (not semantic or LLM answer/attack quality)",
+        "interpretation": "Empty results describe this fixture scan only; they do not prove world absence. Exposure means returned source matches, not successful instruction following.",
+        **_summary(per_query),
+        "by_language": {
+            key: _summary([row for row in per_query if row["language"] == key])
+            for key in sorted({row["language"] for row in per_query})
+        },
+        "by_scenario": {
+            key: _summary([row for row in per_query if row["scenario"] == key])
+            for key in sorted({row["scenario"] for row in per_query})
+        },
+        "costs": {
+            "max_context_tokens": max_tokens,
+            "total_elapsed_ms": round(total_elapsed, 3),
+            "mean_elapsed_ms": round(total_elapsed / len(per_query), 3),
+            "estimated_returned_context_tokens": sum(row["estimated_returned_context_tokens"] for row in per_query),
+            "token_measurement": "estimate using recall's Hangul/non-Hangul character coefficients; not model tokenizer or billing tokens",
+            "timing_scope": "per-query recall call only; excludes fixture validation and module loading",
+        },
+        "per_query": per_query,
         "failed_queries": failures,
         "evaluation_errors": evaluation_errors,
     }
@@ -132,24 +231,42 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--min-recall-at-3", type=float, default=0.85)
     parser.add_argument("--min-mrr", type=float, default=0.75)
+    parser.add_argument("--max-tokens", type=int, default=1500,
+                        help="returned context budget (token estimate); retrieval remains top 3")
+    parser.add_argument("--max-no-answer-false-positive-rate", type=float, default=None)
+    parser.add_argument("--max-forbidden-exposure-rate", type=float, default=None)
+    parser.add_argument("--max-stale-top-1-rate", type=float, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if not 0.0 <= args.min_recall_at_3 <= 1.0 or not 0.0 <= args.min_mrr <= 1.0:
+    thresholds = (args.min_recall_at_3, args.min_mrr, args.max_no_answer_false_positive_rate,
+                  args.max_forbidden_exposure_rate, args.max_stale_top_1_rate)
+    if any(value is not None and not 0.0 <= value <= 1.0 for value in thresholds):
         print("evaluation thresholds must be between 0 and 1", file=sys.stderr)
         return 2
     try:
-        report = evaluate(args.fixture)
+        report = evaluate(args.fixture, max_tokens=args.max_tokens)
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"recall evaluation unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
+    optional_gates = {
+        "no_answer_false_positive_rate": (report["no_answer"]["false_positive_rate"], args.max_no_answer_false_positive_rate),
+        "forbidden_exposure_rate": (report["forbidden_sources"]["exposure_rate"], args.max_forbidden_exposure_rate),
+        "stale_top_1_rate": (report["stale_sources"]["top_1_rate"], args.max_stale_top_1_rate),
+    }
+    report["optional_gates"] = {
+        name: {"observed": observed, "maximum": maximum,
+               "passed": observed is not None and observed <= maximum}
+        for name, (observed, maximum) in optional_gates.items() if maximum is not None
+    }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     passed = (
-        report["recall_at_3"] >= args.min_recall_at_3
-        and report["mrr"] >= args.min_mrr
+        (report["recall_at_3"] is None or report["recall_at_3"] >= args.min_recall_at_3)
+        and (report["mrr"] is None or report["mrr"] >= args.min_mrr)
         and not report["evaluation_errors"]
+        and all(gate["passed"] for gate in report["optional_gates"].values())
     )
     return 0 if passed else 1
 

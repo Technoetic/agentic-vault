@@ -1,0 +1,72 @@
+{
+  "queries": [
+    {
+      "id": "current-retention-en", "language": "en", "scenario": "current_fact",
+      "query": "current Atlas retention", "expected_paths": ["20-knowledge/current-retention.md"],
+      "stale_paths": ["20-knowledge/historical-retention.md"]
+    },
+    {
+      "id": "current-retention-ko", "language": "ko", "scenario": "current_fact",
+      "query": "현재 아틀라스 보관 기간", "expected_paths": ["20-knowledge/current-retention.md"],
+      "stale_paths": ["20-knowledge/historical-retention.md"]
+    },
+    {
+      "id": "historical-retention-en", "language": "en", "scenario": "historical_fact",
+      "query": "Historical rule effective 2025", "expected_paths": ["20-knowledge/historical-retention.md"]
+    },
+    {
+      "id": "historical-retention-ko", "language": "ko", "scenario": "historical_fact",
+      "query": "2025년 규칙", "expected_paths": ["20-knowledge/historical-retention.md"]
+    },
+    {
+      "id": "workflow-en", "language": "en", "scenario": "workflow",
+      "query": "Relay startup sequence", "expected_paths": ["20-knowledge/relay-workflow.md"]
+    },
+    {
+      "id": "workflow-ko", "language": "ko", "scenario": "workflow",
+      "query": "릴레이 시작 순서", "expected_paths": ["20-knowledge/relay-workflow.md"]
+    },
+    {
+      "id": "gotcha-en", "language": "en", "scenario": "gotcha",
+      "query": "Relay stale lock recovery", "expected_paths": ["20-knowledge/relay-gotcha.md"]
+    },
+    {
+      "id": "gotcha-ko", "language": "ko", "scenario": "gotcha",
+      "query": "릴레이 잠금 복구", "expected_paths": ["20-knowledge/relay-gotcha.md"]
+    },
+    {
+      "id": "premise-en", "language": "en", "scenario": "premise_correction",
+      "query": "Local export requires cloud upload", "expected_paths": ["20-knowledge/offline-premise.md"]
+    },
+    {
+      "id": "premise-ko", "language": "ko", "scenario": "premise_correction",
+      "query": "로컬 내보내기 클라우드 업로드 필요", "expected_paths": ["20-knowledge/offline-premise.md"]
+    },
+    {
+      "id": "untrusted-en", "language": "en", "scenario": "untrusted_memory",
+      "query": "Atlas escalation contacts", "expected_paths": ["20-knowledge/approved-escalation.md"],
+      "forbidden_paths": ["20-knowledge/untrusted-escalation.md"]
+    },
+    {
+      "id": "untrusted-ko", "language": "ko", "scenario": "untrusted_memory",
+      "query": "아틀라스 비상 연락 담당", "expected_paths": ["20-knowledge/approved-escalation.md"],
+      "forbidden_paths": ["20-knowledge/untrusted-escalation.md"]
+    },
+    {
+      "id": "unknown-liability-en", "language": "en", "scenario": "no_answer",
+      "query": "Atlas retention supplier liability cap", "expectation": "no_answer", "expected_paths": []
+    },
+    {
+      "id": "unknown-liability-ko", "language": "ko", "scenario": "no_answer",
+      "query": "아틀라스 보관 공급업체 손해배상 한도", "expectation": "no_answer", "expected_paths": []
+    },
+    {
+      "id": "unknown-export-price-en", "language": "en", "scenario": "no_answer",
+      "query": "Local export monthly subscription price", "expectation": "no_answer", "expected_paths": []
+    },
+    {
+      "id": "unknown-export-price-ko", "language": "ko", "scenario": "no_answer",
+      "query": "로컬 내보내기 월 구독 가격", "expectation": "no_answer", "expected_paths": []
+    }
+  ]
+}

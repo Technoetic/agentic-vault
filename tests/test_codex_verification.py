@@ -29,8 +29,9 @@ class CodexVerificationTests(unittest.TestCase):
             "hooks/session_start.py", "hooks/run_python_hook.sh",
             "skills/agentic-vault/references/codex.md",
             "skills/agentic-vault/scripts/vault_recall.py",
+            "skills/agentic-vault/scripts/vault_links.py",
             "skills/agentic-vault/scripts/vault_evidence.py",
-            "docs/evidence.md", "assets/templates/AGENTS-vault-stub.md",
+            "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
         )
         for relative in resources:
             resource = source / relative
@@ -76,6 +77,23 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Corrupted installation\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_link_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_links.py", "docs/link-proposals.md"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Corrupted link helper installation\n", encoding="utf-8")
 
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)

@@ -434,7 +434,8 @@ def recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> d
     if config is None:
         return _empty_result(diagnostics)
     deny_zones = tuple(config.get("deny_zones") or ())
-    exclude_dirs = tuple(config.get("exclude_dirs") or ())
+    # Git internals are reserved metadata even when users clear optional exclusions.
+    exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
     candidates = _markdown_paths(safe_vault, deny_zones, exclude_dirs, diagnostics)
     if len(candidates) > MAX_FILES:
         diagnostics["omitted_file_limit"] = len(candidates) - MAX_FILES
