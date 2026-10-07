@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "unicode-nfc", "notes": {"한글.md": "# Café 👩‍💻 점검\n[[#Café 👩‍💻 점검]]"}},
+    {"id": "block-anchor", "notes": {"a.md": "문단 ^한글-블록\n[[#^한글-블록]]"}},
+    {"id": "qualified-duplicates", "notes": {"source.md": "[[a/Shared#One]]\n[[b/Shared#Two]]", "a/Shared.md": "# One", "b/Shared.md": "# Two"}},
+    {"id": "source-relative", "notes": {"folder/source.md": "[[./sub/Target#Real]]", "folder/sub/Target.md": "# Real"}},
+    {"id": "escaped-pipe", "notes": {"a.md": "# A | B\n[[#A \\| B|display]]"}},
+    {"id": "fenced-examples", "notes": {"a.md": "~~~md\n[[Missing#False]]\n# False\n~~~\n`[[Missing#False]]`\n# Real\n[[#Real]]"}},
+    {"id": "calendar-dates", "notes": {"a.md": "---\ncreated: '2024-02-29' # leap day\nupdated: 2026-10-07\n---\n# Body"}},
+    {"id": "setext", "notes": {"a.md": "Real heading\n====\n[[#Real heading]]"}},
+    {"id": "assets", "notes": {"a.md": "![[picture.png]]\n[[report.pdf]]"}},
+    {"id": "exempt-date", "notes": {"scratch/raw.md": "---\ncreated: arbitrary source metadata\n---"}, "config": {"frontmatter_exempt_paths": ["scratch"]}},
+    {"id": "table-display-pipe", "notes": {"a.md": "| Link |\n| --- |\n| [[b#Real\\|shown]] |", "b.md": "# Real"}},
+    {"id": "relative-denied", "notes": {"folder/a.md": "[[../20-knowledge/_archive/Secret#Hidden]]"}, "config": {"deny_zones": ["20-knowledge/_archive"]}},
+    {"id": "uppercase-qualified-extension", "notes": {"a.md": "[[folder/Target.MD#Real]]\n[[folder/Target#Real]]", "folder/Target.MD": "# Real"}},
+    {"id": "normalized-root-denied", "notes": {"a.md": "[[x/../20-knowledge/_archive/Secret#Real]]"}, "config": {"deny_zones": ["20-knowledge/_archive"]}},
+    {"id": "normalized-root-excluded", "notes": {"a.md": "[[x/../node_modules/Skip#Real]]"}, "config": {"exclude_dirs": ["node_modules"]}}
+  ]
+}

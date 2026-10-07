@@ -50,6 +50,27 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+try:
+    from vault_lint_extensions import analyze_notes, make_warning
+    from vault_warning_policy import checker_sha256, corpus_sha256, validate_promotion
+    _EXTENSIONS_AVAILABLE = True
+except ModuleNotFoundError as _extension_import_error:
+    if _extension_import_error.name not in {"vault_lint_extensions", "vault_warning_policy"}:
+        raise
+    # Existing vault upgrades may still have only the single legacy engine.
+    # Keep original fatal gates usable and explicitly diagnose missing new checks.
+    _EXTENSIONS_AVAILABLE = False
+
+
+def _extension_unavailable_warning() -> dict:
+    return {"issue_id": "lint-extension-unavailable", "code": "lint-incomplete",
+            "severity": "warning", "path": "", "line": 0,
+            "message": "Warning extension modules are unavailable; legacy fatal checks remain active",
+            "details": {"reason": "missing installed extension module"}}
+
 # Windows 콘솔(cp949 등)에서 한국어 출력이 깨지지 않도록 UTF-8 재설정 (실패해도 무해)
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -59,6 +80,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 ENGINE_VERSION = "0.18.0"
 CONFIG_RELPATH = "00-meta/vault-config.json"
+ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
 DEFAULT_FRONTMATTER_ROOTS = (
     "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
 )
@@ -333,6 +355,7 @@ def validate_config(raw: object) -> dict:
 
     config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
     config["gates"] = _validate_gates(config.get("gates"))
+    _validated_warning_policy(config)
 
     for key in _STRING_KEYS:
         value = config.get(key)
@@ -414,6 +437,52 @@ def validate_config(raw: object) -> dict:
     # Full mode uses absence as the compatibility marker for "all active notes";
     # VaultPolicy supplies the five staged defaults without erasing that marker.
     return config
+
+
+def _validated_warning_policy(config: dict) -> dict:
+    policy = config.get("warning_policy", {})
+    levels = policy.get("levels", {}) if isinstance(policy, dict) else {}
+    needs_evidence = isinstance(levels, dict) and "fatal" in levels.values()
+    if not _EXTENSIONS_AVAILABLE:
+        if not isinstance(policy, dict) or not isinstance(levels, dict):
+            raise HealthcheckError("warning promotion policy must be an object")
+        known = {"missing-anchor", "ambiguous-link", "missing-link-path", "invalid-date"}
+        if any(code not in known or severity != "warning" for code, severity in levels.items()):
+            raise HealthcheckError("warning promotion policy cannot be validated without installed extension modules")
+        return {"valid": True, "promoted_codes": [], "errors": []}
+    try:
+        result = validate_promotion(policy, checker_sha256() if needs_evidence else "",
+                                    corpus_sha256() if needs_evidence else "")
+    except (OSError, ValueError) as exc:
+        raise HealthcheckError(f"warning promotion evidence unavailable: {type(exc).__name__}") from exc
+    if not result["valid"]:
+        raise HealthcheckError("warning promotion rejected: " + "; ".join(result["errors"]))
+    return result
+
+
+def extension_warnings(notes: dict[str, str], config: dict, *, input_complete: bool = True,
+                       consumer_paths: set[str] | None = None) -> list[dict]:
+    """Reusable warning entry point; certified promotion is disabled on incomplete input."""
+    promotion = _validated_warning_policy(config)
+    if not _EXTENSIONS_AVAILABLE:
+        return [_extension_unavailable_warning()]
+    findings = analyze_notes(notes, config, consumer_paths=consumer_paths)
+    if not input_complete:
+        findings = [x for x in findings if x["code"] != "missing-link-path"]
+        findings.append(make_warning("lint-incomplete", "", 0,
+                        "Warning analysis omitted unreadable originals; absent paths are unknown"))
+    if not any(x["code"] == "lint-incomplete" for x in findings):
+        for finding in findings:
+            if finding["code"] in promotion["promoted_codes"]:
+                finding["severity"] = "fatal"
+    return findings
+
+
+def format_extension_warning(finding: dict) -> str:
+    location = f'{finding["path"]}:{finding["line"]}' if finding["path"] else "scan"
+    detail = json.dumps(finding.get("details", {}), ensure_ascii=False, sort_keys=True)
+    detail = detail[:1024] + ("..." if len(detail) > 1024 else "")
+    return f'{finding["severity"]}: {location} [{finding["code"]}] {finding["message"]} {detail} ({finding["issue_id"]})'
 
 
 def _ensure_vault_path(vault: Path, path: Path, label: str, deny_zones=()) -> Path:
@@ -498,7 +567,8 @@ def staged_markdown_pathspecs(
     if not isinstance(config, dict):
         raise HealthcheckError("validated config must be an object")
 
-    pathspecs = [":(top,glob,icase)**/*.md"]
+    pathspecs = [":(top,glob,icase)**/*.md",
+                 f":(exclude,top,glob,icase){ENGINE_RUNTIME_RELPATH}/**"]
     deny_zones = sorted(set(config.get("deny_zones") or ()))
     exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
     for path in deny_zones:
@@ -734,6 +804,34 @@ def rel_posix(p: Path, vault: Path) -> str:
     return p.relative_to(vault).as_posix()
 
 
+def _read_extension_evidence(vault: Path, path: Path, deny_zones, remaining_bytes: int) -> tuple[str | None, str | None]:
+    """Read one allowed legacy-exempt target once within note/total byte caps."""
+    _ensure_vault_path(vault, path, "extension target evidence", deny_zones)
+    limit = min(1_000_000, max(remaining_bytes, 0))
+    if not limit:
+        return None, "extension evidence total byte limit"
+    try:
+        with path.open("rb") as stream:
+            original = stream.read(limit + 1)
+        if len(original) > limit:
+            return None, "extension evidence note/total byte limit"
+        return original.decode("utf-8-sig"), None
+    except (OSError, UnicodeError) as exc:
+        return None, f"{type(exc).__name__}: extension target unavailable"
+
+
+def _warning_inventory_allowed(rel: str, config: dict) -> bool:
+    """Intentional policy exclusions do not make the allowed inventory incomplete."""
+    rel = rel.replace("\\", "/").rstrip("/")
+    if is_denied(rel, *build_deny_rules(config.get("deny_zones"))):
+        return False
+    parts = rel.casefold().split("/")
+    if any(str(name).casefold() in parts for name in config.get("exclude_dirs", [])):
+        return False
+    runtime = ENGINE_RUNTIME_RELPATH.casefold()
+    return not (rel.casefold() == runtime or rel.casefold().startswith(runtime + "/"))
+
+
 def norm_cfg_path(value) -> str:
     """config의 경로 값을 posix 상대경로로 정규화한다 (비면 '')."""
     return str(value or "").replace("\\", "/").strip().strip("/")
@@ -773,12 +871,21 @@ def collect_md_files(vault: Path, exclude_names: set[str],
     건너뛴 디렉토리·.md 파일의 볼트 상대 경로는 skipped에 남긴다 — 조용히
     빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고)."""
     results: list[Path] = []
-    for root, dirs, files in os.walk(vault):
+    def scan_error(error: OSError) -> None:
+        if skipped is not None:
+            try:
+                rel = rel_posix(Path(error.filename), vault) if error.filename else "scan-unavailable"
+            except (TypeError, ValueError):
+                rel = "scan-unavailable"
+            skipped.append(rel.rstrip("/") + "/")
+    for root, dirs, files in os.walk(vault, onerror=scan_error):
         root_path = Path(root)
         safe_dirs: list[str] = []
         for dirname in dirs:
             child = root_path / dirname
             if dirname in exclude_names or dirname == ".git":
+                continue
+            if rel_posix(child, vault).casefold() == ENGINE_RUNTIME_RELPATH.casefold():
                 continue
             try:
                 _ensure_vault_path(vault, child, f"scan directory {child.name}")
@@ -933,7 +1040,71 @@ def _index_blob_wikilink_targets(
     return targets
 
 
-def validate_staged(vault: Path, config: dict) -> list[str]:
+def staged_extension_warnings(vault: Path, config: dict, changes: list[StagedChange]) -> list[dict]:
+    """Analyze approved immutable Git-index blobs, never dirty working files.
+
+    Inventory metadata is filtered BEFORE blob size/content reads. SHA-selected
+    reads keep size checks and originals bound even if another writer restages.
+    At most 10,000 notes, 1 MB/note and 8 MB total are consumed. Incomplete scans
+    warn and do not escalate. Only staged consumers or changed anchor targets
+    are reported; unrelated old date warnings cannot block a new commit.
+    """
+    if not _EXTENSIONS_AVAILABLE:
+        return [_extension_unavailable_warning()]
+    data = _run_git_bytes(vault, "ls-files", "--stage", "-z", "--",
+                          *staged_markdown_pathspecs(config))
+    records = _decode_nul_paths(data, "staged warning inventory")
+    deny_rules = build_deny_rules(config.get("deny_zones"))
+    exclude = {str(x).casefold() for x in config.get("exclude_dirs", [])}
+    selected: dict[str, str] = {}
+    incomplete = False
+    for record in records:
+        metadata, separator, path = record.partition("\t")
+        if not separator:
+            raise HealthcheckError("malformed staged warning inventory")
+        if is_denied(path, *deny_rules) or any(part.casefold() in exclude for part in path.split("/")):
+            continue
+        fields = metadata.split()
+        if len(fields) != 3 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", fields[1]):
+            raise HealthcheckError("malformed staged warning blob identity")
+        if fields[2] != "0":
+            incomplete = True
+            continue
+        if len(selected) >= 10_000:
+            incomplete = True
+            continue
+        selected[path] = fields[1]
+    notes: dict[str, str] = {}
+    total = 0
+    for path, oid in sorted(selected.items()):
+        size_data = _run_git_bytes(vault, "cat-file", "-s", oid)
+        try:
+            size = int(size_data.strip())
+        except ValueError as exc:
+            raise HealthcheckError("invalid staged warning blob size") from exc
+        if size < 0 or size > 1_000_000 or total + size > 8_000_000:
+            incomplete = True
+            continue
+        original = _run_git_bytes(vault, "cat-file", "blob", oid)
+        if len(original) != size:
+            raise HealthcheckError("staged warning blob size changed")
+        total += size
+        try:
+            notes[path] = original.decode("utf-8-sig")
+        except UnicodeError:
+            incomplete = True
+    if incomplete:
+        # A skipped target is unknown, so absence of its path is not evidence.
+        # Other findings over the originals actually read remain warning-only.
+        findings = extension_warnings(notes, config, input_complete=False)
+    else:
+        findings = extension_warnings(notes, config)
+    changed_paths = {x.path for x in changes if x.status in "ACMR"}
+    return [x for x in findings if x["code"] == "lint-incomplete" or x["path"] in changed_paths
+            or x["details"].get("target") in changed_paths]
+
+
+def validate_staged(vault: Path, config: dict, *, warning_diagnostics: list[dict] | None = None) -> list[str]:
     """Validate only the staged Markdown change surface without writing a report."""
     if not isinstance(config, dict):
         raise HealthcheckError("validated config must be an object")
@@ -978,6 +1149,12 @@ def validate_staged(vault: Path, config: dict) -> list[str]:
                     "백링크가 남아 있음"
                 )
 
+    promotion = _validated_warning_policy(config)
+    if warning_diagnostics is not None or promotion["promoted_codes"]:
+        findings = staged_extension_warnings(vault, config, changes)
+        if warning_diagnostics is not None:
+            warning_diagnostics.extend(findings)
+        errors.extend(format_extension_warning(x) for x in findings if x["severity"] == "fatal")
     return sorted(set(errors))
 
 
@@ -1116,12 +1293,16 @@ def main() -> int:
     if args.staged:
         try:
             cfg = load_staged_config(vault)
-            diagnostics = validate_staged(vault, cfg)
+            extension_diagnostics: list[dict] = []
+            diagnostics = validate_staged(vault, cfg, warning_diagnostics=extension_diagnostics)
         except (OSError, ValueError, HealthcheckError) as e:
             print(f"[vault-healthcheck] staged 오류: {e}", file=sys.stderr)
             return 1
         for diagnostic in diagnostics:
             print(diagnostic, file=sys.stderr)
+        for finding in extension_diagnostics:
+            if finding["severity"] != "fatal":
+                print(format_extension_warning(finding), file=sys.stderr)
         return 1 if diagnostics else 0
 
     # --- 볼트 감지: 00-meta/vault-config.json 이 없으면 조용히·정중히 무동작 ---
@@ -1273,6 +1454,7 @@ def main() -> int:
     incoming: dict[str, int] = {p.stem: 0 for p in targets}
     note_types: dict[str, str] = {}
     fact_hits: dict[str, dict[str, list[str]]] = {label: {} for label, _ in fact_patterns}
+    approved_note_texts: dict[str, str] = {}
 
     # 프런트매터 면제 구역 — 2026-08-05 신설.
     # 구 버전이 하드코딩하던 면제('10-inbox/*', '00-meta/scratch/*' 등)가
@@ -1308,6 +1490,7 @@ def main() -> int:
             # 파일 단위 fail-soft — 이 노트만 건너뛰고 검사를 계속한다(§14 보고).
             unreadable.append((rel, read_err or "읽기 실패"))
             continue
+        approved_note_texts[rel] = text
         fm, _body = split_frontmatter(text)
 
         exempt = is_fm_exempt(rel)
@@ -1372,6 +1555,31 @@ def main() -> int:
         print("[vault-healthcheck] 오류: 검사 대상 전부를 읽지 못했습니다 — "
               "잠금·권한·클라우드 하이드레이션 상태를 확인하세요.", file=sys.stderr)
         return 1
+
+    # Legacy schema/graph consumers exclude contract docs and the generated
+    # report, but their allowed originals may still be explicit anchor targets.
+    # Read each omitted original once as evidence without widening legacy gates.
+    consumer_paths = {rel_posix(p, vault) for p in targets}
+    evidence_bytes = 0
+    for text in approved_note_texts.values():
+        if len(text) > 1_000_000 or evidence_bytes >= 8_000_000:
+            evidence_bytes = 8_000_000
+            break
+        evidence_bytes += len(text.encode("utf-8"))
+    for p in all_md:
+        rel = rel_posix(p, vault)
+        if rel in consumer_paths or not _warning_inventory_allowed(rel, cfg):
+            continue
+        try:
+            text, read_err = _read_extension_evidence(vault, p, cfg.get("deny_zones"), 8_000_000 - evidence_bytes)
+        except HealthcheckError:
+            link_skipped.append(rel)
+            continue
+        if text is None:
+            unreadable.append((rel, read_err or "읽기 실패"))
+        else:
+            approved_note_texts[rel] = text
+            evidence_bytes += len(text.encode("utf-8"))
 
     # --- 고아 / 준고아 ---------------------------------------------------------
     # 못 읽은 노트는 본문(발신 링크)을 모르므로 고아·준고아 판정에서 제외한다 —
@@ -1510,6 +1718,12 @@ def main() -> int:
         if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names)
     })
 
+    extension_diagnostics = extension_warnings(approved_note_texts, cfg,
+        input_complete=not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
+                       and not any(_warning_inventory_allowed(rel, cfg) for rel in link_skipped),
+        consumer_paths=consumer_paths)
+    promoted_count = sum(x["severity"] == "fatal" for x in extension_diagnostics)
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
@@ -1520,6 +1734,7 @@ def main() -> int:
                     + len(injection_over)
                     + len(unreadable)
                     + len(link_skipped)
+                    + len(extension_diagnostics)
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
@@ -1528,7 +1743,8 @@ def main() -> int:
     # 관리성(과대 프런트매터·데드링크·고아·미등록·노화·SSOT 대기)은 리포트만 남기고 0 —
     # 매번 exit 1 이면 신호가 무의미해진다.
     critical = (len(missing_fm) + len(missing_keys) + len(enum_violations)
-                + len(unquoted_links) + len(log_tag_missing) + len(log_tag_unknown))
+                + len(unquoted_links) + len(log_tag_missing) + len(log_tag_unknown)
+                + promoted_count)
 
     # --- 리포트 작성 -------------------------------------------------------------
     today = date.today().isoformat()
@@ -1665,6 +1881,13 @@ def main() -> int:
         *([f"- {rel}" for rel in link_skipped] or ["- 없음"]),
         "",
     ]
+    if extension_diagnostics:
+        lines += [
+            f"## 15. Markdown warning extensions ({len(extension_diagnostics)})",
+            "  (New checks warn by default; fatal promotion requires current checker/corpus hashes and zero-FP replay.)",
+            *[f"- {format_extension_warning(x)}" for x in extension_diagnostics],
+            "",
+        ]
 
     try:
         if config_derived_output:
