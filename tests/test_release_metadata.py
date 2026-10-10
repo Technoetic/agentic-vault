@@ -18,15 +18,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.19.0"
-EXPECTED_PUBLIC_REF = "0.19.0"
+EXPECTED = "0.20.0"
+EXPECTED_PUBLIC_REF = "0.20.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.19.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.19.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.20.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.20.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.19.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.20.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",

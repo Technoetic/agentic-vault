@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.19.0: shared Markdown memory with source-bound compact constraints, opt-in bilingual query expansion, warning-first lint, host capture provenance, cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage and explicit measured token calibration. Model calls and provider adapters remain opt-in. Jev is advisory; source hashes and receipts are data, not authority. Existing vault data, permissions and default budgets remain under host control. Jarvis retains its API authentication requirement and host-selected context with no model tools.",
+    "longDescription": "Release v0.20.0: opt-in fixed-condition lesson comparisons, execution receipts, conflict-aware single-proposal undo, scoped operation claims with uncertainty holds, and stage-separated Jev/Jarvis connector diagnostics. Existing source-bound compact constraints, recall, provenance, cooperative partial edits and warning-first lint remain. No default model/network calls or automatic promotion/rollback. Receipts and Jev judgments are data, not authority or exactly-once guarantees. Windows lock contention may fail closed. Existing vault permissions, budgets and Jarvis API-auth requirements remain under host control.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [
