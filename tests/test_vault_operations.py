@@ -85,23 +85,31 @@ class VaultOperationTests(unittest.TestCase):
         self.assertNotEqual(fresh['id'], first['id'])
 
     def test_expired_claim_becomes_uncertain_and_old_owner_cannot_finish(self):
-        first = self.begin(ttl_seconds=.2)
-        time.sleep(.25)
-        second = self.begin()
-        self.assertEqual(second['state'], 'uncertain')
-        self.assertEqual(second['disposition'], 'blocked')
-        self.assertNotIn('owner_token', second)
-        with self.assertRaisesRegex(operations.OperationError, '^owner_fence_changed$'):
-            operations.finish(self.vault, first['id'], first['owner_token'], {})
-        self.assertEqual(operations.inspect(self.vault, first['id'])['state'], 'uncertain')
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with mock.patch.object(operations, '_now', return_value=now.isoformat()), \
+             mock.patch.object(operations, 'time') as clock:
+            clock.time.return_value = now.timestamp()
+            first = self.begin(ttl_seconds=.2)
+            clock.time.return_value = now.timestamp() + .25
+            second = self.begin()
+            self.assertEqual(second['state'], 'uncertain')
+            self.assertEqual(second['disposition'], 'blocked')
+            self.assertNotIn('owner_token', second)
+            with self.assertRaisesRegex(operations.OperationError, '^owner_fence_changed$'):
+                operations.finish(self.vault, first['id'], first['owner_token'], {})
+            self.assertEqual(operations.inspect(self.vault, first['id'])['state'], 'uncertain')
 
     def test_finish_expiry_persists_uncertain_before_reporting_failure(self):
-        first = self.begin(ttl_seconds=.2)
-        time.sleep(.25)
-        with self.assertRaisesRegex(operations.OperationError, '^operation_uncertain$'):
-            operations.finish(self.vault, first['id'], first['owner_token'], {})
-        self.assertEqual(operations.inspect(self.vault, first['id'])['state'], 'uncertain')
-        self.assertEqual(self.begin()['disposition'], 'blocked')
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        with mock.patch.object(operations, '_now', return_value=now.isoformat()), \
+             mock.patch.object(operations, 'time') as clock:
+            clock.time.return_value = now.timestamp()
+            first = self.begin(ttl_seconds=.2)
+            clock.time.return_value = now.timestamp() + .25
+            with self.assertRaisesRegex(operations.OperationError, '^operation_uncertain$'):
+                operations.finish(self.vault, first['id'], first['owner_token'], {})
+            self.assertEqual(operations.inspect(self.vault, first['id'])['state'], 'uncertain')
+            self.assertEqual(self.begin()['disposition'], 'blocked')
 
     def test_unknown_outcome_stays_blocked_without_expiry(self):
         first = self.begin()
@@ -328,7 +336,13 @@ print(json.dumps(result))
         effect = Path(self.tmp.name) / 'effect'
         script = """
 import pathlib, sys, os
+from datetime import datetime, timezone
+from types import SimpleNamespace
 sys.path.insert(0, sys.argv[1]); import vault_operations as op
+now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+# Hold only the receipt clock while real claim writes and locks run.
+op._now = lambda: now.isoformat()
+op.time = SimpleNamespace(time=lambda: now.timestamp())
 claim = op.begin(sys.argv[2], 'intent-001', 'send-message',
                  {'count': 1, 'nested': {'b': 2, 'a': 1}}, ttl_seconds=.08)
 if claim['disposition'] == 'claimed': pathlib.Path(sys.argv[3]).write_text('remote effect')
@@ -338,11 +352,14 @@ os._exit(23)
                                 str(effect)], capture_output=True, timeout=10)
         self.assertEqual(child.returncode, 23)
         self.assertEqual(effect.read_text(), 'remote effect')
-        time.sleep(.1)
-        retry = self.begin()
-        self.assertEqual(retry['disposition'], 'blocked')
-        self.assertEqual(retry['state'], 'uncertain')
-        self.assertNotIn('owner_token', retry)
+        expired = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=.1)
+        with mock.patch.object(operations, '_now', return_value=expired.isoformat()), \
+             mock.patch.object(operations, 'time') as clock:
+            clock.time.return_value = expired.timestamp()
+            retry = self.begin()
+            self.assertEqual(retry['disposition'], 'blocked')
+            self.assertEqual(retry['state'], 'uncertain')
+            self.assertNotIn('owner_token', retry)
         self.assertEqual(effect.read_text(), 'remote effect')
 
     def test_policy_change_at_final_replace_boundary_preserves_pending_receipt(self):
