@@ -32,7 +32,7 @@ class ConnectorTests(unittest.TestCase):
             sys.path.remove(str(SCRIPTS))
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.vault = Path(self.temp.name) / "vault"
+        self.vault = Path(self.temp.name).resolve() / "vault"
         self.vault.mkdir()
         self.config_path = self.vault / "00-meta" / "vault-config.json"
         self.write_config()
