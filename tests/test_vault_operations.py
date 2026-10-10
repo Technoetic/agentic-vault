@@ -360,19 +360,25 @@ os._exit(23)
         self.assertEqual(path.read_bytes(), before)
 
     def test_owner_expiry_during_finish_write_cannot_commit_success(self):
-        first = self.begin(ttl_seconds=.2)
-        before = self.receipt(first['id']).read_bytes()
-        original = operations._atomic
-        def delayed(path, data, before_replace, **kwargs):
-            time.sleep(.25)
-            return original(path, data, before_replace, **kwargs)
-        with mock.patch.object(operations, '_atomic', side_effect=delayed):
-            with self.assertRaisesRegex(operations.OperationError, '^operation_uncertain$'):
-                operations.finish(self.vault, first['id'], first['owner_token'], {})
-        self.assertEqual(self.receipt(first['id']).read_bytes(), before)
-        replay = self.begin()
-        self.assertEqual(replay['state'], 'uncertain')
-        self.assertEqual(replay['disposition'], 'blocked')
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        # Expire the owner during staging, independently of runner scheduling.
+        # Replace this module's clock only; advisory-lock clocks remain real.
+        with mock.patch.object(operations, '_now', return_value=now.isoformat()), \
+             mock.patch.object(operations, 'time') as clock:
+            clock.time.return_value = now.timestamp()
+            first = self.begin(ttl_seconds=.2)
+            before = self.receipt(first['id']).read_bytes()
+            original = operations._atomic
+            def expire(path, data, before_replace, **kwargs):
+                clock.time.return_value = now.timestamp() + .25
+                return original(path, data, before_replace, **kwargs)
+            with mock.patch.object(operations, '_atomic', side_effect=expire):
+                with self.assertRaisesRegex(operations.OperationError, '^operation_uncertain$'):
+                    operations.finish(self.vault, first['id'], first['owner_token'], {})
+            self.assertEqual(self.receipt(first['id']).read_bytes(), before)
+            replay = self.begin()
+            self.assertEqual(replay['state'], 'uncertain')
+            self.assertEqual(replay['disposition'], 'blocked')
 
     def test_cli_mark_uncertain_and_reconcile_never_returns_owner(self):
         first = self.begin()
