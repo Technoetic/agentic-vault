@@ -29,3 +29,7 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    이 진단도 읽기 전용이다. `adapters.aside`의 `actions`는 제안으로만 보고하고 설치·교체는
    `/vault-upgrade`(Codex `$agentic-vault:agentic-vault upgrade`)로 안내한다. `cli_on_path`가 false이고
    설치된 것이 없으면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
+7. 사용자가 Jev/Jarvis 연결 준비 상태도 요청하면 [단계별 연결 진단](../docs/tower-reliability.md)의
+   `vault_connectors.py --vault PATH --format json`을 추가로 사용한다. 기본은 오프라인이며
+   키 존재를 인증 성공으로 해석하지 않는다. live probe는 명시한 지원 연결과 기존 승인
+   범위에서만 수행하며, 진단 요청만으로 Jarvis를 시작하거나 메시지를 보내지 않는다.

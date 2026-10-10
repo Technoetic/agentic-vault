@@ -90,6 +90,12 @@ Compact constraints and model-free lifecycle checkpoints preserve existing start
 budgets; new findings warn first. The installation refs below target v0.19.0.
 Code, CI and installation evidence is recorded in the [release verification](docs/verification/v0.19.0.md).
 
+The source also contains opt-in [reliability extensions](docs/tower-reliability.md)
+for fixed-condition lesson comparisons, execution receipts, conflict-aware proposal undo,
+uncertain-operation records and stage-separated connector diagnostics. These are source
+additions beyond the published v0.19.0 scope: verify the relevant script exists in your
+installation. They add no default model/network calls or automatic lesson promotion.
+
 - `/vault-init <name>` creates the standard folder tree, `vault-config.json`, templates and engine rules, and installs the git hooks when git is enabled.
 - `/vault-session-start` restores the last state; `/vault-session-end` updates the handoff, hot note and log, then commits locally.
 - `/vault-ingest`, `/vault-process-inbox` and `/vault-day` turn sources and captures into atomic, wikilinked notes.
