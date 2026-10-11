@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.20.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.19.0 and earlier | No. Upgrade to 0.20.0 after reviewing the Jarvis API-auth requirement. |
+| 0.21.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.20.0 and earlier | No. Upgrade to 0.21.0 after reviewing the Jarvis API-auth requirement. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).

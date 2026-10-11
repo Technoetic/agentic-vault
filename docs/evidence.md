@@ -1,5 +1,9 @@
 # 검증 근거와 다음 세션 인계
 
+v0.21.0의 [요구별 검증 누락 확인](moai-diagnostics.md)은 요구·인수 조건·필수 검사 목록을
+별도로 선언하고 아래 evidence 영수증에 제출한 검사와 비교한다. 기존 `current`만으로
+검증 완전성·실제 실행·요구 의미 충족을 판단하지 않는다.
+
 v0.11.0부터 제공하는 선택 도구다. 배포본의
 `skills/agentic-vault/scripts/vault_evidence.py`를 Python 3.10 이상으로 실행한다.
 Codex에서는 `$agentic-vault:agentic-vault evidence <하위 명령과 인자>`로 연결한다.
