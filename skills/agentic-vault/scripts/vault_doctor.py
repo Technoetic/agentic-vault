@@ -235,7 +235,7 @@ def _isolated_configs(raw: dict) -> tuple[dict, dict] | None:
     return configs["handoff"], configs["hot"]
 
 
-def diagnose(vault: Path) -> tuple[dict, int]:
+def diagnose(vault: Path, *, instructions: bool = False) -> tuple[dict, int]:
     config_candidate = vault / session_hook.CONFIG_REL
     try:
         if not config_candidate.is_file():
@@ -384,6 +384,29 @@ def diagnose(vault: Path) -> tuple[dict, int]:
         ),
         "sections": sections,
     }
+    if instructions:
+        from vault_instruction_budget import diagnose_instructions
+        from vault_evidence import EvidenceError, stable_read
+        # The opt-in reader uses descriptor checks for the config as well as
+        # instruction files. Legacy Doctor behavior remains unchanged.
+        config = full_config if full_config is not None else raw
+        try:
+            denied = (*full_config["deny_zones"], ".git") if full_config is not None else (".git",)
+            resolver = lambda: resolve_note_path(vault, session_hook.CONFIG_REL, denied)
+            initial, _mark, current_bytes = stable_read(resolver, session_hook.MAX_CONFIG_BYTES, contents=True)
+            if current_bytes != raw_bytes:
+                raise EvidenceError("configuration_changed")
+            inventory = diagnose_instructions(vault, config)
+            after, _mark, _data = stable_read(resolver, session_hook.MAX_CONFIG_BYTES)
+            if after != initial:
+                inventory["status"] = "partial"
+                if len(inventory["issues"]) < inventory["limits"]["issues"]:
+                    inventory["issues"].append({"code": "configuration_changed"})
+            report["instructions"] = inventory
+        except (EvidenceError, OSError, ValueError, RuntimeError):
+            report["instructions"] = diagnose_instructions(vault, None)
+        if report["instructions"]["status"] != "complete" and exit_code == 0:
+            exit_code = 1
     return report, exit_code
 
 
@@ -409,6 +432,14 @@ def _format_text(report: dict) -> str:
                 f"configured_budget={section['configured_token_budget']}; "
                 f"effective_budget={section['effective_token_budget']}"
             )
+    if "instructions" in report:
+        inventory = report["instructions"]
+        lines.extend([
+            f"instructions: {inventory['status']}",
+            f"instruction_unique_files: {inventory['totals']['unique_files']}",
+            f"instruction_characters: {inventory['totals']['characters']}",
+            f"instruction_runtime_loading: {inventory['runtime_loading']}",
+        ])
     return "\n".join(lines)
 
 
@@ -417,9 +448,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault", required=True, type=Path, help="Vault directory to diagnose.")
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--instructions", action="store_true", help="Include a bounded metadata-only instruction inventory; runtime loading is unverified.")
     args = parser.parse_args(argv)
 
-    report, exit_code = diagnose(args.vault)
+    report, exit_code = diagnose(args.vault, instructions=args.instructions)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
