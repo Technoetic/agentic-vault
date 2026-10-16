@@ -19,6 +19,37 @@ except ModuleNotFoundError:
     runs = None
 
 
+RUN_CHILD = """
+import json, re, sys
+sys.path.insert(0, sys.argv[1]); import vault_runs as runs
+verb = sys.argv[3]
+try:
+    if verb == 'prepare':
+        result = runs.prepare(sys.argv[2], 'notes/candidate.md', ['notes/prompt.md'],
+            'input/fixture.json', 'input/tools.json', model='fixture-model',
+            provider='fixture-provider', token_budget=2048, candidate_version='v2')
+    else:
+        result = runs.record(sys.argv[2], sys.argv[4], 'input/report.json')
+except runs.RunError as error:
+    cause = error.__cause__
+    if (str(error) == 'unsafe_or_invalid_input'
+            and isinstance(cause, runs.state.StateError) and str(cause) == 'lock_busy'):
+        print(json.dumps({'ok': False, 'error': 'lock_busy'}))
+    elif verb == 'record' and str(error) == 'immutable_receipt_exists':
+        print(json.dumps({'ok': False, 'error': 'immutable_receipt_exists'}))
+    else:
+        chain = []
+        while error is not None:
+            code = str(error) if re.fullmatch(r'[a-z_]{1,80}', str(error)) else None
+            chain.append({'type': type(error).__name__, 'code': code,
+                          'winerror': getattr(error, 'winerror', None)})
+            error = error.__cause__
+        print(json.dumps({'unexpected_error': chain})); sys.exit(2)
+else:
+    print(json.dumps({'ok': True, 'result': result}))
+"""
+
+
 class VaultRunsTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(runs, 'frozen execution receipts implementation is missing')
@@ -53,6 +84,25 @@ class VaultRunsTests(unittest.TestCase):
 
     def write_json(self, relative, value):
         return self.write(relative, json.dumps(value, allow_nan=False))
+
+    def run_children(self, verb, *args, count=2):
+        children = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', RUN_CHILD,
+            str(SCRIPTS), str(self.vault), verb, *args], stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding='utf-8') for _ in range(count)]
+        def cleanup():
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+            for child in children:
+                child.communicate(timeout=5)
+        self.addCleanup(cleanup)
+        results = []
+        for child in children:
+            stdout, stderr = child.communicate(timeout=20)
+            self.assertEqual(child.returncode, 0, stdout + stderr)
+            self.assertEqual(stderr, '')
+            results.append(json.loads(stdout))
+        return results
 
     def prepare(self, candidate='notes/candidate.md', **kwargs):
         options = dict(model='fixture-model', provider='fixture-provider', token_budget=2048,
@@ -375,25 +425,51 @@ class VaultRunsTests(unittest.TestCase):
         renamed.write_text(json.dumps(value))
         self.error(runs.inspect, self.vault, value['id'])
 
-    def test_concurrent_cli_prepares_reuse_one_manifest_and_only_one_completion_wins(self):
-        prefix = [sys.executable, str(SCRIPTS / 'vault_runs.py'), '--vault', str(self.vault)]
-        args = ['prepare', '--candidate', 'notes/candidate.md', '--source', 'notes/prompt.md',
-                '--fixture', 'input/fixture.json', '--tools', 'input/tools.json',
-                '--model', 'fixture-model', '--provider', 'fixture-provider', '--token-budget', '2048']
-        processes = [subprocess.Popen(prefix + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       text=True) for _ in range(2)]
-        results = [process.communicate(timeout=20) for process in processes]
-        self.assertEqual([process.returncode for process in processes], [0, 0], results)
-        prepared = [json.loads(output) for output, _ in results]
-        self.assertEqual(prepared[0]['id'], prepared[1]['id'])
-        self.write_json('input/report.json', self.report(prepared[0]))
-        processes = [subprocess.Popen(prefix + ['record', prepared[0]['id'], '--report', 'input/report.json'],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
-        results = [process.communicate(timeout=20) for process in processes]
-        self.assertEqual(sorted(process.returncode for process in processes), [0, 2], results)
-        self.assertEqual(len(list((self.vault / runs.RUNTIME_DIR).glob('*prepared.json'))), 1)
-        self.assertEqual(len(list((self.vault / runs.RUNTIME_DIR).glob('*completed.json'))), 1)
-        self.assertEqual(runs.inspect(self.vault, prepared[0]['id'])['status'], 'complete')
+    def test_concurrent_prepares_preserve_one_manifest_and_at_most_one_completion(self):
+        # Availability under contention is bounded; serial idempotency is tested separately.
+        prepared = self.prepare()
+        runtime = self.vault / runs.RUNTIME_DIR
+        original = (self.vault / prepared['path']).read_bytes()
+        for result in self.run_children('prepare'):
+            if result['ok']:
+                self.assertEqual(result['result']['id'], prepared['id'])
+            else:
+                self.assertEqual(result, {'ok': False, 'error': 'lock_busy'})
+        self.assertEqual(len(list(runtime.glob('*prepared.json'))), 1)
+        self.assertEqual((self.vault / prepared['path']).read_bytes(), original)
+        self.write_json('input/report.json', self.report(prepared))
+        results = self.run_children('record', prepared['id'])
+        completed = [result['result'] for result in results if result['ok']]
+        self.assertLessEqual(len(completed), 1, results)
+        for result in results:
+            if result['ok']:
+                self.assertEqual(result['result']['id'], prepared['id'])
+            else:
+                self.assertIn(result['error'], ('lock_busy', 'immutable_receipt_exists'))
+        receipts = list(runtime.glob('*completed.json'))
+        self.assertLessEqual(len(receipts), 1)
+        if completed or any(result.get('error') == 'immutable_receipt_exists' for result in results):
+            self.assertEqual(len(receipts), 1)
+        inspected = runs.inspect(self.vault, prepared['id'])
+        self.assertEqual(inspected['status'], 'complete' if receipts else 'prepared')
+        self.assertEqual(len(list(runtime.glob('*prepared.json'))), 1)
+        self.assertEqual((self.vault / prepared['path']).read_bytes(), original)
+
+    def test_held_run_lease_refuses_without_receipt_change_then_serial_reuse_succeeds(self):
+        prepared = self.prepare()
+        path = self.vault / prepared['path']
+        original = path.read_bytes()
+        self.write_json('input/report.json', self.report(prepared))
+        with runs.state.advisory_lock(self.vault, 'run:' + prepared['id'], wait_seconds=1):
+            for verb, args in (('prepare', ()), ('record', (prepared['id'],))):
+                self.assertEqual(self.run_children(verb, *args, count=1),
+                                 [{'ok': False, 'error': 'lock_busy'}])
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(len(list(path.parent.glob('*prepared.json'))), 1)
+            self.assertEqual(list(path.parent.glob('*completed.json')), [])
+        self.assertEqual(self.prepare()['id'], prepared['id'])
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.complete(prepared)['id'], prepared['id'])
 
     def test_source_change_immediately_before_publish_prevents_receipt(self):
         real = runs.state._check_lease

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import importlib
 import json
 import os
@@ -18,6 +19,37 @@ try:
     operations = importlib.import_module('vault_operations')
 except ModuleNotFoundError:
     operations = None
+
+
+OPERATION_CHILD = """
+import json, pathlib, re, sys, time
+sys.path.insert(0, sys.argv[1]); import vault_operations as op
+ready, release, effect = map(pathlib.Path, sys.argv[3:6])
+ready.write_text('ready')
+deadline = time.monotonic() + 10
+while not release.exists():
+    if time.monotonic() > deadline: raise RuntimeError('barrier timeout')
+    time.sleep(.01)
+try:
+    result = op.begin(sys.argv[2], 'one-intent', 'fixed-action', {'count': 1}, wait_seconds=2)
+except op.OperationError as error:
+    cause = error.__cause__
+    if (str(error) == 'operation_unavailable'
+            and isinstance(cause, op.StateError) and str(cause) == 'lock_busy'):
+        print(json.dumps({'ok': False, 'error': 'lock_busy'}))
+    else:
+        chain = []
+        while error is not None:
+            code = str(error) if re.fullmatch(r'[a-z_]{1,80}', str(error)) else None
+            chain.append({'type': type(error).__name__, 'code': code,
+                          'winerror': getattr(error, 'winerror', None)})
+            error = error.__cause__
+        print(json.dumps({'unexpected_error': chain})); sys.exit(2)
+else:
+    if result['disposition'] == 'claimed':
+        with effect.open('a') as output: output.write('effect\\n')
+    print(json.dumps({'ok': True, 'result': result}))
+"""
 
 
 class VaultOperationTests(unittest.TestCase):
@@ -44,6 +76,34 @@ class VaultOperationTests(unittest.TestCase):
 
     def receipt(self, operation_id):
         return self.vault / operations.RUNTIME_DIR / ('operation-' + operation_id + '.json')
+
+    def run_operation_children(self, *, count=2):
+        release = Path(self.tmp.name) / 'release'
+        effect = Path(self.tmp.name) / 'effects'
+        ready = [Path(self.tmp.name) / ('ready-' + str(i)) for i in range(count)]
+        children = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', OPERATION_CHILD,
+                    str(SCRIPTS), str(self.vault), str(marker), str(release), str(effect)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+                    for marker in ready]
+        def cleanup():
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+            for child in children:
+                child.communicate(timeout=5)
+        self.addCleanup(cleanup)
+        deadline = time.monotonic() + 10
+        while not all(p.exists() for p in ready):
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        release.write_text('go')
+        results = []
+        for child in children:
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, stdout + stderr)
+            self.assertEqual(stderr, '')
+            results.append(json.loads(stdout))
+        return results, effect
 
     def cli(self, *args):
         return subprocess.run([sys.executable, '-X', 'utf8', str(SCRIPTS / 'vault_operations.py'),
@@ -295,42 +355,54 @@ class VaultOperationTests(unittest.TestCase):
             self.begin()
         self.assertEqual(list(outside.iterdir()), [])
 
-    def test_two_cli_processes_only_one_caller_effect(self):
-        script = """
-import json, pathlib, sys, time
-sys.path.insert(0, sys.argv[1]); import vault_operations as op
-ready, release, effect = map(pathlib.Path, sys.argv[3:6])
-ready.write_text('ready')
-deadline = time.monotonic() + 5
-while not release.exists():
-    if time.monotonic() > deadline: raise RuntimeError('barrier timeout')
-    time.sleep(.01)
-result = op.begin(sys.argv[2], 'one-intent', 'fixed-action', {'count': 1}, wait_seconds=2)
-if result['disposition'] == 'claimed':
-    with effect.open('a') as output: output.write('effect\\n')
-print(json.dumps(result))
-"""
-        release = Path(self.tmp.name) / 'release'
-        effect = Path(self.tmp.name) / 'effects'
-        ready = [Path(self.tmp.name) / ('ready-' + str(i)) for i in range(2)]
-        children = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', script, str(SCRIPTS),
-                    str(self.vault), str(marker), str(release), str(effect)],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
-                    for marker in ready]
-        self.addCleanup(lambda: [p.kill() for p in children if p.poll() is None])
-        deadline = time.monotonic() + 5
-        while not all(p.exists() for p in ready):
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(.01)
-        release.write_text('go')
-        results = []
-        for child in children:
-            stdout, stderr = child.communicate(timeout=10)
-            self.assertEqual(child.returncode, 0, stderr)
-            results.append(json.loads(stdout))
-        self.assertEqual(sorted(r['disposition'] for r in results), ['blocked', 'claimed'])
-        self.assertEqual(effect.read_text(), 'effect\n')
-        self.assertEqual(results[0]['id'], results[1]['id'])
+    def test_two_processes_allow_bounded_refusal_and_at_most_one_caller_effect(self):
+        results, effect = self.run_operation_children()
+        observed = [result['result'] for result in results if result['ok']]
+        claims = [result for result in observed if result['disposition'] == 'claimed']
+        self.assertLessEqual(len(claims), 1, results)
+        self.assertEqual(effect.read_text().splitlines() if effect.exists() else [],
+                         ['effect'] * len(claims))
+        for result in results:
+            if not result['ok']:
+                self.assertEqual(result, {'ok': False, 'error': 'lock_busy'})
+                self.assertNotIn('owner_token', result)
+            elif result['result']['disposition'] != 'claimed':
+                self.assertEqual(result['result']['disposition'], 'blocked')
+                self.assertNotIn('owner_token', result['result'])
+        receipts = list((self.vault / operations.RUNTIME_DIR).glob('operation-*.json'))
+        self.assertLessEqual(len(receipts), 1)
+        if observed:
+            self.assertEqual(len(receipts), 1)
+            self.assertEqual(len({result['id'] for result in observed}), 1)
+        if receipts:
+            stored = json.loads(receipts[0].read_text())
+            self.assertEqual(receipts[0], self.receipt(stored['id']))
+            self.assertEqual(stored['state'], 'pending')
+            self.assertEqual([event['event'] for event in stored['events']], ['claimed'])
+            self.assertEqual(stored['intent_sha256'], hashlib.sha256(b'"one-intent"').hexdigest())
+            self.assertEqual(stored['action_sha256'], hashlib.sha256(b'"fixed-action"').hexdigest())
+            self.assertEqual(stored['parameters_sha256'],
+                             hashlib.sha256(b'{"count":1}').hexdigest())
+            for result in observed:
+                self.assertEqual(result['id'], stored['id'])
+            if claims:
+                self.assertEqual(claims[0]['owner_token'], stored['owner_token'])
+
+    def test_held_operation_lease_refuses_without_effect_then_reuses_pending_receipt(self):
+        first = operations.begin(self.vault, 'one-intent', 'fixed-action', {'count': 1})
+        path = self.receipt(first['id'])
+        original = path.read_bytes()
+        with operations.advisory_lock(self.vault, 'operation:' + first['id'], wait_seconds=1):
+            results, effect = self.run_operation_children(count=1)
+            self.assertEqual(results, [{'ok': False, 'error': 'lock_busy'}])
+            self.assertFalse(effect.exists())
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(len(list(path.parent.glob('operation-*.json'))), 1)
+        retry = operations.begin(self.vault, 'one-intent', 'fixed-action', {'count': 1})
+        self.assertEqual(retry['disposition'], 'blocked')
+        self.assertEqual(retry['id'], first['id'])
+        self.assertNotIn('owner_token', retry)
+        self.assertEqual(path.read_bytes(), original)
 
     def test_subprocess_crash_after_effect_before_finish_never_reexecutes(self):
         effect = Path(self.tmp.name) / 'effect'

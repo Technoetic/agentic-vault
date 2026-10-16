@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import importlib
 import inspect
 import json
@@ -10,7 +10,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock
@@ -205,20 +204,20 @@ class VaultStateTests(unittest.TestCase):
                 replacement_context.__exit__(None, None, None)
 
     def test_lease_timestamp_starts_at_acquisition_after_bounded_wait(self):
-        acquired = threading.Event()
-        release_started = []
-        def hold():
-            with state.advisory_lock(self.vault, 'shared'):
-                acquired.set()
-                time.sleep(.14)
-                release_started.append(time.time())
-        writer = threading.Thread(target=hold)
-        writer.start()
-        self.addCleanup(writer.join)
-        self.assertTrue(acquired.wait(1))
-        with state.advisory_lock(self.vault, 'shared', ttl_seconds=.1, wait_seconds=.5) as lease:
-            created = state.datetime.fromisoformat(lease['created_at']).timestamp()
-            self.assertGreaterEqual(created, release_started[0])
+        clock = ['2000-01-01T00:00:00+00:00']
+        with ExitStack() as owner:
+            owner.enter_context(state.advisory_lock(self.vault, 'shared'))
+            def release_after_collision(_deadline):
+                # Advance UTC at the retry boundary without relying on a
+                # sleeping thread to finish release within the wait budget.
+                owner.close()
+                clock[0] = '2000-01-01T00:00:02+00:00'
+            with mock.patch.object(state, '_now', side_effect=lambda: clock[0]), \
+                    mock.patch.object(state, '_pause', side_effect=release_after_collision):
+                with state.advisory_lock(self.vault, 'shared', ttl_seconds=.1, wait_seconds=.5) as lease:
+                    self.assertEqual(lease['created_at'], '2000-01-01T00:00:02+00:00')
+                    saved = json.loads(Path(lease['lock_path']).read_text())
+                    self.assertEqual(saved['created_at'], '2000-01-01T00:00:02+00:00')
 
     def test_expiry_requires_both_utc_and_old_mtime(self):
         with state.advisory_lock(self.vault, 'shared', ttl_seconds=.02) as first:
