@@ -15,6 +15,7 @@ import math
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -438,6 +439,8 @@ def evaluate(*, backend='scripted-control', transport=None, control='safe', limi
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=('scripted-control', 'local-model'), default='scripted-control')
     parser.add_argument('--control', choices=('safe', 'susceptible', 'blocked'), default='safe')

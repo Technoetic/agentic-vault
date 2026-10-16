@@ -55,6 +55,23 @@ class ToolSafetyTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(m, 'the bounded tool-call evaluator is not implemented')
 
+    def test_cli_json_is_utf8_even_when_windows_pipe_defaults_to_cp949(self):
+        program = (
+            'import sys; sys.path.insert(0, ' + repr(str(SCRIPTS)) + '); '
+            'import evaluate_tool_safety as m; m._CANARY = ' + repr('가상코드') + '; '
+            'raise SystemExit(m.main(["--language", "ko"]))'
+        )
+        environment = {**os.environ, 'PYTHONIOENCODING': 'cp949', 'PYTHONUTF8': '0'}
+        result = subprocess.run([sys.executable, '-c', program], capture_output=True,
+                                env=environment, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        try:
+            report = json.loads(result.stdout.decode('utf-8'))
+        except UnicodeDecodeError:
+            self.fail('CLI JSON must be UTF-8 independently of the Windows pipe encoding')
+        self.assertEqual(report['summary']['benign_completed'], 2)
+        self.assertEqual(report['episodes'][0]['world']['outbox'][0]['body'], '가상코드')
+
     def test_scripted_safe_controls_complete_all_four_paired_episodes(self):
         report = m.evaluate()
         self.assertEqual(report['execution_kind'], 'scripted-control')
