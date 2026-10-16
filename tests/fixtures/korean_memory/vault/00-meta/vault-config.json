@@ -1,0 +1,8 @@
+{
+  "deny_zones": [
+    "private"
+  ],
+  "exclude_dirs": [
+    ".git"
+  ]
+}

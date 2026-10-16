@@ -1,0 +1,1531 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "description": "직접 작성한 허구 한국어 업무 기억 50건. 공식 벤치마크나 실제 기업 자료가 아니다.",
+  "withdrawn_sources": [
+    "20-knowledge/01-withdrawn.md",
+    "20-knowledge/02-withdrawn.md",
+    "20-knowledge/03-withdrawn.md",
+    "20-knowledge/04-withdrawn.md",
+    "20-knowledge/05-withdrawn.md",
+    "20-knowledge/06-withdrawn.md",
+    "20-knowledge/07-withdrawn.md",
+    "20-knowledge/08-withdrawn.md",
+    "20-knowledge/09-withdrawn.md",
+    "20-knowledge/10-withdrawn.md"
+  ],
+  "cases": [
+    {
+      "id": "ko-01-current",
+      "scenario": "current",
+      "question": "허구 조직 모의달빛기공의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의달빛기공",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-01-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의달빛기공의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의달빛기공",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-01-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의달빛기공의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의달빛기공",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-01-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의달빛기공의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의달빛기공",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-01-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의달빛기공의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의달빛기공",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-02-current",
+      "scenario": "current",
+      "question": "허구 조직 모의바람제어의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의바람제어",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-02-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의바람제어의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의바람제어",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-02-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의바람제어의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의바람제어",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-02-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의바람제어의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의바람제어",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-02-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의바람제어의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의바람제어",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-03-current",
+      "scenario": "current",
+      "question": "허구 조직 모의구름센서의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의구름센서",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-03-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의구름센서의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의구름센서",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-03-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의구름센서의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의구름센서",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-03-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의구름센서의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의구름센서",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-03-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의구름센서의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의구름센서",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-04-current",
+      "scenario": "current",
+      "question": "허구 조직 모의별숲전선의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의별숲전선",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-04-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의별숲전선의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의별숲전선",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-04-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의별숲전선의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의별숲전선",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-04-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의별숲전선의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의별숲전선",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-04-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의별숲전선의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의별숲전선",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-05-current",
+      "scenario": "current",
+      "question": "허구 조직 모의새벽로봇의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의새벽로봇",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-05-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의새벽로봇의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의새벽로봇",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-05-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의새벽로봇의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의새벽로봇",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-05-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의새벽로봇의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의새벽로봇",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-05-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의새벽로봇의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의새벽로봇",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-06-current",
+      "scenario": "current",
+      "question": "허구 조직 모의해솔계측의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의해솔계측",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-06-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의해솔계측의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의해솔계측",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-06-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의해솔계측의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의해솔계측",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-06-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의해솔계측의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의해솔계측",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-06-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의해솔계측의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의해솔계측",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-07-current",
+      "scenario": "current",
+      "question": "허구 조직 모의윤슬설비의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의윤슬설비",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-07-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의윤슬설비의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의윤슬설비",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-07-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의윤슬설비의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의윤슬설비",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-07-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의윤슬설비의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의윤슬설비",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-07-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의윤슬설비의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의윤슬설비",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-08-current",
+      "scenario": "current",
+      "question": "허구 조직 모의산들모터의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의산들모터",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-08-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의산들모터의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의산들모터",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-08-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의산들모터의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의산들모터",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-08-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의산들모터의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의산들모터",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-08-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의산들모터의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의산들모터",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-09-current",
+      "scenario": "current",
+      "question": "허구 조직 모의은하변압의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의은하변압",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-09-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의은하변압의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의은하변압",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-09-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의은하변압의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의은하변압",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-09-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의은하변압의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의은하변압",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-09-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의은하변압의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의은하변압",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-10-current",
+      "scenario": "current",
+      "question": "허구 조직 모의푸른배전의 현재 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의푸른배전",
+        "attribute": "출하책임자",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-10-historical",
+      "scenario": "historical",
+      "question": "허구 조직 모의푸른배전의 과거 기록의 출하책임자는 무엇인가?",
+      "options": {
+        "entity": "모의푸른배전",
+        "attribute": "출하책임자",
+        "scope": "historical",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-10-conditional",
+      "scenario": "conditional",
+      "question": "허구 조직 모의푸른배전의 현재 특송허용시간는 무엇인가? 시험성적서 승인 완료 시 조건으로",
+      "options": {
+        "entity": "모의푸른배전",
+        "attribute": "특송허용시간",
+        "scope": "current",
+        "condition": "시험성적서 승인 완료 시"
+      }
+    },
+    {
+      "id": "ko-10-no_answer",
+      "scenario": "no_answer",
+      "question": "허구 조직 모의푸른배전의 현재 해외창고주소는 무엇인가?",
+      "options": {
+        "entity": "모의푸른배전",
+        "attribute": "해외창고주소",
+        "scope": "current",
+        "condition": null
+      }
+    },
+    {
+      "id": "ko-10-withdrawn",
+      "scenario": "withdrawn",
+      "question": "허구 조직 모의푸른배전의 현재 임시승인코드는 무엇인가?",
+      "options": {
+        "entity": "모의푸른배전",
+        "attribute": "임시승인코드",
+        "scope": "current",
+        "condition": null
+      }
+    }
+  ],
+  "labels": {
+    "ko-01-current": {
+      "expected_paths": [
+        "20-knowledge/01-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의달빛기공",
+          "attribute": "출하책임자",
+          "value": "가상해나",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/01-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의달빛기공",
+          "attribute": "출하책임자",
+          "value": "가상전임01",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/01-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의달빛기공",
+          "attribute": "출하책임자",
+          "value": "가상전임01",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/01-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/01-withdrawn.md"
+      ]
+    },
+    "ko-01-historical": {
+      "expected_paths": [
+        "20-knowledge/01-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의달빛기공",
+          "attribute": "출하책임자",
+          "value": "가상전임01",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/01-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/01-withdrawn.md"
+      ]
+    },
+    "ko-01-conditional": {
+      "expected_paths": [
+        "20-knowledge/01-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의달빛기공",
+          "attribute": "특송허용시간",
+          "value": "13:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/01-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/01-withdrawn.md"
+      ]
+    },
+    "ko-01-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/01-withdrawn.md"
+      ]
+    },
+    "ko-01-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/01-withdrawn.md"
+      ]
+    },
+    "ko-02-current": {
+      "expected_paths": [
+        "20-knowledge/02-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의바람제어",
+          "attribute": "출하책임자",
+          "value": "가상다온",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/02-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의바람제어",
+          "attribute": "출하책임자",
+          "value": "가상전임02",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/02-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의바람제어",
+          "attribute": "출하책임자",
+          "value": "가상전임02",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/02-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/02-withdrawn.md"
+      ]
+    },
+    "ko-02-historical": {
+      "expected_paths": [
+        "20-knowledge/02-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의바람제어",
+          "attribute": "출하책임자",
+          "value": "가상전임02",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/02-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/02-withdrawn.md"
+      ]
+    },
+    "ko-02-conditional": {
+      "expected_paths": [
+        "20-knowledge/02-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의바람제어",
+          "attribute": "특송허용시간",
+          "value": "14:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/02-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/02-withdrawn.md"
+      ]
+    },
+    "ko-02-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/02-withdrawn.md"
+      ]
+    },
+    "ko-02-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/02-withdrawn.md"
+      ]
+    },
+    "ko-03-current": {
+      "expected_paths": [
+        "20-knowledge/03-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의구름센서",
+          "attribute": "출하책임자",
+          "value": "가상소담",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/03-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의구름센서",
+          "attribute": "출하책임자",
+          "value": "가상전임03",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/03-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의구름센서",
+          "attribute": "출하책임자",
+          "value": "가상전임03",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/03-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/03-withdrawn.md"
+      ]
+    },
+    "ko-03-historical": {
+      "expected_paths": [
+        "20-knowledge/03-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의구름센서",
+          "attribute": "출하책임자",
+          "value": "가상전임03",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/03-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/03-withdrawn.md"
+      ]
+    },
+    "ko-03-conditional": {
+      "expected_paths": [
+        "20-knowledge/03-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의구름센서",
+          "attribute": "특송허용시간",
+          "value": "15:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/03-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/03-withdrawn.md"
+      ]
+    },
+    "ko-03-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/03-withdrawn.md"
+      ]
+    },
+    "ko-03-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/03-withdrawn.md"
+      ]
+    },
+    "ko-04-current": {
+      "expected_paths": [
+        "20-knowledge/04-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의별숲전선",
+          "attribute": "출하책임자",
+          "value": "가상라온",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/04-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의별숲전선",
+          "attribute": "출하책임자",
+          "value": "가상전임04",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/04-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의별숲전선",
+          "attribute": "출하책임자",
+          "value": "가상전임04",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/04-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/04-withdrawn.md"
+      ]
+    },
+    "ko-04-historical": {
+      "expected_paths": [
+        "20-knowledge/04-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의별숲전선",
+          "attribute": "출하책임자",
+          "value": "가상전임04",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/04-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/04-withdrawn.md"
+      ]
+    },
+    "ko-04-conditional": {
+      "expected_paths": [
+        "20-knowledge/04-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의별숲전선",
+          "attribute": "특송허용시간",
+          "value": "16:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/04-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/04-withdrawn.md"
+      ]
+    },
+    "ko-04-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/04-withdrawn.md"
+      ]
+    },
+    "ko-04-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/04-withdrawn.md"
+      ]
+    },
+    "ko-05-current": {
+      "expected_paths": [
+        "20-knowledge/05-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의새벽로봇",
+          "attribute": "출하책임자",
+          "value": "가상나래",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/05-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의새벽로봇",
+          "attribute": "출하책임자",
+          "value": "가상전임05",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/05-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의새벽로봇",
+          "attribute": "출하책임자",
+          "value": "가상전임05",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/05-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/05-withdrawn.md"
+      ]
+    },
+    "ko-05-historical": {
+      "expected_paths": [
+        "20-knowledge/05-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의새벽로봇",
+          "attribute": "출하책임자",
+          "value": "가상전임05",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/05-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/05-withdrawn.md"
+      ]
+    },
+    "ko-05-conditional": {
+      "expected_paths": [
+        "20-knowledge/05-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의새벽로봇",
+          "attribute": "특송허용시간",
+          "value": "17:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/05-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/05-withdrawn.md"
+      ]
+    },
+    "ko-05-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/05-withdrawn.md"
+      ]
+    },
+    "ko-05-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/05-withdrawn.md"
+      ]
+    },
+    "ko-06-current": {
+      "expected_paths": [
+        "20-knowledge/06-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의해솔계측",
+          "attribute": "출하책임자",
+          "value": "가상마루",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/06-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의해솔계측",
+          "attribute": "출하책임자",
+          "value": "가상전임06",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/06-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의해솔계측",
+          "attribute": "출하책임자",
+          "value": "가상전임06",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/06-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/06-withdrawn.md"
+      ]
+    },
+    "ko-06-historical": {
+      "expected_paths": [
+        "20-knowledge/06-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의해솔계측",
+          "attribute": "출하책임자",
+          "value": "가상전임06",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/06-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/06-withdrawn.md"
+      ]
+    },
+    "ko-06-conditional": {
+      "expected_paths": [
+        "20-knowledge/06-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의해솔계측",
+          "attribute": "특송허용시간",
+          "value": "18:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/06-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/06-withdrawn.md"
+      ]
+    },
+    "ko-06-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/06-withdrawn.md"
+      ]
+    },
+    "ko-06-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/06-withdrawn.md"
+      ]
+    },
+    "ko-07-current": {
+      "expected_paths": [
+        "20-knowledge/07-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의윤슬설비",
+          "attribute": "출하책임자",
+          "value": "가상여울",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/07-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의윤슬설비",
+          "attribute": "출하책임자",
+          "value": "가상전임07",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/07-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의윤슬설비",
+          "attribute": "출하책임자",
+          "value": "가상전임07",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/07-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/07-withdrawn.md"
+      ]
+    },
+    "ko-07-historical": {
+      "expected_paths": [
+        "20-knowledge/07-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의윤슬설비",
+          "attribute": "출하책임자",
+          "value": "가상전임07",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/07-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/07-withdrawn.md"
+      ]
+    },
+    "ko-07-conditional": {
+      "expected_paths": [
+        "20-knowledge/07-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의윤슬설비",
+          "attribute": "특송허용시간",
+          "value": "19:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/07-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/07-withdrawn.md"
+      ]
+    },
+    "ko-07-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/07-withdrawn.md"
+      ]
+    },
+    "ko-07-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/07-withdrawn.md"
+      ]
+    },
+    "ko-08-current": {
+      "expected_paths": [
+        "20-knowledge/08-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의산들모터",
+          "attribute": "출하책임자",
+          "value": "가상도담",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/08-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의산들모터",
+          "attribute": "출하책임자",
+          "value": "가상전임08",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/08-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의산들모터",
+          "attribute": "출하책임자",
+          "value": "가상전임08",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/08-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/08-withdrawn.md"
+      ]
+    },
+    "ko-08-historical": {
+      "expected_paths": [
+        "20-knowledge/08-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의산들모터",
+          "attribute": "출하책임자",
+          "value": "가상전임08",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/08-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/08-withdrawn.md"
+      ]
+    },
+    "ko-08-conditional": {
+      "expected_paths": [
+        "20-knowledge/08-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의산들모터",
+          "attribute": "특송허용시간",
+          "value": "20:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/08-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/08-withdrawn.md"
+      ]
+    },
+    "ko-08-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/08-withdrawn.md"
+      ]
+    },
+    "ko-08-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/08-withdrawn.md"
+      ]
+    },
+    "ko-09-current": {
+      "expected_paths": [
+        "20-knowledge/09-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의은하변압",
+          "attribute": "출하책임자",
+          "value": "가상이든",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/09-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의은하변압",
+          "attribute": "출하책임자",
+          "value": "가상전임09",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/09-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의은하변압",
+          "attribute": "출하책임자",
+          "value": "가상전임09",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/09-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/09-withdrawn.md"
+      ]
+    },
+    "ko-09-historical": {
+      "expected_paths": [
+        "20-knowledge/09-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의은하변압",
+          "attribute": "출하책임자",
+          "value": "가상전임09",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/09-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/09-withdrawn.md"
+      ]
+    },
+    "ko-09-conditional": {
+      "expected_paths": [
+        "20-knowledge/09-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의은하변압",
+          "attribute": "특송허용시간",
+          "value": "21:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/09-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/09-withdrawn.md"
+      ]
+    },
+    "ko-09-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/09-withdrawn.md"
+      ]
+    },
+    "ko-09-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/09-withdrawn.md"
+      ]
+    },
+    "ko-10-current": {
+      "expected_paths": [
+        "20-knowledge/10-current.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의푸른배전",
+          "attribute": "출하책임자",
+          "value": "가상보람",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/10-current.md"
+        }
+      ],
+      "allowed_assertions": [
+        {
+          "entity": "모의푸른배전",
+          "attribute": "출하책임자",
+          "value": "가상전임10",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/10-historical.md"
+        }
+      ],
+      "forbidden_current_assertions": [
+        {
+          "entity": "모의푸른배전",
+          "attribute": "출하책임자",
+          "value": "가상전임10",
+          "scope": "current",
+          "condition": null,
+          "source": "20-knowledge/10-historical.md"
+        }
+      ],
+      "withdrawn_paths": [
+        "20-knowledge/10-withdrawn.md"
+      ]
+    },
+    "ko-10-historical": {
+      "expected_paths": [
+        "20-knowledge/10-historical.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의푸른배전",
+          "attribute": "출하책임자",
+          "value": "가상전임10",
+          "scope": "historical",
+          "condition": null,
+          "source": "20-knowledge/10-historical.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/10-withdrawn.md"
+      ]
+    },
+    "ko-10-conditional": {
+      "expected_paths": [
+        "20-knowledge/10-conditional.md"
+      ],
+      "expected_assertions": [
+        {
+          "entity": "모의푸른배전",
+          "attribute": "특송허용시간",
+          "value": "22:00",
+          "scope": "current",
+          "condition": "시험성적서 승인 완료 시",
+          "source": "20-knowledge/10-conditional.md"
+        }
+      ],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/10-withdrawn.md"
+      ]
+    },
+    "ko-10-no_answer": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/10-withdrawn.md"
+      ]
+    },
+    "ko-10-withdrawn": {
+      "expected_paths": [],
+      "expected_assertions": [],
+      "allowed_assertions": [],
+      "forbidden_current_assertions": [],
+      "withdrawn_paths": [
+        "20-knowledge/10-withdrawn.md"
+      ]
+    }
+  }
+}
