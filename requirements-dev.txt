@@ -1,0 +1,3 @@
+# Optional generated lifecycle regressions; runtime remains standard-library only.
+hypothesis==6.168.5
+sortedcontainers==2.4.0

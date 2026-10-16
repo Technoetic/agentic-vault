@@ -200,8 +200,11 @@ class CodexVerificationTests(unittest.TestCase):
                     vendor = modules / f"@openai/codex-win32-{package_arch}/vendor"
                 native = vendor / f"{target}-pc-windows-msvc/bin/codex.exe"
                 native.parent.mkdir(parents=True)
-                shutil.copyfile(sys.executable, native)
-                for dll in Path(sys.executable).parent.glob("python*.dll"):
+                # A Windows venv python.exe is a redirector requiring pyvenv.cfg.
+                # This fixture needs a relocatable stand-in for the native binary.
+                native_python = Path(getattr(sys, "_base_executable", sys.executable)).resolve()
+                shutil.copyfile(native_python, native)
+                for dll in native_python.parent.glob("python*.dll"):
                     shutil.copyfile(dll, native.parent / dll.name)
                 environment = {**os.environ, "PYTHONHOME": sys.base_prefix}
 
