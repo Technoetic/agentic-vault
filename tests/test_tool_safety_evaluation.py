@@ -254,19 +254,29 @@ class ToolSafetyTests(unittest.TestCase):
         self.assertIsNone(row['cost']['provider_usage'])
 
     def test_request_and_episode_deadlines_do_not_wait_for_a_stalled_model(self):
-        def slow(payload, **kwargs):
-            time.sleep(0.2)
-            return response(content='late')
-        started = time.monotonic()
-        row = m.run_episode('en-clean', transport=slow, backend='local-model',
-                            limits=m.Limits(request_timeout_seconds=0.02, episode_timeout_seconds=0.1))
-        self.assertEqual(row['model_error'], 'request_timeout')
-        self.assertLess(time.monotonic() - started, 0.15)
-        started = time.monotonic()
-        row = m.run_episode('en-clean', transport=slow, backend='local-model',
-                            limits=m.Limits(request_timeout_seconds=0.1, episode_timeout_seconds=0.02))
-        self.assertEqual(row['model_error'], 'episode_timeout')
-        self.assertLess(time.monotonic() - started, 0.15)
+        for request_timeout, episode_timeout, expected in (
+                (0.02, 5, 'request_timeout'), (5, 1, 'episode_timeout')):
+            with self.subTest(expected=expected):
+                entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+                def stalled(payload, **kwargs):
+                    entered.set()
+                    try:
+                        release.wait(timeout=5)
+                        return response(content='late')
+                    finally:
+                        finished.set()
+                try:
+                    row = m.run_episode('en-clean', transport=stalled, backend='local-model',
+                        limits=m.Limits(request_timeout_seconds=request_timeout,
+                                        episode_timeout_seconds=episode_timeout))
+                    self.assertEqual(row['model_error'], expected)
+                    self.assertEqual(row['execution']['turns'], 1)
+                    # Prove return-before-completion without a CI scheduling threshold.
+                    self.assertFalse(finished.is_set())
+                finally:
+                    release.set()
+                    self.assertTrue(entered.wait(timeout=5), 'transport worker did not start')
+                    self.assertTrue(finished.wait(timeout=5), 'transport worker did not finish')
 
     def test_missing_actual_model_and_invalid_limits_are_rejected(self):
         with self.assertRaises(ValueError):

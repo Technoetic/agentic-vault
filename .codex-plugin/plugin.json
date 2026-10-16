@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.22.0: opt-in Korean structured-answer and evidence evaluation, generated proposal/operation lifecycle regressions, and bounded synthetic tool-call episodes. Scripted controls are separate from actual local-model results; the observed model failed both Korean tasks. Hypothesis is test-only. Existing memory, diagnostics, provenance, budgets and Jarvis API-auth boundary remain. No default network/model call or automatic vault migration.",
+    "longDescription": "Release v0.22.1: opt-in Korean structured-answer and evidence evaluation, generated proposal/operation lifecycle regressions, and bounded synthetic tool-call episodes. Scripted controls are separate from actual local-model results; the observed model failed both Korean tasks. Hypothesis is test-only. Existing memory, diagnostics, provenance, budgets and Jarvis API-auth boundary remain. No default network/model call or automatic vault migration.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

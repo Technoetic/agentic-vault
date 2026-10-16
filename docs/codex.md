@@ -1,11 +1,11 @@
 # Claude Code · Codex 겸용 사용
 
-v0.22.0은 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md)를 선택형으로 추가한다. 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)도 유지한다. 기존 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
-아래 GitHub 설치 ref는 v0.22.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
+v0.22.1은 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md)를 선택형으로 추가한다. 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)도 유지한다. 기존 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
+아래 GitHub 설치 ref는 v0.22.1을 가리킨다. 로컬 소스 설치도 계속 지원하며,
 기존 캐시·설정·활성 범위는 갱신 전에 확인하고 보존한다.
 
-`v0.22.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 코드·CI·설치 상태는 [v0.22.0 검증 기록](verification/v0.22.0.md)에서 확인한다.
+`v0.22.1`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 코드·CI·설치 상태는 [v0.22.1 검증 기록](verification/v0.22.1.md)에서 확인한다.
 이전 [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
@@ -29,7 +29,7 @@ v0.19.0은 compact 제약 재주입, 모델 없이 기록하는 수명주기 체
 공유 상태 부분 수정, 시간 대장, 교훈 델타, 정제 품질·전송 경고와 명시적 토큰 보정을
 더한다. 기억 단위·교훈 관측·연속 작업 평가와 선택형 검색 확장도 포함한다.
 v0.20.0의 비교·복구·작업 기록과 단계 연결 진단은 명시적 helper로 수행한다.
-v0.21.0의 지침량·정리 미리보기·요구별 검증 진단과 v0.22.0의 개발·평가 도구도 선택해서 사용한다. 기본 네트워크 호출이나 자동 적용은 추가하지 않는다.
+v0.21.0의 지침량·정리 미리보기·요구별 검증 진단과 v0.22.1의 개발·평가 도구도 선택해서 사용한다. 기본 네트워크 호출이나 자동 적용은 추가하지 않는다.
 설정을 바꾸거나 교훈·SSOT를 실제로 갱신하는 작업은 명시적 적용 경로를 쓴다.
 
 ## 설치
@@ -37,7 +37,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단과 v0.22.0의
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.22.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.22.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -45,19 +45,19 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.22.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.22.1 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.22.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.22.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.22.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.22.1과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 

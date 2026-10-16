@@ -24,7 +24,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가 |
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정 |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.22.0](releases/v0.22.0.md) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.22.1](releases/v0.22.1.md) |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
 
 ## 내부 작업 기록 / Internal work records
