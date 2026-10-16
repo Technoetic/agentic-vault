@@ -32,10 +32,10 @@
 
 **Interfaces:** additive `evaluate(...)` and CLI; reuse `vault_retrieval.retrieve`. Keep fixture labels separate from question/evidence payload. Export explicit per-case evidence, answer, execution and cost sections.
 
-- [ ] Write failing tests for separate answer/evidence grades, labels isolation, current/historical scopes, abstention/errors, withdrawal/hash binding and null usage.
-- [ ] Observe the expected RED failures.
-- [ ] Implement strict bounded response/observation validation and at least40 synthetic Korean cases, including deliberate wrong-answer controls.
-- [ ] Run focused tests and default CLI; verify no model calls/default behavior changes.
+- [x] Write failing tests for separate answer/evidence grades, labels isolation, current/historical scopes, abstention/errors, withdrawal/hash binding and null usage.
+- [x] Observe the expected RED failures.
+- [x] Implement strict bounded response/observation validation and at least40 synthetic Korean cases, including deliberate wrong-answer controls.
+- [x] Run focused tests and default CLI; verify no model calls/default behavior changes.
 
 ### Task 2: Stateful lifecycle regressions
 
@@ -43,10 +43,10 @@
 
 **Interfaces:** `vault_proposals.Store` and fresh locks/receipts; real apply/rollback, `vault_operations` begin/finish/uncertain/reconcile. Independent state expectations and target byte observations.
 
-- [ ] Define invariants and a deliberately broken model/target-write control that proves the test can detect stale writes or duplicated apply.
-- [ ] Observe expected failure, then implement state machines with proper lifecycle semantics.
-- [ ] Run seeded and exploratory generation; preserve minimized regressions if a real defect occurs.
-- [ ] Verify normal unittest discovery works without Hypothesis and the explicit stateful command has zero skips with it installed.
+- [x] Define invariants and a deliberately broken model/target-write control that proves the test can detect stale writes or duplicated apply.
+- [x] Observe expected failure, then implement state machines with proper lifecycle semantics.
+- [x] Run seeded and exploratory generation; preserve minimized regressions if a real defect occurs.
+- [x] Verify normal unittest discovery works without Hypothesis and the explicit stateful command has zero skips with it installed.
 
 ### Task 3: Optional actual tool-call evaluation
 
@@ -54,16 +54,16 @@
 
 **Interfaces:** built-in synthetic episodes, actual chat `tools`/`tool_calls`/tool results, independent world graders. Offline scripted responses exercise the same dispatch path but are labeled controls.
 
-- [ ] Write failing tests for labels isolation, reachable canary attack, unsupported protocol, final attack after later error, resource budgets and proxy/redirect restrictions.
-- [ ] Observe RED and implement bounded dispatcher, transport and result schema.
-- [ ] Run paired clean/attacked scripted controls, refuse invalid actual-model output, and expose explicit optional CLI parameters.
-- [ ] Run actual local-model smoke only if a supported local endpoint is available; retain exact observed limits and never substitute controls silently.
+- [x] Write failing tests for labels isolation, reachable canary attack, unsupported protocol, final attack after later error, resource budgets and proxy/redirect restrictions.
+- [x] Observe RED and implement bounded dispatcher, transport and result schema.
+- [x] Run paired clean/attacked scripted controls, refuse invalid actual-model output, and expose explicit optional CLI parameters.
+- [x] Run actual local-model smoke only if a supported local endpoint is available; retain exact observed limits and never substitute controls silently.
 
 ### Task 4: Integration and independent verification
 
 **Files:** `.github/workflows/tests.yml`, `docs/memory-patterns.md`, additive usage/results documentation, README concise pointer.
 
-- [ ] Run the baseline suite, install the development dependency in an isolated environment, then integrate explicit new CI commands.
-- [ ] Run full suite and all deterministic evaluator CLIs; check examples, invalid inputs, generated controls and source policy.
-- [ ] Request fresh independent code review and rerun reported issues to resolution.
-- [ ] Commit only owned product files, record exact evidence and unresolved actual-model scope, then record the completed work in the existing vault topic/index/log/handoff without staging peer changes.
+- [x] Run the baseline suite, install the development dependency in an isolated environment, then integrate explicit new CI commands.
+- [x] Run full suite and all deterministic evaluator CLIs; check examples, invalid inputs, generated controls and source policy.
+- [x] Request fresh independent code review and rerun reported issues to resolution.
+- [x] Commit only owned product files, record exact evidence and unresolved actual-model scope, then record the completed work in the existing vault topic/index/log/handoff without staging peer changes.
