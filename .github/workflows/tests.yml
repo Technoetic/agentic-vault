@@ -35,6 +35,10 @@ jobs:
         run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0
       - name: Interdependent synthetic memory workflows
         run: python scripts/evaluate_memory_workflows.py --backend deterministic
+      - name: Korean structured-answer and evidence regression
+        run: python scripts/evaluate_korean_memory.py
+      - name: Synthetic tool-call safety controls (no model calls)
+        run: python scripts/evaluate_tool_safety.py --backend scripted-control
       - name: Hard bilingual recall at top3 (explicit query expansion)
         run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
       - name: Hard bilingual recall at top5 (same token budget)
@@ -46,3 +50,29 @@ jobs:
       # working tree with the index, which is always clean after checkout.
       - name: Whitespace validation (whole committed tree)
         run: git diff --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
+
+  stateful:
+    name: Stateful lifecycle / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.10'
+          - os: windows-latest
+            python: '3.14'
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies only
+        run: python -m pip install -r requirements-dev.txt
+      - name: Generated proposal and operation lifecycle regressions
+        run: python tests/test_stateful_memory_lifecycle.py

@@ -92,6 +92,10 @@ Source, CI and release-asset verification is recorded in the [release verificati
 Host installation is a separate step.
 
 v0.21.0 adds opt-in [instruction inventory, index fold preview and requirement coverage](docs/moai-diagnostics.md).
+Unreleased [memory evaluation tools](docs/memory-evaluation.md) separately assess Korean
+structured answers, generated lifecycle sequences and optional synthetic tool-call episodes.
+Scripted controls are not model results; actual inference remains explicit and local-only.
+Hypothesis is a development dependency, not a core runtime requirement.
 The existing v0.20.0 [reliability tools](docs/tower-reliability.md) remain available for fixed-condition
 lesson comparisons, execution receipts, conflict-aware proposal undo, uncertain-operation
 records and stage-separated connector diagnostics. They add no default model/network

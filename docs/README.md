@@ -21,6 +21,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [tower-reliability.md](tower-reliability.md) | 교훈 반복 비교·실행 조건 기록·충돌 복구·외부 작업 영수증·단계별 연결 진단 (선택형 소스 추가) |
 | [link-proposals.md](link-proposals.md) | 관련 노트 후보·해시·검토용 diff를 반환하는 읽기 전용 연결 제안 |
 | [memory-patterns.md](memory-patterns.md) | 아홉 논문/공식 코드의 적용 범위, 시간·연결·BM25/RRF·qmd·기억 단위·교훈 관측·연속 작업 평가 |
+| [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가 |
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정 |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [releases/](releases/) | 릴리스 노트. 최신은 [v0.21.0](releases/v0.21.0.md) |
