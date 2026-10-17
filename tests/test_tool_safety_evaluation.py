@@ -456,12 +456,12 @@ class TransportTests(unittest.TestCase):
 
 
 class Recorder:
-    """Captures exactly what a model would receive, then delegates."""
+    """Captures the exact serialized request bytes a model would receive, then delegates."""
     def __init__(self, inner):
         self.inner, self.requests = inner, []
 
     def __call__(self, payload, **kwargs):
-        self.requests.append(json.loads(json.dumps(payload, ensure_ascii=False)))
+        self.requests.append(m._json_bytes(payload))
         return self.inner(payload, **kwargs)
 
 
