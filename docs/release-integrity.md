@@ -29,7 +29,10 @@ ZIP은 유지관리자가 `git archive`로 만들어 올린다. CI가 만든 파
 - 릴리스에 올린 자산은 수정·삭제할 수 없다. 제목·릴리스 노트, pre-release·latest 표시는 바꿀 수 있다.
 - 게시할 때 GitHub가 **릴리스 증명**(release attestation)을 자동으로 만든다. 태그, 커밋 SHA, 릴리스 자산을 담은
   서명 기록이다.
-- 불변 설정은 켠 뒤에 게시하는 릴리스에만 적용되고 이미 게시한 릴리스에는 소급되지 않는다.
+
+불변 설정은 켠 뒤에 게시하는 릴리스에만 적용되고 이미 게시한 릴리스에는 소급되지 않는다. 이 내용은 저장소 설정 안내
+[Preventing changes to your releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)가
+보고한 것이다.
 
 게시 순서(유지관리자):
 
@@ -52,7 +55,8 @@ gh release view TAG --json isImmutable -R Technoetic/agentic-vault
 `--verify-tag`는 원격에 태그가 없으면 릴리스를 만들지 않는다. 업로드와 게시를 나눈 것은 되돌릴 수 없는 게시 전에
 자산을 확인하기 위해서다.
 
-`SHA256SUMS`는 LF 줄바꿈으로 만든다. v0.14.0부터 v0.22.1까지 올린 `SHA256SUMS` 11개 중 6개가 CRLF였다
+v0.23.0의 텍스트 자산 `SHA256SUMS`와 `verification.json`은 LF 바이트로 쓴다(CR 없음). 이전 릴리스는 그렇지 않았다.
+v0.14.0부터 v0.22.1까지 올린 `SHA256SUMS` 11개 중 6개가 CRLF였다
 (v0.14.0·v0.15.0·v0.18.0·v0.20.0·v0.21.0·v0.22.1, 바이트 단위 측정). GNU coreutils 8.32의 `sha256sum -c`는
 줄 끝 CR을 파일 이름의 일부로 읽어 v0.22.1의 두 파일을 찾지 못하고 종료 코드 1을 냈다. LF인 v0.16.0에서는
 같은 명령이 통과했다(측정). 불변 릴리스에서는 게시 뒤 이 파일을 고칠 수 없다.
@@ -67,7 +71,8 @@ gh release download TAG -R Technoetic/agentic-vault
 
 ### 1. SHA256SUMS 대조(모든 릴리스)
 
-일부 릴리스의 `SHA256SUMS`가 CRLF이므로 아래 명령은 CR을 지운 뒤 대조한다. LF 파일에도 그대로 쓸 수 있다.
+v0.22.1까지의 일부 `SHA256SUMS`는 CRLF라서 `sha256sum -c`로 대조하려면 CR을 지워야 한다. 아래 명령은 CR을 지운 뒤
+대조하므로 LF로 쓴 v0.23.0 파일과 이전 CRLF 파일에 모두 그대로 쓸 수 있다.
 
 Linux·Git Bash:
 
@@ -160,8 +165,15 @@ SARIF 업로드(`security-events`)와 OIDC 토큰(`id-token`)을 쓰지 않는�
   같은 결과였다. 동시 실행 제한을 넣으면 기존 작업의 실행 방식이 바뀌므로 고치지 않았다.
   같은 날 pip-audit 2.10.1을 Python 3.12에서 `requirements-dev.txt`(고정 의존성 2개)에 실행한 결과는
   `No known vulnerabilities found`였다.
-- **한계:** CI의 zizmor는 GitHub API를 쓰는 온라인 감사도 실행하므로 로컬 오프라인 결과와 다를 수 있다.
-  zizmor action(v0.7.1)은 자기 저장소의 해시 고정 wheel 목록으로 zizmor를 설치한다. pip-audit action(v1.1.0)은
+- **고정 버전(게시 14일 유예):** zizmor action v0.7.0과 v0.7.1은 둘 다 2026-10-15에 게시되어 2026-10-17 기준
+  14일이 지나지 않았다. 그래서 2026-09-09에 게시된 v0.6.4를 커밋 `cc914d7f3750a2d13d75c7f184a1060aa0e9d482`로
+  고정한다. v0.6.4는 자기 저장소 `support/versions`에 digest로 고정한 Docker 이미지
+  (`ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101`)로
+  zizmor를 실행하며, 이 목록의 최신 버전이자 CI가 지정하는 버전은 2026-09-09에 게시된 1.30.1이다. v0.6.4의
+  `action.yml`은 사용 중인 `version`·`advanced-security` 입력을 지원한다. pip-audit action은 2024-08-08에 게시된
+  v1.1.0을 유지한다. 게시일·태그 대상 커밋·`action.yml`·`support/versions`는 2026-10-17에 GitHub API로 조회했다(측정).
+- **한계:** CI의 zizmor는 GitHub API를 쓰는 온라인 감사도 실행하고, 버전도 위 로컬 측정(1.31.1)과 달라(1.30.1)
+  결과가 다를 수 있다. 1.30.1은 로컬에서 실행하지 않았다. pip-audit action(v1.1.0)은
   코드를 SHA로 고정했지만 실행할 때 PyPI에서 pip-audit(`~= 2.0, >= 2.5.6`)을 해시 없이 설치한다(두 action의
   고정 커밋 소스를 읽어 확인). pip-audit은 CI가 쓰는 Python 3.12 기준으로 의존성을 해석한다.
 

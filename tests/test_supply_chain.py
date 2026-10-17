@@ -36,6 +36,18 @@ GATE_MARKERS = (
     "test_stateful_memory_lifecycle",
 )
 PINNED_USES = re.compile(r"uses: ([\w.-]+/[\w.-]+)@([0-9a-f]{40}) # v\d+(?:\.\d+)*")
+# Release cool-down (cut 2026-10-17): pin releases published at least 14 days earlier.
+# zizmor-action v0.7.0 and v0.7.1 were both published 2026-10-15, so the job stays on
+# v0.6.4 (published 2026-09-09; lightweight tag -> commit below, resolved with gh api).
+# v0.6.4 runs zizmor from a digest-pinned image listed in its support/versions file;
+# 1.30.1 (published 2026-09-09) is the newest version listed there.
+# pypa/gh-action-pip-audit v1.1.0 was published 2024-08-08.
+COOL_DOWN_PINS = {
+    "zizmorcore/zizmor-action": ("cc914d7f3750a2d13d75c7f184a1060aa0e9d482", "v0.6.4"),
+    "pypa/gh-action-pip-audit": ("1220774d901786e6f652ae159f7b6bc8fea6d266", "v1.1.0"),
+}
+ZIZMOR_VERSION = "'1.30.1'"
+AUDIT_STEP_IDS = ("zizmor", "pip-audit")
 IMMUTABLE_RELEASES_DOC = (
     "https://docs.github.com/en/code-security/supply-chain-security/"
     "understanding-your-software-supply-chain/immutable-releases"
@@ -170,6 +182,42 @@ class SupplyChainAuditJobTests(unittest.TestCase):
         self.assertEqual(scalars(pip_audit, 10).get("inputs"), "requirements-dev.txt")
         checkout = step_using(audit, "actions/checkout")
         self.assertEqual(scalars(checkout, 10).get("persist-credentials"), "false")
+
+    def test_audit_actions_respect_the_release_cool_down(self) -> None:
+        audit = self.audit()
+        for action, (sha, tag) in COOL_DOWN_PINS.items():
+            with self.subTest(action=action):
+                step = step_using(audit, action)
+                uses = [strip_comment(line).strip() for line in step if "uses:" in line]
+                self.assertEqual(uses, [f"uses: {action}@{sha}"])
+                self.assertTrue(any(line.strip() == f"uses: {action}@{sha} # {tag}" for line in step))
+        zizmor = step_using(audit, "zizmorcore/zizmor-action")
+        self.assertEqual(scalars(zizmor, 10).get("version"), ZIZMOR_VERSION)
+
+    def test_step_outcomes_surface_as_warning_annotations(self) -> None:
+        audit = self.audit()
+        for step_id, action in zip(AUDIT_STEP_IDS, ("zizmorcore/zizmor-action", "pypa/gh-action-pip-audit")):
+            with self.subTest(step=step_id):
+                self.assertEqual(scalars(step_using(audit, action), 8).get("id"), step_id)
+        reporters = []
+        for step in steps(audit):
+            headers = {strip_comment(line).strip(): line for line in step if indent_of(line) == 8}
+            if "env:" not in headers or "run: |" not in headers:
+                continue
+            env = scalars(block_after(step, headers["env:"]), 10)
+            run = "\n".join(line.strip() for line in block_after(step, headers["run: |"]))
+            outcome_vars = {step_id: [name for name, value in env.items()
+                                      if value == f"${{{{ steps.{step_id}.outcome }}}}"]
+                            for step_id in AUDIT_STEP_IDS}
+            if all(outcome_vars.values()):
+                reporters.append((outcome_vars, run))
+        self.assertEqual(len(reporters), 1, "one step must read both audit outcomes from env")
+        outcome_vars, run = reporters[0]
+        self.assertIn("::warning", run)
+        for step_id, names in outcome_vars.items():
+            with self.subTest(outcome=step_id):
+                self.assertTrue(any(f"${{{name}}}" in run for name in names))
+        self.assertNotIn("exit 1", run)
 
     def test_gate_commands_stay_out_of_the_advisory_job(self) -> None:
         for line in self.audit():
