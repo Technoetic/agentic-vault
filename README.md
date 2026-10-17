@@ -503,6 +503,8 @@ Claude가 다음 2단계를 안내합니다 (사용자가 직접 입력):
 /plugin install agentic-vault@agentic-vault
 ```
 
+Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 있고, v0.23.0부터는 `gh release verify-asset`으로 GitHub가 게시한 파일과 같은지도 확인할 수 있다(선택 사항, [릴리스 무결성 확인](docs/release-integrity.md)).
+
 ### Codex 설치
 
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:

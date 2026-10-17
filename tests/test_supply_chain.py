@@ -2,7 +2,8 @@
 
 The `supply-chain-audit` job runs zizmor and pip-audit as warnings. These tests
 keep it from turning into a gate or gaining write, OIDC or code-scanning
-permissions and keep the existing test jobs blocking as before.
+permissions, keep the existing test jobs blocking as before, and keep the
+release integrity guide reachable with commands that name this repository.
 The workflow is read as text by indentation; tests use only the standard library.
 """
 from __future__ import annotations
@@ -10,10 +11,14 @@ from __future__ import annotations
 import re
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
+README = ROOT / "README.md"
+DOCS_INDEX = ROOT / "docs" / "README.md"
+INTEGRITY_DOC = ROOT / "docs" / "release-integrity.md"
 AUDIT_JOB = "supply-chain-audit"
 BLOCKING_JOBS = ("unittest", "stateful")
 AUDIT_ACTIONS = {
@@ -31,6 +36,14 @@ GATE_MARKERS = (
     "test_stateful_memory_lifecycle",
 )
 PINNED_USES = re.compile(r"uses: ([\w.-]+/[\w.-]+)@([0-9a-f]{40}) # v\d+(?:\.\d+)*")
+IMMUTABLE_RELEASES_DOC = (
+    "https://docs.github.com/en/code-security/supply-chain-security/"
+    "understanding-your-software-supply-chain/immutable-releases"
+)
+VERIFY_COMMANDS = (
+    "gh release verify TAG -R Technoetic/agentic-vault",
+    "gh release verify-asset TAG agentic-vault-VERSION.zip -R Technoetic/agentic-vault",
+)
 
 
 def strip_comment(line: str) -> str:
@@ -100,6 +113,16 @@ def step_using(job_lines: list[str], action: str) -> list[str]:
     return matches[0]
 
 
+def relative_links(text: str) -> list[str]:
+    """Return Markdown link targets that point into the repository."""
+    targets = []
+    for target in re.findall(r"\]\(([^)\s]+)\)", text):
+        if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+            continue
+        targets.append(unquote(target.split("#", 1)[0]))
+    return targets
+
+
 class SupplyChainAuditJobTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -162,6 +185,31 @@ class SupplyChainAuditJobTests(unittest.TestCase):
                 self.assertIn(name, self.jobs)
                 directives = {strip_comment(line).strip().partition(":")[0] for line in self.jobs[name]}
                 self.assertNotIn("continue-on-error", directives)
+
+
+class ReleaseIntegrityDocTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.doc = INTEGRITY_DOC.read_text(encoding="utf-8")
+
+    def test_doc_is_indexed_and_linked_from_readme(self) -> None:
+        self.assertIn("](release-integrity.md)", DOCS_INDEX.read_text(encoding="utf-8"))
+        self.assertIn("](docs/release-integrity.md)", README.read_text(encoding="utf-8"))
+
+    def test_relative_links_resolve(self) -> None:
+        targets = relative_links(self.doc)
+        self.assertTrue(targets)
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertTrue((INTEGRITY_DOC.parent / target).exists(), target)
+
+    def test_consumer_commands_name_this_repository(self) -> None:
+        lines = self.doc.splitlines()
+        for command in VERIFY_COMMANDS:
+            with self.subTest(command=command):
+                self.assertIn(command, lines)
+
+    def test_cites_github_immutable_release_documentation(self) -> None:
+        self.assertIn(IMMUTABLE_RELEASES_DOC, self.doc)
 
 
 if __name__ == "__main__":
