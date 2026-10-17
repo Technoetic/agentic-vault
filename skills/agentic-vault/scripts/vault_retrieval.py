@@ -5,6 +5,8 @@ This is a small deterministic adaptation of memory retrieval patterns, not a
 paper reproduction. No source or rank confers authority. The caller reviews
 claims and decides abstention. Default arguments use the unchanged lexical
 recall path. Core executes no commands, network calls or model downloads.
+An opt-in Hangul syllable-bigram BM25 rank (lexical_ngrams="hangul2") is built
+in memory per call; it is never persisted as an index or cache.
 """
 from __future__ import annotations
 
@@ -27,6 +29,11 @@ MAX_METADATA_LINES = 128
 MAX_LINKS_PER_NOTE = 128
 MAX_GRAPH_PROOFS = 8
 RRF_K = 60
+LEXICAL_NGRAM_MODES = ("hangul2",)
+MAX_NGRAM_QUERY_TERMS = 128
+# Precomposed Hangul syllables U+AC00..U+D7A3. Jamo and other scripts are not split.
+_HANGUL_FIRST, _HANGUL_LAST = chr(0xAC00), chr(0xD7A3)
+_HANGUL_SEGMENT = re.compile(f"[{_HANGUL_FIRST}-{_HANGUL_LAST}]+|[^{_HANGUL_FIRST}-{_HANGUL_LAST}]+")
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z")
 _FIELD = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
@@ -246,8 +253,33 @@ def _fallback(doc: dict, phrase: str, terms) -> dict:
     return {"path": doc["path"], "line": line_number, "title": title[:_legacy.MAX_TITLE_CHARS], "score": 0.0, "snippet": _legacy._snippet(title_source, phrase, terms)}
 
 
-def _bm25(documents: dict, query_terms) -> dict[str, float]:
-    counts = {path: Counter(_legacy._WORD_RE.findall(_legacy._normalize(doc["text"]))) for path, doc in documents.items()}
+def _hangul2_tokens(normalized: str) -> list[str]:
+    """Split normalized word tokens into Hangul syllable bigrams.
+
+    Each maximal run of precomposed Hangul syllables inside a word token becomes
+    overlapping syllable bigrams when it has two or more syllables; a one-syllable
+    run stays a unigram. Non-Hangul segments keep the existing word-token text, so
+    ``handoff를`` yields ``handoff`` and ``를``. No morphology or stemming is applied.
+    """
+    tokens = []
+    for word in _legacy._WORD_RE.findall(normalized):
+        for segment in _HANGUL_SEGMENT.findall(word):
+            if len(segment) > 1 and _HANGUL_FIRST <= segment[0] <= _HANGUL_LAST:
+                tokens.extend(segment[index:index + 2] for index in range(len(segment) - 1))
+            else:
+                tokens.append(segment)
+    return tokens
+
+
+def _hangul2_query_terms(query_terms) -> tuple[list[str], int]:
+    """Original-first unique n-gram terms from the bounded word terms, and the omitted count."""
+    terms = list(dict.fromkeys(token for term in query_terms for token in _hangul2_tokens(term)))
+    return terms[:MAX_NGRAM_QUERY_TERMS], max(0, len(terms) - MAX_NGRAM_QUERY_TERMS)
+
+
+def _bm25(documents: dict, query_terms, tokenize=None) -> dict[str, float]:
+    tokenize = tokenize or _legacy._WORD_RE.findall
+    counts = {path: Counter(tokenize(_legacy._normalize(doc["text"]))) for path, doc in documents.items()}
     lengths = {path: sum(words.values()) for path, words in counts.items()}
     average = sum(lengths.values()) / len(lengths) if lengths else 1.0
     average = average or 1.0
@@ -267,11 +299,15 @@ def _bm25(documents: dict, query_terms) -> dict[str, float]:
     return scores
 
 
-def _bm25_passage(doc: dict, match: dict, phrase: str, query_terms) -> None:
-    """Attribute exact-token BM25 evidence rather than a substring title hit."""
+def _bm25_passage(doc: dict, match: dict, phrase: str, query_terms, tokenize=None) -> None:
+    """Attribute exact-token BM25 evidence rather than a substring title hit.
+
+    ``tokenize`` must be the tokenizer of the BM25 view being cited.
+    """
+    tokenize = tokenize or _legacy._WORD_RE.findall
     best_quality = (0, 0)
     for number, line in enumerate(doc["text"].splitlines(), 1):
-        words = Counter(_legacy._WORD_RE.findall(_legacy._normalize(line)))
+        words = Counter(tokenize(_legacy._normalize(line)))
         quality = (sum(term in words for term in query_terms), sum(min(words[term], 3) for term in query_terms))
         if quality > best_quality:
             best_quality = quality
@@ -302,7 +338,7 @@ def _same_policy_stamp(vault: Path, expected: tuple) -> bool:
         return False
 
 
-def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None) -> dict:
+def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None, lexical_ngrams=None) -> dict:
     """Retrieve source-bound review context; explicit temporal bounds are half-open.
 
     as_of: ISO date (UTC midnight) or zoned ISO datetime. checked_at is an
@@ -311,8 +347,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     external_candidates: <=50 path strings/path+rank mappings, {candidates:[]},
     or a vault-relative <=64KiB JSON sidecar. Other provider fields are ignored.
     excluded_sources only adds deny scope. Links use literal unique filenames.
+    lexical_ngrams: None (default, unchanged output) or "hangul2". "hangul2"
+    ranks the same eligible notes with a separate in-memory BM25 over Hangul
+    syllable bigrams and adds rrf_bm25_hangul2 to the RRF sum of the bm25 and
+    hybrid backends. The lexical backend has no BM25 rank: it ignores the
+    channel and says so in diagnostics. Other values are invalid options.
     """
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None:
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and lexical_ngrams is None:
         return _legacy._legacy_recall(vault, query, limit, max_tokens)
     diagnostics = _legacy._diagnostics()
     diagnostics.update({"mode": "advanced", "backend": backend if isinstance(backend, str) else "invalid", "temporal": [], "temporal_rejected": 0, "graph_ambiguous": 0, "graph_unresolved": 0, "graph_links_considered": 0, "external_rejected": 0, "external_bytes_read": 0, "external_provider_status": "not_requested", "abstention": "host_decision", "source_authority": "unverified", "ranking": "lexical/BM25; hybrid uses RRF k=60; graph decays 0.5 per hop"})
@@ -327,6 +368,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             raise ValueError("invalid advanced mode")
         if type(expand_query) is not bool or (query_mapping is not None and not expand_query):
             raise ValueError("query mapping requires explicit expansion")
+        if lexical_ngrams is not None and (type(lexical_ngrams) is not str or lexical_ngrams not in LEXICAL_NGRAM_MODES):
+            raise ValueError("invalid lexical n-gram mode")
         temporal_time = None if as_of is None else _time(as_of)
         if not isinstance(excluded_sources, (tuple, list)) or len(excluded_sources) > _legacy.MAX_RESULTS:
             raise ValueError("invalid excluded scope")
@@ -337,6 +380,17 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         external = [] if external_candidates is None or isinstance(external_candidates, str) else _candidate_list(external_candidates)
     except (ValueError, TypeError, OverflowError):
         return _invalid(diagnostics)
+    # Only an explicit, valid mode adds fields; the default output is unchanged.
+    ngram_active = lexical_ngrams is not None and backend != "lexical"
+    if lexical_ngrams is not None:
+        diagnostics["lexical_ngrams"] = lexical_ngrams
+        diagnostics["lexical_ngram_channel"] = {
+            "status": "active" if ngram_active else "ignored_lexical_backend",
+            "rank_key": "rrf_bm25_hangul2", "tokenizer": "hangul_syllable_bigram",
+            "query_terms_used": 0, "query_terms_omitted": 0, "candidates": 0,
+            "index": "in_memory_per_call", "limits": {"query_terms": MAX_NGRAM_QUERY_TERMS}}
+        diagnostics["ranking"] += ("; lexical_ngrams=hangul2 adds a Hangul syllable-bigram BM25 rank to RRF k=60"
+                                   if ngram_active else "; lexical_ngrams=hangul2 ignored: lexical backend has no BM25 rank")
     try:
         resolve_note_path(vault, _legacy.CONFIG_RELPATH)
         safe_vault = vault.resolve(strict=True)
@@ -444,6 +498,12 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     lexical_matches = {rel: match for rel, doc in eligible.items() if (match := rank_document(rel, doc["text"], phrase, query_terms)) is not None}
     lexical_scores = {rel: match["score"] for rel, match in lexical_matches.items()}
     bm25 = _bm25(eligible, query_terms) if backend != "lexical" else {}
+    ngram_terms, ngram_scores = [], {}
+    if ngram_active:
+        # A separate view of the same eligible notes; no index survives this call.
+        ngram_terms, ngram_omitted = _hangul2_query_terms(query_terms)
+        ngram_scores = _bm25(eligible, ngram_terms, tokenize=_hangul2_tokens)
+        diagnostics["lexical_ngram_channel"].update(query_terms_used=len(ngram_terms), query_terms_omitted=ngram_omitted, candidates=len(ngram_scores))
     external_ranks = {}
     for item in external:
         rel = item["path"]
@@ -460,28 +520,40 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             diagnostics["external_rejected"] += 1
     lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores), 1)}
     bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25), 1)}
+    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores), 1)}
+    rrf_keys = ("rrf_lexical", "rrf_bm25", "rrf_external", "rrf_bm25_hangul2") if ngram_active else ("rrf_lexical", "rrf_bm25", "rrf_external")
     active = lexical_scores if backend == "lexical" else bm25
     candidates = set(active) | set(external_ranks)
     if backend == "hybrid":
         candidates |= set(lexical_scores)
+    candidates |= set(ngram_scores)
     matches = {}
     for rel in candidates:
         doc = eligible[rel]
         match = dict(lexical_matches.get(rel) or _fallback(doc, phrase, query_terms))
         if backend == "bm25" and rel in bm25:
             _bm25_passage(doc, match, phrase, query_terms)
+        elif rel in ngram_scores and (backend == "bm25" or rel not in lexical_matches):
+            # Only the bigram rank found this note: cite a line holding those bigrams.
+            _bm25_passage(doc, match, phrase, ngram_terms, tokenize=_hangul2_tokens)
         contributions = {"lexical": lexical_scores.get(rel, 0), "bm25": bm25.get(rel, 0.0), "rrf_lexical": 0.0, "rrf_bm25": 0.0, "rrf_external": 0.0, "graph": 0.0}
-        if backend == "hybrid" or external_candidates is not None:
+        ranks = {"lexical": lexical_ranks.get(rel), "bm25": bm25_ranks.get(rel), "external": external_ranks.get(rel)}
+        if ngram_active:
+            contributions.update(bm25_hangul2=ngram_scores.get(rel, 0.0), rrf_bm25_hangul2=0.0)
+            ranks["bm25_hangul2"] = ngram_ranks.get(rel)
+        if backend == "hybrid" or external_candidates is not None or ngram_active:
             if rel in lexical_ranks and backend != "bm25":
                 contributions["rrf_lexical"] = 1 / (RRF_K + lexical_ranks[rel])
             if rel in bm25_ranks and backend != "lexical":
                 contributions["rrf_bm25"] = 1 / (RRF_K + bm25_ranks[rel])
             if rel in external_ranks:
                 contributions["rrf_external"] = 1 / (RRF_K + external_ranks[rel])
-            match["score"] = sum(contributions[key] for key in ("rrf_lexical", "rrf_bm25", "rrf_external"))
+            if rel in ngram_ranks:
+                contributions["rrf_bm25_hangul2"] = 1 / (RRF_K + ngram_ranks[rel])
+            match["score"] = sum(contributions[key] for key in rrf_keys)
         else:
             match["score"] = active[rel]
-        match.update({"scores": contributions, "ranks": {"lexical": lexical_ranks.get(rel), "bm25": bm25_ranks.get(rel), "external": external_ranks.get(rel)}, "source": _source(doc, match), "temporal": doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
+        match.update({"scores": contributions, "ranks": ranks, "source": _source(doc, match), "temporal": doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
         matches[rel] = match
     seeds = sorted(matches, key=lambda rel: (-matches[rel]["score"], rel.casefold(), rel))[:limit]
     if expand_links and complete_names:
@@ -515,7 +587,12 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
                     if target not in matches:
                         target_doc = eligible[target]
                         match = _fallback(target_doc, phrase, query_terms)
-                        match.update({"score": propagation, "scores": {"lexical": 0, "bm25": 0.0, "rrf_lexical": 0.0, "rrf_bm25": 0.0, "rrf_external": 0.0, "graph": propagation}, "ranks": {"lexical": None, "bm25": None, "external": None}, "source": _source(target_doc, match), "temporal": target_doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
+                        scores = {"lexical": 0, "bm25": 0.0, "rrf_lexical": 0.0, "rrf_bm25": 0.0, "rrf_external": 0.0, "graph": propagation}
+                        ranks = {"lexical": None, "bm25": None, "external": None}
+                        if ngram_active:
+                            scores.update(bm25_hangul2=0.0, rrf_bm25_hangul2=0.0)
+                            ranks["bm25_hangul2"] = None
+                        match.update({"score": propagation, "scores": scores, "ranks": ranks, "source": _source(target_doc, match), "temporal": target_doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
                         matches[target] = match
                     if len(matches[target]["graph"]) < MAX_GRAPH_PROOFS and proof not in matches[target]["graph"]:
                         matches[target]["graph"].append(proof)

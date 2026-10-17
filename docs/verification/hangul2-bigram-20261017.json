@@ -1,0 +1,1329 @@
+{
+ "schema_version": 1,
+ "task_id": "av-hangul2-bigram-20261017",
+ "status": "local_measured_unreleased",
+ "branch": "feat/v023-hangul2-bm25",
+ "base_commit": "63b4cc9abd55f12954e4a97a2b26f2a4848be8c6",
+ "base_release": "v0.22.1",
+ "implementation_commit": "46ed6852ff10fb493a84e40970ce4b4aedac29c4",
+ "artifact_paths": [
+  "skills/agentic-vault/scripts/vault_retrieval.py",
+  "skills/agentic-vault/scripts/vault_recall.py",
+  "scripts/evaluate_recall.py",
+  "tests/test_hangul_bigram_retrieval.py",
+  "docs/memory-patterns.md",
+  "docs/verification/hangul2-bigram-20261017.md",
+  "docs/verification/hangul2-bigram-20261017.json"
+ ],
+ "defaults_changed": false,
+ "ci_gates_changed": false,
+ "measurement": {
+  "measured_at": "2026-10-17T03:43:31+00:00",
+  "source_commit": "46ed6852ff10fb493a84e40970ce4b4aedac29c4",
+  "measured_paths_clean": true,
+  "python": "3.12.10",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "fixture": {
+   "path": "tests/fixtures/recall_hard",
+   "query_count": 64,
+   "answerable_query_count": 56,
+   "no_answer_query_count": 8,
+   "languages": {"ko": 32, "en": 32},
+   "scenarios": {"particles": 12, "short": 12, "mixed": 12, "spacing": 12, "update": 8, "abstention": 8},
+   "per_language_scenario": "6 each for particles/short/mixed/spacing, 4 each for update/abstention",
+   "stale_labeled_query_count": 10,
+   "note": "Scenario labels come from the fixture; 'en' is the language label, not a scenario.",
+   "note_count": 27,
+   "files_in_vault": 29
+  },
+  "values": "rates rounded to 4 decimals; *_at_k uses the arm's top_k; ndcg_at_5 is graded (2^grade-1) over answerable queries; [count, denominator(, ids)] pairs are exact",
+  "by_language_scenario_format": "[recall_at_k, ndcg_at_5] means over the answerable queries of that language and scenario",
+  "paired_format": "[paired answerable query count, mean delta (with minus without), two-sided p-value]",
+  "randomization": {
+   "function": "scripts/evaluate_recall.py paired_randomization",
+   "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+   "seed": 1707,
+   "permutations": 10000,
+   "pairing": "improved arm without versus with --lexical-ngrams hangul2, aligned by query id; rows whose metric is null are excluded"
+  },
+  "lf_copy_same_retrieved_paths": {"ci_lexical_top5": true, "ci_bm25_top5": true, "ci_hybrid_top5": true},
+  "arms": [
+   {
+    "name": "ci_lexical_top3",
+    "top_k": 3,
+    "backend": "lexical (fixture default; no --backend)",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 0,
+     "ignored_query_count": 64,
+     "queries_with_bigram_candidates": 0,
+     "bigram_candidate_total": 0
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9803,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9803,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, 0.0, 1.0],
+     "reciprocal_rank_at_k": [56, 0.0, 1.0],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9082, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9082, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9607, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9607, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.8164], "on": [1.0, 0.8164]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [],
+    "measured_elapsed_ms_improved_arm": {"off": 4695.442, "on": 4804.813}
+   },
+   {
+    "name": "ci_lexical_top5",
+    "top_k": 5,
+    "backend": "lexical (fixture default; no --backend)",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 0,
+     "ignored_query_count": 64,
+     "queries_with_bigram_candidates": 0,
+     "bigram_candidate_total": 0
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9803,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9803,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, 0.0, 1.0],
+     "reciprocal_rank_at_k": [56, 0.0, 1.0],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9082, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9082, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9607, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9607, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.8164], "on": [1.0, 0.8164]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [],
+    "measured_elapsed_ms_improved_arm": {"off": 4829.409, "on": 4748.905}
+   },
+   {
+    "name": "ci_bm25_top3",
+    "top_k": 3,
+    "backend": "bm25",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 58,
+     "bigram_candidate_total": 471
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9911,
+      "ndcg_at_5": 0.9948,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9911,
+      "claim_coverage": [34, 56, 0.6071],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9845,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [34, 56, 0.6071],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, -0.0104, 0.5053],
+     "reciprocal_rank_at_k": [56, -0.0179, 0.5053],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9758, "claim_coverage": 0.5833},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9275, "claim_coverage": 0.5833},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0484, 0.5063]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5714},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9896, "claim_coverage": 0.5714},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0104, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9896, "claim_coverage": 0.6429},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9793, "claim_coverage": 0.6429},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0104, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 0.9516]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 0.9516], "on": [1.0, 0.9033]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": ["ko-spacing-01", "en-spacing-01", "ko-update-02"],
+    "measured_elapsed_ms_improved_arm": {"off": 5053.362, "on": 4939.322}
+   },
+   {
+    "name": "ci_bm25_top5",
+    "top_k": 5,
+    "backend": "bm25",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 58,
+     "bigram_candidate_total": 471
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9911,
+      "ndcg_at_5": 0.9948,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9911,
+      "claim_coverage": [34, 56, 0.6071],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9732,
+      "ndcg_at_5": 0.9845,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9732,
+      "claim_coverage": [34, 56, 0.6071],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, -0.0104, 0.5053],
+     "reciprocal_rank_at_k": [56, -0.0179, 0.5053],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9758, "claim_coverage": 0.5833},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9275, "claim_coverage": 0.5833},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0484, 0.5063]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.5714},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9896, "claim_coverage": 0.5714},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0104, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9896, "claim_coverage": 0.6429},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9793, "claim_coverage": 0.6429},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0104, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 0.9516]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 0.9516], "on": [1.0, 0.9033]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": ["ko-spacing-01", "en-spacing-01", "ko-particles-06", "en-mixed-06", "en-update-02", "ko-update-02"],
+    "measured_elapsed_ms_improved_arm": {"off": 5249.179, "on": 5965.796}
+   },
+   {
+    "name": "ci_hybrid_top3",
+    "top_k": 3,
+    "backend": "hybrid",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 58,
+     "bigram_candidate_total": 471
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_5": 0.9988,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 1.0,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9911,
+      "ndcg_at_5": 0.9939,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9911,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, -0.0049, 1.0],
+     "reciprocal_rank_at_k": [56, -0.0089, 1.0],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9943, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9957, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0014, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9758, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0242, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9975, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9878, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0098, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.9886], "on": [1.0, 0.9914]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 0.9516]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "en-particles-01",
+     "en-short-02",
+     "en-particles-03",
+     "en-spacing-06",
+     "en-update-01",
+     "en-update-02",
+     "en-update-03",
+     "en-update-04",
+     "ko-update-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 4907.521, "on": 4543.011}
+   },
+   {
+    "name": "ci_hybrid_top5",
+    "top_k": 5,
+    "backend": "hybrid",
+    "expand_query": true,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 0, "on": 0},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 58,
+     "bigram_candidate_total": 471
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 1.0,
+      "ndcg_at_5": 0.9988,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 1.0,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 1.0,
+      "mrr_at_k": 0.9911,
+      "ndcg_at_5": 0.9939,
+      "recall_at_3": 1.0,
+      "mrr_at_3": 0.9911,
+      "claim_coverage": [56, 56, 1.0],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.0, 1.0],
+     "ndcg_at_5": [56, -0.0049, 1.0],
+     "reciprocal_rank_at_k": [56, -0.0089, 1.0],
+     "returned_context_claim_coverage": [56, 0.0, 1.0]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9943, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9957, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0014, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9758, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0242, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [8, 0.0, 1.0], "ndcg_at_5": [8, 0.0, 1.0]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.9975, "claim_coverage": 1.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.9878, "claim_coverage": 1.0},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0098, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "ko-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.9886], "on": [1.0, 0.9914]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 0.9516]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "ko-particles-01",
+     "en-particles-01",
+     "ko-short-01",
+     "en-short-01",
+     "ko-mixed-01",
+     "en-mixed-01",
+     "ko-spacing-01",
+     "en-spacing-01",
+     "en-short-02",
+     "ko-particles-03",
+     "en-particles-03",
+     "ko-short-03",
+     "en-short-03",
+     "ko-mixed-03",
+     "en-mixed-03",
+     "ko-spacing-03",
+     "en-spacing-04",
+     "ko-particles-06",
+     "en-particles-06",
+     "ko-short-06",
+     "en-short-06",
+     "ko-mixed-06",
+     "en-mixed-06",
+     "ko-spacing-06",
+     "en-spacing-06",
+     "en-update-01",
+     "en-update-02",
+     "en-update-03",
+     "en-update-04",
+     "ko-update-04",
+     "ko-abstention-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 5030.434, "on": 5687.786}
+   },
+   {
+    "name": "noexpand_bm25_top3",
+    "top_k": 3,
+    "backend": "bm25",
+    "expand_query": false,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 1, "on": 1},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 45,
+     "bigram_candidate_total": 91
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.5714,
+      "mrr_at_k": 0.4375,
+      "ndcg_at_5": 0.4506,
+      "recall_at_3": 0.5714,
+      "mrr_at_3": 0.4375,
+      "claim_coverage": [9, 56, 0.1607],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.75,
+      "mrr_at_k": 0.6429,
+      "ndcg_at_5": 0.6385,
+      "recall_at_3": 0.75,
+      "mrr_at_3": 0.6429,
+      "claim_coverage": [15, 56, 0.2679],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.1786, 0.0017],
+     "ndcg_at_5": [56, 0.1878, 0.0003],
+     "reciprocal_rank_at_k": [56, 0.2054, 0.0003],
+     "returned_context_claim_coverage": [56, 0.1071, 0.0332]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.25, "ndcg_at_5": 0.1447, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 0.75, "ndcg_at_5": 0.6034, "claim_coverage": 0.1667},
+      "paired": {"source_recall_at_k": [12, 0.5, 0.0307], "ndcg_at_5": [12, 0.4587, 0.0307]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.748, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.748, "claim_coverage": 0.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.7894, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.874, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0846, 0.255]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.0833, "ndcg_at_5": 0.0874, "claim_coverage": 0.0833},
+      "on": {"recall_at_k": 0.0833, "ndcg_at_5": 0.0874, "claim_coverage": 0.0833},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 0.5, "ndcg_at_5": 0.5, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.5, 0.1263], "ndcg_at_5": [8, 0.5, 0.1263]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.4643, "ndcg_at_5": 0.3534, "claim_coverage": 0.0357},
+      "on": {"recall_at_k": 0.8214, "ndcg_at_5": 0.7291, "claim_coverage": 0.25},
+      "paired": {"source_recall_at_k": [28, 0.3571, 0.0022], "ndcg_at_5": [28, 0.3757, 0.0004]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.6786, "ndcg_at_5": 0.5479, "claim_coverage": 0.2857},
+      "on": {"recall_at_k": 0.6786, "ndcg_at_5": 0.5479, "claim_coverage": 0.2857},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [0.0, 0.0], "on": [1.0, 0.9173]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 0.5788], "on": [1.0, 0.748]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [0.1667, 0.1529], "on": [0.1667, 0.1529]},
+     "ko-update": {"answerable_query_count": 4, "off": [0.0, 0.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [0.5, 0.2894], "on": [0.5, 0.2894]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.5788], "on": [1.0, 0.5788]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [0.0, 0.0218], "on": [0.0, 0.0218]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "ko-particles-01",
+     "ko-particles-02",
+     "ko-particles-03",
+     "ko-particles-04",
+     "ko-mixed-04",
+     "en-mixed-04",
+     "ko-particles-05",
+     "ko-mixed-05",
+     "ko-particles-06",
+     "ko-mixed-06",
+     "en-mixed-06",
+     "ko-update-01",
+     "ko-update-02",
+     "ko-update-03",
+     "ko-update-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 4874.359, "on": 5472.725}
+   },
+   {
+    "name": "noexpand_bm25_top5",
+    "top_k": 5,
+    "backend": "bm25",
+    "expand_query": false,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend bm25 --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 1, "on": 1},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 45,
+     "bigram_candidate_total": 91
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.5714,
+      "mrr_at_k": 0.4375,
+      "ndcg_at_5": 0.4506,
+      "recall_at_3": 0.5714,
+      "mrr_at_3": 0.4375,
+      "claim_coverage": [9, 56, 0.1607],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.75,
+      "mrr_at_k": 0.6429,
+      "ndcg_at_5": 0.6385,
+      "recall_at_3": 0.75,
+      "mrr_at_3": 0.6429,
+      "claim_coverage": [15, 56, 0.2679],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.1786, 0.0017],
+     "ndcg_at_5": [56, 0.1878, 0.0003],
+     "reciprocal_rank_at_k": [56, 0.2054, 0.0003],
+     "returned_context_claim_coverage": [56, 0.1071, 0.0332]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.25, "ndcg_at_5": 0.1447, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 0.75, "ndcg_at_5": 0.6034, "claim_coverage": 0.1667},
+      "paired": {"source_recall_at_k": [12, 0.5, 0.0307], "ndcg_at_5": [12, 0.4587, 0.0307]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.748, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.748, "claim_coverage": 0.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.7894, "claim_coverage": 0.5},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.874, "claim_coverage": 0.5},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0846, 0.255]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.0833, "ndcg_at_5": 0.0874, "claim_coverage": 0.0833},
+      "on": {"recall_at_k": 0.0833, "ndcg_at_5": 0.0874, "claim_coverage": 0.0833},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 0.5, "ndcg_at_5": 0.5, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.5, 0.1263], "ndcg_at_5": [8, 0.5, 0.1263]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.4643, "ndcg_at_5": 0.3534, "claim_coverage": 0.0357},
+      "on": {"recall_at_k": 0.8214, "ndcg_at_5": 0.7291, "claim_coverage": 0.25},
+      "paired": {"source_recall_at_k": [28, 0.3571, 0.0022], "ndcg_at_5": [28, 0.3757, 0.0004]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.6786, "ndcg_at_5": 0.5479, "claim_coverage": 0.2857},
+      "on": {"recall_at_k": 0.6786, "ndcg_at_5": 0.5479, "claim_coverage": 0.2857},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, 0.0, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [0.0, 0.0], "on": [1.0, 0.9173]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 0.5788], "on": [1.0, 0.748]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [0.1667, 0.1529], "on": [0.1667, 0.1529]},
+     "ko-update": {"answerable_query_count": 4, "off": [0.0, 0.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [0.5, 0.2894], "on": [0.5, 0.2894]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.5788], "on": [1.0, 0.5788]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [0.0, 0.0218], "on": [0.0, 0.0218]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "ko-particles-01",
+     "ko-particles-02",
+     "ko-particles-03",
+     "ko-particles-04",
+     "ko-mixed-04",
+     "en-mixed-04",
+     "ko-particles-05",
+     "ko-mixed-05",
+     "ko-particles-06",
+     "ko-mixed-06",
+     "en-mixed-06",
+     "ko-update-01",
+     "ko-update-02",
+     "ko-update-03",
+     "ko-update-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 4979.414, "on": 4876.148}
+   },
+   {
+    "name": "noexpand_hybrid_top3",
+    "top_k": 3,
+    "backend": "hybrid",
+    "expand_query": false,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 1, "on": 1},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 45,
+     "bigram_candidate_total": 91
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.6786,
+      "mrr_at_k": 0.5625,
+      "ndcg_at_5": 0.5621,
+      "recall_at_3": 0.6786,
+      "mrr_at_3": 0.5625,
+      "claim_coverage": [10, 56, 0.1786],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.8571,
+      "mrr_at_k": 0.7321,
+      "ndcg_at_5": 0.7258,
+      "recall_at_3": 0.8571,
+      "mrr_at_3": 0.7321,
+      "claim_coverage": [16, 56, 0.2857],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.1786, 0.0017],
+     "ndcg_at_5": [56, 0.1637, 0.0017],
+     "reciprocal_rank_at_k": [56, 0.1696, 0.0017],
+     "returned_context_claim_coverage": [56, 0.1071, 0.0332]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.25, "ndcg_at_5": 0.1447, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 0.75, "ndcg_at_5": 0.6034, "claim_coverage": 0.1667},
+      "paired": {"source_recall_at_k": [12, 0.5, 0.0307], "ndcg_at_5": [12, 0.4587, 0.0307]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.7763, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.748, "claim_coverage": 0.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0282, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.8176, "claim_coverage": 0.4167},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.8176, "claim_coverage": 0.4167},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.5833, "ndcg_at_5": 0.5515, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 0.5833, "ndcg_at_5": 0.5515, "claim_coverage": 0.25},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 0.5, "ndcg_at_5": 0.5, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.5, 0.1263], "ndcg_at_5": [8, 0.5, 0.1263]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.6429, "ndcg_at_5": 0.5292, "claim_coverage": 0.1071},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.8687, "claim_coverage": 0.3214},
+      "paired": {"source_recall_at_k": [28, 0.3571, 0.0022], "ndcg_at_5": [28, 0.3394, 0.0022]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.7143, "ndcg_at_5": 0.595, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 0.7143, "ndcg_at_5": 0.583, "claim_coverage": 0.25},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0121, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [0.0, 0.0], "on": [1.0, 0.9173]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 0.6352], "on": [1.0, 0.6352]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-update": {"answerable_query_count": 4, "off": [0.0, 0.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [0.5, 0.2894], "on": [0.5, 0.2894]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.6352], "on": [1.0, 0.5788]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [0.1667, 0.1856], "on": [0.1667, 0.1856]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "ko-particles-01",
+     "ko-particles-02",
+     "ko-particles-03",
+     "ko-particles-04",
+     "ko-mixed-04",
+     "en-mixed-04",
+     "ko-particles-05",
+     "ko-particles-06",
+     "en-short-06",
+     "ko-mixed-06",
+     "en-mixed-06",
+     "ko-update-01",
+     "ko-update-02",
+     "ko-update-03",
+     "ko-update-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 5163.911, "on": 5379.11}
+   },
+   {
+    "name": "noexpand_hybrid_top5",
+    "top_k": 5,
+    "backend": "hybrid",
+    "expand_query": false,
+    "commands": {
+     "off": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid",
+     "on": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0 --backend hybrid --lexical-ngrams hangul2"
+    },
+    "exit_codes": {"off": 1, "on": 1},
+    "evaluation_errors": {"off": 0, "on": 0},
+    "channel": {
+     "active_query_count": 64,
+     "ignored_query_count": 0,
+     "queries_with_bigram_candidates": 45,
+     "bigram_candidate_total": 91
+    },
+    "overall": {
+     "off": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.6964,
+      "mrr_at_k": 0.567,
+      "ndcg_at_5": 0.5712,
+      "recall_at_3": 0.6786,
+      "mrr_at_3": 0.5625,
+      "claim_coverage": [11, 56, 0.1964],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     },
+     "on": {
+      "answerable_query_count": 56,
+      "recall_at_k": 0.875,
+      "mrr_at_k": 0.7366,
+      "ndcg_at_5": 0.7348,
+      "recall_at_3": 0.8571,
+      "mrr_at_3": 0.7321,
+      "claim_coverage": [17, 56, 0.3036],
+      "no_answer_false_positive": [2, 8, ["en-abstention-04", "ko-abstention-04"]],
+      "stale_top_1": [0, 10, []],
+      "stale_exposure": [0, 10]
+     }
+    },
+    "paired_all_answerable": {
+     "source_recall_at_k": [56, 0.1786, 0.0017],
+     "ndcg_at_5": [56, 0.1636, 0.0017],
+     "reciprocal_rank_at_k": [56, 0.1696, 0.0017],
+     "returned_context_claim_coverage": [56, 0.1071, 0.0332]
+    },
+    "by_scenario": {
+     "particles": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.25, "ndcg_at_5": 0.1447, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 0.75, "ndcg_at_5": 0.6034, "claim_coverage": 0.1667},
+      "paired": {"source_recall_at_k": [12, 0.5, 0.0307], "ndcg_at_5": [12, 0.4587, 0.0307]}
+     },
+     "short": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.781, "claim_coverage": 0.0},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.7527, "claim_coverage": 0.0},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0282, 1.0]}
+     },
+     "mixed": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 1.0, "ndcg_at_5": 0.8223, "claim_coverage": 0.4167},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.8218, "claim_coverage": 0.4167},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, -0.0005, 1.0]}
+     },
+     "spacing": {
+      "answerable_query_count": 12,
+      "off": {"recall_at_k": 0.6667, "ndcg_at_5": 0.5844, "claim_coverage": 0.3333},
+      "on": {"recall_at_k": 0.6667, "ndcg_at_5": 0.5844, "claim_coverage": 0.3333},
+      "paired": {"source_recall_at_k": [12, 0.0, 1.0], "ndcg_at_5": [12, 0.0, 1.0]}
+     },
+     "update": {
+      "answerable_query_count": 8,
+      "off": {"recall_at_k": 0.5, "ndcg_at_5": 0.5, "claim_coverage": 0.25},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 1.0, "claim_coverage": 0.75},
+      "paired": {"source_recall_at_k": [8, 0.5, 0.1263], "ndcg_at_5": [8, 0.5, 0.1263]}
+     }
+    },
+    "abstention": {"off_false_positive": [2, 8], "on_false_positive": [2, 8]},
+    "by_language": {
+     "ko": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.6429, "ndcg_at_5": 0.5313, "claim_coverage": 0.1071},
+      "on": {"recall_at_k": 1.0, "ndcg_at_5": 0.8705, "claim_coverage": 0.3214},
+      "paired": {"source_recall_at_k": [28, 0.3571, 0.0022], "ndcg_at_5": [28, 0.3392, 0.0022]}
+     },
+     "en": {
+      "answerable_query_count": 28,
+      "off": {"recall_at_k": 0.75, "ndcg_at_5": 0.6112, "claim_coverage": 0.2857},
+      "on": {"recall_at_k": 0.75, "ndcg_at_5": 0.5991, "claim_coverage": 0.2857},
+      "paired": {"source_recall_at_k": [28, 0.0, 1.0], "ndcg_at_5": [28, -0.0121, 1.0]}
+     }
+    },
+    "by_language_scenario": {
+     "ko-particles": {"answerable_query_count": 6, "off": [0.0, 0.0], "on": [1.0, 0.9173]},
+     "ko-short": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-mixed": {"answerable_query_count": 6, "off": [1.0, 0.6446], "on": [1.0, 0.6436]},
+     "ko-spacing": {"answerable_query_count": 6, "off": [1.0, 0.9173], "on": [1.0, 0.9173]},
+     "ko-update": {"answerable_query_count": 4, "off": [0.0, 0.0], "on": [1.0, 1.0]},
+     "en-particles": {"answerable_query_count": 6, "off": [0.5, 0.2894], "on": [0.5, 0.2894]},
+     "en-short": {"answerable_query_count": 6, "off": [1.0, 0.6446], "on": [1.0, 0.5882]},
+     "en-mixed": {"answerable_query_count": 6, "off": [1.0, 1.0], "on": [1.0, 1.0]},
+     "en-spacing": {"answerable_query_count": 6, "off": [0.3333, 0.2515], "on": [0.3333, 0.2515]},
+     "en-update": {"answerable_query_count": 4, "off": [1.0, 1.0], "on": [1.0, 1.0]}
+    },
+    "changed_query_ids": [
+     "ko-particles-01",
+     "ko-particles-02",
+     "ko-particles-03",
+     "ko-particles-04",
+     "ko-mixed-04",
+     "en-mixed-04",
+     "ko-particles-05",
+     "ko-particles-06",
+     "en-short-06",
+     "ko-mixed-06",
+     "en-mixed-06",
+     "ko-update-01",
+     "ko-update-02",
+     "ko-update-03",
+     "ko-update-04"
+    ],
+    "measured_elapsed_ms_improved_arm": {"off": 5791.686, "on": 5966.411}
+   }
+  ]
+ },
+ "default_equivalence": {
+  "golden_unit_test": "DefaultPathEquivalenceTests in tests/test_hangul_bigram_retrieval.py pins 7 configurations (64, 64, 12, 12, 16, 16 and 16 queries) on LF-normalized copies of recall_hard, recall_advanced and recall to digests generated with the unmodified v0.22.1 retriever before any runtime edit; the copies byte-match the committed git blobs; floats are canonicalized to 10 significant digits for cross-platform libm differences.",
+  "exact_same_machine": "12 configurations produced byte-identical JSON before (63b4cc9) and after (46ed685) with the argument omitted: hard legacy recall top3, hard ablation top5, hard improved top3/top5, hard bm25/hybrid with and without expansion top5, hard hybrid with expand_links=2 top5, advanced per-query top3, advanced bm25 top3, recall legacy top3.",
+  "ci_commands": "All 7 retrieval-related tests.yml evaluation commands kept the same return code (0), the same empty stderr and the same stdout JSON after removing only measured timing keys (elapsed_ms, elapsed_seconds, mean_elapsed_ms, retrieval_elapsed_ms, total_elapsed_ms); evaluate_tool_safety stdout was byte-identical.",
+  "mutation_checks": "Temporary mutations, restored afterwards: adding a None diagnostics key to the default advanced path failed 6 of 7 golden configurations; switching the default bm25 score to RRF failed 3; citing bigram-only candidates with word tokens failed 2 tests; not splitting mixed-script words failed 5 tests."
+ },
+ "tests": {
+  "baseline_full_suite": {
+   "commit": "63b4cc9",
+   "command": "python -m unittest discover -s tests",
+   "ran": 1375,
+   "seconds": 305.866,
+   "status": "OK (skipped=32)",
+   "exit_code": 0
+  },
+  "targeted": {
+   "command": "python -m unittest tests.test_hangul_bigram_retrieval -v",
+   "ran": 25,
+   "seconds": 10.627,
+   "status": "OK",
+   "exit_code": 0
+  },
+  "related_modules": {
+   "command": "python -m unittest tests.test_vault_retrieval tests.test_recall_hard_evaluation tests.test_recall_evaluation tests.test_vault_query_expansion tests.test_vault_recall",
+   "ran": 123,
+   "seconds": 16.224,
+   "status": "OK (skipped=5)",
+   "exit_code": 0
+  },
+  "final_full_suite": {
+   "command": "python -m unittest discover -s tests",
+   "ran": 1400,
+   "seconds": 371.283,
+   "status": "OK (skipped=32)",
+   "exit_code": 0,
+   "note": "Python 3.12.10 on Windows 11; hypothesis is not installed, so the stateful lifecycle test is among the skips."
+  },
+  "static": {"compileall": 0, "git_diff_check": 0, "git_diff_check_whole_tree": 0}
+ },
+ "reference_only": {
+  "source": "Apache Lucene LUCENE-8231 (2018), https://issues.apache.org/jira/browse/LUCENE-8231",
+  "status": "reported by the source as relayed in the task brief; not re-measured or re-fetched in this work",
+  "collection": "HANTEC",
+  "bm25_map": {"standard_analyzer": 0.1044, "cjk_bigram": 0.1924, "nori": 0.2094},
+  "index_size_mb": {"before": 131, "after": 164}
+ },
+ "limits": [
+  "64 synthetic queries on 27 fixture notes; no real vault and no relevance judgments beyond the fixture labels.",
+  "The tests.yml options use the lexical backend, which ignores the channel; effects appear only with --backend bm25 or hybrid.",
+  "Bigrams are not morphology: unrelated overlaps (for example the shared bigram 복구 in 실패복구 and 삼나무복구, or 확인 in 경보확인 and 확인한다) add candidates and can lower precision.",
+  "The bigram view changes BM25 length normalization, so it can reorder notes for English-only terms too; in en-spacing-01 and ko-spacing-01 (bm25, expansion on) the two views ranked the procedure note and its overview 1/2 and 2/1, the RRF sums tied (1/61 + 1/62) and the existing path tie-break put the overview first.",
+  "Single-syllable spacing queries (격 리 절 차) stay unigrams and do not match bigram tokens.",
+  "Evidence lines follow the existing BM25 passage rule with bigram tokens, so a frontmatter aliases line can be cited.",
+  "Measured on one Windows 11 machine with Python 3.12.10; elapsed times are machine-specific observations."
+ ],
+ "unresolved": [
+  "No default change is proposed from this measurement.",
+  "Independent re-run of the verification commands by another session is pending."
+ ],
+ "next_safe_action": "Keep the default off; if a default is ever considered, measure on a larger Korean corpus with particle-attached queries, include precision on no-answer and unrelated-overlap queries, and compare with explicit alias/mapping expansion."
+}

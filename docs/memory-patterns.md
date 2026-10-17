@@ -47,6 +47,71 @@ BM25는 어휘 검색이며, `hybrid`는 어휘 점수/BM25/명시적 외부 후
 그 본문이 모델에게 전달됐다고 집계하지 않는다. 누락·불완전 검색은 diagnostics로
 확인한다. 시간·파일 해시는 의미적 진실이나 안전한 지시를 인증하지 않는다.
 
+## 한글 음절 bigram BM25 채널 (선택형)
+
+`--lexical-ngrams hangul2`(Python `lexical_ngrams="hangul2"`)는 조사가 붙은 질의(`핸드오프를`),
+두 음절 질의(`대장`), 영문·한글 혼합 질의(`handoff를`)를 위한 선택형 어휘 채널이다. 기본값은
+꺼짐이며, 지정하지 않으면 출력은 v0.22.1과 같다.
+
+- 같은 허용 노트로 호출마다 메모리에서 BM25 보기를 하나 더 만든다. 단어 토큰 안에서 완성형 한글
+  음절(U+AC00–U+D7A3)이 2개 이상 이어진 구간은 겹치는 음절 bigram으로 나눈다(`핸드오프를` →
+  `핸드`·`드오`·`오프`·`프를`). 1음절 구간은 그대로 두고(`를`), 한글이 아닌 부분은 기존 단어
+  토큰을 유지한다(`handoff를` → `handoff`·`를`). 질의어(명시적 확장을 켠 경우 확장 후)도 같은
+  규칙으로 나누고 최대 128개 n-gram만 쓴다. 초과분은 diagnostics에 센다.
+- 이 순위는 `rrf_bm25_hangul2`로 RRF(k=60)에 더해진다. `bm25` 백엔드는 채널이 켜지면 원래 BM25
+  점수 대신 RRF 합으로 정렬하고, `hybrid`는 기존 RRF 합에 더한다.
+- `lexical` 백엔드에는 BM25 순위가 없어 채널을 무시한다. 결과는 옵션이 없을 때와 같고,
+  diagnostics의 `lexical_ngram_channel.status`가 `ignored_lexical_backend`가 된다. 텍스트 출력은
+  stderr에 안내를 출력한다.
+- bigram 순위로만 찾은 노트(`bm25`에서 정확한 단어 토큰 일치가 없거나 `hybrid`에서 어휘 일치가
+  없는 노트)는 기존 BM25 근거 규칙을 bigram 토큰으로 적용한 줄을 인용한다. 나머지 근거 줄은
+  기존과 같다.
+- 모드를 지정한 경우에만 diagnostics에 `lexical_ngrams`·`lexical_ngram_channel`(상태·RRF 키·
+  사용/생략 n-gram 수·후보 수·`in_memory_per_call`)이 생기고 `ranking` 문자열에 모드가 붙는다.
+  인덱스나 캐시는 저장하지 않는다. deny/exclude·시간 조건·출처 재확인은 기존 경로를 따른다.
+
+```text
+python skills/agentic-vault/scripts/vault_recall.py --vault PATH --query "핸드오프를" --backend hybrid --lexical-ngrams hangul2 --format json
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --backend hybrid --lexical-ngrams hangul2
+```
+
+`None`·`hangul2` 외의 값은 노트를 읽기 전에 `invalid_options`로 거부한다(CLI는 인자 오류).
+`evaluate_recall.py`에서는 `--advanced` 또는 `--compare`와 함께만 쓸 수 있다.
+
+**측정(2026-10-17, Windows 11·Python 3.12.10에서 직접 실행, 소스 `46ed685`).** `recall_hard`
+fixture 64질의(한국어 32·영어 32, 정답 있음 56·정답 없음 8)에서 같은 옵션의 개선 조건을 채널
+없이/있이 비교했다. p값은 정답 있는 56질의를 짝지은 `paired_randomization`(시드 1707, 10,000회,
+양측)이다. 상세는 [검증 기록](verification/hangul2-bigram-20261017.md)에 있다.
+
+- CI와 같은 옵션(`--expand-query`·질의 매핑, top 3·5, 백엔드 미지정=lexical): 64/64질의에서 채널이
+  무시됐고 지표가 같았다(recall@k 1.0000, nDCG@5 0.9803, p=1.0).
+- 같은 옵션에 `--backend bm25`(top 5): recall@5 1.0000→1.0000, nDCG@5 0.9948→0.9845(평균 차
+  −0.0104, p=0.5053). spacing 12질의 nDCG@5 0.9758→0.9275(p=0.5063).
+- 같은 옵션에 `--backend hybrid`(top 5): recall@5 1.0000→1.0000, nDCG@5 0.9988→0.9939(p=1.0).
+- 보조 측정, 질의 확장 없음(top 5): `bm25` recall@5 0.5714→0.7500(p=0.0017), nDCG@5
+  0.4506→0.6385(p=0.0003). `hybrid` recall@5 0.6964→0.8750(p=0.0017). 두 백엔드 모두 한국어
+  particles 0/6→6/6, 한국어 update 0/4→4/4였고 영어 28질의의 recall과 spacing은 변하지 않았다.
+- 모든 조건에서 정답 없음 오탐은 채널 없이/있이 같은 2/8, stale top-1은 0/10이었다.
+
+이 fixture에서는 명시적 aliases·질의 매핑이 이미 조사·혼합 질의를 해결해 CI 옵션에서는 개선이
+없었고 nDCG@5가 유의하지 않게 조금 낮아졌다. 확장을 쓰지 않을 때만 좋아졌다. particles 12질의
+(p=0.0307)와 한국어 28질의(p=0.0022)는 유의했고, update 8질의는 한국어 0/4→4/4였지만 p=0.1263이었다.
+이 결과로 기본값이나 CI 기준을 바꾸지 않는다.
+
+한계:
+
+- 형태소 분석이 아니다. 관련 없는 bigram 겹침이 후보를 늘려 정밀도를 낮출 수 있다. 확장 없는
+  측정에서 `실패복구은`은 `복구`로 삼나무 복구 노트 2개를, `경보확인은`은 `확인한다`의 `확인`으로
+  실패 큐 노트를 함께 반환했다.
+- bigram 보기는 BM25 문서 길이 정규화도 바꾸므로 영어 질의의 순서도 달라질 수 있다.
+- 띄어 쓴 1음절 질의(`격 리 절 차`)는 unigram으로 남아 bigram 토큰과 일치하지 않는다.
+- 근거 줄은 기존 BM25 규칙을 따르므로 프런트매터 aliases 줄이 인용될 수 있다.
+- 호출마다 메모리에서 토큰을 다시 만들므로 한국어가 많은 볼트에서는 시간·메모리가 늘어난다.
+  Apache Lucene [LUCENE-8231](https://issues.apache.org/jira/browse/LUCENE-8231)(2018, HANTEC)
+  사례에서는 인덱스가 131MB에서 164MB로 커졌고, BM25 MAP이 Standard .1044·CJK bigram
+  .1924·Nori(형태소) .2094였다고 보고됐다. 출처 보고값이며 이 작업에서 재측정하지 않았다.
+- 27개 노트·64개 합성 질의의 소규모 측정이며 실제 볼트 성능을 확정하지 않는다.
+
 ## 선택형 qmd 연동
 
 qmd 자체의 설치·모델 다운로드·임베딩 생성은 별도 선택이다. 이 브랜치는 qmd 엔진을
