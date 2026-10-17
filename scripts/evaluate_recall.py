@@ -205,7 +205,7 @@ def _summary(rows: list[dict]) -> dict:
 def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
              as_of: str | None = None, expand_links: int | None = None,
              backend: str | None = None, top_k: int = 3, expand_query: bool = False,
-             query_mapping: str | None = None) -> dict:
+             query_mapping: str | None = None, lexical_ngrams: str | None = None) -> dict:
     """Measure labeled source retrieval and returned exposure, never answer quality."""
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
         raise ValueError("max_tokens must be a non-negative integer")
@@ -218,7 +218,9 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         raise ValueError('invalid advanced options')
     if backend is not None and backend not in ('lexical', 'bm25', 'hybrid'):
         raise ValueError('invalid retrieval backend')
-    advanced = advanced or as_of is not None or expand_links is not None or backend is not None or expand_query
+    if lexical_ngrams is not None and lexical_ngrams != 'hangul2':
+        raise ValueError('invalid lexical n-gram mode')
+    advanced = advanced or as_of is not None or expand_links is not None or backend is not None or expand_query or lexical_ngrams is not None
     queries = _load_queries(fixture)
     recall_module = _load_recall_module()
     vault = fixture / "vault"
@@ -236,6 +238,8 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
                             if value is not None})
             if expand_query:
                 options.update(expand_query=True, query_mapping=query_mapping)
+            if lexical_ngrams is not None:
+                options['lexical_ngrams'] = lexical_ngrams
         started = time.perf_counter()
         reader = recall_module._advanced_retrieval.retrieve if advanced else recall_module.recall
         result = reader(vault, item["query"], limit=top_k, max_tokens=max_tokens, **options)
@@ -376,6 +380,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument('--as-of', help='override all per-query time points')
     parser.add_argument('--expand-links', type=int, choices=(0, 1, 2))
     parser.add_argument('--backend', choices=('lexical', 'bm25', 'hybrid'))
+    parser.add_argument('--lexical-ngrams', choices=('hangul2',),
+                        help='opt-in Hangul bigram BM25 rank for advanced retrieval; requires --advanced or --compare')
     return parser
 
 
@@ -386,9 +392,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if any(value is not None and not 0.0 <= value <= 1.0 for value in thresholds):
         print("evaluation thresholds must be between 0 and 1", file=sys.stderr)
         return 2
+    if args.lexical_ngrams is not None and not (args.advanced or args.compare):
+        print("--lexical-ngrams requires --advanced or --compare", file=sys.stderr)
+        return 2
     try:
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
+        if args.lexical_ngrams is not None:
+            options['lexical_ngrams'] = args.lexical_ngrams
         report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
                   evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:

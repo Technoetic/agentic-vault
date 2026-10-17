@@ -509,14 +509,16 @@ def recall(
     vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     as_of: str | None = None, expand_links: int = 0, backend: str = "lexical",
     external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None,
+    lexical_ngrams=None,
 ) -> dict:
     """Preserve legacy output by default; advanced options add source review data."""
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None:
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and lexical_ngrams is None:
         return _legacy_recall(vault, query, limit, max_tokens)
     return _advanced_retrieval.retrieve(
         vault, query, limit, max_tokens, as_of=as_of, expand_links=expand_links,
         backend=backend, external_candidates=external_candidates,
         excluded_sources=excluded_sources, expand_query=expand_query, query_mapping=query_mapping,
+        lexical_ngrams=lexical_ngrams,
     )
 
 
@@ -539,6 +541,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--exclude-source", action="append", default=[], help="additional excluded path/zone")
     parser.add_argument("--expand-query", action="store_true", help="opt-in bounded aliases/plain query mapping")
     parser.add_argument("--query-mapping", help="vault-relative plain trigger => replacement mapping; requires --expand-query")
+    parser.add_argument("--lexical-ngrams", choices=("hangul2",),
+                        help="opt-in Hangul syllable-bigram BM25 rank added to RRF; bm25/hybrid only")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
@@ -551,6 +555,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         external_candidates=args.external_candidates,
         excluded_sources=tuple(args.exclude_source),
         expand_query=args.expand_query, query_mapping=args.query_mapping,
+        lexical_ngrams=args.lexical_ngrams,
     )
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -558,6 +563,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if result["context"]:
             print(result["context"])
         diagnostics = result["diagnostics"]
+        if diagnostics.get("lexical_ngram_channel", {}).get("status") == "ignored_lexical_backend":
+            print("recall note: --lexical-ngrams is ignored by the lexical backend; use --backend bm25 or hybrid",
+                  file=sys.stderr)
         if diagnostics["status"] != "ok":
             print(f"recall unavailable: {diagnostics['status']}", file=sys.stderr)
         elif not diagnostics["search_complete"]:
