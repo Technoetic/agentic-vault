@@ -1,0 +1,1434 @@
+{
+  "schema_version": 1,
+  "task_id": "av-render-matched-20261017",
+  "date": "2026-10-17",
+  "status": "local_measured_unreleased",
+  "branch": "feat/v023-render-matched",
+  "base_commit": "63b4cc9abd55f12954e4a97a2b26f2a4848be8c6",
+  "source_commit": "bc4c55e03f44323babf4c62ff63481b4115a3938",
+  "environment": {
+    "platform": "Windows-11-10.0.26300-SP0",
+    "python": "3.12.10",
+    "hypothesis": "not installed; the stateful lifecycle test skips"
+  },
+  "reference": {
+    "url": "https://arxiv.org/abs/2607.16019",
+    "title": "Presentation, Not Mechanism: A Render Confound in Deprecation-Aware Memory Evaluation",
+    "authors": "Zhaoyang Jiang, Zhizhong Fu, Zicheng Li, Yunsoo Kim, Jiacong Mi, Xuanqi Peng, Fei Teng, Honghan Wu",
+    "version": "v1, submitted 2026-07-17",
+    "checked": "abstract page read 2026-10-17",
+    "reported_by_source_abstract": {
+      "questions": 2907,
+      "question_selection": "high-agreement",
+      "apparent_gain_ledger_over_flat_retrieval": 0.182,
+      "mechanism_residual_after_render_matching": "+0.021 to +0.025 across two judge families",
+      "coarse_invalidation_over_fine_ledger_current_state_queries": 0.084,
+      "metric_named_in_abstract": false,
+      "question_language_stated_in_abstract": false,
+      "data_sources_named": "GitHub, multi-repository issue histories, Wikipedia, DyKnow-style temporal streams"
+    },
+    "reproduced_here": false,
+    "code_or_data_used": false
+  },
+  "artifact_paths": [
+    "skills/agentic-vault/scripts/vault_retrieval.py",
+    "scripts/evaluate_recall.py",
+    "scripts/evaluate_korean_memory.py",
+    "tests/test_render_matched.py",
+    "docs/memory-evaluation.md",
+    "docs/verification/render-matched-20261017.md",
+    "docs/verification/render-matched-20261017.json"
+  ],
+  "implementation": {
+    "retrieval_option": "vault_retrieval.retrieve(..., temporal_filter='exclude'|'annotate_only'); default 'exclude' is byte-identical; 'annotate_only' keeps invalid/expired/not_yet_valid/superseded/supersession_unknown sources with their status annotation; no effect without as_of; invalid values fail before note reads",
+    "recall_cli": "python scripts/evaluate_recall.py ... --compare --render-matched",
+    "korean_cli": "python scripts/evaluate_korean_memory.py --render-matched (evidence only)",
+    "decision_alpha": 0.05,
+    "decision_metrics": [
+      "ndcg_at_5",
+      "source_recall_at_k",
+      "stale_top_1",
+      "no_answer_false_positive"
+    ],
+    "descriptive_metrics": [
+      "stale_exposure"
+    ],
+    "randomization": {
+      "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+      "seed": 1707,
+      "permutations": 10000
+    }
+  },
+  "default_equivalence": {
+    "method": "git archive of base_commit with the repository autocrlf setting (fixture bytes identical to the worktree) versus source_commit; every CI evaluation command; JSON compared after removing wall-clock fields only",
+    "removed_fields": [
+      "elapsed_ms",
+      "mean_elapsed_ms",
+      "retrieval_elapsed_ms",
+      "total_elapsed_ms"
+    ],
+    "commands": [
+      {
+        "command": "python scripts/evaluate_recall.py",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_memory_workflows.py --backend deterministic",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_korean_memory.py",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_tool_safety.py --backend scripted-control",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      },
+      {
+        "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+        "base_exit_code": 0,
+        "head_exit_code": 0,
+        "identical_after_removing_wall_clock_fields": true
+      }
+    ]
+  },
+  "decomposition": {
+    "recall_advanced_top3": {
+      "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --render-matched --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0",
+      "exit_code": 0,
+      "stderr_warnings": [
+        "render-matched warning (non-blocking): ndcg_at_5: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "render-matched warning (non-blocking): stale_top_1: mechanism residual cannot reach p<0.05 with 4 nonzero paired differences",
+        "render-matched warning (non-blocking): no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "gates_on_improved": {
+        "no_answer_false_positive_rate": {
+          "observed": 0.0,
+          "maximum": 0.0,
+          "passed": true
+        },
+        "forbidden_exposure_rate": {
+          "observed": 0.0,
+          "maximum": 0.0,
+          "passed": true
+        },
+        "stale_top_1_rate": {
+          "observed": 0.0,
+          "maximum": 0.0,
+          "passed": true
+        }
+      },
+      "arms": {
+        "legacy": {
+          "method": "legacy",
+          "query_count": 16,
+          "answerable_query_count": 14,
+          "no_answer_query_count": 2,
+          "recall_at_3": 0.7857142857142857,
+          "mrr": 0.6785714285714286,
+          "recall_at_k": 0.7857142857142857,
+          "ndcg_at_5": 0.706627804336741,
+          "stale_sources": {
+            "labeled_query_count": 4,
+            "exposed_query_count": 4,
+            "exposure_rate": 1.0,
+            "top_1_query_count": 4,
+            "top_1_rate": 1.0
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 2,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "no_answer": {
+            "query_count": 2,
+            "false_positive_query_count": 2,
+            "false_positive_rate": 1.0,
+            "complete_empty_query_count": 0,
+            "complete_empty_rate": 0.0,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 0,
+          "covered_claim_count": 0,
+          "evaluation_error_count": 0
+        },
+        "render_matched": {
+          "method": "render_matched",
+          "query_count": 16,
+          "answerable_query_count": 14,
+          "no_answer_query_count": 2,
+          "recall_at_3": 1.0,
+          "mrr": 0.8452380952380952,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.8851992329081695,
+          "stale_sources": {
+            "labeled_query_count": 4,
+            "exposed_query_count": 4,
+            "exposure_rate": 1.0,
+            "top_1_query_count": 4,
+            "top_1_rate": 1.0
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 2,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "no_answer": {
+            "query_count": 2,
+            "false_positive_query_count": 2,
+            "false_positive_rate": 1.0,
+            "complete_empty_query_count": 0,
+            "complete_empty_rate": 0.0,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 0,
+          "covered_claim_count": 0,
+          "evaluation_error_count": 0
+        },
+        "advanced": {
+          "method": "advanced",
+          "query_count": 16,
+          "answerable_query_count": 14,
+          "no_answer_query_count": 2,
+          "recall_at_3": 1.0,
+          "mrr": 0.9166666666666667,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.9379235538265327,
+          "stale_sources": {
+            "labeled_query_count": 4,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 2,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "no_answer": {
+            "query_count": 2,
+            "false_positive_query_count": 0,
+            "false_positive_rate": 0.0,
+            "complete_empty_query_count": 2,
+            "complete_empty_rate": 1.0,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 0,
+          "covered_claim_count": 0,
+          "evaluation_error_count": 0
+        }
+      },
+      "metrics": {
+        "ndcg_at_5": {
+          "population": "answerable queries",
+          "paired_query_count": 14,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.706627804336741,
+            "render_matched": 0.8851992329081695,
+            "advanced": 0.9379235538265327
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.23129574948979179,
+            "p_value": 0.0638936106389361
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.17857142857142858,
+            "p_value": 0.24447555244475552
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.05272432091836321,
+            "p_value": 0.5057494250574942
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "source_recall_at_k": {
+          "population": "answerable queries",
+          "paired_query_count": 14,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.7857142857142857,
+            "render_matched": 1.0,
+            "advanced": 1.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.21428571428571427,
+            "p_value": 0.24447555244475552
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.21428571428571427,
+            "p_value": 0.24447555244475552
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 14,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 0,
+          "mechanism_minimum_attainable_p_value": 1.0,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "none"
+        },
+        "stale_top_1": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 4,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 1.0,
+            "render_matched": 1.0,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": -1.0,
+            "p_value": 0.13008699130086993
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": -1.0,
+            "p_value": 0.13008699130086993
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 4,
+          "mechanism_minimum_attainable_p_value": 0.125,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "no_answer_false_positive": {
+          "population": "no_answer queries",
+          "paired_query_count": 2,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 1.0,
+            "render_matched": 1.0,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 2,
+            "mean_delta": -1.0,
+            "p_value": 0.49995000499950004
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 2,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 2,
+            "mean_delta": -1.0,
+            "p_value": 0.49995000499950004
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "stale_exposure": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 4,
+          "higher_is_better": false,
+          "decision_metric": false,
+          "means": {
+            "legacy": 1.0,
+            "render_matched": 1.0,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": -1.0,
+            "p_value": 0.13008699130086993
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 4,
+            "mean_delta": -1.0,
+            "p_value": 0.13008699130086993
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 4,
+          "mechanism_minimum_attainable_p_value": 0.125,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        }
+      },
+      "nonzero_mechanism_residual_query_ids": {
+        "ndcg_at_5": [
+          "en-current",
+          "ko-current"
+        ],
+        "source_recall_at_k": [],
+        "stale_top_1": [
+          "en-current",
+          "ko-current",
+          "en-retired",
+          "ko-retired"
+        ],
+        "no_answer_false_positive": [
+          "en-retired",
+          "ko-retired"
+        ],
+        "stale_exposure": [
+          "en-current",
+          "ko-current",
+          "en-retired",
+          "ko-retired"
+        ]
+      },
+      "decision": {
+        "rule": "If no decision-metric mechanism residual is distinguishable from zero (two-sided p<0.05) in the beneficial direction, defer richer ledger typing (contested/resolves states).",
+        "decision_metrics": [
+          "ndcg_at_5",
+          "source_recall_at_k",
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "beneficial_distinguishable_metrics": [],
+        "harmful_distinguishable_metrics": [],
+        "power_limited_metrics": [
+          "ndcg_at_5",
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "descriptive_beneficial_distinguishable_metrics": [],
+        "outcome": "defer_richer_ledger_typing",
+        "note": "A detected residual credits the existing coarse as-of/supersession exclusion only; richer ledger states need their own render-matched comparison before adoption. Power-limited metrics cannot show a residual on this fixture whatever its size."
+      },
+      "warnings": [
+        "ndcg_at_5: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "stale_top_1: mechanism residual cannot reach p<0.05 with 4 nonzero paired differences",
+        "no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "claim_coverage_rm_vs_advanced_per_query_differences": 0
+    },
+    "recall_hard_top3": {
+      "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --render-matched --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+      "exit_code": 0,
+      "stderr_warnings": [
+        "render-matched warning (non-blocking): stale_top_1: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "render-matched warning (non-blocking): no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "gates_on_improved": {
+        "no_answer_false_positive_rate": {
+          "observed": 0.25,
+          "maximum": 0.25,
+          "passed": true
+        },
+        "stale_top_1_rate": {
+          "observed": 0.0,
+          "maximum": 0.0,
+          "passed": true
+        }
+      },
+      "arms": {
+        "legacy": {
+          "method": "legacy",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 0.6964285714285714,
+          "mrr": 0.5714285714285714,
+          "recall_at_k": 0.6964285714285714,
+          "ndcg_at_5": 0.569598153844526,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 6,
+            "exposure_rate": 0.6,
+            "top_1_query_count": 3,
+            "top_1_rate": 0.3
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 4,
+            "false_positive_rate": 0.5,
+            "complete_empty_query_count": 4,
+            "complete_empty_rate": 0.5,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 11,
+          "evaluation_error_count": 0
+        },
+        "render_matched": {
+          "method": "render_matched",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 1.0,
+          "mrr": 0.9732142857142857,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.9803311649004058,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 9,
+            "exposure_rate": 0.9,
+            "top_1_query_count": 2,
+            "top_1_rate": 0.2
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 4,
+            "false_positive_rate": 0.5,
+            "complete_empty_query_count": 4,
+            "complete_empty_rate": 0.5,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 56,
+          "evaluation_error_count": 0
+        },
+        "advanced": {
+          "method": "advanced",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 1.0,
+          "mrr": 0.9732142857142857,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.9803311649004058,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 2,
+            "false_positive_rate": 0.25,
+            "complete_empty_query_count": 6,
+            "complete_empty_rate": 0.75,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 56,
+          "evaluation_error_count": 0
+        }
+      },
+      "metrics": {
+        "ndcg_at_5": {
+          "population": "answerable queries",
+          "paired_query_count": 56,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.569598153844526,
+            "render_matched": 0.9803311649004058,
+            "advanced": 0.9803311649004058
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.41073301105587984,
+            "p_value": 9.999000099990002e-05
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.41073301105587984,
+            "p_value": 9.999000099990002e-05
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 0,
+          "mechanism_minimum_attainable_p_value": 1.0,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "none"
+        },
+        "source_recall_at_k": {
+          "population": "answerable queries",
+          "paired_query_count": 56,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.6964285714285714,
+            "render_matched": 1.0,
+            "advanced": 1.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.30357142857142855,
+            "p_value": 9.999000099990002e-05
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.30357142857142855,
+            "p_value": 9.999000099990002e-05
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 0,
+          "mechanism_minimum_attainable_p_value": 1.0,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "none"
+        },
+        "stale_top_1": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 10,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.3,
+            "render_matched": 0.2,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.3,
+            "p_value": 0.25107489251074894
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.1,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.2,
+            "p_value": 0.5058494150584941
+          },
+          "decomposition_error": 2.7755575615628914e-17,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "no_answer_false_positive": {
+          "population": "no_answer queries",
+          "paired_query_count": 8,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.5,
+            "render_matched": 0.5,
+            "advanced": 0.25
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": -0.25,
+            "p_value": 0.49725027497250274
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": -0.25,
+            "p_value": 0.49725027497250274
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "stale_exposure": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 10,
+          "higher_is_better": false,
+          "decision_metric": false,
+          "means": {
+            "legacy": 0.6,
+            "render_matched": 0.9,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.6,
+            "p_value": 0.029597040295970403
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": 0.3,
+            "p_value": 0.2552744725527447
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.9,
+            "p_value": 0.0029997000299970002
+          },
+          "decomposition_error": 1.1102230246251565e-16,
+          "mechanism_nonzero_pair_count": 9,
+          "mechanism_minimum_attainable_p_value": 0.00390625,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": true,
+          "mechanism_direction": "beneficial"
+        }
+      },
+      "nonzero_mechanism_residual_query_ids": {
+        "ndcg_at_5": [],
+        "source_recall_at_k": [],
+        "stale_top_1": [
+          "en-abstention-03",
+          "ko-abstention-03"
+        ],
+        "no_answer_false_positive": [
+          "en-abstention-03",
+          "ko-abstention-03"
+        ],
+        "stale_exposure": [
+          "en-update-01",
+          "en-update-02",
+          "ko-update-02",
+          "en-update-03",
+          "ko-update-03",
+          "en-update-04",
+          "ko-update-04",
+          "en-abstention-03",
+          "ko-abstention-03"
+        ]
+      },
+      "decision": {
+        "rule": "If no decision-metric mechanism residual is distinguishable from zero (two-sided p<0.05) in the beneficial direction, defer richer ledger typing (contested/resolves states).",
+        "decision_metrics": [
+          "ndcg_at_5",
+          "source_recall_at_k",
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "beneficial_distinguishable_metrics": [],
+        "harmful_distinguishable_metrics": [],
+        "power_limited_metrics": [
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "descriptive_beneficial_distinguishable_metrics": [
+          "stale_exposure"
+        ],
+        "outcome": "defer_richer_ledger_typing",
+        "note": "A detected residual credits the existing coarse as-of/supersession exclusion only; richer ledger states need their own render-matched comparison before adoption. Power-limited metrics cannot show a residual on this fixture whatever its size."
+      },
+      "warnings": [
+        "stale_top_1: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "claim_coverage_rm_vs_advanced_per_query_differences": 0
+    },
+    "recall_hard_top5": {
+      "command": "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --render-matched --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+      "exit_code": 0,
+      "stderr_warnings": [
+        "render-matched warning (non-blocking): stale_top_1: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "render-matched warning (non-blocking): no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "gates_on_improved": {
+        "no_answer_false_positive_rate": {
+          "observed": 0.25,
+          "maximum": 0.25,
+          "passed": true
+        },
+        "stale_top_1_rate": {
+          "observed": 0.0,
+          "maximum": 0.0,
+          "passed": true
+        }
+      },
+      "arms": {
+        "legacy": {
+          "method": "legacy",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 0.6964285714285714,
+          "mrr": 0.5714285714285714,
+          "recall_at_k": 0.7142857142857143,
+          "ndcg_at_5": 0.5796764183170036,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 6,
+            "exposure_rate": 0.6,
+            "top_1_query_count": 3,
+            "top_1_rate": 0.3
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 4,
+            "false_positive_rate": 0.5,
+            "complete_empty_query_count": 4,
+            "complete_empty_rate": 0.5,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 12,
+          "evaluation_error_count": 0
+        },
+        "render_matched": {
+          "method": "render_matched",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 1.0,
+          "mrr": 0.9732142857142857,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.9803311649004058,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 10,
+            "exposure_rate": 1.0,
+            "top_1_query_count": 2,
+            "top_1_rate": 0.2
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 4,
+            "false_positive_rate": 0.5,
+            "complete_empty_query_count": 4,
+            "complete_empty_rate": 0.5,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 56,
+          "evaluation_error_count": 0
+        },
+        "advanced": {
+          "method": "advanced",
+          "query_count": 64,
+          "answerable_query_count": 56,
+          "no_answer_query_count": 8,
+          "recall_at_3": 1.0,
+          "mrr": 0.9732142857142857,
+          "recall_at_k": 1.0,
+          "ndcg_at_5": 0.9803311649004058,
+          "stale_sources": {
+            "labeled_query_count": 10,
+            "exposed_query_count": 0,
+            "exposure_rate": 0.0,
+            "top_1_query_count": 0,
+            "top_1_rate": 0.0
+          },
+          "forbidden_sources": {
+            "labeled_query_count": 0,
+            "exposed_query_count": 0,
+            "exposure_rate": null,
+            "top_1_query_count": 0,
+            "top_1_rate": null
+          },
+          "no_answer": {
+            "query_count": 8,
+            "false_positive_query_count": 2,
+            "false_positive_rate": 0.25,
+            "complete_empty_query_count": 6,
+            "complete_empty_rate": 0.75,
+            "incomplete_empty_query_count": 0
+          },
+          "required_claim_count": 56,
+          "covered_claim_count": 56,
+          "evaluation_error_count": 0
+        }
+      },
+      "metrics": {
+        "ndcg_at_5": {
+          "population": "answerable queries",
+          "paired_query_count": 56,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.5796764183170036,
+            "render_matched": 0.9803311649004058,
+            "advanced": 0.9803311649004058
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.4006547465834022,
+            "p_value": 9.999000099990002e-05
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.4006547465834022,
+            "p_value": 9.999000099990002e-05
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 0,
+          "mechanism_minimum_attainable_p_value": 1.0,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "none"
+        },
+        "source_recall_at_k": {
+          "population": "answerable queries",
+          "paired_query_count": 56,
+          "higher_is_better": true,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.7142857142857143,
+            "render_matched": 1.0,
+            "advanced": 1.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.2857142857142857,
+            "p_value": 0.00019998000199980003
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.2857142857142857,
+            "p_value": 0.00019998000199980003
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 56,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 0,
+          "mechanism_minimum_attainable_p_value": 1.0,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "none"
+        },
+        "stale_top_1": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 10,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.3,
+            "render_matched": 0.2,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.3,
+            "p_value": 0.25107489251074894
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.1,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.2,
+            "p_value": 0.5058494150584941
+          },
+          "decomposition_error": 2.7755575615628914e-17,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "no_answer_false_positive": {
+          "population": "no_answer queries",
+          "paired_query_count": 8,
+          "higher_is_better": false,
+          "decision_metric": true,
+          "means": {
+            "legacy": 0.5,
+            "render_matched": 0.5,
+            "advanced": 0.25
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": -0.25,
+            "p_value": 0.49725027497250274
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": 0.0,
+            "p_value": 1.0
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 8,
+            "mean_delta": -0.25,
+            "p_value": 0.49725027497250274
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 2,
+          "mechanism_minimum_attainable_p_value": 0.5,
+          "mechanism_power_limited": true,
+          "mechanism_residual_distinguishable": false,
+          "mechanism_direction": "beneficial"
+        },
+        "stale_exposure": {
+          "population": "queries with stale_paths labels",
+          "paired_query_count": 10,
+          "higher_is_better": false,
+          "decision_metric": false,
+          "means": {
+            "legacy": 0.6,
+            "render_matched": 1.0,
+            "advanced": 0.0
+          },
+          "apparent_gain": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -0.6,
+            "p_value": 0.029597040295970403
+          },
+          "display_effect": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": 0.4,
+            "p_value": 0.12888711128887112
+          },
+          "mechanism_residual": {
+            "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+            "seed": 1707,
+            "permutations": 10000,
+            "paired_query_count": 10,
+            "mean_delta": -1.0,
+            "p_value": 0.0015998400159984002
+          },
+          "decomposition_error": 0.0,
+          "mechanism_nonzero_pair_count": 10,
+          "mechanism_minimum_attainable_p_value": 0.001953125,
+          "mechanism_power_limited": false,
+          "mechanism_residual_distinguishable": true,
+          "mechanism_direction": "beneficial"
+        }
+      },
+      "nonzero_mechanism_residual_query_ids": {
+        "ndcg_at_5": [],
+        "source_recall_at_k": [],
+        "stale_top_1": [
+          "en-abstention-03",
+          "ko-abstention-03"
+        ],
+        "no_answer_false_positive": [
+          "en-abstention-03",
+          "ko-abstention-03"
+        ],
+        "stale_exposure": [
+          "en-update-01",
+          "ko-update-01",
+          "en-update-02",
+          "ko-update-02",
+          "en-update-03",
+          "ko-update-03",
+          "en-update-04",
+          "ko-update-04",
+          "en-abstention-03",
+          "ko-abstention-03"
+        ]
+      },
+      "decision": {
+        "rule": "If no decision-metric mechanism residual is distinguishable from zero (two-sided p<0.05) in the beneficial direction, defer richer ledger typing (contested/resolves states).",
+        "decision_metrics": [
+          "ndcg_at_5",
+          "source_recall_at_k",
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "beneficial_distinguishable_metrics": [],
+        "harmful_distinguishable_metrics": [],
+        "power_limited_metrics": [
+          "stale_top_1",
+          "no_answer_false_positive"
+        ],
+        "descriptive_beneficial_distinguishable_metrics": [
+          "stale_exposure"
+        ],
+        "outcome": "defer_richer_ledger_typing",
+        "note": "A detected residual credits the existing coarse as-of/supersession exclusion only; richer ledger states need their own render-matched comparison before adoption. Power-limited metrics cannot show a residual on this fixture whatever its size."
+      },
+      "warnings": [
+        "stale_top_1: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences",
+        "no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences"
+      ],
+      "claim_coverage_rm_vs_advanced_per_query_differences": 0
+    }
+  },
+  "korean_evidence_only": {
+    "scope": "evidence_only",
+    "answer_metrics_compared": false,
+    "answer_metrics_reason": "Answer metrics are not compared. Synthetic controls and answerer callbacks receive only question, public options and evidence, where evidence is the rendered context ('[Source: path:line]' labels and snippet lines); replayed observations are bound to the evidence hash. Temporal annotations stay on matches and are never rendered into that context. This evaluator also passes no as_of, so as-of and supersession exclusion never act, and withdrawal is deny scope without an annotation, so it has no render-matched counterpart and stays on in both arms. The arm can differ only through retrieved evidence, compared here; re-scoring answers on other evidence would need new model observations, never made here.",
+    "arm": "same retrieve() call with temporal_filter='annotate_only'; no as_of is passed",
+    "case_count": 50,
+    "identical_evidence_case_count": 50,
+    "temporal_rejected_total_default": 0,
+    "temporal_unfiltered_total_render_matched": 0,
+    "mechanism_residual_definition": "default - render_matched on paired cases",
+    "metrics": {
+      "expected_source_recall": {
+        "population": "answerable cases",
+        "higher_is_better": true,
+        "means": {
+          "default": 1.0,
+          "render_matched": 1.0
+        },
+        "mechanism_residual": {
+          "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+          "seed": 1707,
+          "permutations": 10000,
+          "paired_query_count": 30,
+          "mean_delta": 0.0,
+          "p_value": 1.0
+        }
+      },
+      "withdrawn_source_exposure": {
+        "population": "all cases",
+        "higher_is_better": false,
+        "means": {
+          "default": 0.0,
+          "render_matched": 0.0
+        },
+        "mechanism_residual": {
+          "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+          "seed": 1707,
+          "permutations": 10000,
+          "paired_query_count": 50,
+          "mean_delta": 0.0,
+          "p_value": 1.0
+        }
+      },
+      "evidence_complete": {
+        "population": "all cases",
+        "higher_is_better": true,
+        "means": {
+          "default": 1.0,
+          "render_matched": 1.0
+        },
+        "mechanism_residual": {
+          "method": "paired sign randomization; two-sided; add-one Monte Carlo",
+          "seed": 1707,
+          "permutations": 10000,
+          "paired_query_count": 50,
+          "mean_delta": 0.0,
+          "p_value": 1.0
+        }
+      }
+    },
+    "warnings": [],
+    "command": "python scripts/evaluate_korean_memory.py --render-matched",
+    "exit_code": 0,
+    "default_arm_summary": {
+      "answer_correct_count": 50,
+      "answer_assessed_count": 50,
+      "answer_accuracy_assessed": 1.0,
+      "answer_accuracy_all_cases": 1.0,
+      "execution_error_count": 0,
+      "execution_error_denominator": 50,
+      "retrieval_error_count": 0,
+      "evidence_complete_count": 50,
+      "evidence_expected_source_hit_count": 30,
+      "evidence_answerable_denominator": 30,
+      "certified_abstention_count": 20,
+      "no_answer_denominator": 20,
+      "stale_current_assertion_count": 0,
+      "withdrawn_source_assertion_count": 0
+    }
+  },
+  "tests": {
+    "baseline_suite": {
+      "source_commit": "63b4cc9",
+      "command": "python -m unittest discover -s tests",
+      "run": 1375,
+      "skipped": 32,
+      "failures": 0,
+      "errors": 0,
+      "result": "OK",
+      "seconds": 308.192,
+      "note": "Started before any edit; it overlapped the first edits, so it is cited for the test count."
+    },
+    "implementation_suite": {
+      "source_commit": "9fb885e",
+      "command": "python -m unittest discover -s tests",
+      "run": 1393,
+      "skipped": 32,
+      "failures": 0,
+      "errors": 0,
+      "result": "OK",
+      "seconds": 382.104
+    },
+    "final_suite": {
+      "source_commit": "bc4c55e",
+      "tree": "bc4c55e plus docs/memory-evaluation.md and these verification records",
+      "command": "python -m unittest discover -s tests",
+      "run": 1393,
+      "skipped": 32,
+      "failures": 0,
+      "errors": 0,
+      "result": "OK",
+      "seconds": 382.946,
+      "note": "Two subprocess reader-thread UnicodeDecodeError messages (byte 0xbf) are printed in the baseline, implementation and final runs alike; no test fails."
+    },
+    "focused": [
+      {
+        "source_commit": "bc4c55e",
+        "command": "python -m unittest tests.test_render_matched",
+        "run": 18,
+        "skipped": 0,
+        "result": "OK"
+      },
+      {
+        "source_commit": "bc4c55e",
+        "command": "python -m unittest tests.test_vault_retrieval tests.test_recall_evaluation tests.test_recall_hard_evaluation tests.test_korean_memory_evaluation tests.test_vault_recall tests.test_memory_workflows tests.test_vault_query_expansion",
+        "run": 154,
+        "skipped": 5,
+        "result": "OK"
+      }
+    ],
+    "mutation_checks": "Forcing the control marker on the default path, or keeping exclusion under annotate_only, each made the new tests fail (8 failures each); the source was restored afterwards.",
+    "compileall": {
+      "command": "python -m compileall -q hooks skills/agentic-vault/scripts scripts",
+      "exit_code": 0
+    },
+    "diff_check": {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  },
+  "limits": [
+    "Synthetic fixtures; recall_advanced and recall_hard contain stale notes built to win lexical ranking, so results show that the mechanism acts on those constructed cases, not real-vault prevalence or effect size.",
+    "Decision metrics have 0 to 4 nonzero mechanism pairs per fixture; with k nonzero pairs the smallest exact two-sided p is 2^(1-k), so k<=5 can never reach p<0.05 whatever the effect size.",
+    "No reader model: temporal annotations are not rendered into context, so reader-side presentation effects are not measured; display_effect here is the non-temporal advanced machinery.",
+    "stale_exposure was added after inspecting outputs and is descriptive only; it is not used by the decision rule.",
+    "The source paper's numbers are reported by its abstract (English paper; question language not stated) and were not reproduced.",
+    "Korean evaluation: the arm is inert by construction (no as_of passed, no validity metadata in the fixture, annotations never rendered); only evidence metrics are compared."
+  ],
+  "assumptions": [
+    "Paired values are per-query metric values from the same queries, options and budgets in each arm.",
+    "alpha=0.05 two-sided, fixed before the measurement; seed 1707 and 10,000 permutations follow the existing paired_randomization default."
+  ],
+  "unresolved": [
+    "No fixture has >=6 validity-sensitive pairs per decision metric, so the defer outcome is power-limited rather than evidence of no mechanism effect.",
+    "Reader-model (LLM) answer effects of rendered temporal annotations were not measured; no model calls were made.",
+    "Merging with the parallel --lexical-ngrams branch may conflict in evaluate() and retrieve() signatures and main() options."
+  ],
+  "next_safe_action": "Keep the defer default (no richer contested/resolves ledger states). If a decision is needed, add >=6 validity-sensitive paired queries per decision metric and rerun the same commands; an LLM-reader arm needs explicit user approval for model calls.",
+  "verified_by": {
+    "actor": "producing agent only",
+    "date": "2026-10-17",
+    "independent": false,
+    "note": "Commands and counts are from this agent's runs; independent re-execution by another session is pending."
+  }
+}
