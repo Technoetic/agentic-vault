@@ -32,6 +32,10 @@ _ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[
 _FIELD = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
 _LINK = re.compile(r"\[\[([^\[\]\n]{1,512})\]\]")
 _TEMPORAL_FIELDS = {"valid_from", "valid_until", "checked_at", "superseded_by"}
+# Statuses that drop a source when an explicit as_of is given. "annotate_only"
+# is an evaluation control: it keeps such sources with the same annotation.
+TEMPORAL_REJECTED_STATUSES = ("invalid", "expired", "not_yet_valid", "superseded", "supersession_unknown")
+TEMPORAL_FILTERS = ("exclude", "annotate_only")
 
 
 def _time(value: object) -> datetime:
@@ -302,7 +306,7 @@ def _same_policy_stamp(vault: Path, expected: tuple) -> bool:
         return False
 
 
-def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None) -> dict:
+def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None, temporal_filter="exclude") -> dict:
     """Retrieve source-bound review context; explicit temporal bounds are half-open.
 
     as_of: ISO date (UTC midnight) or zoned ISO datetime. checked_at is an
@@ -311,8 +315,12 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     external_candidates: <=50 path strings/path+rank mappings, {candidates:[]},
     or a vault-relative <=64KiB JSON sidecar. Other provider fields are ignored.
     excluded_sources only adds deny scope. Links use literal unique filenames.
+    temporal_filter: "exclude" (default) drops TEMPORAL_REJECTED_STATUSES under
+    as_of. "annotate_only" is an evaluation control, not a currentness answer:
+    the same machinery, fields and status annotations, but no source is dropped
+    for its status. Without as_of it changes nothing.
     """
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None:
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and temporal_filter in TEMPORAL_FILTERS:
         return _legacy._legacy_recall(vault, query, limit, max_tokens)
     diagnostics = _legacy._diagnostics()
     diagnostics.update({"mode": "advanced", "backend": backend if isinstance(backend, str) else "invalid", "temporal": [], "temporal_rejected": 0, "graph_ambiguous": 0, "graph_unresolved": 0, "graph_links_considered": 0, "external_rejected": 0, "external_bytes_read": 0, "external_provider_status": "not_requested", "abstention": "host_decision", "source_authority": "unverified", "ranking": "lexical/BM25; hybrid uses RRF k=60; graph decays 0.5 per hop"})
@@ -327,6 +335,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             raise ValueError("invalid advanced mode")
         if type(expand_query) is not bool or (query_mapping is not None and not expand_query):
             raise ValueError("query mapping requires explicit expansion")
+        if not isinstance(temporal_filter, str) or temporal_filter not in TEMPORAL_FILTERS:
+            raise ValueError("invalid temporal filter")
         temporal_time = None if as_of is None else _time(as_of)
         if not isinstance(excluded_sources, (tuple, list)) or len(excluded_sources) > _legacy.MAX_RESULTS:
             raise ValueError("invalid excluded scope")
@@ -337,6 +347,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         external = [] if external_candidates is None or isinstance(external_candidates, str) else _candidate_list(external_candidates)
     except (ValueError, TypeError, OverflowError):
         return _invalid(diagnostics)
+    if temporal_filter != "exclude":
+        # Default output stays byte-identical; only the control arm says so.
+        diagnostics.update({"temporal_filter": temporal_filter, "temporal_unfiltered": 0})
     try:
         resolve_note_path(vault, _legacy.CONFIG_RELPATH)
         safe_vault = vault.resolve(strict=True)
@@ -426,9 +439,11 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         doc["temporal"] = temporal
         if len(diagnostics["temporal"]) < _legacy.MAX_RESULTS:
             diagnostics["temporal"].append({"path": rel, **temporal})
-        if temporal_time is not None and temporal["status"] in ("invalid", "expired", "not_yet_valid", "superseded", "supersession_unknown"):
-            diagnostics["temporal_rejected"] += 1
-            continue
+        if temporal_time is not None and temporal["status"] in TEMPORAL_REJECTED_STATUSES:
+            if temporal_filter == "exclude":
+                diagnostics["temporal_rejected"] += 1
+                continue
+            diagnostics["temporal_unfiltered"] += 1
         eligible[rel] = doc
     if expand_query:
         expansion = _query_expansion._expand_documents(safe_vault, query, eligible,
