@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest import mock
 
@@ -20,6 +21,8 @@ except ModuleNotFoundError:
     ssot = None
 
 FIELDS = ['subject', 'relation', 'value', 'valid_from', 'valid_until', 'recorded', 'source', 'superseded_by', 'status']
+GOLDEN = Path(__file__).resolve().parent / 'fixtures' / 'v0221_default_outputs.json'
+SUPPORT_CODES = {'ssot-source-unsupported', 'ssot-source-unresolved'}
 
 
 def ledger(rows, fields=FIELDS, newline='\n'):
@@ -404,6 +407,327 @@ class LedgerMigrationTests(unittest.TestCase):
         applied = subprocess.run([sys.executable, script, '--vault', str(self.vault), 'apply', '--approve'], input=json.dumps(proposal).encode(), capture_output=True)
         self.assertEqual(applied.returncode, 0, applied.stderr.decode())
         self.assertEqual(json.loads(applied.stdout)['status'], 'applied')
+
+
+class SourceSupportTests(unittest.TestCase):
+    """Warning-only check-support: cited note body versus ledger value literal."""
+
+    EVIDENCE = '---\ntitle: Evidence\nretention: 99\n---\n보존 기간은 12개월이다. [[Atlas|아틀라스]] 대표, **승인** 완료.\n'
+
+    def setUp(self):
+        self.assertIsNotNone(ssot, 'temporal ledger implementation is missing')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name) / 'vault'
+        self.vault.mkdir()
+        self.write('00-meta/vault-config.json', '{"deny_zones": ["private"], "exclude_dirs": ["excluded"]}')
+        self.evidence = self.write('notes/Evidence.md', self.EVIDENCE)
+
+    def write(self, relative, text):
+        target = self.vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode('utf-8'))
+        return target
+
+    def support(self, rows, preamble=''):
+        """Rows are (value, source) pairs; without a preamble the first row is line 3."""
+        self.write('notes/facts.md', preamble + ledger(
+            [['Atlas', 'retention', value, '2025-01-01', '', '2026-10-07', source, '', 'confirmed'] for value, source in rows]))
+        return ssot.check_support(self.vault, 'notes/facts.md')
+
+    @staticmethod
+    def found(result):
+        return [(w['line'], w['code'], w['details'].get('reason')) for w in result['warnings']]
+
+    def test_supported_value_binds_the_cited_revision_without_warnings(self):
+        result = self.support([('12개월', '[[Evidence]]')])
+        self.assertEqual(result['warnings'], [])
+        self.assertEqual((result['rows_checked'], result['rows_supported'], result['rows_skipped']), (1, 1, 0))
+        data = self.evidence.read_bytes()
+        self.assertEqual(result['cited_notes'], [{'path': 'notes/Evidence.md', 'sha256': sha(data), 'bytes': len(data)}])
+        self.assertEqual(result['source_sha256'], sha((self.vault / 'notes/facts.md').read_bytes()))
+        self.assertEqual(result['incomplete'], [])
+        self.assertEqual(result['authority'], 'warning_only_not_fact_verification')
+
+    def test_unsupported_value_warns_without_echoing_note_content(self):
+        result = self.support([('24개월', '[[Evidence]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unsupported', None)])
+        self.assertEqual(result['warnings'][0]['severity'], 'warning')
+        self.assertEqual(result['warnings'][0]['details'], {'cited': ['notes/Evidence.md']})
+        self.assertEqual(result['rows_unsupported'], 1)
+        self.assertNotIn('보존', json.dumps(result, ensure_ascii=False))
+
+    def test_number_literals_need_boundaries_and_frontmatter_is_not_body(self):
+        for value, supported in [('12', 1), ('12개', 1), ('2', 0), ('1', 0), ('112개월', 0), ('99', 0)]:
+            with self.subTest(value=value):
+                self.assertEqual(self.support([(value, '[[Evidence]]')])['rows_supported'], supported)
+
+    def test_documented_number_examples_are_other_literals(self):
+        self.write('notes/Numbers.md', '수량 125개, 금액 1,212원, 비율 12.5%.\n')
+        for value in ['12', '21', '2']:
+            with self.subTest(value=value):
+                self.assertEqual(self.support([(value, '[[Numbers]]')])['rows_unsupported'], 1)
+        for value in ['125', '1,212', '12.5', '12.5%']:
+            with self.subTest(value=value):
+                self.assertEqual(self.support([(value, '[[Numbers]]')])['rows_supported'], 1)
+
+    def test_normalized_markup_and_alias_forms_are_compared(self):
+        for value in ['１２개월', 'ATLAS', '[[Atlas]] 대표', '아틀라스 대표', '**승인** 완료', '승인 완료', '`12개월`']:
+            with self.subTest(value=value):
+                result = self.support([(value, '[[Evidence]]')])
+                self.assertEqual((result['rows_supported'], result['warnings']), (1, []))
+
+    def test_missing_note_is_unresolved(self):
+        result = self.support([('12개월', '[[Missing]]')])
+        self.assertEqual(result['warnings'][0]['details'], {'reference': 'Missing', 'reason': 'not_found'})
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'not_found')])
+        self.assertEqual((result['rows_checked'], result['rows_unresolved'], result['cited_notes']), (1, 1, []))
+
+    def test_exact_filename_is_case_sensitive_but_unicode_normalized(self):
+        self.write('notes/' + unicodedata.normalize('NFD', '근거노트') + '.md', '보존 12개월\n')
+        result = self.support([('12개월', '[[evidence]]'), ('12개월', '[[' + unicodedata.normalize('NFC', '근거노트') + ']]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'not_found')])
+        self.assertEqual(result['rows_supported'], 1)
+
+    def test_ambiguous_duplicate_stems_abstain_and_qualified_paths_select(self):
+        self.write('a/Dup.md', '12개월\n')
+        self.write('b/Dup.md', '24개월\n')
+        result = self.support([('12개월', '[[Dup]]'), ('12개월', '[[a/Dup]]'), ('24개월', '[[b/Dup.md]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'ambiguous')])
+        self.assertEqual(result['warnings'][0]['details'], {'reference': 'Dup', 'reason': 'ambiguous',
+                                                            'candidate_count': 2, 'candidates': ['a/Dup.md', 'b/Dup.md']})
+        self.assertEqual(result['rows_supported'], 2)
+
+    def test_deny_and_exclude_zone_sources_are_never_listed_read_or_described(self):
+        self.write('private/Secret.md', '12개월\n')
+        self.write('excluded/Hidden.md', '12개월\n')
+        touched = []
+        real_scandir, real_lstat, real_read = os.scandir, os.lstat, ssot.stable_read
+
+        def scandir(path):
+            touched.append(path)
+            return real_scandir(path)
+
+        def lstat(path, *args, **kwargs):
+            touched.append(path)
+            return real_lstat(path, *args, **kwargs)
+
+        def stable_read(resolver, limit, contents=False):
+            touched.append(resolver())
+            return real_read(resolver, limit, contents=contents)
+        rows = [('12개월', '[[Secret]]'), ('12개월', '[[Hidden]]'), ('12개월', '[[private/Secret]]'),
+                ('12개월', '[[excluded/Hidden]]'), ('12개월', '`private/Secret.md`')]
+        with mock.patch.object(ssot.os, 'scandir', scandir), mock.patch.object(ssot.os, 'lstat', lstat), \
+                mock.patch.object(ssot, 'stable_read', stable_read):
+            result = self.support(rows)
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'not_found'),
+                                              (4, 'ssot-source-unresolved', 'not_found'),
+                                              (5, 'ssot-source-unresolved', 'policy'),
+                                              (6, 'ssot-source-unresolved', 'policy'),
+                                              (7, 'ssot-source-unresolved', 'policy')])
+        self.assertTrue(touched)
+        # Compare inside the vault only: macOS temporary roots live under /private.
+        roots = (self.vault.resolve(), self.vault.absolute())
+        for path in touched:
+            candidate = Path(os.fspath(path))
+            inside = next((candidate.relative_to(root).parts for root in roots
+                           if candidate == root or root in candidate.parents), ())
+            self.assertFalse({part.casefold() for part in inside} & {'private', 'excluded'}, path)
+        self.assertNotIn('candidates', json.dumps(result))
+        self.assertEqual(result['cited_notes'], [])
+
+    def test_oversize_note_is_unresolved_and_never_partially_read(self):
+        self.write('notes/Big.md', '12개월 ' + 'x' * ssot.MAX_BYTES)
+        result = self.support([('12개월', '[[Big]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'size_limit')])
+        self.assertEqual(result['cited_notes'], [])
+
+    def test_hardlinked_note_is_unsafe_and_not_read(self):
+        try:
+            os.link(self.evidence, self.vault / 'notes' / 'Alias.md')
+        except (OSError, NotImplementedError, AttributeError):
+            self.skipTest('hardlink creation unavailable')
+        result = self.support([('12개월', '[[Evidence]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'unsafe_file')])
+        self.assertEqual(result['cited_notes'], [])
+
+    def test_symlinked_note_is_a_policy_rejection(self):
+        try:
+            os.symlink(self.evidence, self.vault / 'notes' / 'Linked.md')
+        except (OSError, NotImplementedError, AttributeError):
+            self.skipTest('symlink creation unavailable')
+        result = self.support([('12개월', '[[Linked]]'), ('12개월', '[[notes/Linked]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'policy'),
+                                              (4, 'ssot-source-unresolved', 'policy')])
+
+    def test_vault_paths_code_spans_and_whole_cell_paths_resolve(self):
+        result = self.support([('12개월', '[[notes/Evidence]]'), ('12개월', '`notes/Evidence.md`'),
+                               ('12개월', 'notes/Evidence.md'), ('12개월', '[[./Evidence]]'),
+                               ('12개월', 'Evidence.md'), ('12개월', '[[Evidence.md#근거\\|별칭]]')])
+        self.assertEqual(result['warnings'], [])
+        self.assertEqual(result['rows_supported'], 6)
+
+    def test_invalid_and_non_note_references(self):
+        result = self.support([('12개월', '[[report.pdf]]'), ('12개월', 'https://example.com/a.md'),
+                               ('12개월', '회사 홈페이지'), ('12개월', 'see notes/Evidence.md'),
+                               ('12개월', '`C:/notes/Evidence.md`'), ('12개월', '[[../../Outside]]'),
+                               ('12개월', '[[a:b]]'), ('12개월', '[[]]')])
+        self.assertEqual(self.found(result), [(8, 'ssot-source-unresolved', 'invalid_reference'),
+                                              (9, 'ssot-source-unresolved', 'invalid_reference')])
+        self.assertEqual((result['rows_checked'], result['rows_skipped']), (2, 6))
+
+    def test_self_reference_compares_only_outside_fact_tables(self):
+        result = self.support([('77일', '[[#근거]]'), ('88일', '[[#근거]]'), ('77일', '[[facts]]')],
+                              preamble='## 근거\n세부 값 77일.\n\n')
+        self.assertEqual(self.found(result), [(7, 'ssot-source-unsupported', None)])
+        self.assertEqual(result['warnings'][0]['details'], {'cited': ['notes/facts.md']})
+        self.assertEqual(result['rows_supported'], 2)
+        ledger_bytes = (self.vault / 'notes/facts.md').read_bytes()
+        self.assertEqual(result['cited_notes'], [{'path': 'notes/facts.md', 'sha256': sha(ledger_bytes),
+                                                  'bytes': len(ledger_bytes)}])
+
+    def test_one_supporting_note_is_enough_and_broken_citations_still_warn(self):
+        result = self.support([('12개월', '[[Evidence]], [[Missing]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'not_found')])
+        self.assertEqual((result['rows_checked'], result['rows_supported'], result['rows_unresolved']), (1, 1, 0))
+
+    def test_rows_without_value_or_source_keep_check_treatment(self):
+        text = ledger([['Atlas', 'retention', '12', '2025-01-01', '', '2026-10-07', '', '', 'confirmed'],
+                       ['Atlas', 'retention', '', '2025-01-01', '', '2026-10-07', '[[Missing]]', '', 'pending']])
+        self.write('notes/facts.md', text)
+        result = ssot.check_support(self.vault, 'notes/facts.md')
+        self.assertEqual(result['warnings'], [])
+        self.assertEqual((result['rows_checked'], result['rows_skipped']), (0, 2))
+        codes = [w['code'] for w in ssot.check_ledger(text)]
+        self.assertIn('ssot-confirmed-source-missing', codes)
+        self.assertIn('ssot-empty-fact', codes)
+        self.assertFalse(SUPPORT_CODES & set(codes))
+
+    def test_duplicate_columns_and_tables_without_source_are_skipped(self):
+        text = (ledger([['Atlas', 'retention', '12']], fields=['subject', 'relation', 'value']) + '\n' +
+                ledger([['Atlas', 'retention', '12', '[[Missing]]', '[[Other]]']],
+                       fields=['subject', 'relation', 'value', 'source', '출처']))
+        self.write('notes/facts.md', text)
+        result = ssot.check_support(self.vault, 'notes/facts.md')
+        self.assertEqual((result['warnings'], result['rows_checked'], result['rows_skipped']), ([], 0, 2))
+
+    def test_inventory_limit_reports_incomplete_instead_of_not_found(self):
+        self.write('zz/one.md', 'x\n')
+        self.write('zz/two.md', 'y\n')
+        # Entries: 3 at the root, 1 in 00-meta, 2 in notes, 2 in zz. Stop inside zz.
+        with mock.patch.object(ssot, 'MAX_INVENTORY_ENTRIES', 7):
+            result = self.support([('12개월', '[[Evidence]]'), ('12개월', '[[notes/Evidence]]'), ('12개월', '[[Missing]]')])
+        self.assertEqual(self.found(result), [(3, 'ssot-source-unresolved', 'inventory_incomplete'),
+                                              (5, 'ssot-source-unresolved', 'inventory_incomplete')])
+        self.assertEqual(result['rows_supported'], 1)
+        self.assertEqual(result['incomplete'], ['inventory_incomplete'])
+
+    def test_cited_note_budget_marks_the_result_incomplete(self):
+        self.write('notes/Other.md', '12개월\n')
+        with mock.patch.object(ssot, 'MAX_SUPPORT_NOTES', 1):
+            result = self.support([('12개월', '[[Evidence]]'), ('12개월', '[[Other]]'), ('12개월', '[[Evidence]]')])
+        self.assertEqual(self.found(result), [(4, 'ssot-source-unresolved', 'source_limit')])
+        self.assertEqual(result['incomplete'], ['source_limit'])
+        self.assertEqual(result['rows_supported'], 2)
+
+    def test_reference_limit_marks_the_result_incomplete(self):
+        source = ', '.join(f'[[Missing{index}]]' for index in range(ssot.MAX_REFERENCES + 2))
+        result = self.support([('12개월', source)])
+        self.assertEqual(len(result['warnings']), ssot.MAX_REFERENCES)
+        self.assertEqual(result['incomplete'], ['reference_limit'])
+
+    def test_cited_note_change_during_check_is_not_reported_as_current(self):
+        real = ssot._cited_forms
+
+        def changing(policy, relative, run):
+            outcome = real(policy, relative, run)
+            self.write(relative, 'changed: 12개월 and a longer body\n')
+            return outcome
+        with mock.patch.object(ssot, '_cited_forms', changing):
+            with self.assertRaisesRegex(ssot.SSOTError, 'stale_source'):
+                self.support([('12개월', '[[Evidence]]')])
+
+    def test_policy_change_during_check_fails_closed(self):
+        real = ssot._inventory
+
+        def changing(policy):
+            inventory = real(policy)
+            self.write('00-meta/vault-config.json', '{"deny_zones": ["private", "notes"], "exclude_dirs": []}')
+            return inventory
+        with mock.patch.object(ssot, '_inventory', changing):
+            with self.assertRaisesRegex(ssot.SSOTError, 'configuration_changed'):
+                self.support([('12개월', '[[Evidence]]')])
+
+    def test_issue_ids_are_stable_across_runs(self):
+        rows = [('24개월', '[[Evidence]]'), ('12개월', '[[Missing]]')]
+        first, second = self.support(rows), self.support(rows)
+        self.assertEqual([w['issue_id'] for w in first['warnings']], [w['issue_id'] for w in second['warnings']])
+        self.assertEqual(len({w['issue_id'] for w in first['warnings']}), 2)
+
+    def test_reference_extraction_is_conservative(self):
+        cases = {'[[A]], [[B#h|alias]] and ![[C]]': [('A', True), ('B', True), ('C', True)],
+                 '[[#근거]]': [('', True)],
+                 '[[]] [[ |x]]': [],
+                 '`notes/a b.md` [[A]]': [('notes/a b.md', False), ('A', True)],
+                 '`[[Inside]]`': [],
+                 'notes/a.md': [('notes/a.md', False)],
+                 'see notes/a.md': [],
+                 '[[A]] and [[A|again]]': [('A', True)],
+                 'https://example.com/page': []}
+        for cell, expected in cases.items():
+            with self.subTest(cell=cell):
+                self.assertEqual(ssot._references(cell), expected)
+
+    def test_cli_check_support_exit_zero_with_warnings_and_unchanged_error_contract(self):
+        self.support([('24개월', '[[Evidence]]')])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+            code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', 'notes/facts.md'])
+        self.assertEqual((code, stderr.getvalue()), (0, ''))
+        self.assertEqual([w['code'] for w in json.loads(stdout.getvalue())['warnings']], ['ssot-source-unsupported'])
+        self.write('private/facts.md', 'x\n')
+        self.write('excluded/facts.md', 'x\n')
+        for relative in ['private/facts.md', 'excluded/facts.md', '../outside.md', 'notes/absent.md', 'notes/facts.json']:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(path=relative), mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', relative])
+                self.assertEqual(code, 1)
+                self.assertEqual(stdout.getvalue(), '')
+                self.assertEqual(json.loads(stderr.getvalue()), {'error': 'ssot_operation_unavailable'})
+        script = str(SCRIPTS / 'vault_ssot.py')
+        completed = subprocess.run([sys.executable, script, '--vault', str(self.vault), 'check-support',
+                                    '--path', 'notes/facts.md'], capture_output=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+        self.assertEqual(json.loads(completed.stdout)['rows_unsupported'], 1)
+
+
+class DefaultCliRegressionTests(unittest.TestCase):
+    """Golden check/prepare outputs captured from v0.22.1 (63b4cc9) before check-support."""
+
+    def setUp(self):
+        self.assertIsNotNone(ssot, 'temporal ledger implementation is missing')
+
+    def test_check_and_prepare_outputs_equal_v0221_golden(self):
+        golden = json.loads(GOLDEN.read_text(encoding='utf-8'))['ssot']
+        self.assertEqual(sorted(golden['cases']), ['check_legacy', 'check_v2', 'prepare_legacy', 'prepare_v2'])
+        for name, case in sorted(golden['cases'].items()):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                vault = Path(tmp) / 'vault'
+                for relative, text in (('00-meta/vault-config.json', golden['config']),
+                                       ('notes/facts.md', case['ledger']), ('notes/Evidence.md', golden['evidence'])):
+                    target = vault / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(text.encode('utf-8'))
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                    code = ssot.main(['--vault', str(vault), case['command'], '--path', 'notes/facts.md'])
+                self.assertEqual((code, stdout.getvalue(), stderr.getvalue()),
+                                 (case['exit'], case['stdout'], case['stderr']))
+
+    def test_support_codes_stay_outside_lint_and_promotion(self):
+        lint = importlib.import_module('vault_lint_extensions')
+        self.assertFalse(SUPPORT_CODES & lint.WARNING_CODES)
+        self.assertFalse(SUPPORT_CODES & lint.PROMOTABLE_CODES)
 
 
 if __name__ == '__main__':

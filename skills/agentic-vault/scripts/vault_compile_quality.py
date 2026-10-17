@@ -5,6 +5,9 @@ Only caller-selected Markdown files are read. Retrieval exclusions are not a
 permission boundary for explicitly selected ingest inputs; deny zones, reserved
 runtime/receipt paths, source hashes and portable path checks still apply.
 This tool never moves sources, writes notes or makes semantic truth judgments.
+The opt-in reverse direction (report_unsupported / --report-unsupported) lists
+target literals found in no selected source. It is an observation only: it does
+not change status, review_reason or the exit code, and a literal is not truth.
 """
 from __future__ import annotations
 
@@ -123,8 +126,29 @@ def _fact_rows(sources):
     return facts
 
 
-def check_compile(vault, sources, targets, required_claims):
-    """Compare bounded literals; hashes bind current originals and compiled notes."""
+def _present(kind, literal, numbers, dates, texts):
+    """Apply one matching rule in either direction over the other side's literals."""
+    # Numbers/dates use exact extracted tokens. Names use conservative
+    # Unicode word boundaries: a longer contiguous name is different.
+    # Attached Korean particles may need a separate structured label or
+    # an explicit host claim; this is literal coverage, not linguistic NER.
+    if kind == 'number':
+        return literal in numbers
+    if kind == 'date':
+        return literal in dates
+    if kind == 'name':
+        pattern = re.compile(r'(?<!\w)' + re.escape(literal) + r'(?!\w)')
+        return any(pattern.search(body) is not None for body in texts)
+    return any(literal in body for body in texts)
+
+
+def check_compile(vault, sources, targets, required_claims, *, report_unsupported=False):
+    """Compare bounded literals; hashes bind current originals and compiled notes.
+
+    report_unsupported=True adds the precision direction: number/date/name
+    literals extracted from targets with the same scope and limits that appear
+    in no selected source. Default output is unchanged when it is False.
+    """
     if not isinstance(required_claims, list) or len(required_claims) > MAX_CLAIMS:
         raise QualityError('invalid_required_claims')
     if any(not isinstance(item, str) or not item.strip() or len(item) > 1024 for item in required_claims):
@@ -156,20 +180,18 @@ def check_compile(vault, sources, targets, required_claims):
             raise QualityError('fact_limit')
     rows = []
     for (kind, literal), paths in sorted(facts.items()):
-        # Numbers/dates use exact extracted tokens. Names use conservative
-        # Unicode word boundaries: a longer contiguous name is different.
-        # Attached Korean particles may need a separate structured label or
-        # an explicit host claim; this is literal coverage, not linguistic NER.
-        if kind == 'number':
-            present = literal in target_numbers
-        elif kind == 'date':
-            present = literal in target_dates
-        elif kind == 'name':
-            pattern = re.compile(r'(?<!\w)' + re.escape(literal) + r'(?!\w)')
-            present = any(pattern.search(body) is not None for body in target_texts)
-        else:
-            present = any(literal in body for body in target_texts)
+        present = _present(kind, literal, target_numbers, target_dates, target_texts)
         rows.append({'kind': kind, 'literal': literal, 'source_paths': sorted(paths), 'preserved': present})
+    unsupported = None
+    if report_unsupported:
+        # Precision direction with the already extracted target literals: no
+        # new extraction, budget or fact limit. Host claims are source-only.
+        source_numbers = {literal for kind, literal in facts if kind == 'number'}
+        source_dates = {literal for kind, literal in facts if kind == 'date'}
+        source_bodies = list(source_texts.values())
+        unsupported = [{'kind': kind, 'literal': literal, 'target_paths': sorted(paths)}
+                       for (kind, literal), paths in sorted(target_facts.items())
+                       if not _present(kind, literal, source_numbers, source_dates, source_bodies)]
     # Recheck policy and every original after analysis. This is a point-in-time
     # guard, not an atomic multi-file snapshot or authority to quarantine.
     try:
@@ -187,23 +209,40 @@ def check_compile(vault, sources, targets, required_claims):
     except (ProposalError, OSError, ValueError, RuntimeError):
         raise QualityError('source_policy_changed') from None
     missing = [row for row in rows if not row['preserved']]
-    return {'status': 'needs_review' if missing or not rows else 'complete',
-            'review_reason': ('missing_literal_facts' if missing else 'no_selected_literal_facts' if not rows else None),
-            'originals_current': True, 'config_sha256': config_sha,
-            'source_bindings': [{k: source[k] for k in ('path', 'sha256', 'bytes')} for source in originals],
-            'target_bindings': [{k: target[k] for k in ('path', 'sha256', 'bytes')} for target in compiled],
-            'facts_checked': len(rows), 'facts_preserved': len(rows) - len(missing),
-            'literal_coverage': ((len(rows) - len(missing)) / len(rows) if rows else None),
-            'missing_facts': missing,
-            'semantic_authority': 'advisory_unverified',
-            'name_scope': 'structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER',
-            'authority': 'coverage_observation_only_not_permission_or_truth',
-            'limits': {'files_per_role': MAX_FILES, 'file_bytes': MAX_FILE_BYTES, 'read_bytes_per_sweep': MAX_TOTAL_BYTES}}
+    result = {'status': 'needs_review' if missing or not rows else 'complete',
+              'review_reason': ('missing_literal_facts' if missing else 'no_selected_literal_facts' if not rows else None),
+              'originals_current': True, 'config_sha256': config_sha,
+              'source_bindings': [{k: source[k] for k in ('path', 'sha256', 'bytes')} for source in originals],
+              'target_bindings': [{k: target[k] for k in ('path', 'sha256', 'bytes')} for target in compiled],
+              'facts_checked': len(rows), 'facts_preserved': len(rows) - len(missing),
+              'literal_coverage': ((len(rows) - len(missing)) / len(rows) if rows else None),
+              'missing_facts': missing,
+              'semantic_authority': 'advisory_unverified',
+              'name_scope': 'structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER',
+              'authority': 'coverage_observation_only_not_permission_or_truth',
+              'limits': {'files_per_role': MAX_FILES, 'file_bytes': MAX_FILE_BYTES, 'read_bytes_per_sweep': MAX_TOTAL_BYTES}}
+    if unsupported is not None:
+        # Rates use distinct (kind, literal) pairs across all selected targets.
+        checked = len(target_facts)
+        result.update({
+            'target_literals_checked': checked,
+            'unsupported_target_literals': unsupported,
+            'unsupported_by_kind': {kind: sum(1 for row in unsupported if row['kind'] == kind)
+                                    for kind in ('date', 'name', 'number')},
+            'fabrication_candidate_rate': (len(unsupported) / checked if checked else None),
+            'fabrication_scope': ('target number/date/name literals found in no selected source, using the same '
+                                  'extraction, matching rules and limits; warning-only observation that never changes '
+                                  'status, review_reason or exit code; paraphrase, unit and format variants cause '
+                                  'misses and false alarms; a literal is not truth'),
+        })
+    return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vault', required=True, type=Path)
+    parser.add_argument('--report-unsupported', action='store_true',
+                        help='also list target literals found in no selected source (observation only)')
     args = parser.parse_args(argv)
     try:
         data = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
@@ -212,7 +251,8 @@ def main(argv=None):
         request = decode_json(data)
         if not isinstance(request, dict) or set(request) != {'sources', 'targets', 'required_claims'}:
             raise QualityError('invalid_request')
-        result = check_compile(args.vault, request['sources'], request['targets'], request['required_claims'])
+        result = check_compile(args.vault, request['sources'], request['targets'], request['required_claims'],
+                               report_unsupported=args.report_unsupported)
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
         return 0 if result['status'] == 'complete' else 1
     except (QualityError, ProposalError, ValueError, OSError, RuntimeError, UnicodeError) as exc:

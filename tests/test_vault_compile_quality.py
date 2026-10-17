@@ -1,6 +1,8 @@
 import hashlib
 import importlib.util
+import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +12,16 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/agentic-vault/scripts'
 sys.path.insert(0, str(SCRIPTS))
 MODULE = SCRIPTS / 'vault_compile_quality.py'
+GOLDEN = Path(__file__).resolve().parent / 'fixtures' / 'v0221_default_outputs.json'
+REVERSE_FIELDS = {'target_literals_checked', 'unsupported_target_literals', 'unsupported_by_kind',
+                  'fabrication_candidate_rate', 'fabrication_scope'}
+
+
+def load_module():
+    spec = importlib.util.spec_from_file_location('compile_quality_test_module', MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class CompileQualityTests(unittest.TestCase):
@@ -205,6 +217,172 @@ class CompileQualityTests(unittest.TestCase):
         with patch.object(self.module, '_bindings', side_effect=drifting):
             with self.assertRaisesRegex(self.module.QualityError, 'policy_changed'):
                 self.module.check_compile(self.vault, [source], [target], [])
+
+
+class ReverseLiteralTests(unittest.TestCase):
+    """Opt-in precision direction: target literals that no selected source contains."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name)
+        (self.vault / '00-meta').mkdir()
+        (self.vault / '00-meta/vault-config.json').write_bytes(b'{"deny_zones": ["private"], "exclude_dirs": ["10-inbox"]}')
+        self.module = load_module()
+
+    def write(self, path, text):
+        target = self.vault / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = text.encode('utf-8')
+        target.write_bytes(data)
+        return {'path': path, 'sha256': hashlib.sha256(data).hexdigest()}
+
+    def check(self, source_text, target_text, claims=()):
+        source = self.write('10-inbox/source.md', source_text)
+        target = self.write('20-knowledge/result.md', target_text)
+        return self.module.check_compile(self.vault, [source], [target], list(claims), report_unsupported=True)
+
+    def test_unsupported_number_date_and_name_are_listed_without_changing_status(self):
+        result = self.check('Name: Atlas\nDate: 2026-10-07\nAmount: 125,000 KRW\n',
+                            'Name: Atlas\nName: Borealis\nAtlas: 125,000 KRW and 999 units on 2026-10-07 and 2027-01-01.\n')
+        self.assertEqual(result['status'], 'complete')
+        self.assertIsNone(result['review_reason'])
+        self.assertEqual(result['missing_facts'], [])
+        self.assertEqual(result['unsupported_target_literals'], [
+            {'kind': 'date', 'literal': '2027-01-01', 'target_paths': ['20-knowledge/result.md']},
+            {'kind': 'name', 'literal': 'borealis', 'target_paths': ['20-knowledge/result.md']},
+            {'kind': 'number', 'literal': '999', 'target_paths': ['20-knowledge/result.md']}])
+        self.assertEqual(result['target_literals_checked'], 6)
+        self.assertEqual(result['unsupported_by_kind'], {'date': 1, 'name': 1, 'number': 1})
+        self.assertEqual(result['fabrication_candidate_rate'], 0.5)
+        self.assertIn('a literal is not truth', result['fabrication_scope'])
+
+    def test_supported_target_literals_have_zero_candidate_rate(self):
+        result = self.check('Name: Atlas\nDate: 2026-10-07\nAmount: 125,000 KRW\n',
+                            'Name: Atlas\nAtlas: 125,000 KRW on 2026-10-07.\n')
+        self.assertEqual(result['unsupported_target_literals'], [])
+        self.assertEqual(result['target_literals_checked'], 3)
+        self.assertEqual(result['fabrication_candidate_rate'], 0.0)
+
+    def test_target_without_literals_has_no_rate_and_keeps_review_reason(self):
+        result = self.check('An unstructured narrative.\n', 'A different narrative.\n')
+        self.assertEqual(result['status'], 'needs_review')
+        self.assertEqual(result['review_reason'], 'no_selected_literal_facts')
+        self.assertEqual(result['target_literals_checked'], 0)
+        self.assertEqual(result['unsupported_target_literals'], [])
+        self.assertIsNone(result['fabrication_candidate_rate'])
+
+    def test_empty_target_list_is_still_an_input_error(self):
+        source = self.write('10-inbox/source.md', 'Value: 12.\n')
+        with self.assertRaisesRegex(self.module.QualityError, 'invalid_target_list'):
+            self.module.check_compile(self.vault, [source], [], [], report_unsupported=True)
+
+    def test_reverse_names_use_the_forward_word_boundaries(self):
+        self.assertEqual(self.check('Atlases are maps.\n', 'Name: Atlas\n')['unsupported_target_literals'],
+                         [{'kind': 'name', 'literal': 'atlas', 'target_paths': ['20-knowledge/result.md']}])
+        self.assertEqual(self.check('담당자: 홍길동.\n', 'Name: 홍길동\n')['unsupported_target_literals'], [])
+        # Documented false alarm: an attached Korean particle is another literal.
+        self.assertEqual(self.check('홍길동은 승인했다.\n', 'Name: 홍길동\n')['unsupported_by_kind']['name'], 1)
+
+    def test_format_and_unit_variants_are_documented_false_alarms(self):
+        result = self.check('Amount: 125000 KRW\nDate: 2026.10.07\n', 'Amount: 125,000 KRW on 2026-10-07.\n')
+        self.assertEqual({row['literal'] for row in result['unsupported_target_literals']}, {'125,000', '2026-10-07'})
+
+    def test_frontmatter_dates_and_host_claims_are_not_target_literals(self):
+        result = self.check('Value: 12. Host claim.\n', '---\nupdated: 2026-10-17\n---\nValue: 12. Host claim.\n',
+                            ['Host claim.'])
+        self.assertEqual(result['target_literals_checked'], 1)
+        self.assertEqual(result['unsupported_target_literals'], [])
+
+    def test_existing_fact_limit_is_reused_for_both_directions(self):
+        source = self.write('10-inbox/source.md', 'Value: 12.\n')
+        target = self.write('20-knowledge/result.md', 'Value: 12 and 13.\n')
+        for flag in (False, True):
+            with self.subTest(report_unsupported=flag), patch.object(self.module, 'MAX_FACTS', 1):
+                with self.assertRaisesRegex(self.module.QualityError, 'fact_limit'):
+                    self.module.check_compile(self.vault, [source], [target], [], report_unsupported=flag)
+
+    def test_cli_flag_adds_fields_without_changing_exit_codes(self):
+        script = str(MODULE)
+        cases = (('Value: 12.\n', 'Value: 12 and 999.\n', 0, 'complete'),
+                 ('Value: 12.\n', 'Value: 999.\n', 1, 'needs_review'))
+        for source_text, target_text, code, status in cases:
+            source = self.write('10-inbox/source.md', source_text)
+            target = self.write('20-knowledge/result.md', target_text)
+            request = json.dumps({'sources': [source], 'targets': [target], 'required_claims': []}).encode()
+            with self.subTest(status=status):
+                plain = subprocess.run([sys.executable, script, '--vault', str(self.vault)],
+                                       input=request, capture_output=True)
+                opted = subprocess.run([sys.executable, script, '--vault', str(self.vault), '--report-unsupported'],
+                                       input=request, capture_output=True)
+                self.assertEqual((plain.returncode, opted.returncode), (code, code), opted.stderr.decode())
+                default, extended = json.loads(plain.stdout), json.loads(opted.stdout)
+                self.assertEqual(extended['status'], status)
+                self.assertFalse(REVERSE_FIELDS & set(default))
+                self.assertEqual({key: extended[key] for key in default}, default)
+                self.assertEqual(extended['unsupported_target_literals'],
+                                 [{'kind': 'number', 'literal': '999', 'target_paths': ['20-knowledge/result.md']}])
+
+
+class DefaultOutputRegressionTests(unittest.TestCase):
+    """Golden outputs captured from v0.22.1 (63b4cc9) before the opt-in reverse check."""
+
+    def setUp(self):
+        self.golden = json.loads(GOLDEN.read_text(encoding='utf-8'))['compile']
+        self.module = load_module()
+
+    def build(self, tmp, case):
+        vault = Path(tmp)
+        bindings = []
+        for relative, text in (('00-meta/vault-config.json', self.golden['config']),
+                               ('10-inbox/source.md', case['source']),
+                               ('20-knowledge/result.md', case['target'])):
+            target = vault / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(text.encode('utf-8'))
+            bindings.append({'path': relative, 'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()})
+        return vault, bindings[1], bindings[2]
+
+    def test_default_api_output_equals_v0221_golden(self):
+        self.assertEqual(len(self.golden['cases']), 5)
+        for name, case in sorted(self.golden['cases'].items()):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                vault, source, target = self.build(tmp, case)
+                self.assertEqual(self.module.check_compile(vault, [source], [target], case['required_claims']),
+                                 case['api'])
+                self.assertEqual(self.module.check_compile(vault, [source], [target], case['required_claims'],
+                                                           report_unsupported=False), case['api'])
+
+    def test_default_cli_output_is_byte_identical_to_v0221_golden(self):
+        for name, case in sorted(self.golden['cases'].items()):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                vault, source, target = self.build(tmp, case)
+                request = json.dumps({'sources': [source], 'targets': [target],
+                                      'required_claims': case['required_claims']}).encode('utf-8')
+                stdin = type('Stdin', (), {'buffer': io.BytesIO(request)})()
+                stdout = io.StringIO()
+                with patch('sys.stdin', stdin), patch('sys.stdout', stdout):
+                    code = self.module.main(['--vault', str(vault)])
+                self.assertEqual(code, case['cli']['exit'])
+                self.assertEqual(stdout.getvalue(), case['cli']['stdout'])
+
+    def test_opt_in_keeps_every_existing_field_and_only_adds_reverse_fields(self):
+        for name, case in sorted(self.golden['cases'].items()):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as tmp:
+                vault, source, target = self.build(tmp, case)
+                result = self.module.check_compile(vault, [source], [target], case['required_claims'],
+                                                   report_unsupported=True)
+                self.assertEqual({key: result[key] for key in case['api']}, case['api'])
+                self.assertEqual(set(result) - set(case['api']), REVERSE_FIELDS)
+
+    def test_frontmatter_wiki_golden_reports_only_the_extra_number(self):
+        case = self.golden['cases']['frontmatter_wiki']
+        with tempfile.TemporaryDirectory() as tmp:
+            vault, source, target = self.build(tmp, case)
+            result = self.module.check_compile(vault, [source], [target], [], report_unsupported=True)
+        self.assertEqual(result['unsupported_target_literals'],
+                         [{'kind': 'number', 'literal': '7', 'target_paths': ['20-knowledge/result.md']}])
+        self.assertEqual(result['fabrication_candidate_rate'], 0.25)
 
 
 if __name__ == '__main__':

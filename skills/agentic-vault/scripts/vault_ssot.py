@@ -7,6 +7,9 @@ contradiction. No dates, source authority, truth or supersession are inferred.
 Legacy headers are aliases only; original fact cells and unrelated bytes remain
 intact during migration. JSON proposals/receipts are accounting, not signatures
 or evidence of approval. Only an explicit approve=True applies a migration.
+check_support (CLI check-support) is a separate, warning-only observation: a
+row value absent from its cited note body, or a citation that does not resolve
+to exactly one allowed note, is reported. Literal presence is not truth.
 """
 from __future__ import annotations
 
@@ -14,12 +17,17 @@ import argparse
 from datetime import date
 import hashlib
 import json
+import os
 from pathlib import Path
+import posixpath
 import re
+import stat
 import sys
+import unicodedata
 
 import vault_state as state
-from vault_evidence import EvidenceError, decode
+from vault_evidence import EvidenceError, decode, regular, stable_read, stamp
+from vault_paths import relative_parts, resolve_note_path, unsafe_path_segment, zone_matches
 
 MAX_BYTES = 256 * 1024
 MAX_PROPOSAL_BYTES = 1024 * 1024
@@ -45,6 +53,17 @@ CONFIRMED = frozenset(('confirmed', '확정', '✅확정'))
 REJECTED = frozenset(('rejected', 'excluded', '기각', '배제', '🚫배제'))
 DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
 DIVIDER_RE = re.compile(r':?-{3,}:?')
+# check_support bounds. A cited note keeps the ledger byte limit (MAX_BYTES).
+MAX_SUPPORT_NOTES = 128
+MAX_SUPPORT_BYTES = 8 * 1024 * 1024
+MAX_REFERENCES = 8
+MAX_INVENTORY_ENTRIES = 20_000
+MAX_CANDIDATES = 16
+MAX_REFERENCE_CHARS = 256
+WIKI_REF_RE = re.compile(r'!?\[\[([^\[\]\n]{0,512})\]\]')
+CODE_SPAN_RE = re.compile(r'(`+)(.+?)\1')
+ATTACHMENT_RE = re.compile(r'\.[A-Za-z][A-Za-z0-9]{0,7}$')
+_ASCII_ALNUM = frozenset('0123456789abcdefghijklmnopqrstuvwxyz')
 
 
 class SSOTError(Exception):
@@ -337,6 +356,315 @@ def check_ledger(text_or_parsed, *, path=''):
     return warnings
 
 
+def _nfc(text):
+    return unicodedata.normalize('NFC', text)
+
+
+def _literal(text):
+    return ' '.join(unicodedata.normalize('NFKC', text).casefold().split())
+
+
+def _render(text, alias):
+    """Drop code/bold markup and render wiki links as their target (or display alias)."""
+    def link(match):
+        target, separator, display = match[1].partition('|')
+        return display if alias and separator and display.strip() else target.split('#', 1)[0]
+    return WIKI_REF_RE.sub(link, text).replace('`', '').replace('**', '').replace('__', '')
+
+
+def _forms(text, *, aliases=False):
+    """Literal forms compared by check_support: as written and with markup rendered."""
+    candidates = (text, _render(text, False), *((_render(text, True),) if aliases else ()))
+    return tuple(dict.fromkeys(form for form in map(_literal, candidates) if form))
+
+
+def _note_body(text):
+    lines = text.splitlines()
+    if lines and lines[0].strip() == '---':
+        end = next((i for i, line in enumerate(lines[1:65], 1) if line.strip() == '---'), None)
+        if end is not None:
+            return '\n'.join(lines[end + 1:])
+    return text
+
+
+def _body_forms(text):
+    # Bodies add a display-alias form; ledger values never match by alias alone.
+    return _forms(re.sub(r'\\([\\|])', r'\1', _note_body(text)), aliases=True)
+
+
+def _support_pattern(literal):
+    """An ASCII letter/digit next to an alphanumeric edge, or a longer number, is another literal."""
+    prefix = suffix = ''
+    if literal[0] in _ASCII_ALNUM:
+        prefix = r'(?<![0-9a-z])' + (r'(?<![0-9][.,])' if literal[0].isdigit() else '')
+    if literal[-1] in _ASCII_ALNUM:
+        suffix = r'(?![0-9a-z])' + (r'(?![.,][0-9])' if literal[-1].isdigit() else '')
+    return re.compile(prefix + re.escape(literal) + suffix)
+
+
+def _references(cell):
+    """Return (target, strict) note references in one source cell, in order.
+
+    Wiki links are strict; an anchor-only link ('[[#heading]]') targets the
+    ledger itself and an empty link is ignored. A Markdown path in a code span,
+    or a whole cell that is one whitespace-free .md path, is a plain reference;
+    an invalid plain path is ignored rather than reported.
+    """
+    found = []
+    for match in CODE_SPAN_RE.finditer(cell):
+        content = match[2].strip()
+        if content.casefold().endswith('.md'):
+            found.append((content, False))
+    text = CODE_SPAN_RE.sub(' ', cell)
+    for match in WIKI_REF_RE.finditer(text):
+        link = match[1].split('|', 1)[0].strip()
+        target = link.split('#', 1)[0].strip()
+        if target or link.startswith('#'):
+            found.append((target, True))
+    whole = cell.strip()
+    if (not found and whole.casefold().endswith('.md') and not any(char.isspace() for char in whole)
+            and not any(char in whole for char in '`[]')):
+        found.append((whole, False))
+    unique = {}
+    for target, strict in found:
+        unique[target] = unique.get(target, False) or strict
+    return list(unique.items())
+
+
+def _inventory(policy):
+    """Allowed Markdown names and paths; denied/excluded zones are never listed or described."""
+    stems, paths, unsafe_stems, unsafe_paths = {}, {}, set(), set()
+    pending, entries, complete = [()], 0, True
+    while pending:
+        parts = pending.pop()
+        try:
+            directory = resolve_note_path(policy.vault, '/'.join(parts), policy.rules) if parts else policy.root
+            with os.scandir(directory) as iterator:
+                listed = []
+                for entry in iterator:
+                    entries += 1
+                    if entries > MAX_INVENTORY_ENTRIES:
+                        return dict(stems=stems, paths=paths, unsafe_stems=unsafe_stems,
+                                    unsafe_paths=unsafe_paths, complete=False)
+                    listed.append((entry.name, entry.is_dir(follow_symlinks=False)))
+        except (OSError, ValueError):
+            complete = False
+            continue
+        children = []
+        for name, is_directory in sorted(listed):
+            child = (*parts, name)
+            note = name.casefold().endswith('.md')
+            if (not is_directory and not note) or any(zone_matches(child, rule) for rule in policy.rules):
+                continue
+            relative = '/'.join(child)
+            try:
+                mode = resolve_note_path(policy.vault, relative, policy.rules).lstat().st_mode
+            except ValueError:
+                if note:
+                    unsafe_stems.add(_nfc(name[:-3]))
+                    unsafe_paths.add(_nfc(relative))
+                continue
+            except OSError:
+                complete = False
+                continue
+            if stat.S_ISDIR(mode):
+                children.append(child)
+            elif note:
+                stems.setdefault(_nfc(name[:-3]), []).append(relative)
+                paths[_nfc(relative)] = relative
+        pending.extend(reversed(children))
+    return dict(stems=stems, paths=paths, unsafe_stems=unsafe_stems, unsafe_paths=unsafe_paths, complete=complete)
+
+
+def _inventory_of(policy, run):
+    if run['inventory'] is None:
+        run['inventory'] = _inventory(policy)
+        if not run['inventory']['complete']:
+            run['incomplete'].add('inventory_incomplete')
+    return run['inventory']
+
+
+def _locate(policy, target, strict, ledger_path, run):
+    """Resolve one reference to ('note', path), ('self', path), ('skip', None) or ('unresolved', details).
+
+    A path (contains '/') must match one allowed note exactly; './' and '../'
+    are relative to the ledger. A bare name must be the exact (NFC) filename
+    stem of exactly one allowed note. Policy zones are checked on the reference
+    text before any lookup. An unmatched attachment-like name is skipped.
+    """
+    if not target:
+        return 'self', ledger_path
+    markdown = target.casefold().endswith('.md')
+    attachment = not markdown and ATTACHMENT_RE.search(target) is not None
+    name = target if markdown else target + '.md'
+    invalid = ('unresolved', dict(reason='invalid_reference')) if strict and not attachment else ('skip', None)
+    if '/' in name or '\\' in name:
+        candidate = name.replace('\\', '/')
+        if candidate.startswith(('./', '../')):
+            candidate = posixpath.join(posixpath.dirname(ledger_path), candidate)
+        try:
+            parts = relative_parts(posixpath.normpath(candidate), 'reference')
+        except ValueError:
+            return invalid
+        key = _nfc('/'.join(parts))
+        if key == _nfc(ledger_path):
+            return 'self', ledger_path
+        if any(zone_matches(parts, rule) for rule in policy.rules):
+            return ('skip', None) if attachment else ('unresolved', dict(reason='policy'))
+        inventory = _inventory_of(policy, run)
+        if key in inventory['paths']:
+            return 'note', inventory['paths'][key]
+        matches, unsafe = [], key in inventory['unsafe_paths']
+    else:
+        if unsafe_path_segment(name):
+            return invalid
+        stem = _nfc(name[:-3])
+        inventory = _inventory_of(policy, run)
+        matches = sorted(inventory['stems'].get(stem, []))
+        if len(matches) > 1:
+            return 'unresolved', dict(reason='ambiguous', candidate_count=len(matches),
+                                      candidates=matches[:MAX_CANDIDATES])
+        if matches and inventory['complete']:
+            return ('self', ledger_path) if matches[0] == ledger_path else ('note', matches[0])
+        unsafe = stem in inventory['unsafe_stems']
+    if not matches and attachment:
+        return 'skip', None
+    if not matches and unsafe:
+        return 'unresolved', dict(reason='policy')
+    # One unseen duplicate could exist when the inventory is incomplete.
+    return 'unresolved', dict(reason='not_found' if inventory['complete'] else 'inventory_incomplete')
+
+
+def _cited_forms(policy, relative, run):
+    """Read one allowed cited note once under the note policy and bounded budgets."""
+    if relative in run['cache']:
+        return run['cache'][relative]
+    if run['notes'] >= MAX_SUPPORT_NOTES or run['bytes'] >= MAX_SUPPORT_BYTES:
+        run['incomplete'].add('source_limit')
+        outcome = (None, 'source_limit')
+    else:
+        try:
+            info, mark, raw = stable_read(lambda: policy.note(relative), MAX_BYTES, contents=True)
+            text = raw.decode('utf-8-sig')
+        except EvidenceError as exc:
+            outcome = (None, {'input_too_large': 'size_limit', 'unsafe_file': 'unsafe_file'}.get(str(exc), 'unreadable'))
+        except state.StateError:
+            outcome = (None, 'policy')
+        except FileNotFoundError:
+            outcome = (None, 'not_found')
+        except (OSError, ValueError, RuntimeError):
+            outcome = (None, 'unreadable')
+        else:
+            run['notes'] += 1
+            run['bytes'] += info['size']
+            if run['bytes'] > MAX_SUPPORT_BYTES:
+                run['incomplete'].add('source_limit')
+                outcome = (None, 'source_limit')
+            else:
+                run['marks'][relative] = mark
+                run['cited'][relative] = dict(path=relative, sha256=info['sha256'], bytes=info['size'])
+                outcome = (_body_forms(text), None)
+    run['cache'][relative] = outcome
+    return outcome
+
+
+def _without_tables(raw, parsed):
+    pieces, cursor = [], 0
+    for table in parsed['tables']:
+        pieces.append(raw[cursor:table['start']])
+        cursor = table['end']
+    pieces.append(raw[cursor:])
+    return b''.join(pieces).decode('utf-8')
+
+
+def check_support(vault, path):
+    """Warn when a row value is absent from its cited note or the citation is unresolved.
+
+    Warning-only observation, never a truth or authority decision. A value is
+    supported when one of its normalized literal forms (NFKC, casefold,
+    collapsed whitespace; optionally without wiki-link/code/bold markup) occurs
+    in the body of at least one cited note. Rows without a value, a source or
+    a note reference are skipped and keep their existing check treatment.
+    """
+    try:
+        policy = state._Policy(vault)
+        info, _, raw = policy.read_note(path)
+        parsed = parse_ledger(raw.decode('utf-8'))
+        ledger_path = info['path']
+        run = dict(cache={}, notes=0, bytes=0, marks={}, cited={}, incomplete=set(), inventory=None)
+        warnings = []
+        counts = dict(rows_checked=0, rows_supported=0, rows_unsupported=0, rows_unresolved=0, rows_skipped=0)
+        self_forms = None
+        for table in parsed['tables']:
+            for row in table['rows']:
+                value_forms = _forms(row['fields'].get('value', '').strip())
+                source = row['fields'].get('source', '').strip()
+                references = _references(source) if value_forms and source and not table['duplicate_fields'] else []
+                if len(references) > MAX_REFERENCES:
+                    references = references[:MAX_REFERENCES]
+                    run['incomplete'].add('reference_limit')
+                bodies, unresolved = {}, []
+                for target, strict in references:
+                    kind, detail = _locate(policy, target, strict, ledger_path, run)
+                    if kind == 'skip':
+                        continue
+                    if kind == 'unresolved':
+                        unresolved.append((target, detail))
+                        continue
+                    if kind == 'self':
+                        if self_forms is None:
+                            # A row cannot support itself: compare outside the fact tables.
+                            self_forms = _body_forms(_without_tables(raw, parsed))
+                            run['cited'][ledger_path] = dict(path=ledger_path, sha256=info['sha256'], bytes=info['size'])
+                        bodies[ledger_path] = self_forms
+                        continue
+                    forms, reason = _cited_forms(policy, detail, run)
+                    if forms is None:
+                        unresolved.append((target, dict(reason=reason)))
+                    else:
+                        bodies[detail] = forms
+                if not bodies and not unresolved:
+                    counts['rows_skipped'] += 1
+                    continue
+                counts['rows_checked'] += 1
+                for target, detail in unresolved:
+                    warnings.append(_warning('ssot-source-unresolved', row['line'], ledger_path,
+                                             dict(reference=target[:MAX_REFERENCE_CHARS], **detail)))
+                if not bodies:
+                    counts['rows_unresolved'] += 1
+                    continue
+                patterns = [_support_pattern(form) for form in value_forms]
+                if any(pattern.search(body) for pattern in patterns
+                       for forms in bodies.values() for body in forms):
+                    counts['rows_supported'] += 1
+                else:
+                    counts['rows_unsupported'] += 1
+                    warnings.append(_warning('ssot-source-unsupported', row['line'], ledger_path,
+                                             dict(cited=sorted(bodies))))
+        if len(warnings) > 1024:
+            raise SSOTError('warning_limit')
+        # Point-in-time recheck like check: same policy, ledger and cited revisions.
+        policy = policy.fresh()
+        latest, _, _ = policy.read_note(ledger_path)
+        if latest['sha256'] != info['sha256']:
+            raise SSOTError('stale_base')
+        for relative, mark in run['marks'].items():
+            metadata = policy.note(relative).lstat()
+            regular(metadata)
+            if stamp(metadata) != mark:
+                raise SSOTError('stale_source')
+        policy.fresh()
+        return dict(path=ledger_path, source_sha256=info['sha256'], warnings=warnings, **counts,
+                    cited_notes=[run['cited'][key] for key in sorted(run['cited'])],
+                    incomplete=sorted(run['incomplete']),
+                    method='normalized_literal_presence_in_cited_note_body',
+                    authority='warning_only_not_fact_verification')
+    except SSOTError:
+        raise
+    except (state.StateError, EvidenceError, OSError, ValueError, UnicodeError, RuntimeError) as exc:
+        raise SSOTError(str(exc) if isinstance(exc, state.StateError) else 'support_check_unavailable') from exc
+
+
 def _append(line, values):
     cells = _cells(line)
     position = cells['right'] if cells['right'] is not None else len(line)
@@ -464,6 +792,8 @@ def main(argv=None):
     prepare.add_argument('--path', required=True)
     check = commands.add_parser('check')
     check.add_argument('--path', required=True)
+    support = commands.add_parser('check-support')
+    support.add_argument('--path', required=True)
     apply = commands.add_parser('apply')
     apply.add_argument('--approve', action='store_true')
     args = parser.parse_args(argv)
@@ -481,6 +811,8 @@ def main(argv=None):
             if latest['sha256'] != info['sha256']:
                 raise SSOTError('stale_base')
             policy.fresh()
+        elif args.command == 'check-support':
+            result = check_support(args.vault, args.path)
         else:
             raw = sys.stdin.buffer.read(MAX_PROPOSAL_BYTES + 1)
             if len(raw) > MAX_PROPOSAL_BYTES:

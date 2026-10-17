@@ -1,0 +1,301 @@
+{
+ "compile": {
+  "cases": {
+   "complete": {
+    "api": {
+     "authority": "coverage_observation_only_not_permission_or_truth",
+     "config_sha256": "d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76",
+     "facts_checked": 4,
+     "facts_preserved": 4,
+     "limits": {
+      "file_bytes": 262144,
+      "files_per_role": 16,
+      "read_bytes_per_sweep": 2097152
+     },
+     "literal_coverage": 1.0,
+     "missing_facts": [],
+     "name_scope": "structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER",
+     "originals_current": true,
+     "review_reason": null,
+     "semantic_authority": "advisory_unverified",
+     "source_bindings": [
+      {
+       "bytes": 75,
+       "path": "10-inbox/source.md",
+       "sha256": "55dd2439ccfe73ddf515194eec108e5d1f0c49152a5f6826dc7dd67830510658"
+      }
+     ],
+     "status": "complete",
+     "target_bindings": [
+      {
+       "bytes": 60,
+       "path": "20-knowledge/result.md",
+       "sha256": "5aa65b7e4eba0225013d6ef4ca5ac372f130f94d82c6d91e709086d305857ed8"
+      }
+     ]
+    },
+    "cli": {
+     "exit": 0,
+     "stdout": "{\"status\": \"complete\", \"review_reason\": null, \"originals_current\": true, \"config_sha256\": \"d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76\", \"source_bindings\": [{\"path\": \"10-inbox/source.md\", \"sha256\": \"55dd2439ccfe73ddf515194eec108e5d1f0c49152a5f6826dc7dd67830510658\", \"bytes\": 75}], \"target_bindings\": [{\"path\": \"20-knowledge/result.md\", \"sha256\": \"5aa65b7e4eba0225013d6ef4ca5ac372f130f94d82c6d91e709086d305857ed8\", \"bytes\": 60}], \"facts_checked\": 4, \"facts_preserved\": 4, \"literal_coverage\": 1.0, \"missing_facts\": [], \"semantic_authority\": \"advisory_unverified\", \"name_scope\": \"structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER\", \"authority\": \"coverage_observation_only_not_permission_or_truth\", \"limits\": {\"files_per_role\": 16, \"file_bytes\": 262144, \"read_bytes_per_sweep\": 2097152}}\n"
+    },
+    "required_claims": [
+     "Approval remains pending."
+    ],
+    "source": "Name: Atlas\nDate: 2026-10-07\nAmount: 125,000 KRW\nApproval remains pending.\n",
+    "target": "Atlas: 125,000 KRW on 2026-10-07. Approval remains pending.\n"
+   },
+   "frontmatter_wiki": {
+    "api": {
+     "authority": "coverage_observation_only_not_permission_or_truth",
+     "config_sha256": "d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76",
+     "facts_checked": 3,
+     "facts_preserved": 3,
+     "limits": {
+      "file_bytes": 262144,
+      "files_per_role": 16,
+      "read_bytes_per_sweep": 2097152
+     },
+     "literal_coverage": 1.0,
+     "missing_facts": [],
+     "name_scope": "structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER",
+     "originals_current": true,
+     "review_reason": null,
+     "semantic_authority": "advisory_unverified",
+     "source_bindings": [
+      {
+       "bytes": 98,
+       "path": "10-inbox/source.md",
+       "sha256": "6a53e0d0cfc3fb25db0163c999f0f43edce2d04cdbec5abc4d963400a0d18576"
+      }
+     ],
+     "status": "complete",
+     "target_bindings": [
+      {
+       "bytes": 94,
+       "path": "20-knowledge/result.md",
+       "sha256": "e91f83a5790cdfa5872e1218161cf347db7564029546daf598dd3a2c0977f9a3"
+      }
+     ]
+    },
+    "cli": {
+     "exit": 0,
+     "stdout": "{\"status\": \"complete\", \"review_reason\": null, \"originals_current\": true, \"config_sha256\": \"d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76\", \"source_bindings\": [{\"path\": \"10-inbox/source.md\", \"sha256\": \"6a53e0d0cfc3fb25db0163c999f0f43edce2d04cdbec5abc4d963400a0d18576\", \"bytes\": 98}], \"target_bindings\": [{\"path\": \"20-knowledge/result.md\", \"sha256\": \"e91f83a5790cdfa5872e1218161cf347db7564029546daf598dd3a2c0977f9a3\", \"bytes\": 94}], \"facts_checked\": 3, \"facts_preserved\": 3, \"literal_coverage\": 1.0, \"missing_facts\": [], \"semantic_authority\": \"advisory_unverified\", \"name_scope\": \"structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER\", \"authority\": \"coverage_observation_only_not_permission_or_truth\", \"limits\": {\"files_per_role\": 16, \"file_bytes\": 262144, \"read_bytes_per_sweep\": 2097152}}\n"
+    },
+    "required_claims": [],
+    "source": "---\ntitle: S\n---\nThe owner is [[Atlas#Responsibilities|project lead]]. Budget 3.5% on 2026-01-02.\n",
+    "target": "---\ntitle: T\nupdated: 2026-10-17\n---\n[[Atlas]] budget 3.5% and 2026-01-02 plus 7 extra items.\n"
+   },
+   "korean_units": {
+    "api": {
+     "authority": "coverage_observation_only_not_permission_or_truth",
+     "config_sha256": "d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76",
+     "facts_checked": 2,
+     "facts_preserved": 0,
+     "limits": {
+      "file_bytes": 262144,
+      "files_per_role": 16,
+      "read_bytes_per_sweep": 2097152
+     },
+     "literal_coverage": 0.0,
+     "missing_facts": [
+      {
+       "kind": "number",
+       "literal": "12개",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      },
+      {
+       "kind": "number",
+       "literal": "350만원",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      }
+     ],
+     "name_scope": "structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER",
+     "originals_current": true,
+     "review_reason": "missing_literal_facts",
+     "semantic_authority": "advisory_unverified",
+     "source_bindings": [
+      {
+       "bytes": 32,
+       "path": "10-inbox/source.md",
+       "sha256": "c2245cc649403e72138827591c92d8e7f8f66c93bbdece62855d9ee218f62439"
+      }
+     ],
+     "status": "needs_review",
+     "target_bindings": [
+      {
+       "bytes": 34,
+       "path": "20-knowledge/result.md",
+       "sha256": "7d64e6b3677a04a301dc8a4fee7734d480414eefcb56b7e8780480ac07fc2eaa"
+      }
+     ]
+    },
+    "cli": {
+     "exit": 1,
+     "stdout": "{\"status\": \"needs_review\", \"review_reason\": \"missing_literal_facts\", \"originals_current\": true, \"config_sha256\": \"d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76\", \"source_bindings\": [{\"path\": \"10-inbox/source.md\", \"sha256\": \"c2245cc649403e72138827591c92d8e7f8f66c93bbdece62855d9ee218f62439\", \"bytes\": 32}], \"target_bindings\": [{\"path\": \"20-knowledge/result.md\", \"sha256\": \"7d64e6b3677a04a301dc8a4fee7734d480414eefcb56b7e8780480ac07fc2eaa\", \"bytes\": 34}], \"facts_checked\": 2, \"facts_preserved\": 0, \"literal_coverage\": 0.0, \"missing_facts\": [{\"kind\": \"number\", \"literal\": \"12개\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}, {\"kind\": \"number\", \"literal\": \"350만원\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}], \"semantic_authority\": \"advisory_unverified\", \"name_scope\": \"structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER\", \"authority\": \"coverage_observation_only_not_permission_or_truth\", \"limits\": {\"files_per_role\": 16, \"file_bytes\": 262144, \"read_bytes_per_sweep\": 2097152}}\n"
+    },
+    "required_claims": [],
+    "source": "수량: 12개\n금액: 350만원\n",
+    "target": "수량과 금액을 확인했다.\n"
+   },
+   "missing": {
+    "api": {
+     "authority": "coverage_observation_only_not_permission_or_truth",
+     "config_sha256": "d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76",
+     "facts_checked": 4,
+     "facts_preserved": 0,
+     "limits": {
+      "file_bytes": 262144,
+      "files_per_role": 16,
+      "read_bytes_per_sweep": 2097152
+     },
+     "literal_coverage": 0.0,
+     "missing_facts": [
+      {
+       "kind": "claim",
+       "literal": "approval remains pending.",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      },
+      {
+       "kind": "date",
+       "literal": "2026-10-07",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      },
+      {
+       "kind": "name",
+       "literal": "atlas",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      },
+      {
+       "kind": "number",
+       "literal": "125,000",
+       "preserved": false,
+       "source_paths": [
+        "10-inbox/source.md"
+       ]
+      }
+     ],
+     "name_scope": "structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER",
+     "originals_current": true,
+     "review_reason": "missing_literal_facts",
+     "semantic_authority": "advisory_unverified",
+     "source_bindings": [
+      {
+       "bytes": 75,
+       "path": "10-inbox/source.md",
+       "sha256": "55dd2439ccfe73ddf515194eec108e5d1f0c49152a5f6826dc7dd67830510658"
+      }
+     ],
+     "status": "needs_review",
+     "target_bindings": [
+      {
+       "bytes": 19,
+       "path": "20-knowledge/result.md",
+       "sha256": "4f9c6b18e4df5dbb391acafd372e858f35cc0eee16228aa6a464374825367e59"
+      }
+     ]
+    },
+    "cli": {
+     "exit": 1,
+     "stdout": "{\"status\": \"needs_review\", \"review_reason\": \"missing_literal_facts\", \"originals_current\": true, \"config_sha256\": \"d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76\", \"source_bindings\": [{\"path\": \"10-inbox/source.md\", \"sha256\": \"55dd2439ccfe73ddf515194eec108e5d1f0c49152a5f6826dc7dd67830510658\", \"bytes\": 75}], \"target_bindings\": [{\"path\": \"20-knowledge/result.md\", \"sha256\": \"4f9c6b18e4df5dbb391acafd372e858f35cc0eee16228aa6a464374825367e59\", \"bytes\": 19}], \"facts_checked\": 4, \"facts_preserved\": 0, \"literal_coverage\": 0.0, \"missing_facts\": [{\"kind\": \"claim\", \"literal\": \"approval remains pending.\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}, {\"kind\": \"date\", \"literal\": \"2026-10-07\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}, {\"kind\": \"name\", \"literal\": \"atlas\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}, {\"kind\": \"number\", \"literal\": \"125,000\", \"source_paths\": [\"10-inbox/source.md\"], \"preserved\": false}], \"semantic_authority\": \"advisory_unverified\", \"name_scope\": \"structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER\", \"authority\": \"coverage_observation_only_not_permission_or_truth\", \"limits\": {\"files_per_role\": 16, \"file_bytes\": 262144, \"read_bytes_per_sweep\": 2097152}}\n"
+    },
+    "required_claims": [
+     "Approval remains pending."
+    ],
+    "source": "Name: Atlas\nDate: 2026-10-07\nAmount: 125,000 KRW\nApproval remains pending.\n",
+    "target": "An event occurred.\n"
+   },
+   "no_facts": {
+    "api": {
+     "authority": "coverage_observation_only_not_permission_or_truth",
+     "config_sha256": "d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76",
+     "facts_checked": 0,
+     "facts_preserved": 0,
+     "limits": {
+      "file_bytes": 262144,
+      "files_per_role": 16,
+      "read_bytes_per_sweep": 2097152
+     },
+     "literal_coverage": null,
+     "missing_facts": [],
+     "name_scope": "structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER",
+     "originals_current": true,
+     "review_reason": "no_selected_literal_facts",
+     "semantic_authority": "advisory_unverified",
+     "source_bindings": [
+      {
+       "bytes": 27,
+       "path": "10-inbox/source.md",
+       "sha256": "98fd9652ed3e35f600fe6d53bb74755aab062923d0605e1e7b3fc035a222032c"
+      }
+     ],
+     "status": "needs_review",
+     "target_bindings": [
+      {
+       "bytes": 23,
+       "path": "20-knowledge/result.md",
+       "sha256": "e820f8fe529344c5a88487c3b190a2135d558d6795d8cdb10dc2c24e61b98e4d"
+      }
+     ]
+    },
+    "cli": {
+     "exit": 1,
+     "stdout": "{\"status\": \"needs_review\", \"review_reason\": \"no_selected_literal_facts\", \"originals_current\": true, \"config_sha256\": \"d583e4e03f0581864968084bb90c4e64ede1e53c8845bb932f3cf181075d5d76\", \"source_bindings\": [{\"path\": \"10-inbox/source.md\", \"sha256\": \"98fd9652ed3e35f600fe6d53bb74755aab062923d0605e1e7b3fc035a222032c\", \"bytes\": 27}], \"target_bindings\": [{\"path\": \"20-knowledge/result.md\", \"sha256\": \"e820f8fe529344c5a88487c3b190a2135d558d6795d8cdb10dc2c24e61b98e4d\", \"bytes\": 23}], \"facts_checked\": 0, \"facts_preserved\": 0, \"literal_coverage\": null, \"missing_facts\": [], \"semantic_authority\": \"advisory_unverified\", \"name_scope\": \"structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER\", \"authority\": \"coverage_observation_only_not_permission_or_truth\", \"limits\": {\"files_per_role\": 16, \"file_bytes\": 262144, \"read_bytes_per_sweep\": 2097152}}\n"
+    },
+    "required_claims": [],
+    "source": "An unstructured narrative.\n",
+    "target": "A different narrative.\n"
+   }
+  },
+  "config": "{\"deny_zones\": [\"private\"], \"exclude_dirs\": [\"10-inbox\"]}"
+ },
+ "note": "Default outputs captured from v0.22.1 (63b4cc9) before the opt-in fabrication/source-support checks. Inputs are written as exact UTF-8 bytes. Regenerate only for an intentional, documented default change.",
+ "ssot": {
+  "cases": {
+   "check_legacy": {
+    "command": "check",
+    "exit": 0,
+    "ledger": "---\r\ntitle: \"Facts\"\r\nupdated: 2026-01-01\r\n---\r\nHuman text 한글\r\n\r\n| 주체 | 항목 | 값 | 출처 | 상태 | Original Extra |\r\n| --- | --- | --- | --- | --- | --- |\r\n| Atlas | retention | 12\\|24 | [[Evidence]] | confirmed | keep  exact |\r\n\r\nKeep this prose  unchanged\n",
+    "stderr": "",
+    "stdout": "{\"authority\":\"warning_only_not_fact_verification\",\"path\":\"notes/facts.md\",\"source_sha256\":\"c49fac9d12453ff7caf08328a247c15fa5a2085c03ce2967a6ce7943c0e56ec2\",\"warnings\":[{\"code\":\"ssot-legacy-schema\",\"details\":{\"missing\":[\"valid_from\",\"valid_until\",\"recorded\",\"superseded_by\"]},\"issue_id\":\"ssot-df91d64825f98c65e34b\",\"line\":7,\"message\":\"legacy schema\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"},{\"code\":\"ssot-unknown-validity\",\"details\":{},\"issue_id\":\"ssot-7fb9205447109b830faa\",\"line\":9,\"message\":\"unknown validity\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"},{\"code\":\"ssot-unknown-recorded\",\"details\":{},\"issue_id\":\"ssot-4d2eb15adfe5dc32ef64\",\"line\":9,\"message\":\"unknown recorded\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"}]}\n"
+   },
+   "check_v2": {
+    "command": "check",
+    "exit": 0,
+    "ledger": "---\ntitle: \"Facts\"\n---\nIntro 한글\n\n| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by | status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Atlas | retention | 12개월 | 2025-01-01 |  | 2026-10-07 | [[Evidence]] |  | confirmed |\n| Atlas | retention | 24개월 | 2026-01-01 |  | 2026-10-07 |  |  | confirmed |\n| Birch | price | 1,200 | 2025-01-01 | 2026-01-01 | 2026-10-07 | [[Missing]] |  | pending |\n",
+    "stderr": "",
+    "stdout": "{\"authority\":\"warning_only_not_fact_verification\",\"path\":\"notes/facts.md\",\"source_sha256\":\"858fcae5e5c118753001720592e466105cbe4d7d8757267527d661950d624f88\",\"warnings\":[{\"code\":\"ssot-confirmed-source-missing\",\"details\":{},\"issue_id\":\"ssot-1a855818d7e0d3f9789c\",\"line\":9,\"message\":\"confirmed source missing\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"},{\"code\":\"ssot-temporal-conflict\",\"details\":{\"other_line\":9,\"relation\":\"retention\",\"subject\":\"Atlas\"},\"issue_id\":\"ssot-a8d9804849bcebc9a2e7\",\"line\":8,\"message\":\"temporal conflict\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"}]}\n"
+   },
+   "prepare_legacy": {
+    "command": "prepare",
+    "exit": 0,
+    "ledger": "---\r\ntitle: \"Facts\"\r\nupdated: 2026-01-01\r\n---\r\nHuman text 한글\r\n\r\n| 주체 | 항목 | 값 | 출처 | 상태 | Original Extra |\r\n| --- | --- | --- | --- | --- | --- |\r\n| Atlas | retention | 12\\|24 | [[Evidence]] | confirmed | keep  exact |\r\n\r\nKeep this prose  unchanged\n",
+    "stderr": "",
+    "stdout": "{\"authority\":\"proposal_only_not_approval_or_truth\",\"base_sha256\":\"c49fac9d12453ff7caf08328a247c15fa5a2085c03ce2967a6ce7943c0e56ec2\",\"candidate_sha256\":\"077f8ba9a4e1f1d5869b60a18506e89c3883f203e879305b9c74bf1dff56f860\",\"config_sha256\":\"a6a657373928d498c79b718820624cc61d3bc40ba407091344433e5d29e77732\",\"edits\":[{\"end\":242,\"replacement\":\"| subject | relation | value | source | \\uc0c1\\ud0dc | Original Extra | valid_from | valid_until | recorded | superseded_by |\\r\\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\\r\\n| Atlas | retention | 12\\\\|24 | [[Evidence]] | confirmed | keep  exact |  |  |  |  |\\r\\n\",\"start\":68}],\"kind\":\"ssot-v2-migration\",\"path\":\"notes/facts.md\",\"preserved_rows\":[{\"fields\":{\"recorded\":\"\",\"relation\":\"retention\",\"source\":\"[[Evidence]]\",\"status\":\"confirmed\",\"subject\":\"Atlas\",\"superseded_by\":\"\",\"valid_from\":\"\",\"valid_until\":\"\",\"value\":\"12|24\"},\"line\":9}],\"proposal_sha256\":\"41f96de78ff68c7a0ab9a86b1c0ea923ef87d618c7f7a776c07565501ef74694\",\"status\":\"prepared\",\"version\":1,\"warnings\":[{\"code\":\"ssot-unknown-validity\",\"details\":{},\"issue_id\":\"ssot-7fb9205447109b830faa\",\"line\":9,\"message\":\"unknown validity\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"},{\"code\":\"ssot-unknown-recorded\",\"details\":{},\"issue_id\":\"ssot-4d2eb15adfe5dc32ef64\",\"line\":9,\"message\":\"unknown recorded\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"}]}\n"
+   },
+   "prepare_v2": {
+    "command": "prepare",
+    "exit": 0,
+    "ledger": "---\ntitle: \"Facts\"\n---\nIntro 한글\n\n| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by | status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Atlas | retention | 12개월 | 2025-01-01 |  | 2026-10-07 | [[Evidence]] |  | confirmed |\n| Atlas | retention | 24개월 | 2026-01-01 |  | 2026-10-07 |  |  | confirmed |\n| Birch | price | 1,200 | 2025-01-01 | 2026-01-01 | 2026-10-07 | [[Missing]] |  | pending |\n",
+    "stderr": "",
+    "stdout": "{\"authority\":\"proposal_only_not_approval_or_truth\",\"base_sha256\":\"858fcae5e5c118753001720592e466105cbe4d7d8757267527d661950d624f88\",\"candidate_sha256\":\"858fcae5e5c118753001720592e466105cbe4d7d8757267527d661950d624f88\",\"config_sha256\":\"a6a657373928d498c79b718820624cc61d3bc40ba407091344433e5d29e77732\",\"edits\":[],\"kind\":\"ssot-v2-migration\",\"path\":\"notes/facts.md\",\"preserved_rows\":[{\"fields\":{\"recorded\":\"2026-10-07\",\"relation\":\"retention\",\"source\":\"[[Evidence]]\",\"status\":\"confirmed\",\"subject\":\"Atlas\",\"superseded_by\":\"\",\"valid_from\":\"2025-01-01\",\"valid_until\":\"\",\"value\":\"12\\uac1c\\uc6d4\"},\"line\":8},{\"fields\":{\"recorded\":\"2026-10-07\",\"relation\":\"retention\",\"source\":\"\",\"status\":\"confirmed\",\"subject\":\"Atlas\",\"superseded_by\":\"\",\"valid_from\":\"2026-01-01\",\"valid_until\":\"\",\"value\":\"24\\uac1c\\uc6d4\"},\"line\":9},{\"fields\":{\"recorded\":\"2026-10-07\",\"relation\":\"price\",\"source\":\"[[Missing]]\",\"status\":\"pending\",\"subject\":\"Birch\",\"superseded_by\":\"\",\"valid_from\":\"2025-01-01\",\"valid_until\":\"2026-01-01\",\"value\":\"1,200\"},\"line\":10}],\"proposal_sha256\":\"b677c8d6d7c1bdb69ffc8bea355a092a3adbbcd02a8402072951f452c66e0019\",\"status\":\"unchanged\",\"version\":1,\"warnings\":[{\"code\":\"ssot-confirmed-source-missing\",\"details\":{},\"issue_id\":\"ssot-1a855818d7e0d3f9789c\",\"line\":9,\"message\":\"confirmed source missing\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"},{\"code\":\"ssot-temporal-conflict\",\"details\":{\"other_line\":9,\"relation\":\"retention\",\"subject\":\"Atlas\"},\"issue_id\":\"ssot-a8d9804849bcebc9a2e7\",\"line\":8,\"message\":\"temporal conflict\",\"path\":\"notes/facts.md\",\"severity\":\"warning\"}]}\n"
+   }
+  },
+  "config": "{\"deny_zones\": [\"private\"], \"exclude_dirs\": [\"excluded\"]}",
+  "evidence": "보존 기간은 12개월이다.\n"
+ }
+}
