@@ -205,8 +205,15 @@ def _summary(rows: list[dict]) -> dict:
 def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
              as_of: str | None = None, expand_links: int | None = None,
              backend: str | None = None, top_k: int = 3, expand_query: bool = False,
-             query_mapping: str | None = None, lexical_ngrams: str | None = None) -> dict:
-    """Measure labeled source retrieval and returned exposure, never answer quality."""
+             query_mapping: str | None = None, lexical_ngrams: str | None = None,
+             render_matched: bool = False) -> dict:
+    """Measure labeled source retrieval and returned exposure, never answer quality.
+
+    lexical_ngrams is passed to every advanced-path retrieval call of this arm.
+    render_matched runs the advanced arm with temporal_filter='annotate_only':
+    same options (lexical_ngrams included), fields and annotations, but no
+    as-of/supersession exclusion.
+    """
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
         raise ValueError("max_tokens must be a non-negative integer")
     if type(top_k) is not int or top_k not in (3, 5) or type(expand_query) is not bool:
@@ -220,7 +227,10 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         raise ValueError('invalid retrieval backend')
     if lexical_ngrams is not None and lexical_ngrams != 'hangul2':
         raise ValueError('invalid lexical n-gram mode')
-    advanced = advanced or as_of is not None or expand_links is not None or backend is not None or expand_query or lexical_ngrams is not None
+    if type(render_matched) is not bool:
+        raise ValueError('render_matched must be boolean')
+    advanced = (advanced or render_matched or as_of is not None or expand_links is not None
+                or backend is not None or expand_query or lexical_ngrams is not None)
     queries = _load_queries(fixture)
     recall_module = _load_recall_module()
     vault = fixture / "vault"
@@ -240,6 +250,8 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
                 options.update(expand_query=True, query_mapping=query_mapping)
             if lexical_ngrams is not None:
                 options['lexical_ngrams'] = lexical_ngrams
+            if render_matched:
+                options['temporal_filter'] = 'annotate_only'
         started = time.perf_counter()
         reader = recall_module._advanced_retrieval.retrieve if advanced else recall_module.recall
         result = reader(vault, item["query"], limit=top_k, max_tokens=max_tokens, **options)
@@ -309,7 +321,7 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
     total_elapsed = sum(row["elapsed_ms"] for row in per_query)
     return {
         "benchmark": "bilingual source retrieval and data exposure (not LLM answer/attack quality)",
-        "method": 'advanced' if advanced else 'legacy',
+        "method": 'render_matched' if render_matched else 'advanced' if advanced else 'legacy',
         'top_k': top_k,
         'metric_definitions': {'returned_context_claim_coverage': 'covered literal claims / labeled claims, in rendered context after attribution labels are removed; no semantic answer-quality inference',
             'ndcg_at_5': 'graded gain 2^grade-1, log2(rank+1) discount; top-k=3 leaves ranks 4/5 unreturned',
@@ -362,6 +374,135 @@ def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
     return report
 
 
+RENDER_MATCHED_ALPHA = 0.05
+# (metric, paired population, higher_is_better, used by the decision rule).
+# Per-query values match _summary(). stale_exposure (any returned rank) was
+# added after inspecting fixture outputs, so it is descriptive only.
+DECOMPOSITION_METRICS = (
+    ('ndcg_at_5', 'answerable queries', True, True),
+    ('source_recall_at_k', 'answerable queries', True, True),
+    ('stale_top_1', 'queries with stale_paths labels', False, True),
+    ('no_answer_false_positive', 'no_answer queries', False, True),
+    ('stale_exposure', 'queries with stale_paths labels', False, False),
+)
+
+
+def _decomposition_value(row: dict, metric: str):
+    if metric == 'stale_top_1':
+        return float(row['top_1_stale']) if row['stale_paths'] else None
+    if metric == 'stale_exposure':
+        return float(bool(row['stale_retrieved_paths'])) if row['stale_paths'] else None
+    if metric == 'no_answer_false_positive':
+        return float(bool(row['retrieved_paths'])) if row['expectation'] == 'no_answer' else None
+    return row[metric]
+
+
+def temporal_decomposition(legacy: dict, render_matched: dict, advanced: dict, *,
+                           alpha: float = RENDER_MATCHED_ALPHA, seed: int = 1707,
+                           permutations: int = 10000) -> dict:
+    """Split the apparent advanced-legacy gain on the same paired queries.
+
+    display_effect = render_matched - legacy; mechanism_residual = advanced -
+    render_matched. Their means add up to apparent_gain = advanced - legacy.
+    """
+    if type(alpha) not in (int, float) or not 0 < alpha < 1:
+        raise ValueError('alpha must be between 0 and 1')
+    arms = (legacy, render_matched, advanced)
+    ids = [[row['id'] for row in arm['per_query']] for arm in arms]
+    if ids[0] != ids[1] or ids[0] != ids[2]:
+        raise ValueError('decomposition requires identical queries in identical order')
+    def paired(baseline, improved):
+        return paired_randomization(baseline, improved, seed=seed, permutations=permutations)
+
+    metrics = {}
+    for metric, population, higher_is_better, decision_metric in DECOMPOSITION_METRICS:
+        triples = [values for values in (tuple(_decomposition_value(row, metric) for row in rows)
+                                         for rows in zip(*(arm['per_query'] for arm in arms)))
+                   if None not in values]
+        base, render, improved = ([values[index] for values in triples] for index in range(3))
+        apparent, display, residual = paired(base, improved), paired(base, render), paired(render, improved)
+        nonzero = sum(a != b for a, b in zip(render, improved))
+        # Exact two-sided sign test floor: the two all-same-sign flips always tie.
+        floor = 2.0 ** (1 - nonzero) if nonzero else 1.0
+        delta = residual['mean_delta']
+        direction = ('none' if not delta else
+                     'beneficial' if (delta > 0) == higher_is_better else 'harmful')
+        metrics[metric] = {
+            'population': population, 'paired_query_count': len(triples),
+            'higher_is_better': higher_is_better, 'decision_metric': decision_metric,
+            'means': {name: _ratio(sum(values), len(values)) for name, values in
+                      (('legacy', base), ('render_matched', render), ('advanced', improved))},
+            'apparent_gain': apparent, 'display_effect': display, 'mechanism_residual': residual,
+            'decomposition_error': (abs(apparent['mean_delta'] - display['mean_delta'] - delta)
+                                    if triples else None),
+            'mechanism_nonzero_pair_count': nonzero,
+            'mechanism_minimum_attainable_p_value': floor,
+            'mechanism_power_limited': bool(nonzero) and floor >= alpha,
+            'mechanism_residual_distinguishable': residual['p_value'] is not None and residual['p_value'] < alpha,
+            'mechanism_direction': direction,
+        }
+
+    def selected(direction, *, decision=True):
+        return [name for name, row in metrics.items() if row['decision_metric'] is decision
+                and row['mechanism_residual_distinguishable'] and row['mechanism_direction'] == direction]
+
+    beneficial, harmful = selected('beneficial'), selected('harmful')
+    limited = [name for name, row in metrics.items() if row['decision_metric'] and row['mechanism_power_limited']]
+    warnings = [f'{name}: no paired queries in this fixture' for name, row in metrics.items()
+                if not row['paired_query_count']]
+    warnings += [f'{name}: mechanism residual cannot reach p<{alpha} with '
+                 f"{metrics[name]['mechanism_nonzero_pair_count']} nonzero paired differences"
+                 for name in limited]
+    warnings += [f'{name}: mechanism residual is distinguishable but harmful'
+                 for name in (*harmful, *selected('harmful', decision=False))]
+    warnings += [f"{label} arm: {len(arm['evaluation_errors'])} incomplete or invalid searches"
+                 for label, arm in zip(('legacy', 'render_matched', 'advanced'), arms) if arm['evaluation_errors']]
+    return {
+        'method': 'render-matched control arm (arXiv 2607.16019): advanced retrieval with '
+                  "temporal_filter='annotate_only'; paired sign randomization per metric",
+        'definitions': {
+            'display_effect': 'render_matched - legacy: every advanced-arm change except as-of/supersession '
+                              'exclusion (backend, link/query expansion, candidate sidecar, annotation fields)',
+            'mechanism_residual': 'advanced - render_matched: as-of/supersession exclusion with the same '
+                                  'machinery, fields and rendering',
+            'apparent_gain': 'advanced - legacy = display_effect + mechanism_residual (paired means)',
+        },
+        'scorer_scope': 'Scores read returned paths and rendered context only. Temporal annotations are attached '
+                        'to matches but not rendered into context or read by this scorer, so a reader-side '
+                        'presentation effect is zero by construction here; display_effect is not a reader effect.',
+        'alpha': alpha, 'metrics': metrics,
+        'decision': {
+            'rule': f'If no decision-metric mechanism residual is distinguishable from zero (two-sided '
+                    f'p<{alpha}) in the beneficial direction, defer richer ledger typing (contested/resolves states).',
+            'decision_metrics': [name for name, row in metrics.items() if row['decision_metric']],
+            'beneficial_distinguishable_metrics': beneficial,
+            'harmful_distinguishable_metrics': harmful,
+            'power_limited_metrics': limited,
+            'descriptive_beneficial_distinguishable_metrics': selected('beneficial', decision=False),
+            'outcome': 'mechanism_residual_detected' if beneficial else 'defer_richer_ledger_typing',
+            'note': 'A detected residual credits the existing coarse as-of/supersession exclusion only; '
+                    'richer ledger states need their own render-matched comparison before adoption. '
+                    'Power-limited metrics cannot show a residual on this fixture whatever its size.',
+        },
+        'warnings': warnings,
+    }
+
+
+def with_render_matched(report: dict, fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
+    """Return a compare() report plus the render-matched arm; existing keys are unchanged."""
+    if not isinstance(report, dict) or 'baseline' not in report or 'improved' not in report:
+        raise ValueError('render-matched decomposition requires a compare() report')
+    arm = evaluate(fixture, max_tokens=max_tokens, render_matched=True, **options)
+    return {**report, 'render_matched': arm,
+            'temporal_decomposition': temporal_decomposition(report['baseline'], arm, report['improved'])}
+
+
+def compare_render_matched(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
+    """compare() plus the opt-in render-matched control arm and decomposition."""
+    return with_render_matched(compare(fixture, max_tokens=max_tokens, **options), fixture,
+                               max_tokens=max_tokens, **options)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -377,6 +518,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-stale-top-1-rate", type=float, default=None)
     parser.add_argument('--advanced', action='store_true', help='apply per-query advanced options')
     parser.add_argument('--compare', action='store_true', help='legacy versus advanced; gates apply to improved')
+    parser.add_argument('--render-matched', action='store_true',
+                        help='with --compare: add the annotate-only temporal control arm and its '
+                             'display/mechanism decomposition (observational; gates still apply to improved)')
     parser.add_argument('--as-of', help='override all per-query time points')
     parser.add_argument('--expand-links', type=int, choices=(0, 1, 2))
     parser.add_argument('--backend', choices=('lexical', 'bm25', 'hybrid'))
@@ -395,6 +539,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.lexical_ngrams is not None and not (args.advanced or args.compare):
         print("--lexical-ngrams requires --advanced or --compare", file=sys.stderr)
         return 2
+    if args.render_matched and not args.compare:
+        print("--render-matched requires --compare", file=sys.stderr)
+        return 2
     try:
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
@@ -402,6 +549,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             options['lexical_ngrams'] = args.lexical_ngrams
         report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
                   evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
+        if args.render_matched:
+            report = with_render_matched(report, args.fixture, max_tokens=args.max_tokens, **options)
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"recall evaluation unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
@@ -417,6 +566,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name, (observed, maximum) in optional_gates.items() if maximum is not None
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    for warning in report.get('temporal_decomposition', {}).get('warnings', ()):
+        print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
     passed = (
         (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
         and (gated["mrr"] is None or gated["mrr"] >= args.min_mrr)

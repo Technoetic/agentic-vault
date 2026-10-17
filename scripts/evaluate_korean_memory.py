@@ -283,18 +283,92 @@ def _ratio(count: int, total: int):
     return count / total if total else None
 
 
+RENDER_MATCHED_ANSWER_REASON = (
+    "Answer metrics are not compared. Synthetic controls and answerer callbacks receive only question, "
+    "public options and evidence, where evidence is the rendered context ('[Source: path:line]' labels and "
+    "snippet lines); replayed observations are bound to the evidence hash. Temporal annotations stay on "
+    "matches and are never rendered into that context. This evaluator also passes no as_of, so as-of and "
+    "supersession exclusion never act, and withdrawal is deny scope without an annotation, so it has no "
+    "render-matched counterpart and stays on in both arms. The arm can differ only through retrieved "
+    "evidence, compared here; re-scoring answers on other evidence would need new model observations, "
+    "never made here.")
+# (metric, paired population, higher_is_better); values come from _evidence().
+RENDER_MATCHED_EVIDENCE_METRICS = (
+    ("expected_source_recall", "answerable cases", True),
+    ("withdrawn_source_exposure", "all cases", False),
+    ("evidence_complete", "all cases", True),
+)
+
+
+def _paired_randomization():
+    """Reuse the recall evaluator's stdlib paired test; loaded only for the opt-in arm."""
+    spec = importlib.util.spec_from_file_location("agentic_vault_paired_statistics",
+                                                  REPO_ROOT / "scripts" / "evaluate_recall.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.paired_randomization
+
+
+def _evidence(result: dict, expected_paths: Sequence[str], withdrawn: Sequence[str]) -> dict:
+    diagnostics = result["diagnostics"]
+    context_paths = [match[1] for match in map(_SOURCE.fullmatch, result["context"].splitlines()) if match]
+    complete = (diagnostics.get("status") == "ok" and diagnostics.get("search_complete") is True
+                and not diagnostics.get("context_omitted") and not diagnostics.get("context_truncated"))
+    return {"retrieved_paths": [item["path"] for item in result["matches"]], "returned_context_paths": context_paths,
+            "context_sha256": hashlib.sha256(result["context"].encode("utf-8")).hexdigest(),
+            "expected_source_recall": _ratio(len(set(expected_paths) & set(context_paths)), len(expected_paths)),
+            "withdrawn_source_exposure": float(bool(set(context_paths) & set(withdrawn))),
+            "evidence_complete": float(complete),
+            "temporal_rejected": diagnostics.get("temporal_rejected", 0),
+            "temporal_unfiltered": diagnostics.get("temporal_unfiltered", 0)}
+
+
+def _render_matched_evidence(pairs: list[tuple[str, dict, dict]]) -> dict:
+    """Paired default-minus-render_matched evidence residuals; no answer is re-scored."""
+    paired_randomization = _paired_randomization()
+    residual = {}
+    for metric, population, higher_is_better in RENDER_MATCHED_EVIDENCE_METRICS:
+        values = [(render[metric], default[metric]) for _, default, render in pairs
+                  if default[metric] is not None and render[metric] is not None]
+        stats = paired_randomization([item[0] for item in values], [item[1] for item in values])
+        residual[metric] = {"population": population, "higher_is_better": higher_is_better,
+                            "means": {"default": _ratio(sum(item[1] for item in values), len(values)),
+                                      "render_matched": _ratio(sum(item[0] for item in values), len(values))},
+                            "mechanism_residual": stats}
+    identical = [case_id for case_id, default, render in pairs
+                 if (default["context_sha256"], default["retrieved_paths"]) == (render["context_sha256"], render["retrieved_paths"])]
+    warnings = [f"{metric}: mechanism residual is nonzero" for metric, row in residual.items()
+                if row["mechanism_residual"]["mean_delta"]]
+    if len(identical) != len(pairs):
+        warnings.append(f"{len(pairs) - len(identical)} cases returned different evidence in the render-matched arm")
+    return {"scope": "evidence_only", "answer_metrics_compared": False,
+            "answer_metrics_reason": RENDER_MATCHED_ANSWER_REASON,
+            "arm": "same retrieve() call with temporal_filter='annotate_only'; no as_of is passed",
+            "case_count": len(pairs), "identical_evidence_case_count": len(identical),
+            "temporal_rejected_total_default": sum(default["temporal_rejected"] for _, default, _ in pairs),
+            "temporal_unfiltered_total_render_matched": sum(render["temporal_unfiltered"] for _, _, render in pairs),
+            "mechanism_residual_definition": "default - render_matched on paired cases",
+            "metrics": residual, "warnings": warnings,
+            "per_case": [{"id": case_id, "retrieved_paths": render["retrieved_paths"],
+                          "returned_context_paths": render["returned_context_paths"],
+                          "identical_to_default": case_id in identical} for case_id, _, render in pairs]}
+
+
 def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer: Callable | None = None,
              observations: dict | None = None, max_tokens: int = 1500, top_k: int = 3,
-             backend: str = "bm25", withdrawn_sources: Sequence[str] = ()) -> dict:
+             backend: str = "bm25", withdrawn_sources: Sequence[str] = (), render_matched: bool = False) -> dict:
     """Run synthetic controls or replay observations against fresh synthetic retrieval.
 
     Optional callbacks receive only a copied question/options/evidence payload and
     return the strict response schema. They are external observations, never an
     implicit actual-model backend. Replay usage is caller-attested, not verified
-    billing. Fresh CLI runs make zero model requests.
+    billing. Fresh CLI runs make zero model requests. render_matched adds an
+    evidence-only annotate-only retrieval arm (RENDER_MATCHED_ANSWER_REASON).
     """
     if control not in CONTROLS or type(max_tokens) is not int or not 0 <= max_tokens <= 20_000:
         raise ValueError("invalid control/context budget")
+    if type(render_matched) is not bool:
+        raise ValueError("render_matched must be boolean")
     if type(top_k) is not int or not 1 <= top_k <= 10 or backend not in ("lexical", "bm25", "hybrid"):
         raise ValueError("invalid retrieval configuration")
     if observations is not None and (not isinstance(observations, dict) or answerer is not None):
@@ -313,7 +387,7 @@ def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer
     config_hash = _hash(config)
     retrieval = _retrieval_module()
     mode = "observation_replay" if observations is not None else "external_answerer" if answerer else "synthetic_control"
-    rows = []
+    rows, pairs = [], []
     for case in pack["cases"]:
         label = copy.deepcopy(pack["labels"][case["id"]])
         label["withdrawn_paths"] = sorted(set(label["withdrawn_paths"]) | set(withdrawn))
@@ -367,11 +441,16 @@ def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer
             "cost": {"actual_model_usage": observation["usage"] if observation else None,
                      "actual_model_cost": observation["actual_cost"] if observation else None,
                      "estimated_context_tokens": retrieval._legacy.estimate_tokens(context), "model_request_count": 0}})
+        if render_matched:
+            arm = retrieval.retrieve(vault, query, limit=top_k, max_tokens=max_tokens, backend=backend,
+                                     excluded_sources=withdrawn, temporal_filter="annotate_only")
+            pairs.append((case["id"], _evidence(result, label["expected_paths"], withdrawn),
+                          _evidence(arm, label["expected_paths"], withdrawn)))
     correct = sum(row["answer"]["correct"] is True for row in rows)
     assessed = sum(row["answer"]["status"] == "assessed" for row in rows)
     observed_usage = [row["cost"]["actual_model_usage"] for row in rows if row["cost"]["actual_model_usage"] is not None]
     total_usage = {key: sum(usage[key] for usage in observed_usage) for key in ("input_tokens", "output_tokens")} if len(observed_usage) == len(rows) else None
-    return {"benchmark": "synthetic Korean scoped business-memory evaluation; not official benchmark or free-form QA",
+    report = {"benchmark": "synthetic Korean scoped business-memory evaluation; not official benchmark or free-form QA",
         "mode": mode, "control": control if mode == "synthetic_control" else None, "case_count": len(rows),
         "by_scenario": dict(Counter(case["scenario"] for case in pack["cases"])),
         "config": config, "corpus_sha256": corpus_hash,
@@ -393,6 +472,9 @@ def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer
             "usage_provenance": "replay model usage/cost is caller-attested; missing values remain null"},
         "interpretation": "Evidence hits do not imply answer correctness. Abstention is limited to this complete synthetic fixture scan; missing, invalid or incomplete observations are errors/unassessed. Historical values are stale only when asserted as current. No actual-model execution occurs in this CLI.",
         "per_case": rows}
+    if render_matched:
+        report["render_matched"] = _render_matched_evidence(pairs)
+    return report
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -404,15 +486,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--observations", type=Path, help="explicit JSON replay mapping: case id -> bound observation")
     parser.add_argument("--write-observations", type=Path, help="export bound responses for explicit replay")
     parser.add_argument("--withdraw-source", action="append", default=[], help="additional synthetic source withdrawal")
+    parser.add_argument("--render-matched", action="store_true",
+                        help="add an evidence-only annotate-only retrieval arm (observational; answers are not re-scored)")
     args = parser.parse_args(argv)
     try:
         report = evaluate(control=args.control, max_tokens=args.max_tokens, top_k=args.top_k, backend=args.backend,
                           observations=_read_json(args.observations) if args.observations else None,
-                          withdrawn_sources=args.withdraw_source)
+                          withdrawn_sources=args.withdraw_source, render_matched=args.render_matched)
         if args.write_observations:
             args.write_observations.write_text(json.dumps({row["id"]: row["observation"] for row in report["per_case"]},
                                                          ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, ensure_ascii=False, indent=2))
+        for warning in report.get("render_matched", {}).get("warnings", ()):
+            print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
     except (ValueError, OSError, TypeError) as exc:
         parser.error(str(exc))
     return 1 if report["summary"]["execution_error_count"] or report["summary"]["retrieval_error_count"] else 0
