@@ -18,15 +18,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.22.1"
-EXPECTED_PUBLIC_REF = "0.22.1"
+EXPECTED = "0.23.0"
+EXPECTED_PUBLIC_REF = "0.23.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.22.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.22.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.23.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.23.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.22.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.23.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -323,7 +323,34 @@ FORBIDDEN_V0171_STALE_LITERALS = (
 )
 
 
+# v0.23.0: six opt-in, default-off or warning-only items and the first GitHub immutable release.
+# Rule template content did not change, so no rule stamp moves to 0.23.0.
+RELEASE_NOTE_V0230 = REPO_ROOT / "docs" / "releases" / "v0.23.0.md"
+REQUIRED_V0230_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
+REQUIRED_V0230_RELEASE_LITERALS = (
+    "--receipt-out", "--report-unsupported", "check-support", "supply-chain-audit",
+    "--render-matched", "--lexical-ngrams hangul2", "hooks/hooks.json", "checker_sha256",
+    "vault_warning_policy.py --certificate", "SHA256SUMS", "LF", "--ref v0.23.0",
+)
+
+
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_v0230_release_note_covers_the_contract(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0230.is_file())
+        release = RELEASE_NOTE_V0230.read_text(encoding="utf-8")
+        for section in REQUIRED_V0230_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0230_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.23.0.md").is_file())
+        for template in sorted(BROWSER_RULE.parent.glob("vault-*.md")):
+            with self.subTest(rule=template.name):
+                stamp = template.read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn("agentic-vault:rule engine=", stamp)
+                self.assertNotIn("engine=0.23.0", stamp)
+
     def test_v0171_context_delivery_fixes_are_wired(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0171.is_file())
         release = RELEASE_NOTE_V0171.read_text(encoding="utf-8")
