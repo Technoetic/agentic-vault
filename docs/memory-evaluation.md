@@ -107,7 +107,7 @@ fixture 측정이다. recall 행은 CI와 같은 옵션에 `--render-matched`만
 
 - 세 구성 모두 결정은 `defer_richer_ledger_typing`이다. recall_hard의 nDCG@5·recall@k(56쌍)와
   recall_advanced의 recall@k(14쌍) 잔차는 정확히 0이다. 나머지 판정 지표는 0이 아닌 쌍이
-  2~4개뿐이라 검정력 한계(최소 p 0.125~0.5)에 걸린다. 따라서 "미룬다"는 기전 효과가 없다는
+  2–4개뿐이라 검정력 한계(최소 p 0.125–0.5)에 걸린다. 따라서 "미룬다"는 기전 효과가 없다는
   증거가 아니라 현재 fixture로는 구별할 수 없다는 뜻이다.
 - 서술 지표인 stale 노출은 recall_hard top3에서 legacy 6/10, render_matched 9/10, advanced 0/10이다
   (기전 잔차 −0.9, p=0.003, 9쌍). top5에서는 6/10, 10/10, 0/10이다(−1.0, p=0.0016, 10쌍). 질의 확장이
