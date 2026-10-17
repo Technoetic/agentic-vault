@@ -9,10 +9,10 @@ Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 
 |---|---|---|
 | 출처 | `vault_provenance.py`: `derive_provenance`, `validate_provenance`, `analyze_notes` | 선택 원본·정제본 해시와 가장 낮은 신뢰를 유지. 별도 근거의 현재성을 조회하며 이름만으로 독립 검증을 인정하지 않음 |
 | 공유 상태 | `vault_state.py`: `advisory_lock`, `patch_note`, `project_handoff`, `detect_removed_blockers` | 원본 UTF-8 바이트 범위의 부분 편집, 기대 파일/config 해시, 소유자 토큰과 TTL. 협조하는 쓰기만 잠금 보호 |
-| 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음 |
+| 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함 |
 | 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존 |
 | 선언 규칙 | `vault_declarative_rules.py`: `evaluate_rules` | literal existence/substitution/occurrence 기본값. regex는 명시적 선택, 별도 프로세스 제한시간·입력 상한 |
-| 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
+| 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
 | 토큰 | `vault_token_calibration.py`: `calibrate`, `estimate`, `check_drift`, `measure_local`, `measure_counter` | 모델/세대별 측정치와 보정 해시. 명시적으로 선택할 때만 사용; 기존 hook/검색 계수 유지 |
 | 외부 전송 경고 | `vault_egress.py`: `scan_text`, `analyze_notes` | D1 정규화로 가짜 토큰·한국 식별번호 패턴 검사. 일치한 비밀값을 출력하지 않음; 자동 외부 전송 없음 |
 
@@ -34,6 +34,96 @@ deny/excluded 자료를 인라인 문자열로 바꿔 외부 전송 제한을 �
 `derive_provenance`로 이동 전 source/target 해시와 origin을 기록한다. 원문이 나중에 deny zone으로 옮겨졌다면 이후 검사에서
 그 원문을 다시 읽지 않는다. 현재성을 다시 확인할 수 없으면 unresolved로 남긴다. 출처 기록은 원문 접근 권한을 확장하지 않는다.
 검사 사이 또는 이동 직전 파일이 바뀌면 새 해시와 결과로 다시 검토한다. multi-file 해시 검사는 원자적인 파일시스템 스냅샷이 아니다.
+
+## 날조 후보·출처 뒷받침 경고 (선택)
+
+두 검사는 정밀도 방향의 관측이다. 기존 회수율 방향 검사(원문 literal이 정제본에 남았는가)와 `check` 경고는 그대로 두고,
+호출자가 명시적으로 선택할 때만 실행한다. 결과는 모두 비차단 관측(경고)이며 사실 판정·격리 권한·출처 진위 증명이 아니다.
+선택하지 않으면 기본 인자·CLI 출력·exit code가 v0.22.1과 같다. 테스트가 v0.22.1(`63b4cc9`)에서 캡처한 출력과 비교한다.
+방법은 [HaluMem](https://arxiv.org/abs/2511.03506)(기억 환각을 추출·갱신·질의응답 단계별로 측정)과
+[MemTxn](https://arxiv.org/abs/2607.27834)(갱신이 원천에 의해 뒷받침되는지 보는 경계)을 참고했다.
+방법 참고일 뿐 두 논문의 코드·데이터·수치는 포함하지 않는다. HaluMem 데이터(CC-BY-NC-ND-4.0)는 이 저장소에 없다.
+
+### 정제본에만 있는 literal: `check_compile` 역방향
+
+정제본(target)에는 있지만 선택한 원본(source) 어디에도 없는 숫자·ISO 날짜·이름 literal을 날조 후보로 나열한다.
+추출 범위·일치 규칙·파일/바이트/fact 상한은 정방향과 같다. 숫자·날짜는 추출 token끼리 비교하고, 이름은 정방향과 같은
+보수적 단어 경계로 원본 본문에서 찾는다. frontmatter는 양쪽 모두 제외한다. 호스트 지정 주장(`required_claims`)은 원본 쪽 항목이라 대상이 아니다.
+
+API는 `check_compile(vault, sources, targets, required_claims, report_unsupported=True)`다.
+CLI는 위 JSON 요청을 그대로 stdin으로 넣고 `--report-unsupported`를 더한다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_compile_quality.py --vault <볼트> --report-unsupported
+```
+
+`status`·`review_reason`·exit code(0/1/2)의 의미는 바뀌지 않는다. 역방향 결과만으로 needs_review가 되거나 원본 격리가 막히지 않는다.
+기존 필드는 그대로 두고 다음 필드만 더한다.
+
+| 필드 | 뜻 |
+|---|---|
+| `target_literals_checked` | 선택한 모든 정제본에서 뽑은 고유 `(kind, literal)` 수 |
+| `unsupported_target_literals` | 원본에 없는 literal 목록. 항목마다 `kind`(number/date/name), 정규화한 `literal`, `target_paths` |
+| `unsupported_by_kind` | 위 목록의 kind별 개수 |
+| `fabrication_candidate_rate` | 위 목록 수 ÷ `target_literals_checked`. 분모가 0이면 `null`. 이번 호출에서 선택한 파일만의 비율이며 표본 추정치가 아니다 |
+| `fabrication_scope` | 범위와 한계를 적은 고정 문자열 |
+
+### 대장 값의 출처 노트 대조: `vault_ssot.py check-support`
+
+시간 대장 행의 `value`가 같은 행 `source` 칸이 가리키는 노트 본문에 실제로 있는지 본다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md>
+```
+
+경고만 있으면 exit 0이다. 대장 경로가 deny/exclude/runtime 구역이거나 Markdown이 아니거나, 검사 중 설정·대장·출처 노트가 바뀌면
+기존 `check`와 같이 stdout 없이 stderr에 `{"error":"ssot_operation_unavailable"}`를 쓰고 exit 1이다. API는 `check_support(vault, path)`다.
+
+참조는 다음만 해석한다.
+
+- `[[이름]]`, `[[이름#제목|별칭]]`, `![[이름]]`: 허용된 노트 가운데 파일명(`.md` 제외, NFC 정규화, 대소문자 구분)이 정확히 같은 노트가 하나일 때만 해석한다. 둘 이상이면 고르지 않는다.
+- `[[폴더/이름]]`, `` `폴더/이름.md` ``, 칸 전체가 공백 없는 `.md` 경로 하나: 볼트 루트 기준 정확한 경로다. `./`·`../`로 시작하면 대장 위치 기준이다.
+- `[[#제목]]`과 대장 자신을 가리키는 링크: 대장에서 사실 표를 뺀 나머지 본문과 비교한다. 행이 자기 자신을 뒷받침하지 않게 한다.
+- `[[보고서.pdf]]`처럼 첨부로 보이는 이름은 같은 이름의 노트가 없으면 건너뛴다. URL·서술 문장·공백이 든 일반 경로는 참조로 보지 않는다.
+- deny·exclude·runtime 구역과 `.git` 안으로는 들어가지 않는다(목록·읽기·후보 표시 없음). 구역 경로를 직접 쓴 참조는 `policy`로만 표시한다.
+- symlink·reparse point·hardlink 노트와 256 KiB(대장과 같은 상한) 초과 노트는 읽지 않는다. 읽은 노트는 끝에 대장·설정과 함께 다시 확인한다.
+
+값과 노트 본문(frontmatter 제외)을 NFKC·casefold·공백 정규화해 비교한다. 쓴 그대로의 형태와, 위키링크를 대상 이름으로 바꾸고
+인라인 코드·굵게 표시를 지운 형태를 함께 본다. 노트 본문은 위키링크를 별칭으로 바꾼 형태도 본다.
+값의 처음·끝이 ASCII 영숫자인데 바로 옆에 ASCII 영숫자가 붙으면 다른 literal로 본다. 숫자 앞뒤에 `.`·`,`와 숫자가 이어져도 다른 수로 본다
+(`12`는 `125`·`1,212`·`12.5`에서 찾지 않는다). 출처 노트 중 하나라도 값을 포함하면 그 행은 뒷받침된 것으로 센다.
+
+| 경고 코드 | 뜻 | `details` |
+|---|---|---|
+| `ssot-source-unsupported` | 해석된 출처 노트 어디에도 값이 없다 | `cited`: 비교한 노트 경로 |
+| `ssot-source-unresolved` | 참조를 허용된 노트 하나로 해석하거나 읽지 못했다 | `reference`(대장에 쓴 그대로), `reason`, 모호하면 `candidate_count`·`candidates`(최대 16개) |
+
+`reason`은 `not_found`, `ambiguous`, `policy`(deny/exclude/runtime 구역·symlink 경로), `size_limit`, `unsafe_file`(hardlink 등 단일 정규 파일 아님),
+`unreadable`(UTF-8 아님·읽는 중 변경), `invalid_reference`, `inventory_incomplete`, `source_limit` 중 하나다.
+나머지 출력 필드는 `path`, `source_sha256`(대장), `rows_checked`·`rows_supported`·`rows_unsupported`·`rows_unresolved`·`rows_skipped`,
+`cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
+값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
+그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
+상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.
+앞의 넷을 넘으면 `incomplete`에 이유를 남기고, 경고 수 상한은 기존 `check`처럼 오류로 끝낸다.
+
+### 경고 우선 원칙
+
+두 검사는 경고로만 시작한다. 차단(fail-closed) 승격은 실제 무해 자료의 benign replay에서 오탐 0건을 확인하고 사람이 승인한 뒤에만 검토한다.
+이번 버전의 두 경고 코드는 lint `WARNING_CODES`·`PROMOTABLE_CODES`에 없어 `warning_policy.levels`나 인증서로 승격할 수 없다.
+`fabrication_candidate_rate`도 차단 기준이 아니다. 경고 수나 비율만 보고 정제본·대장을 고치거나 원본을 옮기지 않는다.
+
+### 한계
+
+- literal은 진실이 아니다. 원본에 있는 값이라도 맞는 사실이라는 보장이 없고, 원본에 없는 값이 곧 틀린 값도 아니다.
+- 바꿔 쓰기, 단위·형식 차이(`125,000`과 `125000`, `2026-10-07`과 `2026.10.07`, `12개월`과 `1년`)는 놓침과 오탐을 모두 만든다.
+- 이름은 구조화 label·위키 대상만 다루는 literal 비교이며 언어학적 NER이 아니다. 조사가 붙은 이름(`홍길동은`)은 다른 literal로 보아 오탐이 되고,
+  정제본의 개념 위키링크도 원문에 없는 이름으로 잡히기 쉽다.
+- `check-support`는 값이 출처 본문 어딘가에 있는지만 본다. 같은 주체·관계·기간에 대한 서술인지, 부정문인지는 판단하지 않는다.
+  행의 상태(확정·기각 등)와 관계없이 모든 행을 같은 방식으로 본다.
+- frontmatter·첨부(PDF 등)·deny 구역 원문과는 비교하지 않는다. 값과 노트가 서로 다른 별칭·표기를 쓰면 놓친다.
+- 해석은 파일명 정확 일치다. Obsidian의 대소문자 무시·별칭 해석과 결과가 다를 수 있다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-17 기준). 근거는 단위 테스트의 합성 자료뿐이다.
 
 ## 수집과 경고
 
