@@ -120,11 +120,17 @@ class AnnotateOnlyRetrievalTests(unittest.TestCase):
             annotated["matches"], 1500, retrieval._legacy._diagnostics()))
 
     def test_annotate_only_reaches_graph_and_candidates_like_an_unfiltered_corpus(self):
-        self.write("20-knowledge/seed.md", "rollback seed [[expired]]\n")
+        # The target never matches the query, so only a resolved link can return it.
+        self.write("20-knowledge/seed.md", "rollback seed [[retired-target]]\n")
+        self.write("20-knowledge/retired-target.md", "---\nvalid_until: 2025-01-01\n---\nLINK_ONLY_EVIDENCE\n")
         excluded = self.run_retrieval(as_of=self.AS_OF, expand_links=1)
         annotated = self.run_retrieval(as_of=self.AS_OF, expand_links=1, temporal_filter="annotate_only")
-        self.assertNotIn("20-knowledge/expired.md", [m["path"] for m in excluded["matches"]])
-        self.assertIn("20-knowledge/expired.md", [m["path"] for m in annotated["matches"]])
+        self.assertNotIn("20-knowledge/retired-target.md", [m["path"] for m in excluded["matches"]])
+        self.assertGreaterEqual(excluded["diagnostics"]["graph_unresolved"], 1)
+        target = next(m for m in annotated["matches"] if m["path"] == "20-knowledge/retired-target.md")
+        self.assertEqual(target["graph"][0]["origin_path"], "20-knowledge/seed.md")
+        self.assertEqual(target["temporal"]["status"], "expired")
+        self.assertIn("LINK_ONLY_EVIDENCE", annotated["context"])
         external = [{"path": "20-knowledge/future.md", "rank": 1}]
         self.assertEqual(self.run_retrieval(as_of=self.AS_OF, external_candidates=external)["diagnostics"]["external_rejected"], 1)
         self.assertEqual(self.run_retrieval(as_of=self.AS_OF, external_candidates=external,

@@ -284,13 +284,14 @@ def _ratio(count: int, total: int):
 
 
 RENDER_MATCHED_ANSWER_REASON = (
-    "Answer metrics are not compared. Synthetic controls, answerer callbacks and replayed observations "
-    "receive only question, public options and evidence, where evidence is the rendered context "
-    "('[Source: path:line]' labels and snippet lines). Temporal annotations stay on matches and are never "
-    "rendered into that context. This evaluator also passes no as_of, so as-of and supersession exclusion "
-    "never act, and withdrawal is deny scope without an annotation, so it has no render-matched counterpart "
-    "and stays on in both arms. The arm can differ only through retrieved evidence, compared here. Replays "
-    "are bound to the evidence hash; scoring other evidence would need new model observations, never made here.")
+    "Answer metrics are not compared. Synthetic controls and answerer callbacks receive only question, "
+    "public options and evidence, where evidence is the rendered context ('[Source: path:line]' labels and "
+    "snippet lines); replayed observations are bound to the evidence hash. Temporal annotations stay on "
+    "matches and are never rendered into that context. This evaluator also passes no as_of, so as-of and "
+    "supersession exclusion never act, and withdrawal is deny scope without an annotation, so it has no "
+    "render-matched counterpart and stays on in both arms. The arm can differ only through retrieved "
+    "evidence, compared here; re-scoring answers on other evidence would need new model observations, "
+    "never made here.")
 # (metric, paired population, higher_is_better); values come from _evidence().
 RENDER_MATCHED_EVIDENCE_METRICS = (
     ("expected_source_recall", "answerable cases", True),
