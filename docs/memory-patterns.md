@@ -60,12 +60,15 @@ BM25는 어휘 검색이며, `hybrid`는 어휘 점수/BM25/명시적 외부 후
   규칙으로 나누고 최대 128개 n-gram만 쓴다. 초과분은 diagnostics에 센다.
 - 이 순위는 `rrf_bm25_hangul2`로 RRF(k=60)에 더해진다. `bm25` 백엔드는 채널이 켜지면 원래 BM25
   점수 대신 RRF 합으로 정렬하고, `hybrid`는 기존 RRF 합에 더한다.
-- `lexical` 백엔드에는 BM25 순위가 없어 채널을 무시한다. 결과는 옵션이 없을 때와 같고,
-  diagnostics의 `lexical_ngram_channel.status`가 `ignored_lexical_backend`가 된다. 텍스트 출력은
-  stderr에 안내를 출력한다.
-- bigram 순위로만 찾은 노트(`bm25`에서 정확한 단어 토큰 일치가 없거나 `hybrid`에서 어휘 일치가
-  없는 노트)는 기존 BM25 근거 규칙을 bigram 토큰으로 적용한 줄을 인용한다. 나머지 근거 줄은
-  기존과 같다.
+- `lexical` 백엔드에는 BM25 순위가 없어 채널을 무시한다. 검색 결과(반환 경로·context)는 옵션이
+  없을 때와 같다. 다만 옵션을 지정하면 다른 고급 옵션이 없어도 출력이 고급 모드로 바뀌어
+  diagnostics와 match 필드가 달라지고, diagnostics의 `lexical_ngram_channel.status`가
+  `ignored_lexical_backend`가 된다. `vault_recall.py` 텍스트 출력과 `evaluate_recall.py`는 stderr에
+  안내를 출력한다(종료 코드는 바뀌지 않는다).
+- bigram 점수는 있지만 활성 백엔드의 근거 줄이 없는 노트(`bm25`에서 정확한 단어 토큰 BM25 점수가
+  없거나 `hybrid`에서 어휘 일치가 없는 노트)는 기존 BM25 근거 규칙을 bigram 토큰으로 적용한 줄을
+  인용한다. 이런 노트에도 외부 후보 순위가 함께 있을 수 있어 bigram 순위로만 찾은 노트와 같지 않다.
+  나머지 근거 줄은 기존과 같다.
 - 모드를 지정한 경우에만 diagnostics에 `lexical_ngrams`·`lexical_ngram_channel`(상태·RRF 키·
   사용/생략 n-gram 수·후보 수·`in_memory_per_call`)이 생기고 `ranking` 문자열에 모드가 붙는다.
   인덱스나 캐시는 저장하지 않는다. deny/exclude·시간 조건·출처 재확인은 기존 경로를 따른다.

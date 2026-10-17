@@ -459,6 +459,23 @@ class EvaluationPlumbingTests(unittest.TestCase):
         self.assertTrue(all(row["retrieval_options"]["lexical_ngrams"] == "hangul2" for row in report["per_query"]))
         self.assertTrue(all(row["diagnostics"]["lexical_ngram_channel"]["status"] == "active" for row in report["per_query"]))
 
+    def test_all_lexical_backend_prints_a_note_without_changing_the_exit_code(self):
+        plain_code, plain_stdout, plain_stderr = self.main("--advanced")
+        code, stdout, stderr = self.main("--advanced", "--lexical-ngrams", "hangul2")
+        report = json.loads(stdout)
+        self.assertTrue(all(row["diagnostics"]["lexical_ngram_channel"]["status"] == "ignored_lexical_backend"
+                            for row in report["per_query"]))
+        self.assertEqual(stderr.strip(), evaluator.LEXICAL_NGRAMS_IGNORED_NOTE)
+        self.assertEqual(plain_stderr, "")
+        self.assertEqual((code, report["recall_at_3"]), (plain_code, json.loads(plain_stdout)["recall_at_3"]))
+        _, _, compared = self.main("--compare", "--lexical-ngrams", "hangul2")
+        self.assertEqual(compared.strip(), evaluator.LEXICAL_NGRAMS_IGNORED_NOTE)
+        for args in (("--advanced", "--backend", "bm25", "--lexical-ngrams", "hangul2"),
+                     ("--compare", "--backend", "hybrid", "--lexical-ngrams", "hangul2")):
+            with self.subTest(args=args):
+                _, _, stderr = self.main(*args)
+                self.assertNotIn("recall evaluation note", stderr)
+
     def test_flag_reaches_only_advanced_retrieval_calls(self):
         module = evaluator._load_recall_module()
         advanced_calls, legacy_calls = [], []

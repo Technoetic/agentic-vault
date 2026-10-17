@@ -503,6 +503,17 @@ def compare_render_matched(fixture: Path, *, max_tokens: int = 1500, **options) 
                                max_tokens=max_tokens, **options)
 
 
+LEXICAL_NGRAMS_IGNORED_NOTE = (
+    "recall evaluation note (non-blocking): --lexical-ngrams had no effect because every query "
+    "used the lexical backend, which has no BM25 rank; add --backend bm25 or hybrid")
+
+
+def lexical_ngrams_ignored(report: dict) -> bool:
+    """True when every advanced-arm query ran the lexical backend, which ignores the n-gram rank."""
+    rows = report.get('improved', report).get('per_query', [])
+    return bool(rows) and all(row['retrieval_options'].get('backend', 'lexical') == 'lexical' for row in rows)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -566,6 +577,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name, (observed, maximum) in optional_gates.items() if maximum is not None
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if args.lexical_ngrams is not None and lexical_ngrams_ignored(report):
+        print(LEXICAL_NGRAMS_IGNORED_NOTE, file=sys.stderr)
     for warning in report.get('temporal_decomposition', {}).get('warnings', ()):
         print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
     passed = (

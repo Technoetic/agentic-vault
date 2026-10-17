@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
@@ -166,6 +167,119 @@ class AnnotateOnlyRetrievalTests(unittest.TestCase):
                     self.assertEqual(result["diagnostics"]["files_read"], 0)
                     self.assertEqual(result["matches"], [])
                     self.assertNotIn("rollback", json.dumps(result))
+
+
+class LexicalNgramsWithTemporalFilterTests(unittest.TestCase):
+    """lexical_ngrams and temporal_filter compose; each is validated and reported on its own."""
+    AS_OF = "2025-06-01"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name) / "vault"
+        self.write(self.vault, "00-meta/vault-config.json", "{}")
+        self.write(self.vault, "20-knowledge/old.md", "---\nvalid_until: 2025-01-01\n---\n세션 종료 때 핸드오프 문서를 남긴다.\n")
+        self.write(self.vault, "20-knowledge/new.md", "---\nvalid_from: 2025-01-01\n---\n핸드오프 절차를 새로 정리했다.\n")
+
+    @staticmethod
+    def write(root: Path, rel: str, text: str) -> None:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def run_retrieval(self, **options):
+        return retrieval.retrieve(self.vault, "핸드오프를", **{"limit": 10, "backend": "bm25", "as_of": self.AS_OF, **options})
+
+    def test_both_options_apply_and_each_is_reported_only_when_requested(self):
+        excluded = self.run_retrieval(lexical_ngrams="hangul2")
+        annotated = self.run_retrieval(lexical_ngrams="hangul2", temporal_filter="annotate_only")
+        self.assertEqual([m["path"] for m in excluded["matches"]], ["20-knowledge/new.md"])
+        self.assertEqual(sorted(m["path"] for m in annotated["matches"]), ["20-knowledge/new.md", "20-knowledge/old.md"])
+        for result in (excluded, annotated):
+            self.assertEqual(result["diagnostics"]["lexical_ngram_channel"]["status"], "active")
+            self.assertTrue(all(m["ranks"]["bm25_hangul2"] for m in result["matches"]))
+        self.assertNotIn("temporal_filter", excluded["diagnostics"])
+        self.assertEqual(excluded["diagnostics"]["temporal_rejected"], 1)
+        self.assertEqual((annotated["diagnostics"]["temporal_filter"], annotated["diagnostics"]["temporal_unfiltered"],
+                          annotated["diagnostics"]["temporal_rejected"]), ("annotate_only", 1, 0))
+        # Without the bigram channel the particle-attached query has no exact BM25 token.
+        plain = self.run_retrieval(temporal_filter="annotate_only")
+        self.assertNotIn("lexical_ngrams", plain["diagnostics"])
+        self.assertEqual(plain["matches"], [])
+
+    def test_an_invalid_value_of_either_option_fails_before_note_reads(self):
+        for options in ({"lexical_ngrams": "hangul3"}, {"temporal_filter": "drop"},
+                        {"lexical_ngrams": "hangul3", "temporal_filter": "annotate_only"},
+                        {"lexical_ngrams": "hangul2", "temporal_filter": "drop"}):
+            for base in ({}, {"backend": "lexical", "as_of": None}):
+                with self.subTest(options=options, base=base):
+                    result = self.run_retrieval(**{**base, **options})
+                    self.assertEqual(result["diagnostics"]["status"], "invalid_options")
+                    self.assertEqual(result["diagnostics"]["files_read"], 0)
+                    self.assertNotIn("temporal_filter", result["diagnostics"])
+                    self.assertNotIn("lexical_ngrams", result["diagnostics"])
+                    self.assertNotIn("핸드오프 절차", json.dumps(result, ensure_ascii=False))
+
+    def test_the_legacy_fast_path_needs_both_defaults(self):
+        legacy = retrieval._legacy._legacy_recall(self.vault, "핸드오프", 10)
+        self.assertEqual(len(legacy["matches"]), 2)
+        for options in ({}, {"lexical_ngrams": None}, {"temporal_filter": "exclude"},
+                        {"lexical_ngrams": None, "temporal_filter": "exclude"}):
+            with self.subTest(options=options):
+                self.assertEqual(retrieval.retrieve(self.vault, "핸드오프", limit=10, **options), legacy)
+        for options in ({"lexical_ngrams": "hangul2"}, {"temporal_filter": "annotate_only"}):
+            with self.subTest(options=options):
+                result = retrieval.retrieve(self.vault, "핸드오프", limit=10, **options)
+                self.assertEqual(result["diagnostics"]["mode"], "advanced")
+                self.assertEqual([m["path"] for m in result["matches"]], [m["path"] for m in legacy["matches"]])
+                self.assertEqual(result["context"], legacy["context"])
+
+    def test_the_evaluator_passes_lexical_ngrams_to_every_advanced_arm(self):
+        fixture = Path(self.tmp.name) / "fixture"
+        self.write(fixture, "vault/00-meta/vault-config.json", "{}")
+        self.write(fixture, "vault/00-meta/query-map.txt", "핸드오프를 => 핸드오프 절차\n")
+        self.write(fixture, "vault/note.md", "---\nvalid_until: 2025-01-01\n---\n세션 종료 때 핸드오프 문서를 남긴다.\n")
+        queries = [{"id": str(index), "language": "ko", "scenario": "particles", "query": "핸드오프를",
+                    "as_of": self.AS_OF, "expected_paths": ["note.md"], "relevance": {"note.md": 3}}
+                   for index in range(12)]
+        self.write(fixture, "queries.json", json.dumps({"queries": queries}))
+        module = recall_evaluator._load_recall_module()
+        calls = {"advanced": [], "legacy": []}
+        original_retrieve, original_recall = module._advanced_retrieval.retrieve, module.recall
+
+        def advanced(vault, query, **options):
+            calls["advanced"].append(options)
+            return original_retrieve(vault, query, **options)
+
+        def legacy(vault, query, **options):
+            calls["legacy"].append(options)
+            return original_recall(vault, query, **options)
+
+        with mock.patch.object(recall_evaluator, "_load_recall_module", return_value=module), \
+             mock.patch.object(module._advanced_retrieval, "retrieve", side_effect=advanced), \
+             mock.patch.object(module, "recall", side_effect=legacy):
+            report = recall_evaluator.compare_render_matched(
+                fixture, top_k=3, backend="bm25", lexical_ngrams="hangul2",
+                expand_query=True, query_mapping="00-meta/query-map.txt")
+        self.assertEqual(len(calls["legacy"]), 12)
+        self.assertTrue(all(set(call) == {"limit", "max_tokens"} for call in calls["legacy"]))
+        # compare() runs improved then the expansion ablation; the control arm runs last.
+        self.assertEqual(len(calls["advanced"]), 36)
+        improved, ablation, control = (calls["advanced"][index * 12:(index + 1) * 12] for index in range(3))
+        for base, without_expansion, matched in zip(improved, ablation, control):
+            self.assertEqual((base["lexical_ngrams"], base["expand_query"], base["as_of"]), ("hangul2", True, self.AS_OF))
+            self.assertNotIn("temporal_filter", base)
+            self.assertEqual(without_expansion, {key: value for key, value in base.items()
+                                                 if key not in ("expand_query", "query_mapping")})
+            self.assertEqual(matched, {**base, "temporal_filter": "annotate_only"})
+        for arm in ("improved", "expansion_ablation", "render_matched"):
+            with self.subTest(arm=arm):
+                rows = report[arm]["per_query"]
+                self.assertEqual(report[arm]["evaluation_errors"], [])
+                self.assertTrue(all(row["diagnostics"]["lexical_ngram_channel"]["status"] == "active" for row in rows))
+        self.assertTrue(all(row["retrieved_paths"] == [] for row in report["improved"]["per_query"]))
+        self.assertTrue(all(row["retrieved_paths"] == ["note.md"] and row["diagnostics"]["temporal_unfiltered"] == 1
+                            for row in report["render_matched"]["per_query"]))
 
 
 def _row(query_id, *, ndcg=None, recall=None, stale=None, exposed=None, no_answer=None):

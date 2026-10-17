@@ -22,9 +22,11 @@ output and every tests.yml command and gate are unchanged. See
   backends. With the channel active, `bm25` ranks by the RRF sum instead of the raw BM25
   score. The `lexical` backend has no BM25 rank, so it ignores the channel; diagnostics say
   `ignored_lexical_backend` and `vault_recall.py` text output prints a stderr note.
-- A candidate found only by the bigram rank (no exact-token BM25 hit under `bm25`, no
-  lexical hit under `hybrid`) cites the line chosen by the existing BM25 passage rule with
-  bigram tokens. All other evidence lines are unchanged.
+- A candidate with a bigram BM25 score but no evidence line from the active backend (no
+  exact-token BM25 score under `bm25`, no lexical match under `hybrid`) cites the line chosen
+  by the existing BM25 passage rule with bigram tokens. Such a candidate may also hold an
+  external candidate rank, so it is not necessarily found by the bigram rank alone. All other
+  evidence lines are unchanged.
 - Diagnostics gain `lexical_ngrams` and `lexical_ngram_channel` (status, RRF key,
   tokenizer, n-grams used and omitted, candidate count, `in_memory_per_call`), and the
   ranking string names the mode, only when a mode is requested. Nothing is persisted.

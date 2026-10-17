@@ -553,7 +553,10 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         if backend == "bm25" and rel in bm25:
             _bm25_passage(doc, match, phrase, query_terms)
         elif rel in ngram_scores and (backend == "bm25" or rel not in lexical_matches):
-            # Only the bigram rank found this note: cite a line holding those bigrams.
+            # The bigram view scored this note and the active backend has no evidence line
+            # for it: under bm25 no word-token BM25 score (the branch above), under hybrid no
+            # lexical match (a word-token BM25 hit implies one). It may still hold an
+            # external candidate rank, so cite a line holding those bigrams.
             _bm25_passage(doc, match, phrase, ngram_terms, tokenize=_hangul2_tokens)
         contributions = {"lexical": lexical_scores.get(rel, 0), "bm25": bm25.get(rel, 0.0), "rrf_lexical": 0.0, "rrf_bm25": 0.0, "rrf_external": 0.0, "graph": 0.0}
         ranks = {"lexical": lexical_ranks.get(rel), "bm25": bm25_ranks.get(rel), "external": external_ranks.get(rel)}

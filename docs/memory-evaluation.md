@@ -50,13 +50,22 @@ python scripts/evaluate_korean_memory.py --render-matched
   context가 같지만, 다른 고급 옵션이 없을 때 `"annotate_only"`를 지정하면 legacy 출력 대신 고급 출력
   (diagnostics·match 필드)이 나오고 diagnostics에 `temporal_filter` 표지가 붙는다.
   평가용 대조군이며 현재성 판단에 쓰는 옵션이 아니다.
+- `annotate_only`가 남기는 출처는 명시적 `as_of`가 있을 때 기본값이 빼는 `TEMPORAL_REJECTED_STATUSES`
+  다섯 상태뿐이다. `invalid`(시간 메타데이터 오류: 시간 키의 중복·들여쓰기·따옴표·대소문자 변형·병합 키,
+  해석할 수 없는 값이나 날짜, 128줄 안에 닫히지 않은 frontmatter, `valid_from` ≥ `valid_until`),
+  `not_yet_valid`(`as_of` < `valid_from`), `expired`(`as_of` ≥ `valid_until`), `supersession_unknown`
+  (`superseded_by`의 후속 노트를 하나로 특정할 수 없거나, 후속 노트에 `valid_from`이 없거나 메타데이터
+  오류가 있거나 자기 자신이거나, 파일 목록 탐색이 불완전함), `superseded`(`as_of` ≥ 후속 노트의
+  `valid_from`)이다. 이 출처는 diagnostics의 `temporal_unfiltered`로 세고 `temporal_rejected`는 0으로 남는다.
+  `within_explicit_bounds`·`unknown`은 두 값 모두에서 남는다. `as_of`가 없으면 상태는 `invalid`·
+  `not_evaluated`·`unknown`뿐이고 `invalid`도 빼지 않으므로 두 값이 남기는 출처가 같다.
 - `display_effect = render_matched − legacy`, `mechanism_residual = advanced − render_matched`이다.
   같은 질문 쌍에서 두 평균의 합은 겉보기 이득(`advanced − legacy`)과 같다. 각 값에 기존
   `paired_randomization`(부호 무작위화, 양측, seed 1707, 10,000회)의 p값을 붙인다.
 - 판정 지표는 nDCG@5, recall@k, stale top-1 비율, 답 없음 오탐 비율이다. 뒤의 두 지표는 낮을수록
   좋으므로 음수 잔차가 이득이다. 반환 순위 전체의 stale 노출은 결과를 본 뒤 추가한 서술 지표라
   판정에 넣지 않는다.
-- 0이 아닌 쌍이 k개이면 정확한 부호 검정의 최소 p는 2^(1−k)다. k가 5 이하이면 효과 크기와
+- 0이 아닌 쌍이 k개이면 정확한 부호 검정의 최소 p는 2^(1−k)다. k가 1~5이면 효과 크기와
   상관없이 p<0.05가 될 수 없어 `power_limited_metrics`와 경고로 표시한다.
 - 새 팔과 경고는 관측 기록이다. 게이트와 종료 코드는 이전처럼 `improved`만 본다.
 
@@ -66,7 +75,8 @@ python scripts/evaluate_korean_memory.py --render-matched
 
 이 채점기는 반환 경로 순서와 렌더링된 context만 읽는다. 시간 주석은 match에 붙지만 context에는
 렌더링되지 않고 채점에도 쓰이지 않는다. 그래서 여기의 `display_effect`는 읽는 모델이 보는 표시의
-효과가 아니라, 시간 제외를 뺀 나머지 고급 기능(백엔드·링크 확장·질의 확장·후보 sidecar)의 효과다.
+효과가 아니라, 시간 제외를 뺀 나머지 고급 기능(백엔드·링크 확장·질의 확장·후보 sidecar 등 고급 경로의
+나머지 차이)의 효과다.
 
 한국어 구조화 답변 평가는 근거 지표만 비교한다. 합성 대조군과 답변 콜백이 받는 입력은
 질문·공개 옵션·렌더링된 근거뿐이고, 시간 주석은 그 근거에 들어가지 않는다. 이 평가는 `as_of`를
