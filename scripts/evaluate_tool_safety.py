@@ -6,6 +6,8 @@ only opt-in inference transport is loopback OpenAI-compatible chat completions.
 Tools read built-in invented documents or append to a Python list; none can read
 a real vault, execute a command, browse, or send a real message. Opt-in diagnostics
 (--receipt-out) add failure subtypes, bounded assistant text and a server-props record.
+Opt-in measurement conditions (--no-prompt-cache, --slot-snapshots) record request fields
+and server load around each episode; they do not make inference deterministic.
 """
 from __future__ import annotations
 
@@ -160,6 +162,10 @@ class LocalChatTransport:
     def probe_props(self, **bounds):
         """Opt-in diagnostics only: fail-soft GET /props on this endpoint's own origin."""
         return probe_server_props(self.endpoint, self._api_key, **bounds)
+
+    def probe_slots(self, **bounds):
+        """Opt-in measurement only: fail-soft GET /slots on this endpoint's own origin."""
+        return probe_server_slots(self.endpoint, self._api_key, **bounds)
 
     def __call__(self, payload, *, timeout_seconds, max_response_bytes):
         body = _json_bytes({**payload, 'model': self.model})
@@ -378,10 +384,14 @@ def _bounded_request(transport, payload, *, timeout_seconds, max_response_bytes,
 
 _PROPS_TIMEOUT_SECONDS = 5.0
 _PROPS_MAX_BYTES = 262144
+# Opt-in GET /slots snapshots reuse the /props probe's origin rule, time and byte limits.
+_SLOTS_TIMEOUT_SECONDS = _PROPS_TIMEOUT_SECONDS
+_SLOTS_MAX_BYTES = _PROPS_MAX_BYTES
+_SLOTS_MAX_ENTRIES = 4096
 
 
-def _props_url(endpoint):
-    """The chat endpoint's own literal-loopback origin, or None (refused, no request)."""
+def _origin_url(endpoint, path):
+    """``path`` on the chat endpoint's own literal-loopback origin, or None (refused, no request)."""
     if not isinstance(endpoint, str):
         return None
     try:
@@ -394,10 +404,19 @@ def _props_url(endpoint):
             or url.query or url.fragment or url.path != '/v1/chat/completions'
             or (port is not None and port == 0)):
         return None
-    return urllib.parse.urlunsplit((url.scheme, url.netloc, '/props', '', ''))
+    return urllib.parse.urlunsplit((url.scheme, url.netloc, path, '', ''))
 
 
-def _loopback_get_json(url, api_key, *, timeout_seconds, max_response_bytes):
+def _props_url(endpoint):
+    """The chat endpoint's own literal-loopback origin, or None (refused, no request)."""
+    return _origin_url(endpoint, '/props')
+
+
+def _slots_url(endpoint):
+    return _origin_url(endpoint, '/slots')
+
+
+def _loopback_get_json(url, api_key, *, timeout_seconds, max_response_bytes, label='props'):
     """GET under the chat transport's policy: no proxy, redirect or retry; bytes capped."""
     headers = {'Accept': 'application/json'}
     if api_key is not None:
@@ -414,14 +433,14 @@ def _loopback_get_json(url, api_key, *, timeout_seconds, max_response_bytes):
     except (TimeoutError, OSError, urllib.error.URLError):
         raise ModelError('transport_error') from None
     if len(raw) > max_response_bytes:
-        raise ModelError('props_bytes_exceeded')
+        raise ModelError(label + '_bytes_exceeded')
     try:
-        props = _sanitize_credentials(_strict_json(raw), api_key)
-        if len(_json_bytes(props)) > max_response_bytes:
-            raise ModelError('props_bytes_exceeded')
-        return props
+        value = _sanitize_credentials(_strict_json(raw), api_key)
+        if len(_json_bytes(value)) > max_response_bytes:
+            raise ModelError(label + '_bytes_exceeded')
+        return value
     except (ValueError, TypeError, UnicodeError, RecursionError):
-        raise ModelError('invalid_props_json') from None
+        raise ModelError('invalid_' + label + '_json') from None
 
 
 def _label(value, limit=256):
@@ -482,6 +501,107 @@ def probe_server_props(endpoint, api_key=None, *, timeout_seconds=_PROPS_TIMEOUT
     if all(value is None for value in record.values()):
         return None, 'props_fields_absent'
     return record, None
+
+
+def probe_server_slots(endpoint, api_key=None, *, timeout_seconds=_SLOTS_TIMEOUT_SECONDS,
+                       max_response_bytes=_SLOTS_MAX_BYTES):
+    """Fail-soft load snapshot from a llama.cpp-style GET /slots: (record, reason).
+
+    Same origin, proxy, redirect, header, time and byte rules as probe_server_props.
+    llama-server serves a JSON array with one object per slot; only the slot count and the
+    number whose boolean ``is_processing`` is true are kept, never slot parameters, prompt or
+    task fields, headers or the key. A disabled or absent endpoint is a reason code, not an error.
+    """
+    url = _slots_url(endpoint)
+    if url is None:
+        return None, 'non_loopback_endpoint'
+    if api_key is not None and (not isinstance(api_key, str) or not api_key
+                                or any(ord(char) < 32 for char in api_key)):
+        return None, 'invalid_api_key'
+    def fetch(_payload, *, timeout_seconds, max_response_bytes):
+        return _loopback_get_json(url, api_key, timeout_seconds=timeout_seconds,
+                                  max_response_bytes=max_response_bytes, label='slots')
+    try:
+        slots = _bounded_request(fetch, None, timeout_seconds=timeout_seconds,
+                                 max_response_bytes=max_response_bytes, timeout_code='slots_timeout')
+    except ModelError as error:
+        return None, str(error)
+    if not isinstance(slots, list):
+        return None, 'slots_not_array'
+    if (not 1 <= len(slots) <= _SLOTS_MAX_ENTRIES
+            or any(not isinstance(slot, dict) or type(slot.get('is_processing')) is not bool
+                   for slot in slots)):
+        return None, 'slots_fields_absent'
+    return {'total_slots': len(slots), 'busy_slots': sum(slot['is_processing'] for slot in slots)}, None
+
+
+# An episode that stopped on these may have left its own last request running on the server.
+_MAY_LEAVE_REQUEST_RUNNING = ('request_timeout', 'episode_timeout', 'transport_error')
+
+
+def _slot_snapshot(backend, transport):
+    """Opt-in (record, reason); scripted controls and transports without a probe make no request."""
+    if backend == 'scripted-control':
+        return None, 'scripted_control'
+    probe = getattr(transport, 'probe_slots', None)
+    if not callable(probe):
+        return None, 'slots_probe_unavailable'
+    try:
+        record, reason = probe()
+    except Exception:
+        # A measurement must never end or change the episode.
+        return None, 'slots_probe_error'
+    if record is None:
+        return None, reason if _label(reason, 64) is not None else 'slots_probe_error'
+    total = record.get('total_slots') if isinstance(record, dict) else None
+    busy = record.get('busy_slots') if isinstance(record, dict) else None
+    if (type(total) is not int or type(busy) is not int
+            or not 0 <= busy <= total or not 1 <= total <= _SLOTS_MAX_ENTRIES):
+        return None, 'slots_probe_error'
+    return {'total_slots': total, 'busy_slots': busy}, None
+
+
+def summarize_slot_activity(episodes):
+    """Episodes that started or ended while another slot was busy, from opt-in snapshots.
+
+    Snapshots are point samples outside each episode. Before an episode every busy slot is
+    another request (possibly an earlier episode's abandoned one). After a time or transport
+    stop one busy slot may be this episode's own request, so only the excess counts there and a
+    single busy slot is reported as ambiguous. A missing snapshot is counted, never guessed.
+    """
+    result = {'episodes': len(episodes), 'episodes_with_both_snapshots': 0,
+              'started_with_other_busy_slot': 0, 'ended_with_other_busy_slot': 0,
+              'started_or_ended_with_other_busy_slot': 0, 'ended_busy_possibly_own_request': 0,
+              'snapshots_unavailable': {'before': 0, 'after': 0}, 'unavailable_reasons': {}}
+    for row in episodes:
+        slots = row['server_slots']
+        for side in ('before', 'after'):
+            if slots[side] is None:
+                result['snapshots_unavailable'][side] += 1
+                reason = slots[side + '_reason']
+                result['unavailable_reasons'][reason] = result['unavailable_reasons'].get(reason, 0) + 1
+        before, after = slots['before'], slots['after']
+        result['episodes_with_both_snapshots'] += before is not None and after is not None
+        own = 1 if slots['own_request_may_be_running_after'] else 0
+        started = before is not None and before['busy_slots'] > 0
+        ended = after is not None and after['busy_slots'] - own > 0
+        result['started_with_other_busy_slot'] += started
+        result['ended_with_other_busy_slot'] += ended
+        result['started_or_ended_with_other_busy_slot'] += started or ended
+        result['ended_busy_possibly_own_request'] += after is not None and own == 1 and after['busy_slots'] == 1
+    return result
+
+
+def measurement_conditions(*, no_prompt_cache=False, slot_snapshots=False):
+    """Opt-in run record of extra request fields and load snapshots; never a determinism claim."""
+    return {'schema_version': 1,
+            'request_fields': {'cache_prompt': False} if no_prompt_cache else {},
+            'slot_snapshots': ({'timing': 'before and after each episode, outside its time budget',
+                                'max_requests_per_episode': 2, 'timeout_seconds': _SLOTS_TIMEOUT_SECONDS,
+                                'max_response_bytes': _SLOTS_MAX_BYTES} if slot_snapshots else None),
+            'determinism': ('Not guaranteed. These fields record conditions only: batch-invariant kernels '
+                            'are neither requested nor verified, snapshots are point samples, and other '
+                            'requests can start or stop between them.')}
 
 
 class ScriptedControl:
@@ -624,11 +744,12 @@ def _diagnostics_contract():
 
 def run_episode(episode_id, *, transport=None, backend='scripted-control', control='safe', limits=None,
                 diagnostics=False, system_language='en', tool_language='en', prompt_variant='canonical',
-                seed=None, capture_responses=False):
+                seed=None, capture_responses=False, no_prompt_cache=False, slot_snapshots=False):
     if (system_language not in ('en', 'ko') or tool_language not in ('en', 'ko')
             or prompt_variant not in ('canonical', 'literal-identifiers')
             or (seed is not None and (type(seed) is not int or not 0 <= seed < 2**31))
-            or type(capture_responses) is not bool):
+            or type(capture_responses) is not bool or type(no_prompt_cache) is not bool
+            or type(slot_snapshots) is not bool):
         raise ValueError('invalid_episode_condition')
     if backend not in ('scripted-control', 'local-model'):
         raise ValueError('invalid_backend')
@@ -650,6 +771,9 @@ def run_episode(episode_id, *, transport=None, backend='scripted-control', contr
     observed = [] if diagnostics else None
     raw_responses = [] if capture_responses else None
     text_budget = _TEXT_EPISODE_BYTES
+    if slot_snapshots:
+        # Opt-in load sample before the first request, outside the episode's time budget.
+        slots_before, slots_before_reason = _slot_snapshot(backend, transport)
     started = time.monotonic()
     deadline = started + limits.episode_timeout_seconds
     try:
@@ -667,6 +791,9 @@ def run_episode(episode_id, *, transport=None, backend='scripted-control', contr
                        'chat_template_kwargs': {'enable_thinking': False}}
             if seed is not None:
                 payload['seed'] = seed
+            if no_prompt_cache:
+                # llama-server request option, appended last; the default payload never has it.
+                payload['cache_prompt'] = False
             request_bytes = _json_bytes(payload)
             if len(request_bytes) > limits.max_request_bytes:
                 raise ModelError('request_bytes_exceeded')
@@ -746,10 +873,18 @@ def run_episode(episode_id, *, transport=None, backend='scripted-control', contr
     if raw_responses is not None:
         row['raw_responses'] = raw_responses
     if (system_language != 'en' or tool_language != 'en' or prompt_variant != 'canonical'
-            or seed is not None):
+            or seed is not None or no_prompt_cache):
         row['evaluation_conditions'] = {'request_language': scenario['language'],
                                         'system_language': system_language, 'tool_language': tool_language,
                                         'prompt_variant': prompt_variant, 'seed': seed}
+        if no_prompt_cache:
+            row['evaluation_conditions']['cache_prompt'] = False
+    if slot_snapshots:
+        # After the elapsed time is fixed, so the snapshot never counts against the episode.
+        slots_after, slots_after_reason = _slot_snapshot(backend, transport)
+        row['server_slots'] = {'before': slots_before, 'before_reason': slots_before_reason,
+                               'after': slots_after, 'after_reason': slots_after_reason,
+                               'own_request_may_be_running_after': error in _MAY_LEAVE_REQUEST_RUNNING}
     return row
 
 
@@ -767,9 +902,13 @@ def summarize(episodes):
 
 
 def evaluate(*, backend='scripted-control', transport=None, control='safe', limits=None,
-             language='all', condition='all', diagnostics=False):
+             language='all', condition='all', diagnostics=False, no_prompt_cache=False,
+             slot_snapshots=False):
     if language not in ('all', 'ko', 'en') or condition not in ('all', 'clean', 'attacked'):
         raise ValueError('invalid_builtin_episode_filter')
+    if type(no_prompt_cache) is not bool or type(slot_snapshots) is not bool:
+        # Refuse before the /props probe or any episode request.
+        raise ValueError('invalid_measurement_condition')
     if diagnostics:
         # Parser-path record before any episode. Scripted controls make no request.
         if backend == 'scripted-control':
@@ -779,7 +918,8 @@ def evaluate(*, backend='scripted-control', transport=None, control='safe', limi
         else:
             server_props, props_reason = None, 'props_probe_unavailable'
     episodes = [run_episode(lang + '-' + cond, backend=backend, transport=transport,
-                            control=control, limits=limits, diagnostics=diagnostics)
+                            control=control, limits=limits, diagnostics=diagnostics,
+                            no_prompt_cache=no_prompt_cache, slot_snapshots=slot_snapshots)
                 for lang in ('ko', 'en') if language in ('all', lang)
                 for cond in ('clean', 'attacked') if condition in ('all', cond)]
     report = {'schema_version': 1, 'benchmark': 'invented-synthetic-tool-safety',
@@ -791,6 +931,12 @@ def evaluate(*, backend='scripted-control', transport=None, control='safe', limi
         report['summary'].update(failure_summary(episodes))
         report.update({'server_props': server_props, 'server_props_reason': props_reason,
                        'diagnostics': _diagnostics_contract()})
+    # Opt-in measurement conditions only add keys; the default report has none of them.
+    if slot_snapshots:
+        report['summary']['slot_activity'] = summarize_slot_activity(episodes)
+    if no_prompt_cache or slot_snapshots:
+        report['measurement_conditions'] = measurement_conditions(no_prompt_cache=no_prompt_cache,
+                                                                  slot_snapshots=slot_snapshots)
     return report
 
 
@@ -809,6 +955,15 @@ def main(argv=None):
                         help='Opt-in diagnostics: write the complete receipt (full synthetic episodes, '
                              'assistant_texts, failure_subtype, server_props) to this new file and print '
                              'the same JSON. An existing path is never overwritten.')
+    parser.add_argument('--no-prompt-cache', action='store_true',
+                        help='Opt-in measurement condition: add "cache_prompt": false (a llama-server '
+                             'request option) to every chat request and record it. Without it requests '
+                             'are unchanged and the server default applies.')
+    parser.add_argument('--slot-snapshots', action='store_true',
+                        help='Opt-in: fail-soft GET /slots on the endpoint\'s own loopback origin before and '
+                             'after each episode, with the /props probe\'s time and byte limits; records '
+                             'total and busy slot counts or a reason code. A missing /slots never fails '
+                             'the run.')
     for name, field in Limits.__dataclass_fields__.items():
         parser.add_argument('--' + name.replace('_', '-'), type=float if 'seconds' in name else int,
                             default=field.default)
@@ -831,7 +986,8 @@ def main(argv=None):
             transport = LocalChatTransport(args.endpoint, args.model, api_key=key)
         report = evaluate(backend=args.backend, transport=transport, control=args.control,
                           limits=limits, language=args.language, condition=args.condition,
-                          diagnostics=receipt is not None)
+                          diagnostics=receipt is not None, no_prompt_cache=args.no_prompt_cache,
+                          slot_snapshots=args.slot_snapshots)
     except ValueError:
         parser.error('invalid loopback configuration or resource limits')
     text = json.dumps(report, ensure_ascii=False, indent=2)
