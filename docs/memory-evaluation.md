@@ -337,6 +337,10 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   남는다. 게이트는 바꾸기 전의 값으로 판정한다.
 - 해시는 암호화가 아니다. 짧거나 추측할 수 있는 문자열은 후보를 해시해 보면 되찾을 수 있다. 파일 이름도 경로로
   남으므로 공유하기 전에 확인한다. 질문이 노트 이름과 같거나 비슷하면 경로만으로도 질문 내용이 드러난다.
+- `--derive-split`이 출력하는 분할 파일에는 문항 `id`(`dev`·`heldout` 목록)와 층의 `scenario` 이름이 원문 그대로
+  들어간다. `--derive-split`은 `--redact`와 함께 쓸 수 없다. 그래서 분할 파일도 골드셋과 같은 결정에 따라 보관 위치와
+  git 추적 여부를 정한다. `id`는 `q01`처럼 질문 내용을 드러내지 않는 값으로 짓기를 권한다. 설명적인 `id`는 분할
+  파일과 `--redact` 없는 보고서에 그대로 남는다.
 - 오류와 경고 문구에는 문항 번호(`queries[3]`)·필드·경로만 쓴다. 실패한 문항은 그 번호나 `id`의 sha256으로 찾는다.
 - `goldset.goldset_canonical_sha256`은 골드셋 JSON을 키 정렬·압축한 형태의 해시다. 줄바꿈과 BOM의 영향을 받지
   않으며, 결과가 어느 골드셋 판에서 나왔는지 묶어 준다. 분할 파일은 보고서의 `split.definition_canonical_sha256`이
@@ -396,7 +400,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   건너뛴다.
 - recall_hard 64문항은 개발 중 이미 모두 공개·검토됐다. 이번 heldout은 앞으로의 변경을 위한 보류 집합이며,
   지난 조정에 대해 보지 않은 집합이 아니다.
-- 개인 골드셋은 `--derive-split`으로 같은 규칙의 분할을 출력해 저장하고 고정한다. 문항을 늘린 뒤에는
+- 개인 골드셋은 `--derive-split`으로 같은 규칙의 분할을 출력해 저장하고 고정한다. 분할 파일은 문항 `id`를 그대로
+  담으므로 골드셋과 같은 결정으로 보관·git 추적한다([개인정보와 보관](#개인정보와-보관)). 문항을 늘린 뒤에는
   `--derive-split --split-file 기존분할.json`을 쓴다. 기존 배정은 그대로 두고 새 문항만 같은 규칙으로 나누므로
   dev 문항이 heldout으로 옮겨 가지 않는다(`incremental`에 유지·추가·제외 수가 남는다). 분할을 처음부터 다시
   만들면 층마다 floor(n/2)와 순서가 달라져 dev 문항이 heldout으로 옮겨 갈 수 있다.
