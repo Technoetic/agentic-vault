@@ -5,8 +5,12 @@
 건너뛰어도 설치·사용 방법은 같고, 플러그인 런타임은 이 확인을 위해 네트워크나 모델을 호출하지 않는다.
 
 GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)가
-보고한 내용이다. 개수·종료 코드·출력은 2026-10-17에 GitHub API와 GitHub CLI 2.98.0으로 직접 조회·실행한
-측정값이며 각 항목에 대상 수를 적는다.
+보고한 내용이다. 아래 2026-10-17의 개수·종료 코드·출력은 당시 GitHub API와 GitHub CLI 2.98.0으로
+직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
+2026-10-18 API 조회에서 `"enabled": true`였다. v0.23.0은 불변 릴리스로 게시됐고, v0.24.0의
+최종 소스·CI·ZIP/blob 대조는 [릴리스 검증](verification/v0.24.0.md)과 게시 전 릴리스 자산
+`verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+`post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산
 
@@ -16,8 +20,9 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 | `SHA256SUMS` | ZIP과 `verification.json`의 SHA-256 목록 |
 | `verification.json` | 최종 Git 소스, 메타데이터 검사, CI, 압축본·blob 대조, 독립 검토를 담은 검증 영수증 |
 
-아래 `TAG`는 확인할 릴리스 태그(예: `v0.23.0`), `VERSION`은 태그에서 앞의 `v`를 뺀 번호다.
-GitHub 릴리스 23개 중 v0.15.0부터 v0.22.1까지 10개가 이 세 파일을 올렸다(측정).
+아래 `TAG`는 확인할 릴리스 태그(예: `v0.24.0`), `VERSION`은 태그에서 앞의 `v`를 뺀 번호다.
+2026-10-17 v0.23.0 게시 전 GitHub 릴리스 23개 중 v0.15.0부터 v0.22.1까지 10개가
+이 세 파일을 올렸다(당시 측정).
 ZIP은 유지관리자가 `git archive`로 만들어 올린다. CI가 만든 파일이 아니다(v0.22.1 `verification.json` 기록).
 
 ## v0.23.0부터: 불변 릴리스
@@ -36,13 +41,16 @@ ZIP은 유지관리자가 `git archive`로 만들어 올린다. CI가 만든 파
 
 게시 순서(유지관리자):
 
-1. 저장소 Settings의 Releases 섹션에서 **Enable release immutability**를 켠다. 2026-10-17 조회에서 이 저장소의
-   설정은 꺼져 있었다(`GET /repos/Technoetic/agentic-vault/immutable-releases` → `"enabled": false`, 측정).
+1. 저장소 Settings의 Releases 섹션에서 **Enable release immutability**가 켜져 있는지 확인한다.
+   `GET /repos/Technoetic/agentic-vault/immutable-releases`의 2026-10-18 응답은 `"enabled": true`였다.
+   v0.23.0 게시 전인 2026-10-17 조회의 `"enabled": false`는 당시 관측이며 현재 설정이 아니다.
 2. 태그를 push한 뒤 릴리스를 **초안**(draft)으로 만든다. 초안과 그 태그는 아직 잠기지 않는다.
 3. 세 자산을 모두 초안에 올리고 이름과 개수를 확인한다.
 4. 초안을 게시한다. 게시하면 자산과 태그가 잠기고 릴리스 증명이 생긴다. 이후 자산을 고쳐야 하면 새 태그로 다시
    릴리스한다.
-5. 게시 후 아래 사용자 확인을 직접 실행하고 결과를 검증 기록에 남긴다.
+5. 게시 후 아래 사용자 확인을 직접 실행하고 별도 `post-publication.json`에 결과를 남긴다.
+   게시 전의 `verification.json`은 이미 잠긴 자산이며 자기 자신의 나중 검증 결과를 추가할 수 없다.
+   게시 후 기록은 불변 릴리스 자산 밖에 보관하고 운영 인계에서 경로를 연결한다.
 
 ```text
 gh release create TAG --draft --verify-tag --title "TAG — 제목" --notes-file NOTES.md -R Technoetic/agentic-vault
@@ -55,7 +63,7 @@ gh release view TAG --json isImmutable -R Technoetic/agentic-vault
 `--verify-tag`는 원격에 태그가 없으면 릴리스를 만들지 않는다. 업로드와 게시를 나눈 것은 되돌릴 수 없는 게시 전에
 자산을 확인하기 위해서다.
 
-v0.23.0의 텍스트 자산 `SHA256SUMS`와 `verification.json`은 LF 바이트로 쓴다(CR 없음). 이전 릴리스는 그렇지 않았다.
+v0.23.0부터 텍스트 자산 `SHA256SUMS`와 `verification.json`은 LF 바이트로 쓴다(CR 없음). 이전 릴리스는 그렇지 않았다.
 v0.14.0부터 v0.22.1까지 올린 `SHA256SUMS` 11개 중 6개가 CRLF였다
 (v0.14.0·v0.15.0·v0.18.0·v0.20.0·v0.21.0·v0.22.1, 바이트 단위 측정). GNU coreutils 8.32의 `sha256sum -c`는
 줄 끝 CR을 파일 이름의 일부로 읽어 v0.22.1의 두 파일을 찾지 못하고 종료 코드 1을 냈다. LF인 v0.16.0에서는

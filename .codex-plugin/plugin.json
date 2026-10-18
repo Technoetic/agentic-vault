@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.23.0: opt-in tool-call failure diagnostics with complete receipts, a render-matched temporal control arm, Hangul syllable-bigram BM25 ranking, and warning-only fabrication-candidate and ledger source-support checks, plus an advisory CI supply-chain audit. Published as a GitHub immutable release with LF SHA256SUMS. Default outputs are unchanged; the observed local model still fails both Korean tool tasks. Existing memory, diagnostics, provenance, budgets and Jarvis API-auth boundary remain. No default network/model call or automatic vault migration.",
+    "longDescription": "Release v0.24.0: bounded Windows shared-file replacement retries with revision and policy rechecks, opt-in bilingual tool-call matrices with literal identifier preservation and redacted receipts, and public-fixture Kiwi/qmd retrieval comparisons. A small fixed-budget Korean probe completed 0/4 canonical versus 4/4 literal-preserving tasks; vector recall improved on the fixture while producing 8/8 no-answer false positives. Published as a GitHub immutable release. Existing memory, diagnostics, budgets and Jarvis API-auth boundary remain. No default network/model call, optional dependency installation or automatic vault migration.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [
