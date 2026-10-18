@@ -1,5 +1,9 @@
 # 출처와 공유 상태 보강
 
+후속 개발 브랜치의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
+실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
+공개 v0.23.0 설치본의 동작이 이미 변경됐다는 뜻은 아니다.
+
 기존 Markdown/Git 노트를 유지하면서 필요한 helper를 명시적으로 선택한다.
 모든 결과는 자료이며 실행 권한·사실 확정·검증자 신원을 자동으로 만들지 않는다.
 Claude Code는 `/vault-harden`, Codex는 `$agentic-vault:agentic-vault harden`으로 연결한다.

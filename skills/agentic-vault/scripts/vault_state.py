@@ -34,6 +34,7 @@ MAX_RUNTIME_BYTES = 64 * 1024
 MAX_ITEMS = 128
 MAX_WAIT_SECONDS = 60
 MAX_TTL_SECONDS = 86400
+REPLACE_RETRY_DELAYS = (.01, .02, .04, .08, .16)
 HASH_RE = re.compile(r'[0-9a-f]{64}')
 TOKEN_RE = re.compile(r'[0-9a-f]{32}')
 ITEM_ID_RE = re.compile(r'(?:[A-Za-z][A-Za-z0-9_]{0,23}-?\d{1,10}|av-[0-9a-f]{20})')
@@ -45,6 +46,10 @@ EVENTS = frozenset({'PreCompact', 'SessionEnd'})
 
 class StateError(Exception):
     """Content-free operational error code."""
+
+    def __init__(self, code, *, winerror=None):
+        super().__init__(code)
+        self.winerror = winerror
 
 
 def _sha(data):
@@ -398,29 +403,49 @@ def _cleanup_temporary(policy, relative, temporary, *, runtime=False):
 
 
 def _atomic(path, data, before_replace, *, cleanup_guard=None):
-    """Retain our temporary for manual recovery when its cleanup guard refuses."""
+    """Retry short Windows sharing failures with a fresh validated attempt.
+
+    The callback must include the final revision/policy/lease checks and the
+    replacement itself. Retrying os.replace alone would authorize a lost update.
+    Keep staged evidence when current policy refuses its cleanup, as before.
+    """
     mode = stat.S_IMODE(path.lstat().st_mode) if path.exists() else 0o600
-    fd, name = tempfile.mkstemp(prefix='.vault-state-', dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, 'wb') as stream:
-            regular(os.fstat(stream.fileno()))
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(temporary, mode)
-        before_replace(temporary)
-    finally:
+    for attempt in range(len(REPLACE_RETRY_DELAYS) + 1):
+        fd, name = tempfile.mkstemp(prefix='.vault-state-', dir=path.parent)
+        temporary = Path(name)
+        cleanup_error = None
         try:
-            if cleanup_guard is not None:
-                cleanup_guard(temporary)
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
-        except StateError:
-            # A failed current-policy/path check retains our staged file for
-            # conservative manual recovery; do not inspect denied metadata.
-            pass
+            with os.fdopen(fd, 'wb') as stream:
+                regular(os.fstat(stream.fileno()))
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, mode)
+            try:
+                before_replace(temporary)
+                return
+            except OSError as exc:
+                if os.name != 'nt':
+                    raise
+                winerror = getattr(exc, 'winerror', None)
+                if winerror not in (5, 32) or attempt == len(REPLACE_RETRY_DELAYS):
+                    raise StateError('replace_failed', winerror=winerror) from None
+        finally:
+            try:
+                if cleanup_guard is not None:
+                    cleanup_guard(temporary)
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except StateError as exc:
+                # A failed current-policy/path check retains our staged file for
+                # conservative manual recovery; do not inspect denied metadata.
+                cleanup_error = exc
+        if cleanup_error is not None:
+            # Do not create another staged file after cleanup observed a policy
+            # revocation or unsafe path. Earlier callback errors still propagate.
+            raise cleanup_error from None
+        time.sleep(REPLACE_RETRY_DELAYS[attempt])
 
 
 def patch_note(vault, path, expected_sha256, edits, *, source_hashes=None,

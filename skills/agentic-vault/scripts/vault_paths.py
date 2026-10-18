@@ -114,6 +114,38 @@ def _is_denied(parts: tuple[str, ...], deny_zones: Sequence[str]) -> bool:
     return False
 
 
+def _contained_relative_path(candidate: Path, root: Path) -> Path:
+    r"""Compare a transient DOS extended prefix without changing the I/O path.
+
+    Windows realpath can retain \\?\ after a file disappears between its two
+    handle lookups. Only ordinary absolute drive paths are equivalent here:
+    device/UNC namespaces stay distinct, and the existing root must also have
+    the same file identity through the candidate's original ancestor path.
+    """
+    try:
+        return candidate.relative_to(root)
+    except ValueError:
+        if os.name != 'nt':
+            raise
+    def drive_path(path):
+        value = str(path)
+        if value.startswith('\\\\?\\'):
+            value = value[4:]
+        if not re.match(r'^[A-Za-z]:\\', value):
+            raise ValueError('incomparable_windows_namespace')
+        compared = Path(value)
+        if any(unsafe_path_segment(part) for part in compared.parts[1:]):
+            raise ValueError('unsafe_windows_comparison')
+        return compared
+    relative = drive_path(candidate).relative_to(drive_path(root))
+    ancestor = candidate
+    for _ in relative.parts:
+        ancestor = ancestor.parent
+    if not os.path.samefile(ancestor, root):
+        raise ValueError('root_identity_changed')
+    return relative
+
+
 def resolve_note_path(
     vault: Path,
     rel_path: str,
@@ -155,7 +187,7 @@ def resolve_note_path(
     except RuntimeError as exc:
         raise OSError("note path could not be resolved") from exc
     try:
-        resolved_relative = resolved_candidate.relative_to(resolved_vault)
+        resolved_relative = _contained_relative_path(resolved_candidate, resolved_vault)
     except ValueError as exc:
         raise ValueError("note path escapes the vault") from exc
     if _is_denied(resolved_relative.parts, deny_zones):
