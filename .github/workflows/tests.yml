@@ -105,23 +105,41 @@ jobs:
         with:
           version: '1.30.1'
           advanced-security: false
-      # The action code is pinned by SHA, but it installs pip-audit
-      # (~= 2.0, >= 2.5.6) from PyPI at run time without hashes.
+      # pip hash-checking mode with the job's Python: ci/requirements-audit.txt pins
+      # pip-audit and its whole dependency closure for Python 3.12, with a sha256
+      # for every file PyPI lists for each pinned version (pip-compile
+      # --generate-hashes; refresh steps in docs/release-integrity.md).
+      # --require-hashes rejects an unlisted hash or dependency; --only-binary :all:
+      # rejects source distributions, so no package build code runs.
+      - name: Install pip-audit (hash-checked wheels)
+        id: pip-audit-install
+        continue-on-error: true
+        run: |
+          python -m pip install --require-hashes --only-binary :all: -r ci/requirements-audit.txt
+      # requirements-dev.txt pins each package with ==, so --no-deps audits exactly
+      # those versions. --disable-pip is what avoids an install: without it,
+      # pip-audit 2.10.1 (even with --no-deps) creates a temporary venv and runs
+      # `pip install --upgrade pip wheel setuptools` and a --dry-run resolve of the
+      # file there, both without hashes. With it, pip-audit only parses the file and
+      # queries the PyPI vulnerability service.
       - name: Development dependency audit (pip-audit)
         id: pip-audit
+        if: ${{ steps.pip-audit-install.outcome == 'success' }}
         continue-on-error: true
-        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
-        with:
-          inputs: requirements-dev.txt
+        run: python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requirements-dev.txt
       - name: Report advisory results
         if: ${{ !cancelled() }}
         env:
           ZIZMOR_OUTCOME: ${{ steps.zizmor.outcome }}
+          PIP_AUDIT_INSTALL_OUTCOME: ${{ steps.pip-audit-install.outcome }}
           PIP_AUDIT_OUTCOME: ${{ steps.pip-audit.outcome }}
         run: |
-          echo "zizmor: ${ZIZMOR_OUTCOME}; pip-audit: ${PIP_AUDIT_OUTCOME}"
+          echo "zizmor: ${ZIZMOR_OUTCOME}; pip-audit install: ${PIP_AUDIT_INSTALL_OUTCOME}; pip-audit: ${PIP_AUDIT_OUTCOME}"
           if [ "${ZIZMOR_OUTCOME}" != success ]; then
             echo "::warning title=zizmor (advisory)::findings or tool error; see the zizmor step log"
+          fi
+          if [ "${PIP_AUDIT_INSTALL_OUTCOME}" != success ]; then
+            echo "::warning title=pip-audit install (advisory)::hash-checked install failed; see the install step log"
           fi
           if [ "${PIP_AUDIT_OUTCOME}" != success ]; then
             echo "::warning title=pip-audit (advisory)::findings or tool error; see the pip-audit step log"
