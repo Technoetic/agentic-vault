@@ -4,7 +4,9 @@ Both checks are warning-only and off by default. The golden fixture holds the
 full-mode output of the unmodified v0.24.0 engine (d2b9315) for a vault that
 already contains sync-style names and a drifted checkpoint, so the default path
 is compared byte for byte (report text is compared after universal-newline
-decoding because the engine writes it in text mode).
+decoding because the engine writes it in text mode). Its section15 case adds a
+link to a missing heading, so v0.24.0 already writes report section 15 there,
+the section the opt-in warnings extend.
 """
 from __future__ import annotations
 
@@ -94,6 +96,21 @@ def section_15_codes(report: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def section_15_lines(report: str) -> list[str]:
+    """Return the header and list lines of report section 15 ([] when it is absent)."""
+    lines = report.splitlines()
+    starts = [index for index, line in enumerate(lines) if line.startswith("## 15. ")]
+    if not starts:
+        return []
+    section = [lines[starts[0]]]
+    for line in lines[starts[0] + 1:]:
+        if line.startswith("## "):
+            break
+        if line.startswith("- "):
+            section.append(line)
+    return section
+
+
 class DefaultOutputGoldenTests(unittest.TestCase):
     """Without the new keys the engine must print and write what v0.24.0 did."""
 
@@ -110,7 +127,7 @@ class DefaultOutputGoldenTests(unittest.TestCase):
             return run_main(vault, self.golden["today"], self.golden["report_path"])
 
     def test_default_output_and_exit_code_match_v0240_golden(self) -> None:
-        self.assertEqual(sorted(self.golden["cases"]), ["clean", "fatal"])
+        self.assertEqual(sorted(self.golden["cases"]), ["clean", "fatal", "section15"])
         for name, case in sorted(self.golden["cases"].items()):
             with self.subTest(case=name):
                 self.assertEqual(self.run_case(name), case["expected"])
@@ -128,6 +145,26 @@ class DefaultOutputGoldenTests(unittest.TestCase):
         codes = {code for _path, code in section_15_codes(result["report"])}
         self.assertEqual(codes, SYNC_CODES)
         self.assertEqual(result["exit"], self.golden["cases"]["clean"]["expected"]["exit"])
+
+    def test_section_15_written_by_default_keeps_its_lines_when_opted_in(self) -> None:
+        expected = self.golden["cases"]["section15"]["expected"]
+        default_section = section_15_lines(expected["report"])
+        # v0.24.0 already writes section 15 here: one missing-anchor warning, no sync code.
+        self.assertEqual(default_section[0], "## 15. Markdown warning extensions (1)")
+        self.assertEqual(len(default_section), 2)
+        self.assertIn(" [missing-anchor] ", default_section[1])
+        self.assertEqual(section_15_codes(expected["report"]), [])
+        self.assertEqual(section_15_lines(self.golden["cases"]["clean"]["expected"]["report"]), [])
+
+        result = self.run_case("section15", OPT_IN)
+        opted_section = section_15_lines(result["report"])
+        self.assertEqual(opted_section[1], default_section[1], "default lines come first, unchanged")
+        codes = {code for _path, code in section_15_codes(result["report"])}
+        self.assertEqual(codes, SYNC_CODES)
+        self.assertEqual(opted_section[0],
+                         f"## 15. Markdown warning extensions ({len(opted_section) - 1})")
+        self.assertEqual(result["exit"], expected["exit"])
+        self.assertIn("(치명 0건)", result["stdout"])
 
     def test_default_cli_subprocess_reports_no_sync_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
