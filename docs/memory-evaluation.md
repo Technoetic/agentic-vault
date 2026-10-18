@@ -258,6 +258,8 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 `invalid_props_json`·`props_not_object`·`props_fields_absent`·`non_loopback_endpoint`·
 `invalid_api_key` 중 하나를 남긴다. `scripted-control`은 요청 없이 `scripted_control`,
 사용자 정의 전송 객체는 `props_probe_unavailable`이다.
+프롬프트 캐시 요청 필드·`/slots` 슬롯 부하를 함께 남기는 선택형 측정 조건(`--no-prompt-cache`,
+`--slot-snapshots`)과 행렬의 반복 일치는 [측정 조건 기록](evaluation-stability.md)에 있다.
 
 2026-10-16 영수증의 재분류와 2026-10-17 재실행 결과는
 [도구 호출 진단 기록](verification/tool-call-diagnosis-20261017.md)에 있다.
