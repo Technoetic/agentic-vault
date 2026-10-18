@@ -229,6 +229,10 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
 - **해시 대조:** PyPI JSON API와 비교하면 29개 고정 버전 모두 파일의 해시 집합이 PyPI에 올라온 그 버전의 파일 전체와
   같았다(charset-normalizer 172개, msgpack 91개, tomli 47개, 나머지 26개 패키지는 각 2개). 29개 모두 CPython 3.12용
   manylinux x86_64 휠과 win_amd64 휠이 있고, msgpack을 뺀 28개는 순수 Python 휠이다.
+- **Linux 휠:** 같은 파일을 `pip download --require-hashes --only-binary :all: --no-deps`로 받되 manylinux x86_64
+  `--platform` 태그들과 `--python-version 3.12 --implementation cp --abi cp312`를 주자 29개 휠을 모두 받았고 pip가
+  각 해시를 확인했다(종료 코드 0, 1회). 플랫폼 휠이 필요한 charset-normalizer·msgpack·tomli는 cp312 manylinux
+  휠이었다. Linux에서 설치를 실행한 것은 아니다.
 - **의존성 범위:** PyPI 메타데이터의 Requires-Dist를 Python 3.12의 Linux·Windows 환경 표지로 평가해 pip-audit 2.10.1부터
   따라간 집합은 두 플랫폼 모두 고정한 29개와 같았다(빠짐 0, 남음 0). 조건이 붙은 의존성은 두 개뿐이다(CacheControl의
   `filecache` 추가 기능이 요구하는 filelock, Python 3.13 미만에서만 필요한 typing-extensions). Windows에서 만든 파일을
