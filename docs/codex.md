@@ -88,6 +88,15 @@ macOS/Linux도 같은 명령에 해당 OS의 절대경로를 쓴다. 설치 후 
 Claude Code 설치는 [README의 설치 안내](../README.md#-설치)를
 따른다. 두 클라이언트를 별도로 설치해도 볼트 데이터는 한 벌이다.
 
+Claude Code는 2.1.295 이상을 권장한다. 그 이전 버전은 비동기 건강 검사 SessionStart 훅의
+바뀌지 않은 컨텍스트를 resume할 때마다 대화에 다시 붙일 수 있다.
+[Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)
+2.1.295 항목: "Fixed an async SessionStart hook's unchanged context being added to the
+conversation again on every resume"(2026-10-19 원문 확인). `hooks/hooks.json`은 바꾸지 않았다.
+같은 버전의 `onFailure: "block"`은 훅 실패 시 동작을 막도록 바꾸므로 채택하지 않았고,
+Codex 훅에서는 대응 필드가 확인되지 않았다. `vault_doctor.py --host-version`은 PATH의
+`claude --version`만 확인하며 Codex 버전은 보지 않는다. [확인 방법과 실측 절차](reliability.md#호스트-버전과-sessionstart-실측)
+
 ## 사용
 
 Codex 대화 입력란에서 다음처럼 요청한다. 셸 명령이 아니다.
