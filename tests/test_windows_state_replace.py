@@ -47,7 +47,8 @@ class WindowsStateReplaceTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.vault = Path(self.tmp.name)
+        # CI temp paths can include 8.3 aliases; mocks must match the resolved root.
+        self.vault = Path(self.tmp.name).resolve(strict=True)
         self.config = self.write('00-meta/vault-config.json', b'{"deny_zones":["private"]}')
         self.target = self.write('notes/edit.md', b'old\r\n')
         self.source = self.write('notes/source.md', b'observed\n')
