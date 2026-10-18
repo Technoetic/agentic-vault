@@ -7,8 +7,8 @@ statistic and tie rule.
 
 rate_upper_bounds() gives one-sided upper confidence bounds for a binomial
 proportion: the Wilson score bound and the exact Clopper-Pearson bound
-(bisection on the binomial CDF built from math.comb; zero events use the
-closed form 1 - alpha^(1/n)).
+(bisection on the binomial CDF whose log coefficients come from math.lgamma;
+zero events use the closed form 1 - alpha^(1/n)).
 
 Both describe uncertainty for human judgement. Callers report them next to the
 existing metrics and never turn them into gates.
@@ -124,13 +124,24 @@ def _binomial_cdf(log_coefficients: list, trials: int, probability: float) -> fl
                      for i, log_c in enumerate(log_coefficients))
 
 
+def _log_binomial_coefficients(trials: int, events: int) -> list:
+    """log C(trials, i) for i = 0..events from math.lgamma, without big integers.
+
+    math.comb grows to thousands of digits for large trials (n = 20,000), which
+    made the coefficients the slow part of the bound; lgamma keeps every term a
+    float. Both ends are exactly 0.0 because lgamma(1) is 0.
+    """
+    log_factorial = math.lgamma(trials + 1)
+    return [log_factorial - math.lgamma(i + 1) - math.lgamma(trials - i + 1) for i in range(events + 1)]
+
+
 def _clopper_pearson_bisection(events: int, trials: int, alpha: float) -> float:
     """Solve P(X <= events | trials, p) = alpha for p; the CDF falls as p grows.
 
-    Returns the bracket end whose CDF is at most alpha, so the bound is never
-    below the root by more than float spacing.
+    Returns the bracket end whose computed CDF is at most alpha, so the bound is
+    never below the root of the computed CDF by more than float spacing.
     """
-    log_coefficients = [math.log(math.comb(trials, i)) for i in range(events + 1)]
+    log_coefficients = _log_binomial_coefficients(trials, events)
     low, high = 0.0, 1.0
     for _ in range(2048):
         middle = (low + high) / 2

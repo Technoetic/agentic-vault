@@ -177,8 +177,10 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
   `rate_upper_bound_definitions`에 정의와 해석 범위를 한 번 적는다.
 - 항목마다 분자·분모·관측 비율과 두 단측 95% 상한을 담는다. `wilson_upper`는 단측 정규 분위수
   z = 1.645를 쓴 Wilson score 상한이다(양측 90% Wilson 구간의 위 끝). `clopper_pearson_upper`는
-  P(X ≤ 분자 | 분모, p) = 0.05가 되는 p를 `math.comb`로 만든 이항 누적분포의 이분법으로 찾은 정확
-  상한이다. 분자가 0이면 닫힌 식 1 − 0.05^(1/n), 분자가 분모와 같으면 1이다.
+  P(X ≤ 분자 | 분모, p) = 0.05가 되는 p를 이항 누적분포의 이분법으로 찾은 정확 상한이다. 이항 계수는
+  큰 정수(`math.comb`) 대신 `math.lgamma`로 만든 로그 값을 쓴다. 2026-10-19 로컬 측정(Windows, Python 3.12.10,
+  1회)에서 분모 20,000·분자 19,999의 계산이 34.7초에서 0.10초로 줄었다. 분자가 0이면 닫힌 식 1 − 0.05^(1/n),
+  분자가 분모와 같으면 1이다.
 - 0건이 말해 주는 것: 21건 중 0건이어도 Clopper-Pearson 상한은 0.1329, Wilson 상한은 0.1141이다
   (계산값). 이 표본으로는 비율이 약 13%보다 작다는 데까지만 말할 수 있다는 뜻이지 비율이 0이라는
   뜻이 아니다.

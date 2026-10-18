@@ -244,6 +244,30 @@ class RateUpperBoundTests(unittest.TestCase):
                 self.assertGreater(binomial_cdf(events, trials, bound * (1 - 1e-6)), ALPHA)
                 self.assertGreater(bound, events / trials)
 
+    def test_large_trials_use_float_log_coefficients(self):
+        # math.lgamma replaces math.comb, whose integers reach thousands of digits at n = 20,000.
+        trials = 20_000
+        coefficients = stats._log_binomial_coefficients(trials, trials)
+        self.assertEqual((coefficients[0], coefficients[-1]), (0.0, 0.0))
+        for i in (1, 2, 10, 999, 1000, 6667, 10_000, 19_999):
+            with self.subTest(i=i):
+                exact = math.log(math.comb(trials, i))
+                self.assertLess(abs(coefficients[i] - exact), 1e-9)
+                self.assertLess(abs(coefficients[i] - coefficients[trials - i]), 1e-9)
+
+        def tail(events, probability):
+            """P(X <= events) in log space with exact math.comb coefficients."""
+            log_p, log_q = math.log(probability), math.log1p(-probability)
+            return math.fsum(math.exp(math.log(math.comb(trials, i)) + i * log_p + (trials - i) * log_q)
+                             for i in range(events + 1))
+
+        for events in (1, 100, 1000):
+            with self.subTest(events=events):
+                bound = stats.clopper_pearson_upper_bound(events, trials)
+                self.assertLess(abs(tail(events, bound) - ALPHA), 1e-9)
+                self.assertGreater(tail(events, bound * (1 - 1e-6)), ALPHA)
+                self.assertGreater(bound, events / trials)
+
     def test_wilson_is_the_upper_root_of_the_score_quadratic(self):
         z2 = self.Z ** 2
         for events, trials in ((0, 5), (1, 10), (2, 8), (5, 20), (19, 21), (3, 50)):
