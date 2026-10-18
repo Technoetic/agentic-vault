@@ -20,6 +20,7 @@ Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 
 | 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
 | 토큰 | `vault_token_calibration.py`: `calibrate`, `estimate`, `check_drift`, `measure_local`, `measure_counter` | 모델/세대별 측정치와 보정 해시. 명시적으로 선택할 때만 사용; 기존 hook/검색 계수 유지 |
 | 외부 전송 경고 | `vault_egress.py`: `scan_text`, `analyze_notes` | D1 정규화로 가짜 토큰·한국 식별번호 패턴 검사. 일치한 비밀값을 출력하지 않음; 자동 외부 전송 없음 |
+| 동기화 경고(선택) | `vault_healthcheck.py` full 모드: `sync_conflict_check`, `sync_conflict_patterns`, `checkpoint_drift_check` | 동기화 충돌 사본·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트를 경고만 함. 외부 쓰기를 막거나 되돌리지 않음 |
 
 ## 원본을 옮기기 전
 
@@ -167,6 +168,90 @@ compact SessionStart는 고정 제약 발췌/현재 source 해시를 먼저 유�
 선택한 최대 8개 blocker 발췌와 Now/anchor의 범위를 넘어 전체 계약을 주입했다는 의미는 아니다.
 전체 출력 상한은 9,500 UTF-16 단위이며 기존 0 예산과 startup/clear/resume 동작을 유지한다.
 Codex hook 지원은 [공식 설명](https://learn.chatgpt.com/docs/hooks)을 참고한다. 실제 정의 신뢰를 자동 승인하지 않는다.
+
+## 동기화 충돌 사본과 checkpoint 이후 변경 경고 (선택)
+
+협조 잠금은 참여하는 writer만 보호한다. v0.24.0까지는 외부 편집기(Obsidian)와 동기화 클라이언트의 쓰기를 막지도 감지하지도 못했다.
+두 선택형 검사는 그 흔적을 healthcheck full 모드의 경고로 보여 준다. **탐지만 한다.** 외부 쓰기를 막거나 되돌리지 않고
+충돌 사본을 합치거나 지우지도 않는다. 결과는 리포트 §15의 `warning` 줄과 콘솔 요약 끝의 짧은 표시다. exit code와 치명 집계는 바뀌지 않는다.
+새 경고 코드는 lint `WARNING_CODES`에 없어 `warning_policy.levels`로 승격할 수 없다(적으면 설정 오류다).
+설정 키가 없거나 `false`·`[]`이면 출력·리포트·exit code가 v0.24.0과 같다. 테스트가 v0.24.0(`d2b9315`)에서 캡처한 출력과 비교한다.
+
+### 켜는 법
+
+`00-meta/vault-config.json`에 필요한 키만 넣는다. 셋 다 선택 키이며 기본 템플릿에는 없다.
+
+```json
+{"sync_conflict_check": true, "sync_conflict_patterns": ["*.conflict-copy.md"], "checkpoint_drift_check": true}
+```
+
+| 키 | 값 | 뜻 |
+|---|---|---|
+| `sync_conflict_check` | `true`/`false`, 없으면 꺼짐 | 아래 내장 이름 규칙과 `sync_conflict_patterns`로 파일 이름을 검사한다 |
+| `sync_conflict_patterns` | 파일 이름 glob 목록(최대 32개, 각 128자 이하 — 코드 상수) | 사용자 패턴. `sync_conflict_check`가 `true`일 때만 쓰며, 아니면 리포트 §0 설정 경고 한 줄만 남긴다 |
+| `checkpoint_drift_check` | `true`/`false`, 없으면 꺼짐 | 가장 최근 checkpoint 이후 바뀌거나 없어진 엔진 노트를 보고한다 |
+
+스위치가 불리언이 아니거나, 패턴이 목록이 아니거나, 빈 문자열·제어 문자·`/`·`\`가 든 패턴, 개수·길이 초과는 다른 설정 오류처럼
+config 파싱 실패(exit 1)다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
+`*`·`?`·`[...]`만 특수 문자다. 이름과 패턴은 NFC로 맞춘 뒤 비교한다.
+
+### 내장 이름 규칙과 근거
+
+공식 문서가 파일 이름 형식을 그대로 적은 것만 내장했다. 아래 두 문서는 2026-10-19에 원문을 직접 읽어 확인했다.
+
+| 경고 코드(`details.pattern`) | 파일 이름 형태 | 근거 |
+|---|---|---|
+| `sync-conflict-copy` (`syncthing-conflict`) | `<filename>.sync-conflict-<date>-<time>-<modifiedBy>.<ext>` | [Syncthing: Understanding Synchronization](https://docs.syncthing.net/users/syncing.html) "Conflicting Changes" |
+| `sync-temp-file` (`syncthing-temp`) | `.syncthing.original-filename.ext.tmp`, Windows는 `~syncthing~original-filename.ext.tmp`. 이름이 너무 길면 `.syncthing.<hash>.tmp`·`~syncthing~<hash>.tmp` | 같은 문서 "Temporary Files" |
+| `sync-conflict-copy` (`obsidian-sync-conflict`) | `original-note-name (Conflicted copy device-name YYYYMMDDHHMM).md` | [Troubleshoot Obsidian Sync](https://github.com/obsidianmd/obsidian-help/blob/master/en/Obsidian%20Sync/Troubleshoot%20Obsidian%20Sync.md) "Conflict file naming pattern" |
+| `sync-user-pattern` (`user`) | `sync_conflict_patterns`의 glob | 사용자 설정 |
+
+- Syncthing 문서(v2.1.0용 페이지)는 두 기기에서 동시에 바뀐 파일 가운데 수정 시각이 더 오래된 쪽을 충돌 사본 이름으로 바꾸고,
+  그 사본을 "일반 파일로 취급해 기기 사이에 전파한다"고 적는다. 정리하지 않으면 다른 기기에도 사본이 남는다.
+  `<date>`·`<time>`·`<modifiedBy>`의 세부 형식은 문서에 없어서, 검사는 `.sync-conflict-` 뒤에 `-`로 나뉜 세 부분이 있는지만 본다.
+- 같은 문서에 따르면 Syncthing은 대상 파일에 직접 쓰지 않고 임시 사본에 쓴 뒤 옮긴다. 복사·동기화 중 오류가 나면 임시 파일이
+  최대 하루 남고, 임시 파일은 보통 숨김 파일이다. `.syncthing.`·`~syncthing~`로 시작하는 이름은 Syncthing이 동기화에서 뺀다.
+  남아 있는 임시 파일은 전송이 끝나지 않았거나 실패했다는 신호일 수 있다.
+- Obsidian 도움말은 Obsidian 1.9.7부터 고를 수 있는 "Create conflict file" 옵션이 위 형식의 새 파일을 만든다고 적는다
+  (예: `Meeting notes (Conflicted copy MyMacBook2 202411281430).md`). 충돌 파일에는 충돌을 감지한 기기의 변경이, 원래 파일에는 원격본이 남는다.
+  기본값 "Automatically merge"는 별도 파일 없이 한 파일로 합치고(Markdown은 diff-match-patch), 중복 텍스트나 서식 문제가 생길 수 있다고 적는다.
+  그런 병합 흔적은 이름 검사로 찾지 못한다.
+  충돌 처리 설정은 기기마다 따로 정한다.
+- Dropbox와 OneDrive의 충돌 사본 이름은 공식 문서로 확인하지 못해 기본값에 넣지 않았다. 쓰는 클라이언트가 실제로 만든 이름을 보고
+  `sync_conflict_patterns`에 적는다.
+
+### 이름 검사 범위
+
+기존 full 모드는 `.md`만 모아 검사한다. 이 검사는 같은 디렉터리 걷기에서 본 **모든 확장자의 파일 이름**을 본다.
+Syncthing 임시 파일은 `.tmp`이고, 설정·첨부의 충돌 사본(예: `vault-config.sync-conflict-<date>-<time>-<modifiedBy>.json`)은 `.md`가 아니기 때문이다.
+이름만 비교하며 파일을 열거나 읽거나 링크를 따라가지 않는다. 파일 하나에는 규칙 하나만 보고하며 임시 파일, 충돌 사본, 사용자 패턴 순으로 본다.
+deny zone·`exclude_dirs`·엔진 runtime은 건너뛰고, 걷기가 따라가지 않는 심볼릭 링크·정션 폴더 아래도 보지 않는다(§14b).
+경고는 경로순 최대 200건(코드 상수)이며 넘으면 `lint-incomplete`에 생략 수를 남긴다. 콘솔 요약 끝에는 `⚠️동기화 충돌·임시 파일 이름 N건(§15)`가 붙는다.
+`.md` 충돌 사본은 지금처럼 일반 노트로도 검사되므로 다른 섹션(프런트매터·고아·모호한 링크 등)에도 나올 수 있다.
+staged(pre-commit) 모드는 이 검사를 하지 않는다. 새 키의 형식 검증만 같이 적용된다.
+
+### checkpoint 이후 바뀐 엔진 노트
+
+PreCompact·SessionEnd 훅은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`에 `hot_note`·`handoff_note`·`log_note`·`tasks_note`의
+경로와 SHA-256을 남긴다(위 [부분 편집과 checkpoint](#부분-편집과-checkpoint)). `checkpoint_drift_check`를 켜면 healthcheck가 가장 최근
+checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`state: changed`)와 없어진 노트(`state: missing`)를 `checkpoint-drift` 경고로 보고한다.
+`details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
+콘솔 요약 끝에는 `⚠️checkpoint 이후 바뀐 엔진 노트 N건(§15)`가 붙는다. `hooks/hooks.json`의 SessionStart(startup·clear·resume)가 실행하는
+비동기 healthcheck도 이 비교를 하므로, 세션을 시작하면 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
+다른 에이전트 세션 등)이 보인다.
+
+- "가장 최근"은 수정 시각이 늦은 checkpoint 파일 최대 64개(코드 상수) 가운데 형식이 맞고 마지막 사건 시각이 가장 늦은 기록이다.
+- runtime 폴더나 checkpoint가 없거나, JSON·필드 형식이 맞지 않거나, 파일이 64 KiB(코드 상수)를 넘으면 경고도 오류도 없이 넘어간다.
+  기록된 경로가 지금 deny·exclude·runtime 구역이거나 링크·정션을 지나면 그 노트는 읽지 않는다.
+- 노트·checkpoint·runtime 어느 파일도 쓰지 않는다. 지금 파일이 1,000,000바이트(코드 상수)를 넘으면 해시 없이 `changed`로 보고한다.
+
+### 한계
+
+- 탐지만 한다. 외부 편집기·동기화 클라이언트의 쓰기를 막거나 순서를 정하지 못하며 다중 파일 트랜잭션도 아니다.
+- 누가 바꿨는지 모른다. checkpoint 뒤 같은 세션이 직접 고친 노트(예: PreCompact 이후 편집)도 경고에 나온다. 세션 안의 엔진 쓰기는 따로 기록하지 않는다.
+- checkpoint는 PreCompact·SessionEnd 훅이 실행될 때만 생긴다. 훅이 돌지 않은 세션이나 강제 종료 뒤에는 더 오래된 checkpoint와 비교한다.
+- 이름 규칙은 문서에 적힌 형태만 본다. 클라이언트 버전·설정에 따른 다른 이름은 놓치고, 같은 모양의 이름을 일부러 쓴 파일은 오탐이 된다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-19 기준). 근거는 단위 테스트가 만든 임시 볼트의 합성 자료뿐이다.
 
 ## 측정과 보정
 
