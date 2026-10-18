@@ -356,6 +356,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 - 결과는 제공한 질문과 그 시점의 볼트에만 해당한다. 일반적인 검색 품질이나 다른 볼트로 넓히지 않는다. 개선
   주장은 같은 골드셋·같은 옵션의 짝 비교(`--compare`의 `paired_randomization`)로만 하며, 0이 아닌 쌍이 k개이면
   최소 p는 2^(1−k)다([위 절](#시간-유효성-표시-효과와-기전-잔차) 참조).
+- 골드셋·`--split` 실행에도 `--exact-paired`(정확 p)와 `--rate-bounds`(0건·소수 건 비율의 단측 상한)를 붙일 수 있다.
+  두 값 모두 그 실행에 들어간 문항만으로 계산하며 `--redact`와 함께 써도 된다([소표본 통계](#소표본-통계-정확-부호-검정과-비율-상한)).
 
 **2026-10-19 측정.** 로컬 Windows·Python 3.12.10에서 이 분할을 담은 소스로 recall_hard에 CI top3 옵션
 (`--compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500
