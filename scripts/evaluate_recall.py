@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import math
@@ -17,6 +18,7 @@ from typing import Sequence
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "recall"
 RECALL_PATH = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_recall.py"
+EVAL_STATS_PATH = REPO_ROOT / "scripts" / "eval_stats.py"
 MAX_QUERIES_BYTES = 1024 * 1024
 
 
@@ -33,6 +35,17 @@ def _load_recall_module():
         return module
     finally:
         sys.path.remove(script_dir)
+
+
+@functools.lru_cache(maxsize=1)
+def _load_eval_stats():
+    """Load the small-sample statistics by path; only --exact-paired/--rate-bounds use them."""
+    spec = importlib.util.spec_from_file_location("agentic_vault_eval_stats", EVAL_STATS_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load statistics module: {EVAL_STATS_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_queries(fixture: Path) -> list[dict]:
@@ -153,6 +166,30 @@ def paired_randomization(baseline, improved, *, seed=1707, permutations=10000) -
     return {'method': 'paired sign randomization; two-sided; add-one Monte Carlo',
             'seed': seed, 'permutations': permutations, 'paired_query_count': n,
             'mean_delta': observed, 'p_value': p_value}
+
+
+def paired_test(baseline, improved, *, exact: bool = False, seed: int = 1707, permutations: int = 10000) -> dict:
+    """paired_randomization() unless exact=True (the opt-in --exact-paired path).
+
+    Exact mode enumerates all 2^k sign patterns when k (non-zero pairs) <= 20,
+    with the same statistic and tie rule; above that it keeps the seeded Monte
+    Carlo p-value. Both exact-mode records name their method and add
+    nonzero_pair_count and minimum_attainable_p_value (2^(1-k)).
+    """
+    if type(exact) is not bool:
+        raise ValueError('exact must be boolean')
+    if not exact:
+        return paired_randomization(baseline, improved, seed=seed, permutations=permutations)
+    if type(seed) is not int or type(permutations) is not int or not 1 <= permutations <= 100000:
+        raise ValueError('invalid randomization bounds')
+    stats = _load_eval_stats()
+    nonzero = sum(value != 0 for value in stats.paired_differences(baseline, improved))
+    if nonzero <= stats.EXACT_PAIRED_MAX_NONZERO:
+        return stats.exact_paired_sign_flip(baseline, improved)
+    result = paired_randomization(baseline, improved, seed=seed, permutations=permutations)
+    return {**result, 'method': f"{result['method']} (more than {stats.EXACT_PAIRED_MAX_NONZERO} non-zero pairs)",
+            'nonzero_pair_count': nonzero,
+            'minimum_attainable_p_value': stats.minimum_attainable_p_value(nonzero)}
 
 
 def _summary(rows: list[dict]) -> dict:
@@ -353,8 +390,14 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
     }
 
 
-def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
-    """Identical labeled queries/budget; legacy ignores advanced fixture options."""
+def compare(fixture: Path, *, max_tokens: int = 1500, exact_paired: bool = False, **options) -> dict:
+    """Identical labeled queries/budget; legacy ignores advanced fixture options.
+
+    exact_paired=True (opt-in) gives each paired_randomization entry the exact
+    p-value when a metric has at most 20 non-zero paired differences.
+    """
+    if type(exact_paired) is not bool:
+        raise ValueError('exact_paired must be boolean')
     top_k = options.get('top_k', 3)
     baseline = evaluate(fixture, max_tokens=max_tokens, top_k=top_k)
     improved = evaluate(fixture, max_tokens=max_tokens, advanced=True, **options)
@@ -369,7 +412,8 @@ def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
     for metric in ('source_recall_at_k', 'ndcg_at_5', 'returned_context_claim_coverage'):
         paired = [(a[metric], b[metric]) for a, b in zip(paired_baseline['per_query'], improved['per_query'])
                   if a[metric] is not None and b[metric] is not None]
-        report['paired_randomization'][metric] = paired_randomization([p[0] for p in paired], [p[1] for p in paired])
+        report['paired_randomization'][metric] = paired_test([p[0] for p in paired], [p[1] for p in paired],
+                                                             exact=exact_paired)
     report['paired_comparison'] = 'expansion_ablation versus improved' if 'expansion_ablation' in report else 'baseline versus improved'
     return report
 
@@ -399,20 +443,23 @@ def _decomposition_value(row: dict, metric: str):
 
 def temporal_decomposition(legacy: dict, render_matched: dict, advanced: dict, *,
                            alpha: float = RENDER_MATCHED_ALPHA, seed: int = 1707,
-                           permutations: int = 10000) -> dict:
+                           permutations: int = 10000, exact_paired: bool = False) -> dict:
     """Split the apparent advanced-legacy gain on the same paired queries.
 
     display_effect = render_matched - legacy; mechanism_residual = advanced -
     render_matched. Their means add up to apparent_gain = advanced - legacy.
+    exact_paired=True runs every paired test through paired_test(exact=True).
     """
     if type(alpha) not in (int, float) or not 0 < alpha < 1:
         raise ValueError('alpha must be between 0 and 1')
+    if type(exact_paired) is not bool:
+        raise ValueError('exact_paired must be boolean')
     arms = (legacy, render_matched, advanced)
     ids = [[row['id'] for row in arm['per_query']] for arm in arms]
     if ids[0] != ids[1] or ids[0] != ids[2]:
         raise ValueError('decomposition requires identical queries in identical order')
     def paired(baseline, improved):
-        return paired_randomization(baseline, improved, seed=seed, permutations=permutations)
+        return paired_test(baseline, improved, exact=exact_paired, seed=seed, permutations=permutations)
 
     metrics = {}
     for metric, population, higher_is_better, decision_metric in DECOMPOSITION_METRICS:
@@ -459,7 +506,8 @@ def temporal_decomposition(legacy: dict, render_matched: dict, advanced: dict, *
                  for label, arm in zip(('legacy', 'render_matched', 'advanced'), arms) if arm['evaluation_errors']]
     return {
         'method': 'render-matched control arm (arXiv 2607.16019): advanced retrieval with '
-                  "temporal_filter='annotate_only'; paired sign randomization per metric",
+                  "temporal_filter='annotate_only'; paired sign randomization per metric"
+                  + ('; exact enumeration when a test has at most 20 non-zero pairs' if exact_paired else ''),
         'definitions': {
             'display_effect': 'render_matched - legacy: every advanced-arm change except as-of/supersession '
                               'exclusion (backend, link/query expansion, candidate sidecar, annotation fields)',
@@ -488,19 +536,111 @@ def temporal_decomposition(legacy: dict, render_matched: dict, advanced: dict, *
     }
 
 
-def with_render_matched(report: dict, fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
+def with_render_matched(report: dict, fixture: Path, *, max_tokens: int = 1500,
+                        exact_paired: bool = False, **options) -> dict:
     """Return a compare() report plus the render-matched arm; existing keys are unchanged."""
     if not isinstance(report, dict) or 'baseline' not in report or 'improved' not in report:
         raise ValueError('render-matched decomposition requires a compare() report')
+    if type(exact_paired) is not bool:
+        raise ValueError('exact_paired must be boolean')
     arm = evaluate(fixture, max_tokens=max_tokens, render_matched=True, **options)
     return {**report, 'render_matched': arm,
-            'temporal_decomposition': temporal_decomposition(report['baseline'], arm, report['improved'])}
+            'temporal_decomposition': temporal_decomposition(report['baseline'], arm, report['improved'],
+                                                             exact_paired=exact_paired)}
 
 
-def compare_render_matched(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
+def compare_render_matched(fixture: Path, *, max_tokens: int = 1500, exact_paired: bool = False,
+                           **options) -> dict:
     """compare() plus the opt-in render-matched control arm and decomposition."""
-    return with_render_matched(compare(fixture, max_tokens=max_tokens, **options), fixture,
-                               max_tokens=max_tokens, **options)
+    return with_render_matched(compare(fixture, max_tokens=max_tokens, exact_paired=exact_paired, **options),
+                               fixture, max_tokens=max_tokens, exact_paired=exact_paired, **options)
+
+
+RATE_BOUND_CONFIDENCE = 0.95
+# (bound name = optional gate name, summary section, numerator key, denominator key)
+RATE_BOUND_FIELDS = (
+    ('no_answer_false_positive_rate', 'no_answer', 'false_positive_query_count', 'query_count'),
+    ('forbidden_exposure_rate', 'forbidden_sources', 'exposed_query_count', 'labeled_query_count'),
+    ('stale_top_1_rate', 'stale_sources', 'top_1_query_count', 'labeled_query_count'),
+)
+REPORT_ARMS = ('baseline', 'expansion_ablation', 'improved', 'render_matched')
+RATE_BOUND_DEFINITIONS = {
+    'scope': 'Every summary (overall, by_language, by_scenario; each compare arm) gains rate_upper_bounds for '
+             'the no-answer false-positive, forbidden exposure and stale top-1 rates. A rate whose denominator '
+             'is zero has no entry.',
+    'wilson_upper': 'one-sided Wilson score upper bound; z is the one-sided normal quantile of the confidence',
+    'clopper_pearson_upper': 'one-sided exact binomial bound: the p with P(X <= numerator | denominator, p) = '
+                             '1 - confidence, by bisection on the binomial CDF; zero events use '
+                             '1 - (1 - confidence)^(1/denominator); all events give 1',
+    'interpretation': 'Descriptive inputs for human judgement, never gates or exit-code inputs. They assume '
+                      'independent queries that share one rate, but fixture queries are designed cases, not a '
+                      'sample of real use. Each bound holds on its own, with no multiplicity adjustment.',
+}
+
+
+def _with_key_after(mapping: dict, anchor: str, key: str, value) -> dict:
+    """Copy mapping with key (re)placed right after anchor (appended if anchor is absent)."""
+    copied = {}
+    for name, item in mapping.items():
+        if name == key:
+            continue
+        copied[name] = item
+        if name == anchor:
+            copied[key] = value
+    if key not in copied:
+        copied[key] = value
+    return copied
+
+
+def with_rate_bounds(report: dict, *, confidence: float = RATE_BOUND_CONFIDENCE) -> dict:
+    """Return an evaluate() or compare() report whose summaries carry one-sided rate upper bounds.
+
+    Opt-in (--rate-bounds). Existing keys and values are unchanged, the input is
+    not mutated, and gates keep reading the observed rates only.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('rate bounds require an evaluate() or compare() report')
+    stats = _load_eval_stats()
+    stats.confidence_alpha(confidence)
+
+    def summary(section: dict) -> dict:
+        bounds = {}
+        for name, group, numerator, denominator in RATE_BOUND_FIELDS:
+            counts = section[group]
+            if counts[denominator]:
+                bounds[name] = stats.rate_upper_bounds(counts[numerator], counts[denominator],
+                                                       confidence=confidence)
+        return _with_key_after(section, 'stale_sources', 'rate_upper_bounds', bounds)
+
+    def arm(result: dict) -> dict:
+        extended = summary(result)
+        for group in ('by_language', 'by_scenario'):
+            extended[group] = {key: summary(value) for key, value in result[group].items()}
+        return extended
+
+    if 'per_query' in report:
+        extended = arm(report)
+    elif 'baseline' in report and 'improved' in report:
+        extended = {**report, **{name: arm(report[name]) for name in REPORT_ARMS if name in report}}
+    else:
+        raise ValueError('rate bounds require an evaluate() or compare() report')
+    return _with_key_after(extended, 'interpretation', 'rate_upper_bound_definitions',
+                           {'confidence': confidence, 'side': 'one-sided upper', **RATE_BOUND_DEFINITIONS})
+
+
+def rate_bound_gate_notes(gated: dict) -> list[str]:
+    """Optional gates that passed although the exact upper bound still exceeds their maximum."""
+    bounds = gated.get('rate_upper_bounds', {})
+    notes = []
+    for name, gate in gated.get('optional_gates', {}).items():
+        bound = bounds.get(name)
+        if bound and gate['passed'] and bound['clopper_pearson_upper'] > gate['maximum']:
+            notes.append(f"{name} passed at {bound['numerator']}/{bound['denominator']} (maximum "
+                         f"{gate['maximum']:g}), but its one-sided {bound['confidence']:.0%} upper bound is "
+                         f"{bound['clopper_pearson_upper']:.4f} (Clopper-Pearson; Wilson "
+                         f"{bound['wilson_upper']:.4f}), so this sample cannot show the rate is at most "
+                         f"{gate['maximum']:g}")
+    return notes
 
 
 LEXICAL_NGRAMS_IGNORED_NOTE = (
@@ -537,6 +677,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument('--backend', choices=('lexical', 'bm25', 'hybrid'))
     parser.add_argument('--lexical-ngrams', choices=('hangul2',),
                         help='opt-in Hangul bigram BM25 rank for advanced retrieval; requires --advanced or --compare')
+    parser.add_argument('--exact-paired', action='store_true',
+                        help='with --compare: exact sign-flip p-values when a paired test has at most 20 non-zero '
+                             'differences (otherwise the seeded Monte Carlo test); records method, '
+                             'nonzero_pair_count and minimum_attainable_p_value (observational)')
+    parser.add_argument('--rate-bounds', action='store_true',
+                        help='add one-sided 95%% upper bounds (Wilson, Clopper-Pearson) with numerator and '
+                             'denominator for the no-answer false-positive, forbidden exposure and stale top-1 '
+                             'rates (descriptive; gates and exit code are unchanged)')
     return parser
 
 
@@ -553,15 +701,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.render_matched and not args.compare:
         print("--render-matched requires --compare", file=sys.stderr)
         return 2
+    if args.exact_paired and not args.compare:
+        print("--exact-paired requires --compare", file=sys.stderr)
+        return 2
     try:
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
         if args.lexical_ngrams is not None:
             options['lexical_ngrams'] = args.lexical_ngrams
-        report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
+        report = (compare(args.fixture, max_tokens=args.max_tokens, exact_paired=args.exact_paired, **options)
+                  if args.compare else
                   evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
         if args.render_matched:
-            report = with_render_matched(report, args.fixture, max_tokens=args.max_tokens, **options)
+            report = with_render_matched(report, args.fixture, max_tokens=args.max_tokens,
+                                         exact_paired=args.exact_paired, **options)
+        if args.rate_bounds:
+            report = with_rate_bounds(report)
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"recall evaluation unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
@@ -581,6 +736,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(LEXICAL_NGRAMS_IGNORED_NOTE, file=sys.stderr)
     for warning in report.get('temporal_decomposition', {}).get('warnings', ()):
         print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
+    if args.rate_bounds:
+        for note in rate_bound_gate_notes(gated):
+            print(f"rate-bounds note (non-blocking): {note}", file=sys.stderr)
     passed = (
         (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
         and (gated["mrr"] is None or gated["mrr"] >= args.min_mrr)
