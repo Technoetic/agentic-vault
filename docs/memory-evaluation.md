@@ -270,7 +270,9 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 - 질의별 옵션(`as_of` 등)과 `--advanced`·`--compare`·`--render-matched`·게이트 옵션은 fixture 모드와 같다.
   게이트 기본값(recall@3 ≥ 0.85, MRR ≥ 0.75)도 같으므로 작은 골드셋에는 의도한 기준을 직접 준다.
 - 엔진 한도(노트 2,000개, 파일당 512 KiB, 읽기 합계 16 MiB, 디렉터리 항목 20,000개)를 넘는 볼트는 검색이
-  불완전으로 기록되어 `evaluation_errors`가 생기고 종료 코드 1이 된다. 이 결과를 완전한 측정으로 읽지 않는다.
+  불완전으로 기록되어 `evaluation_errors`가 생기고 종료 코드 1이 된다. 라벨 풀이도 검색과 같은 순서의 앞 2,000개
+  노트만 대상으로 하므로, 그 뒤의 노트를 가리키는 라벨은 `incomplete_inventory`로 남고 파일 이름 일치도 꺼진다.
+  이 결과를 완전한 측정으로 읽지 않는다.
 
 ### 골드셋 만들기
 

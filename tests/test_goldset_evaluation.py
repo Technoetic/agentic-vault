@@ -436,6 +436,39 @@ class GoldSetVaultTests(unittest.TestCase):
         self.assertEqual(prepared.queries[0]["label_matches"][0]["match"], "incomplete_inventory")
         self.assertEqual(section["label_match_counts"]["stem"], 0)
 
+    def test_file_limit_cut_matches_retrieval_and_turns_stem_matching_off(self):
+        module = evaluator._load_recall_module()
+        module.MAX_FILES = 3
+        with mock.patch.object(evaluator, "_load_recall_module", return_value=module):
+            prepared = evaluator.load_goldset(self.vault, self.goldset)
+            report = evaluator.evaluate(prepared)
+        # The first MAX_FILES notes in the listing order that retrieval also cuts.
+        kept = {"20-knowledge/a/Checklist.md", "20-knowledge/b/Checklist.md",
+                "20-knowledge/history/Legacy rollback.md"}
+        section = prepared.sections["goldset"]
+        self.assertFalse(section["listing_complete"])
+        self.assertEqual(section["listed_note_count"], 3)
+        self.assertTrue(section["warnings"][0].startswith("note listing incomplete (file_count_limit)"))
+        self.assertEqual(section["label_match_counts"]["stem"], 0)
+        # A moved note's stem is not guessed, and an exact path past the cut is not a match.
+        self.assertEqual(prepared.queries[0]["label_matches"][0]["match"], "incomplete_inventory")
+        self.assertEqual(prepared.queries[2]["label_matches"][0]["match"], "incomplete_inventory")
+        self.assertEqual(prepared.queries[10]["label_matches"][0], {
+            "field": "expected_paths", "label": "20-knowledge/a/Checklist.md", "match": "path",
+            "path": "20-knowledge/a/Checklist.md"})
+        resolved = {found["path"] for row in prepared.queries for found in row["label_matches"] if found["path"]}
+        self.assertTrue(resolved and resolved <= kept, resolved)
+        retrieved = {path for row in report["per_query"] for path in row["retrieved_paths"]}
+        self.assertTrue(retrieved and retrieved <= kept, retrieved)
+        self.assertTrue(report["evaluation_errors"])
+
+        # Under the limit nothing changes: the stem still resolves the moved note.
+        module.MAX_FILES = 5
+        with mock.patch.object(evaluator, "_load_recall_module", return_value=module):
+            prepared = evaluator.load_goldset(self.vault, self.goldset)
+        self.assertTrue(prepared.sections["goldset"]["listing_complete"])
+        self.assertEqual(prepared.queries[0]["label_matches"][0]["match"], "stem")
+
     def test_goldset_split_needs_its_own_split_file(self):
         derived = self.root / "goldset.split.json"
         code, stdout, stderr = run_main(evaluator, ["--vault", self.vault, "--goldset", self.goldset,

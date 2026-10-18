@@ -925,6 +925,13 @@ def load_goldset(vault: Path, goldset: Path) -> EvaluationInput:
         # Schema messages name indices and fields only, never label text.
         raise GoldSetError(str(exc)) from exc
     listing = [relative for relative, _ in recall._markdown_paths(safe_vault, deny, exclude, diagnostics)]
+    if len(listing) > recall.MAX_FILES:
+        # Same cut as retrieval, which considers only the first MAX_FILES notes of this
+        # order: no label resolves to a note it can never return, and the incomplete
+        # listing turns stem matching off.
+        diagnostics["omitted_file_limit"] = len(listing) - recall.MAX_FILES
+        recall._omit(diagnostics, "file_count_limit")
+        listing = listing[:recall.MAX_FILES]
     complete = bool(diagnostics["search_complete"])
     warnings: list[str] = [] if complete else [
         "note listing incomplete (" + ", ".join(diagnostics["omissions"]) + "); labels whose path was "
