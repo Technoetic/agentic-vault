@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""Evaluate lexical source retrieval on the checked-in bilingual fixture corpus."""
+"""Evaluate lexical source retrieval on the checked-in bilingual fixture corpus.
+
+Opt-in: --vault/--goldset evaluates a user gold set against a real vault in
+place (local output only), --split evaluates one side of a committed
+dev/held-out split, and --redact hashes gold-set free text in the report.
+"""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
 import random
 import re
+import stat
 import sys
 import time
+import unicodedata
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Sequence
 
@@ -18,6 +27,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "recall"
 RECALL_PATH = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_recall.py"
 MAX_QUERIES_BYTES = 1024 * 1024
+MAX_SPLIT_BYTES = 1024 * 1024
+MAX_GOLDSET_WARNINGS = 50
+MAX_AMBIGUOUS_CANDIDATES = 5
+SPLIT_NAMES = ("dev", "heldout")
+SPLIT_SEED = 1707
+SPLIT_RULE = (
+    "Stratify queries by (language, scenario). Within each stratum order the query ids by the "
+    "lowercase SHA-256 hex of the UTF-8 text '<seed>:<id>' (ties by id); the first floor(n/2) ids "
+    "are heldout and the rest dev. With a previous split file, its listed ids keep their split and "
+    "only unlisted ids are ordered and divided this way within each stratum."
+)
+LABEL_MATCH_KINDS = ("path", "stem", "ambiguous_stem", "missing", "denied", "excluded", "incomplete_inventory")
 
 
 def _load_recall_module():
@@ -40,6 +61,11 @@ def _load_queries(fixture: Path) -> list[dict]:
     if path.stat().st_size > MAX_QUERIES_BYTES:
         raise ValueError("queries.json exceeds evaluation byte limit")
     raw = json.loads(path.read_text(encoding="utf-8"))
+    return _checked_queries(raw)
+
+
+def _checked_queries(raw: object) -> list[dict]:
+    """Validate the per-query schema shared by fixture queries.json and gold sets."""
     queries = raw.get("queries") if isinstance(raw, dict) else None
     if not isinstance(queries, list) or len(queries) < 12:
         raise ValueError("fixture must contain at least 12 labeled queries")
@@ -90,6 +116,10 @@ def _load_queries(fixture: Path) -> list[dict]:
             raise ValueError('expected paths require positive relevance labels')
         if expectation == 'no_answer' and any(relevance.values()):
             raise ValueError('no_answer query cannot have positive relevance')
+        # Optional: true marks a query edited after looking at failures. Such
+        # queries leave headline metrics; the key is never added when absent.
+        if 'inspected' in item and type(item['inspected']) is not bool:
+            raise ValueError(f'queries[{index}].inspected must be true or false')
         checked.append({**item, "expectation": expectation, "scenario": scenario,
                         "forbidden_paths": forbidden, "stale_paths": stale,
                         'required_claims': claims, 'relevance': relevance})
@@ -213,6 +243,11 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
     render_matched runs the advanced arm with temporal_filter='annotate_only':
     same options (lexical_ngrams included), fields and annotations, but no
     as-of/supersession exclusion.
+
+    fixture is a fixture directory (queries.json + vault/) or an
+    EvaluationInput from load_goldset()/select_split(); the latter's report
+    sections are appended. Queries marked inspected=true leave the headline
+    metrics, by_language and by_scenario and are summarized separately.
     """
     if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0:
         raise ValueError("max_tokens must be a non-negative integer")
@@ -231,9 +266,10 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         raise ValueError('render_matched must be boolean')
     advanced = (advanced or render_matched or as_of is not None or expand_links is not None
                 or backend is not None or expand_query or lexical_ngrams is not None)
-    queries = _load_queries(fixture)
+    prepared = fixture if isinstance(fixture, EvaluationInput) else None
+    queries = list(prepared.queries) if prepared is not None else _load_queries(fixture)
     recall_module = _load_recall_module()
-    vault = fixture / "vault"
+    vault = prepared.vault if prepared is not None else fixture / "vault"
     failures: list[dict] = []
     evaluation_errors: list[dict] = []
     per_query: list[dict] = []
@@ -319,7 +355,9 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
             evaluation_errors.append({"id": item["id"], **diagnostics})
 
     total_elapsed = sum(row["elapsed_ms"] for row in per_query)
-    return {
+    # Without inspected marks this is every row, so the default report is unchanged.
+    headline = [row for row in per_query if row.get("inspected") is not True]
+    report = {
         "benchmark": "bilingual source retrieval and data exposure (not LLM answer/attack quality)",
         "method": 'render_matched' if render_matched else 'advanced' if advanced else 'legacy',
         'top_k': top_k,
@@ -327,14 +365,14 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
             'ndcg_at_5': 'graded gain 2^grade-1, log2(rank+1) discount; top-k=3 leaves ranks 4/5 unreturned',
             'legacy_at_3': 'legacy keys always assess first three matches, including when top_k=5'},
         "interpretation": "Empty results describe this fixture scan only; they do not prove world absence. Exposure means returned source matches, not successful instruction following.",
-        **_summary(per_query),
+        **_summary(headline),
         "by_language": {
-            key: _summary([row for row in per_query if row["language"] == key])
-            for key in sorted({row["language"] for row in per_query})
+            key: _summary([row for row in headline if row["language"] == key])
+            for key in sorted({row["language"] for row in headline})
         },
         "by_scenario": {
-            key: _summary([row for row in per_query if row["scenario"] == key])
-            for key in sorted({row["scenario"] for row in per_query})
+            key: _summary([row for row in headline if row["scenario"] == key])
+            for key in sorted({row["scenario"] for row in headline})
         },
         "costs": {
             "max_context_tokens": max_tokens,
@@ -351,6 +389,22 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
         "failed_queries": failures,
         "evaluation_errors": evaluation_errors,
     }
+    inspected = [row for row in per_query if row.get("inspected") is True]
+    if inspected:
+        report["inspected_queries"] = {
+            "query_count": len(inspected),
+            "ids": [row["id"] for row in inspected],
+            "summary": _summary(inspected),
+            "note": "Queries marked inspected=true were edited after looking at failures. They are excluded "
+                    "from the headline metrics, by_language, by_scenario, gates and paired statistics, and "
+                    "reported here only; per_query, failed_queries, evaluation_errors and costs keep them. "
+                    "If they leave the headline with no query, or with no answerable query while some of "
+                    "them are answerable, the recall@3 and MRR gates cannot be evaluated and the command "
+                    "exits 1.",
+        }
+    if prepared is not None:
+        report.update(prepared.sections)
+    return report
 
 
 def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
@@ -367,8 +421,9 @@ def compare(fixture: Path, *, max_tokens: int = 1500, **options) -> dict:
     paired_baseline = report.get('expansion_ablation', baseline)
     report['paired_randomization'] = {}
     for metric in ('source_recall_at_k', 'ndcg_at_5', 'returned_context_claim_coverage'):
+        # Inspected queries leave paired statistics as they leave headline metrics.
         paired = [(a[metric], b[metric]) for a, b in zip(paired_baseline['per_query'], improved['per_query'])
-                  if a[metric] is not None and b[metric] is not None]
+                  if a[metric] is not None and b[metric] is not None and a.get('inspected') is not True]
         report['paired_randomization'][metric] = paired_randomization([p[0] for p in paired], [p[1] for p in paired])
     report['paired_comparison'] = 'expansion_ablation versus improved' if 'expansion_ablation' in report else 'baseline versus improved'
     return report
@@ -417,7 +472,8 @@ def temporal_decomposition(legacy: dict, render_matched: dict, advanced: dict, *
     metrics = {}
     for metric, population, higher_is_better, decision_metric in DECOMPOSITION_METRICS:
         triples = [values for values in (tuple(_decomposition_value(row, metric) for row in rows)
-                                         for rows in zip(*(arm['per_query'] for arm in arms)))
+                                         for rows in zip(*(arm['per_query'] for arm in arms))
+                                         if rows[0].get('inspected') is not True)
                    if None not in values]
         base, render, improved = ([values[index] for values in triples] for index in range(3))
         apparent, display, residual = paired(base, improved), paired(base, render), paired(render, improved)
@@ -514,9 +570,482 @@ def lexical_ngrams_ignored(report: dict) -> bool:
     return bool(rows) and all(row['retrieval_options'].get('backend', 'lexical') == 'lexical' for row in rows)
 
 
+# --- Opt-in: in-place gold set, dev/held-out split and redaction -----------
+# None of this runs unless --vault/--goldset, --split, --derive-split or
+# --redact is given. No network, model call or file write is involved.
+
+
+class GoldSetError(ValueError):
+    """Gold-set, split or vault-policy problem shown to the user.
+
+    Messages carry only indices, counts, field names and vault-relative paths,
+    never query text or other gold-set free text.
+    """
+
+
+class EvaluationInput:
+    """Prepared queries for one vault; evaluate()/compare() accept it as fixture.
+
+    ``sections`` are appended to every evaluated arm's report and ``notes`` are
+    printed to stderr by main(). Built by load_goldset() and select_split().
+    A plain class, not a dataclass: callers load this file with importlib
+    without registering it in sys.modules, which dataclasses require.
+    """
+    __slots__ = ("vault", "queries", "sections", "notes")
+
+    def __init__(self, vault: Path, queries: Sequence[dict], sections: dict | None = None,
+                 notes: Sequence[str] = ()):
+        self.vault = vault
+        self.queries = tuple(queries)
+        self.sections = dict(sections or {})
+        self.notes = tuple(notes)
+
+
+def _unique_json_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise GoldSetError("JSON object repeats a key")
+        result[key] = value
+    return result
+
+
+def _read_bounded_json(path: Path, limit: int, label: str) -> object:
+    """Read one regular JSON file of at most ``limit`` bytes.
+
+    json.loads detects UTF-8 (with or without BOM), UTF-16 and UTF-32 from the
+    bytes, so a file saved by Windows PowerShell 5.1 redirection also loads.
+    """
+    try:
+        metadata = path.stat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise GoldSetError(f"{label} is not a regular file")
+        if metadata.st_size > limit:
+            raise GoldSetError(f"{label} exceeds {limit} bytes")
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise GoldSetError(f"{label} is not a readable file") from exc
+    if len(raw) > limit:
+        raise GoldSetError(f"{label} exceeds {limit} bytes")
+    try:
+        return json.loads(raw, object_pairs_hook=_unique_json_fields)
+    except UnicodeDecodeError as exc:
+        raise GoldSetError(f"{label} is not UTF-8, UTF-16 or UTF-32 text") from exc
+    except json.JSONDecodeError as exc:
+        raise GoldSetError(f"{label} is not valid JSON (line {exc.lineno}, column {exc.colno})") from exc
+    except RecursionError as exc:
+        raise GoldSetError(f"{label} is nested too deeply") from exc
+
+
+def _label_key(text: str) -> str:
+    # Obsidian matches link targets case-insensitively; macOS can store
+    # decomposed Hangul names. Compare NFC + casefold on both sides.
+    return unicodedata.normalize("NFC", text).casefold()
+
+
+def _stem(relative: str) -> str:
+    # Listed notes end in .md in any letter case; labels end in lowercase .md.
+    return relative.rsplit("/", 1)[-1][:-3]
+
+
+class _LabelResolver:
+    """Resolve gold-set labels against the policy-filtered note listing.
+
+    Order: deny/exclude rules on the label itself (no fallback), exact
+    vault-relative path, a unique NFC+casefold path, then a unique filename
+    stem (the wikilink target) when the listing is complete. Ambiguous stems
+    are never guessed: such a label stays unresolved and can only miss.
+    """
+
+    def __init__(self, recall_module, paths: Sequence[str], deny: tuple, exclude: tuple, complete: bool):
+        self._recall = recall_module
+        self._deny, self._exclude, self._complete = deny, exclude, complete
+        self._exact = set(paths)
+        self._by_path: dict[str, list[str]] = defaultdict(list)
+        self._by_stem: dict[str, list[str]] = defaultdict(list)
+        for relative in paths:
+            self._by_path[_label_key(relative)].append(relative)
+            self._by_stem[_label_key(_stem(relative))].append(relative)
+
+    def resolve(self, label: str) -> dict:
+        skipped = self._recall._classified_skip(tuple(label.split("/")), self._deny, self._exclude)
+        if skipped:
+            return {"match": skipped, "path": None}
+        if label in self._exact:
+            return {"match": "path", "path": label}
+        same_path = self._by_path.get(_label_key(label), [])
+        if len(same_path) == 1:
+            return {"match": "path", "path": same_path[0]}
+        if not self._complete:
+            return {"match": "incomplete_inventory", "path": None}
+        candidates = sorted(self._by_stem.get(_label_key(_stem(label)), []))
+        if len(candidates) == 1:
+            return {"match": "stem", "path": candidates[0]}
+        if candidates:
+            return {"match": "ambiguous_stem", "path": None, "candidate_count": len(candidates),
+                    "candidates": candidates[:MAX_AMBIGUOUS_CANDIDATES]}
+        return {"match": "missing", "path": None}
+
+
+def _label_warning(index: int, field_name: str, position: int, found: dict) -> str:
+    kind = found["match"]
+    if kind == "ambiguous_stem":
+        shown = ", ".join(found["candidates"])
+        more = ", ..." if found["candidate_count"] > len(found["candidates"]) else ""
+        text = (f"filename stem is shared by {found['candidate_count']} eligible notes ({shown}{more}); "
+                "label left unresolved, give the full vault-relative path")
+    else:
+        text = {
+            "missing": "no eligible note has this path or filename stem; the label can only miss",
+            "denied": "label is inside a deny zone; it is never read or matched",
+            "excluded": "label is inside an excluded directory; retrieval never returns it",
+            "incomplete_inventory": "path not found and the note listing is incomplete; stem matching is off",
+        }[kind]
+    return f"queries[{index}].{field_name}[{position}]: {text}"
+
+
+def _resolved_query(index: int, item: dict, resolver: _LabelResolver, counts: Counter, warnings: list) -> dict:
+    """Rewrite labels to the notes they resolve to; record each label's match."""
+    if "label_matches" in item:
+        raise GoldSetError(f"queries[{index}].label_matches is reserved for evaluator output")
+    matches: list[dict] = []
+    resolved: dict[str, str] = {}
+
+    def resolve(field_name: str, position: int, label: str) -> str:
+        found = resolver.resolve(label)
+        counts[found["match"]] += 1
+        matches.append({"field": field_name, "label": label, **found})
+        if found["path"] is None:
+            warnings.append(_label_warning(index, field_name, position, found))
+        resolved[label] = found["path"] or label
+        return resolved[label]
+
+    fields = {}
+    for field_name in ("expected_paths", "forbidden_paths", "stale_paths"):
+        values = [resolve(field_name, position, label) for position, label in enumerate(item[field_name])]
+        if len({value.casefold() for value in values}) != len(values):
+            raise GoldSetError(f"queries[{index}].{field_name} labels resolve to the same note")
+        fields[field_name] = values
+    expected = {value.casefold() for value in fields["expected_paths"]}
+    for field_name in ("forbidden_paths", "stale_paths"):
+        if expected.intersection(value.casefold() for value in fields[field_name]):
+            raise GoldSetError(f"queries[{index}].{field_name} resolves to an expected note")
+    relevance: dict[str, int] = {}
+    for position, (label, grade) in enumerate(item["relevance"].items()):
+        path = resolved[label] if label in resolved else resolve("relevance", position, label)
+        if path.casefold() in {key.casefold() for key in relevance}:
+            raise GoldSetError(f"queries[{index}].relevance labels resolve to the same note")
+        relevance[path] = grade
+    return {**item, **fields, "relevance": relevance, "label_matches": matches}
+
+
+def load_goldset(vault: Path, goldset: Path) -> EvaluationInput:
+    """Prepare a user gold set for evaluating a real vault in place.
+
+    The vault is read only through the engine's policy: its validated
+    00-meta/vault-config.json (with defaults) fixes deny zones and exclusions
+    before any listing. This step lists note paths and reads no note content;
+    retrieval reads notes later through the same policy. The gold set uses the
+    fixture queries.json schema and may live outside the vault; inside the
+    vault it must not be in a deny zone. Labels are resolved once and shared by
+    every evaluated arm. Nothing is written or sent anywhere.
+    """
+    recall = _load_recall_module()
+    diagnostics = recall._diagnostics()
+    try:
+        if not isinstance(vault, Path) or not vault.is_dir():
+            raise OSError("vault is not a directory")
+        # Same bootstrap as recall: check the given root before resolving it,
+        # so a symlink or junction root is refused rather than followed.
+        recall.resolve_note_path(vault, recall.CONFIG_RELPATH)
+        safe_vault = vault.resolve(strict=True)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise GoldSetError("vault must be an existing directory that is not a symlink or junction") from exc
+    config = recall._read_config(safe_vault, diagnostics)
+    if config is None:
+        raise GoldSetError(f"vault configuration unavailable ({diagnostics['status']})")
+    deny = tuple(config.get("deny_zones") or ())
+    exclude = (*tuple(config.get("exclude_dirs") or ()), ".git")
+    try:
+        goldset_path = goldset.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise GoldSetError("gold set file not found") from exc
+    try:
+        inside = goldset_path.relative_to(safe_vault).parts
+    except ValueError:
+        inside = None
+    if inside is not None and any(recall._path_matches_rule(inside, zone) for zone in deny):
+        raise GoldSetError("gold set file is inside a deny zone of this vault; it was not read")
+    data = _read_bounded_json(goldset_path, MAX_QUERIES_BYTES, "gold set")
+    if not isinstance(data, dict) or not isinstance(data.get("queries"), list) or len(data["queries"]) < 12:
+        raise GoldSetError("gold set must be an object whose queries list has at least 12 labeled queries")
+    try:
+        queries = _checked_queries(data)
+    except ValueError as exc:
+        # Schema messages name indices and fields only, never label text.
+        raise GoldSetError(str(exc)) from exc
+    listing = [relative for relative, _ in recall._markdown_paths(safe_vault, deny, exclude, diagnostics)]
+    complete = bool(diagnostics["search_complete"])
+    warnings: list[str] = [] if complete else [
+        "note listing incomplete (" + ", ".join(diagnostics["omissions"]) + "); labels whose path was "
+        "not found are not matched by filename stem"]
+    counts: Counter = Counter()
+    resolver = _LabelResolver(recall, listing, deny, exclude, complete)
+    prepared = tuple(_resolved_query(index, item, resolver, counts, warnings)
+                     for index, item in enumerate(queries))
+    section = {
+        "mode": "in_place_vault",
+        # Of the parsed JSON (sorted keys, compact): line endings and BOMs do not change it.
+        "goldset_canonical_sha256": _digest(data),
+        "query_count": len(prepared),
+        "listed_note_count": len(listing),
+        "listing_complete": complete,
+        "label_match_counts": {kind: counts[kind] for kind in LABEL_MATCH_KINDS},
+        "warnings": warnings[:MAX_GOLDSET_WARNINGS],
+        "warnings_omitted": max(0, len(warnings) - MAX_GOLDSET_WARNINGS),
+        "matching": "Labels resolve once against the policy-filtered note listing, before retrieval: exact "
+                    "vault-relative path, then a unique case- and Unicode-normalization-insensitive path, then a "
+                    "unique filename stem (wikilink target). Denied, excluded, ambiguous, missing or unverifiable "
+                    "labels stay unresolved and can only miss; per_query[].label_matches records every label.",
+        "interpretation": "Results cover only these user-supplied queries on this vault at run time (n = "
+                          "query_count), not general retrieval quality. The report goes to standard output only; "
+                          "nothing is written or sent over the network.",
+    }
+    resolved_count = counts["path"] + counts["stem"]
+    notes = (f"goldset evaluation: {len(prepared)} queries, {len(listing)} listed notes; labels by path "
+             f"{counts['path']}, by stem {counts['stem']}, unresolved {sum(counts.values()) - resolved_count}",
+             *(f"goldset warning (non-blocking): {warning}" for warning in warnings[:MAX_GOLDSET_WARNINGS]))
+    if len(warnings) > MAX_GOLDSET_WARNINGS:
+        notes += (f"goldset warning (non-blocking): {len(warnings) - MAX_GOLDSET_WARNINGS} more not listed",)
+    return EvaluationInput(vault=vault, queries=prepared, sections={"goldset": section}, notes=notes)
+
+
+def load_split(path: Path) -> dict:
+    """Read a split definition: disjoint lists of unique query ids under dev and heldout."""
+    data = _read_bounded_json(path, MAX_SPLIT_BYTES, "split file")
+    if not isinstance(data, dict):
+        raise GoldSetError("split file must be a JSON object")
+    for name in SPLIT_NAMES:
+        values = data.get(name)
+        if (not isinstance(values, list)
+                or any(not isinstance(value, str) or not value.strip() for value in values)
+                or len(set(values)) != len(values)):
+            raise GoldSetError(f"split file {name} must list unique non-empty query ids")
+    if set(data["dev"]).intersection(data["heldout"]):
+        raise GoldSetError("split file lists a query id in both dev and heldout")
+    return data
+
+
+def _prepared(source) -> EvaluationInput:
+    if isinstance(source, EvaluationInput):
+        return source
+    return EvaluationInput(vault=source / "vault", queries=tuple(_load_queries(source)))
+
+
+def select_split(source, split: str, split_file: Path) -> EvaluationInput:
+    """Keep only the queries the split file lists under ``split`` and record n per split."""
+    if split not in SPLIT_NAMES:
+        raise GoldSetError("split must be dev or heldout")
+    prepared = _prepared(source)
+    definition = load_split(split_file)
+    members = {name: set(definition[name]) for name in SPLIT_NAMES}
+    ids = [item["id"] for item in prepared.queries]
+    counts = {name: sum(query_id in members[name] for query_id in ids) for name in SPLIT_NAMES}
+    unassigned = sum(not any(query_id in members[name] for name in SPLIT_NAMES) for query_id in ids)
+    selected = tuple(item for item in prepared.queries if item["id"] in members[split])
+    if not selected:
+        raise GoldSetError(f"split {split} selects no queries")
+    seed = definition.get("seed")
+    section = {
+        "name": split,
+        "definition_canonical_sha256": _digest(definition),
+        "seed": seed if type(seed) is int else None,
+        "query_count_by_split": {"dev": counts["dev"], "heldout": counts["heldout"], "unassigned": unassigned},
+        "evaluated_query_count": len(selected),
+        "evaluated_inspected_query_count": sum(item.get("inspected") is True for item in selected),
+        "listed_ids_not_in_queries": sum(len(members[name].difference(ids)) for name in SPLIT_NAMES),
+        "interpretation": "Every metric in this report covers only this split (n = evaluated_query_count). "
+                          "Unassigned queries are not evaluated. Tune on dev; report heldout separately.",
+    }
+    note = (f"recall evaluation split: {split} n={len(selected)} "
+            f"(dev n={counts['dev']}, heldout n={counts['heldout']}, unassigned n={unassigned})")
+    return EvaluationInput(vault=prepared.vault, queries=selected,
+                           sections={**prepared.sections, "split": section}, notes=(*prepared.notes, note))
+
+
+def derive_split(queries: Sequence[dict], *, seed: int = SPLIT_SEED, previous: dict | None = None) -> dict:
+    """Derive the dev/heldout split by SPLIT_RULE; deterministic on every platform.
+
+    With ``previous`` (a split definition), ids it lists keep their split and
+    only unlisted ids are divided, so growing a gold set never moves an
+    existing dev query into heldout.
+    """
+    if type(seed) is not int or seed < 0:
+        raise GoldSetError("split seed must be a non-negative integer")
+    kept = {query_id: name for name in SPLIT_NAMES for query_id in (previous or {}).get(name, ())}
+    strata: dict[tuple, list[str]] = defaultdict(list)
+    for item in queries:
+        strata[(item["language"], item["scenario"])].append(item["id"])
+
+    def order(query_id: str):
+        return hashlib.sha256(f"{seed}:{query_id}".encode("utf-8")).hexdigest(), query_id
+
+    present = {item["id"] for item in queries}
+    assigned = {query_id: name for query_id, name in kept.items() if query_id in present}
+    rows = []
+    for (language, scenario), ids in sorted(strata.items()):
+        new = sorted((query_id for query_id in ids if query_id not in kept), key=order)
+        for position, query_id in enumerate(new):
+            assigned[query_id] = "heldout" if position < len(new) // 2 else "dev"
+        rows.append({"language": language, "scenario": scenario, "query_count": len(ids),
+                     "heldout_count": sum(assigned[query_id] == "heldout" for query_id in ids)})
+    result = {
+        "split_version": 1,
+        "rule": SPLIT_RULE,
+        "seed": seed,
+        "heldout_fraction": "floor(n/2) per stratum",
+        "strata_fields": ["language", "scenario"],
+        "query_count": len(assigned),
+        "strata": rows,
+        "dev": sorted(query_id for query_id, name in assigned.items() if name == "dev"),
+        "heldout": sorted(query_id for query_id, name in assigned.items() if name == "heldout"),
+    }
+    if previous is not None:
+        retained = sum(query_id in present for query_id in kept)
+        result["incremental"] = {"kept": retained, "added": len(assigned) - retained,
+                                 "dropped": len(kept) - retained}
+    return result
+
+
+_ROW_RESULT_KEYS = frozenset({
+    "retrieved_paths", "source_recall_at_3", "reciprocal_rank_at_3", "source_recall_at_k",
+    "reciprocal_rank_at_k", "ndcg_at_5", "returned_context_claim_coverage", "outcome",
+    "forbidden_retrieved_paths", "stale_retrieved_paths", "top_1_forbidden", "top_1_stale",
+    "elapsed_ms", "estimated_returned_context_tokens"})
+_ROW_STRUCTURED_LABEL_KEYS = frozenset({
+    "language", "expectation", "expected_paths", "forbidden_paths", "stale_paths", "relevance",
+    "inspected", "label_matches"})
+_OPTION_ENUMS = {"backend": ("lexical", "bm25", "hybrid"), "lexical_ngrams": ("hangul2",),
+                 "temporal_filter": ("exclude", "annotate_only")}
+_AS_OF_SHAPE = re.compile(r"[0-9TZ:+.\-]{1,64}")
+REDACTION_DESCRIPTION = {
+    "method": "sha256 hex of the UTF-8 text; a non-text value is hashed as its compact sorted JSON",
+    "replaced": ["id (also in failed_queries, evaluation_errors and inspected_queries)", "query",
+                 "scenario (also by_scenario keys)", "required_claims and covered_claims (each claim)",
+                 "every other free-text gold-set field, such as label_rationale",
+                 "query-expansion terms, triggers, replacements and added terms"],
+    "kept": "vault-relative paths and labels, languages, expectations, numbers, booleans, dates and option names",
+    "limits": "A hash is not encryption: short or guessable text can be recovered by hashing candidates. "
+              "File names stay readable in paths.",
+}
+
+
+def _digest(value: object) -> str:
+    text = value if isinstance(value, str) else json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _redacted_candidates(value: object) -> object:
+    """External candidates are paths and ranks; any other provider text is hashed."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return {key: (_redacted_candidates(item) if key == "candidates" else _digest(item))
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [item if isinstance(item, str) else
+                {key: (entry if key in ("path", "rank") else _digest(entry)) for key, entry in item.items()}
+                if isinstance(item, dict) else _digest(item) for item in value]
+    return _digest(value)
+
+
+def _redacted_option(key: str, value: object) -> object:
+    if key in ("query_mapping", "excluded_sources"):
+        return value  # vault-relative paths
+    if key == "external_candidates":
+        return _redacted_candidates(value)
+    if key == "as_of":
+        return value if isinstance(value, str) and _AS_OF_SHAPE.fullmatch(value) else _digest(value)
+    if key == "expand_links":
+        return value if type(value) is int else _digest(value)
+    if key == "expand_query":
+        return value if type(value) is bool else _digest(value)
+    if key in _OPTION_ENUMS:
+        return value if isinstance(value, str) and value in _OPTION_ENUMS[key] else _digest(value)
+    return _digest(value)
+
+
+def _redacted_diagnostics(diagnostics: object) -> object:
+    expansion = diagnostics.get("query_expansion") if isinstance(diagnostics, dict) else None
+    if not isinstance(expansion, dict):
+        return diagnostics
+
+    def entry(value: dict) -> dict:
+        changed = {key: _digest(value[key]) for key in ("trigger", "replacement") if key in value}
+        if "added_terms" in value:
+            changed["added_terms"] = [_digest(term) for term in value["added_terms"]]
+        return {**value, **changed}
+
+    expansion = {**expansion, "terms": [_digest(term) for term in expansion.get("terms", ())],
+                 "expansions": [entry(value) for value in expansion.get("expansions", ())],
+                 "ambiguities": [entry(value) for value in expansion.get("ambiguities", ())]}
+    return {**diagnostics, "query_expansion": expansion}
+
+
+def _redacted_row(row: dict) -> dict:
+    redacted = {}
+    for key, value in row.items():
+        if key in ("required_claims", "covered_claims"):
+            redacted[key] = [_digest(claim) for claim in value]
+        elif key == "diagnostics":
+            redacted[key] = _redacted_diagnostics(value)
+        elif key == "retrieval_options":
+            redacted[key] = {name: _redacted_option(name, option) for name, option in value.items()}
+        elif key in ("as_of", "expand_links", "backend", "external_candidates", "excluded_sources"):
+            redacted[key] = _redacted_option(key, value)
+        elif key in _ROW_RESULT_KEYS or key in _ROW_STRUCTURED_LABEL_KEYS:
+            redacted[key] = value
+        else:
+            # id, query, scenario, label_rationale and any unknown field.
+            redacted[key] = _digest(value)
+    return redacted
+
+
+def _redacted_evaluation(report: dict) -> dict:
+    redacted = {**report,
+                "by_scenario": {_digest(key): value for key, value in report["by_scenario"].items()},
+                "per_query": [_redacted_row(row) for row in report["per_query"]],
+                "failed_queries": [{**row, "id": _digest(row["id"])} for row in report["failed_queries"]],
+                "evaluation_errors": [_redacted_diagnostics({**row, "id": _digest(row["id"])})
+                                      for row in report["evaluation_errors"]]}
+    if "inspected_queries" in report:
+        redacted["inspected_queries"] = {**report["inspected_queries"],
+                                         "ids": [_digest(value) for value in report["inspected_queries"]["ids"]]}
+    return redacted
+
+
+def redact_report(report: dict) -> dict:
+    """Replace gold-set free text with sha256 hex; paths, numbers and enums remain.
+
+    Works on one evaluate() report or on any report whose arms (baseline,
+    improved, expansion_ablation, render_matched, ...) are evaluate() reports.
+    """
+    if "per_query" in report:
+        redacted = _redacted_evaluation(report)
+    else:
+        redacted = {key: (_redacted_evaluation(value) if isinstance(value, dict) and "per_query" in value
+                          else value) for key, value in report.items()}
+    redacted["redaction"] = REDACTION_DESCRIPTION
+    return redacted
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
+    # None means the checked-in default fixture; main() resolves it, so an
+    # explicit --fixture can be told apart from the gold-set mode.
+    parser.add_argument("--fixture", type=Path, default=None,
+                        help="directory with queries.json and vault/ (default: tests/fixtures/recall)")
     parser.add_argument("--min-recall-at-3", type=float, default=0.85)
     parser.add_argument("--min-mrr", type=float, default=0.75)
     parser.add_argument("--max-tokens", type=int, default=1500,
@@ -537,7 +1066,57 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument('--backend', choices=('lexical', 'bm25', 'hybrid'))
     parser.add_argument('--lexical-ngrams', choices=('hangul2',),
                         help='opt-in Hangul bigram BM25 rank for advanced retrieval; requires --advanced or --compare')
+    goldset = parser.add_argument_group('in-place gold set (opt-in, local output only)')
+    goldset.add_argument('--vault', type=Path,
+                         help='real vault evaluated in place with --goldset; read through its '
+                              '00-meta/vault-config.json policy (deny zones, exclusions); nothing is written or sent')
+    goldset.add_argument('--goldset', type=Path,
+                         help='gold-set JSON in the fixture queries.json schema; labels match by vault-relative '
+                              'path, then by a unique filename stem (wikilink target); cannot be combined with --fixture')
+    goldset.add_argument('--redact', action='store_true',
+                         help='replace ids, queries, scenarios, claims and other gold-set free text in the report '
+                              'with sha256 hex; vault-relative paths remain')
+    split = parser.add_argument_group('dev/held-out split (opt-in)')
+    split.add_argument('--split', choices=SPLIT_NAMES,
+                       help='evaluate only this side of the split definition and report n per split')
+    split.add_argument('--split-file', type=Path,
+                       help='split definition JSON (default: <fixture>/split.json; required with --goldset)')
+    split.add_argument('--derive-split', action='store_true',
+                       help=f'print the split derived by the documented stratified rule (seed {SPLIT_SEED}) and '
+                            'exit without retrieval; with --split-file, keep its assignments and divide only new ids')
     return parser
+
+
+def _mode_error(args: argparse.Namespace) -> str | None:
+    if args.fixture is not None and (args.vault is not None or args.goldset is not None):
+        return "--fixture cannot be combined with --vault or --goldset"
+    if (args.vault is None) != (args.goldset is None):
+        return "--vault and --goldset must be given together"
+    if args.derive_split and (args.split is not None or args.redact):
+        return "--derive-split cannot be combined with --split or --redact"
+    if args.split_file is not None and args.split is None and not args.derive_split:
+        return "--split-file requires --split or --derive-split"
+    if args.split is not None and args.goldset is not None and args.split_file is None:
+        return "--split with --goldset requires --split-file"
+    return None
+
+
+def _inspected_gate_gap(report: dict) -> str | None:
+    """Name what inspected=true marks left the gated headline without, or None.
+
+    As in v0.24.0, the recall@3 and MRR gates are skipped for a query set
+    without answerable queries. They cannot pass when the marks themselves
+    leave the headline with no query at all, or with no answerable query
+    while inspected answerable queries exist. Always None without marks.
+    """
+    inspected = report.get("inspected_queries")
+    if inspected is None:
+        return None
+    if not report["query_count"]:
+        return "no query"
+    if not report["answerable_query_count"] and inspected["summary"]["answerable_query_count"]:
+        return "no answerable query"
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -553,15 +1132,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.render_matched and not args.compare:
         print("--render-matched requires --compare", file=sys.stderr)
         return 2
+    mode_error = _mode_error(args)
+    if mode_error is not None:
+        print(mode_error, file=sys.stderr)
+        return 2
+    fixture = DEFAULT_FIXTURE if args.fixture is None else args.fixture
+    source = fixture
     try:
+        if args.goldset is not None:
+            source = load_goldset(args.vault, args.goldset)
+        if args.derive_split:
+            previous = None if args.split_file is None else load_split(args.split_file)
+            seed = SPLIT_SEED if previous is None else previous.get("seed", SPLIT_SEED)
+            derived = derive_split(_prepared(source).queries, seed=seed, previous=previous)
+            print(json.dumps(derived, ensure_ascii=False, indent=2))
+            return 0
+        if args.split is not None:
+            split_file = fixture / "split.json" if args.split_file is None else args.split_file
+            source = select_split(source, args.split, split_file)
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
         if args.lexical_ngrams is not None:
             options['lexical_ngrams'] = args.lexical_ngrams
-        report = (compare(args.fixture, max_tokens=args.max_tokens, **options) if args.compare else
-                  evaluate(args.fixture, max_tokens=args.max_tokens, advanced=args.advanced, **options))
+        report = (compare(source, max_tokens=args.max_tokens, **options) if args.compare else
+                  evaluate(source, max_tokens=args.max_tokens, advanced=args.advanced, **options))
         if args.render_matched:
-            report = with_render_matched(report, args.fixture, max_tokens=args.max_tokens, **options)
+            report = with_render_matched(report, source, max_tokens=args.max_tokens, **options)
+    except GoldSetError as exc:
+        # Opt-in modes only; the message names indices, fields and paths.
+        print(f"recall evaluation unavailable: {exc}", file=sys.stderr)
+        return 2
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         print(f"recall evaluation unavailable: {type(exc).__name__}", file=sys.stderr)
         return 2
@@ -576,13 +1176,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                "passed": observed is not None and observed <= maximum}
         for name, (observed, maximum) in optional_gates.items() if maximum is not None
     }
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(redact_report(report) if args.redact else report, ensure_ascii=False, indent=2))
     if args.lexical_ngrams is not None and lexical_ngrams_ignored(report):
         print(LEXICAL_NGRAMS_IGNORED_NOTE, file=sys.stderr)
     for warning in report.get('temporal_decomposition', {}).get('warnings', ()):
         print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
+    # Opt-in notes (gold set, split, inspected); a fixture path has none.
+    for note in (source.notes if isinstance(source, EvaluationInput) else ()):
+        print(note, file=sys.stderr)
+    # Inspected marks must not turn the recall@3/MRR gates into a vacuous pass.
+    gate_gap = _inspected_gate_gap(gated)
+    if gate_gap is not None:
+        print(f"recall evaluation gate failed: {gated['inspected_queries']['query_count']} inspected=true "
+              f"queries leave {gate_gap} in the headline, so --min-recall-at-3 and --min-mrr cannot be "
+              "evaluated; add queries that were not edited after looking at failures", file=sys.stderr)
+    elif "inspected_queries" in gated:
+        print(f"recall evaluation note (non-blocking): {gated['inspected_queries']['query_count']} inspected "
+              "queries are excluded from headline metrics and gates; see inspected_queries", file=sys.stderr)
     passed = (
-        (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
+        gate_gap is None
+        and (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
         and (gated["mrr"] is None or gated["mrr"] >= args.min_mrr)
         and not gated["evaluation_errors"]
         and all(gate["passed"] for gate in gated["optional_gates"].values())

@@ -1,0 +1,153 @@
+{
+  "split_version": 1,
+  "rule": "Stratify queries by (language, scenario). Within each stratum order the query ids by the lowercase SHA-256 hex of the UTF-8 text '<seed>:<id>' (ties by id); the first floor(n/2) ids are heldout and the rest dev. With a previous split file, its listed ids keep their split and only unlisted ids are ordered and divided this way within each stratum.",
+  "seed": 1707,
+  "heldout_fraction": "floor(n/2) per stratum",
+  "strata_fields": [
+    "language",
+    "scenario"
+  ],
+  "query_count": 64,
+  "strata": [
+    {
+      "language": "en",
+      "scenario": "abstention",
+      "query_count": 4,
+      "heldout_count": 2
+    },
+    {
+      "language": "en",
+      "scenario": "mixed",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "en",
+      "scenario": "particles",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "en",
+      "scenario": "short",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "en",
+      "scenario": "spacing",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "en",
+      "scenario": "update",
+      "query_count": 4,
+      "heldout_count": 2
+    },
+    {
+      "language": "ko",
+      "scenario": "abstention",
+      "query_count": 4,
+      "heldout_count": 2
+    },
+    {
+      "language": "ko",
+      "scenario": "mixed",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "ko",
+      "scenario": "particles",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "ko",
+      "scenario": "short",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "ko",
+      "scenario": "spacing",
+      "query_count": 6,
+      "heldout_count": 3
+    },
+    {
+      "language": "ko",
+      "scenario": "update",
+      "query_count": 4,
+      "heldout_count": 2
+    }
+  ],
+  "dev": [
+    "en-abstention-03",
+    "en-abstention-04",
+    "en-mixed-03",
+    "en-mixed-04",
+    "en-mixed-05",
+    "en-particles-04",
+    "en-particles-05",
+    "en-particles-06",
+    "en-short-02",
+    "en-short-04",
+    "en-short-05",
+    "en-spacing-04",
+    "en-spacing-05",
+    "en-spacing-06",
+    "en-update-01",
+    "en-update-04",
+    "ko-abstention-02",
+    "ko-abstention-04",
+    "ko-mixed-01",
+    "ko-mixed-05",
+    "ko-mixed-06",
+    "ko-particles-01",
+    "ko-particles-03",
+    "ko-particles-06",
+    "ko-short-03",
+    "ko-short-05",
+    "ko-short-06",
+    "ko-spacing-01",
+    "ko-spacing-04",
+    "ko-spacing-05",
+    "ko-update-03",
+    "ko-update-04"
+  ],
+  "heldout": [
+    "en-abstention-01",
+    "en-abstention-02",
+    "en-mixed-01",
+    "en-mixed-02",
+    "en-mixed-06",
+    "en-particles-01",
+    "en-particles-02",
+    "en-particles-03",
+    "en-short-01",
+    "en-short-03",
+    "en-short-06",
+    "en-spacing-01",
+    "en-spacing-02",
+    "en-spacing-03",
+    "en-update-02",
+    "en-update-03",
+    "ko-abstention-01",
+    "ko-abstention-03",
+    "ko-mixed-02",
+    "ko-mixed-03",
+    "ko-mixed-04",
+    "ko-particles-02",
+    "ko-particles-04",
+    "ko-particles-05",
+    "ko-short-01",
+    "ko-short-02",
+    "ko-short-04",
+    "ko-spacing-02",
+    "ko-spacing-03",
+    "ko-spacing-06",
+    "ko-update-01",
+    "ko-update-02"
+  ]
+}

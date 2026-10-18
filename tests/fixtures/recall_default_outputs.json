@@ -1,0 +1,91 @@
+{
+  "note": "SHA-256 of canonical evaluate_recall.py outputs captured from v0.24.0 (d2b9315) before the opt-in gold-set, split, inspected and redaction options. Each fixture's queries.json and vault/ are copied with LF endings; wall-clock fields are replaced and floats rounded to 12 significant digits before json.dumps(ensure_ascii=False, indent=2); stderr and exit codes are exact. Regenerate only for an intentional, documented default change (tests/test_goldset_evaluation.py capture_default_outputs).",
+  "captured_from": "d2b9315",
+  "cases": [
+    {
+      "name": "ci_default",
+      "fixture": "recall",
+      "args": [],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout_canonical_sha256": "e4cd60a38b6457ee7788c2ff87547396965b7623b2daf329869af6660d6aa1c4"
+    },
+    {
+      "name": "ci_advanced_compare",
+      "fixture": "recall_advanced",
+      "args": [
+        "--compare",
+        "--max-no-answer-false-positive-rate",
+        "0",
+        "--max-forbidden-exposure-rate",
+        "0",
+        "--max-stale-top-1-rate",
+        "0"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout_canonical_sha256": "4e986b8d9423b846806e1f1eb38b642d6288387bf3614f123de8b88139d37183"
+    },
+    {
+      "name": "ci_hard_top3",
+      "fixture": "recall_hard",
+      "args": [
+        "--compare",
+        "--expand-query",
+        "--query-mapping",
+        "00-meta/query-map.txt",
+        "--max-tokens",
+        "1500",
+        "--max-no-answer-false-positive-rate",
+        "0.25",
+        "--max-stale-top-1-rate",
+        "0",
+        "--top-k",
+        "3"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout_canonical_sha256": "3d80a3c40375b1c12e1b5b2aa58cf9e1116dd5061abc4c57f305847c22ae17a8"
+    },
+    {
+      "name": "ci_hard_top5",
+      "fixture": "recall_hard",
+      "args": [
+        "--compare",
+        "--expand-query",
+        "--query-mapping",
+        "00-meta/query-map.txt",
+        "--max-tokens",
+        "1500",
+        "--max-no-answer-false-positive-rate",
+        "0.25",
+        "--max-stale-top-1-rate",
+        "0",
+        "--top-k",
+        "5"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout_canonical_sha256": "d2eacbf4eccc5a80f7b9ce8b2106f31efe12be2c4cc99537eebba43d76d30aee"
+    },
+    {
+      "name": "doc_advanced_render_matched",
+      "fixture": "recall_advanced",
+      "args": [
+        "--compare",
+        "--render-matched"
+      ],
+      "exit_code": 0,
+      "stderr": "render-matched warning (non-blocking): ndcg_at_5: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences\nrender-matched warning (non-blocking): stale_top_1: mechanism residual cannot reach p<0.05 with 4 nonzero paired differences\nrender-matched warning (non-blocking): no_answer_false_positive: mechanism residual cannot reach p<0.05 with 2 nonzero paired differences\n",
+      "stdout_canonical_sha256": "88ba46f0235d1dad6d4050b6651544885bc496728eb6af7789c5fc6cfaf2f9c1"
+    },
+    {
+      "name": "doc_experience",
+      "fixture": "recall_experience",
+      "args": [],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout_canonical_sha256": "2ed07bc267dbbfd9b8c8d93e8a155a1b5b55ee07b3a06400d021e2e245c8f8c0"
+    }
+  ]
+}

@@ -13,8 +13,10 @@ v0.24.0의 [언어 매트릭스·Kiwi/qmd 비교·Windows 편집 보강](evaluat
 유형별로 분류해 전체 영수증으로 남긴다.
 
 이 문서는 v0.24.0의 선택형 개발·평가 도구를 설명한다. 위 두 옵션은 v0.23.0에서 더했다. 기본 세션 훅·검색·주입·설치 동작에
-모델 호출이나 새 런타임 의존성을 추가하지 않는다. 실제 사용자 볼트나 업무 자료를
-평가 입력으로 받지 않으며, 가상의 조직·사실·메시지함만 사용한다.
+모델 호출이나 새 런타임 의존성을 추가하지 않는다. 기본 실행은 실제 사용자 볼트나 업무 자료를
+평가 입력으로 받지 않으며, 가상의 조직·사실·메시지함만 사용한다. 예외는 v0.24.0 뒤에 더한
+선택형 `--vault --goldset`([실제 볼트 골드셋 평가](#실제-볼트-골드셋-평가))뿐이다. 사용자가 지정한
+볼트를 제자리에서 읽고, 결과는 표준 출력으로만 낸다.
 
 ## 한국어 근거와 구조화 답변
 
@@ -136,6 +138,157 @@ fixture 측정이다. recall 행은 CI와 같은 옵션에 `--render-matched`만
   0이 아닌 쌍이 지표마다 최소 6개 필요하다(최소 p 2^(1−6)=0.031).
 - 읽는 모델이 없으므로 표시(렌더링) 자체가 답변에 주는 효과는 측정하지 않는다.
 - 측정 기록: [render-matched-20261017.md](verification/render-matched-20261017.md)
+
+## 실제 볼트 골드셋 평가
+
+사용자가 손으로 라벨한 질문 묶음(골드셋)으로 실제 볼트의 검색을 제자리에서 잰다. 볼트를 복사하거나
+밖으로 보내지 않는다. 기본 꺼짐이며 `--fixture`와 함께 쓸 수 없다. 아래 옵션이 없으면 기본 실행·출력·CI
+게이트는 v0.24.0과 같다. `tests/test_goldset_evaluation.py`가 CI의 `evaluate_recall.py` 명령 네 개와 문서에
+적힌 실행 두 개(`recall_advanced --compare --render-matched`, `recall_experience`)의 출력을 v0.24.0(`d2b9315`)에서
+잡은 값과 비교한다. 실행 시간 필드는 빼고, 실수는 플랫폼 간 마지막 자리 차이를 없애려 유효숫자 12자리로 맞춘다.
+
+```text
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact > RESULT.json
+```
+
+- 볼트는 엔진의 정책으로만 읽는다. `00-meta/vault-config.json`을 엔진 설정 검사기로 검증하고 빠진 키는
+  엔진 기본값(기본 deny zone 다섯 곳 포함)으로 채운 뒤, 노트를 나열하기 전에 deny zone과 제외 폴더
+  (`exclude_dirs`, `.git`)를 정한다. 설정이 없거나 잘못되면 아무것도 나열하지 않고 종료 코드 2로 끝난다.
+- 준비 단계는 노트 경로만 나열하고 본문을 읽지 않는다. 본문은 검색 엔진이 같은 정책으로 읽는다. deny zone은
+  나열·읽기·일치 대상이 아니다.
+- 네트워크·모델 호출과 파일 쓰기가 없다. 결과 JSON은 표준 출력, 경고는 표준 오류로만 나온다.
+- 질의별 옵션(`as_of` 등)과 `--advanced`·`--compare`·`--render-matched`·게이트 옵션은 fixture 모드와 같다.
+  게이트 기본값(recall@3 ≥ 0.85, MRR ≥ 0.75)도 같으므로 작은 골드셋에는 의도한 기준을 직접 준다.
+- 엔진 한도(노트 2,000개, 파일당 512 KiB, 읽기 합계 16 MiB, 디렉터리 항목 20,000개)를 넘는 볼트는 검색이
+  불완전으로 기록되어 `evaluation_errors`가 생기고 종료 코드 1이 된다. 이 결과를 완전한 측정으로 읽지 않는다.
+
+### 골드셋 만들기
+
+골드셋은 fixture `queries.json`과 같은 스키마의 JSON이다. `{"queries": [...]}`에 12문항 이상을 넣고 파일은
+1 MiB 이하로 둔다. UTF-8(BOM 허용)·UTF-16 파일을 읽는다(Windows PowerShell 5.1의 `>`는 UTF-16으로 저장한다).
+
+| 필드 | 필수 | 뜻 |
+|---|---|---|
+| `id` | 예 | 문항마다 다른 문자열. 분할과 보고의 기준 |
+| `language` | 예 | `ko` 또는 `en` |
+| `query` | 예 | 검색할 질문 |
+| `expected_paths` | 답 있는 문항 | 답이 있는 노트의 볼트 상대 경로(`.md`). 답 없는 문항은 `[]` |
+| `expectation` | 아니오 | `answerable`(기본) 또는 `no_answer` |
+| `scenario` | 아니오 | 질문 유형(기본 `unspecified`). 분할의 층이 된다 |
+| `stale_paths`, `forbidden_paths` | 아니오 | 낡은 출처, 반환되면 안 되는 출처 |
+| `relevance`, `required_claims` | 아니오 | 경로별 등급(0~3), 반환 근거에 있어야 할 문장 |
+| `as_of` | 아니오 | `--advanced`·`--compare`에서 쓸 기준 시점 |
+| `inspected` | 아니오 | 실패를 본 뒤 고친 문항이면 `true`([아래](#devheld-out-분할과-inspected-표시)) |
+
+```json
+{"queries": [
+  {"id": "q01", "language": "ko", "scenario": "절차", "query": "차단기 격리 절차",
+   "expected_paths": ["20-knowledge/차단기 격리 절차.md"]},
+  {"id": "q02", "language": "ko", "scenario": "답없음", "query": "화성 지사 출장비 기준",
+   "expectation": "no_answer", "expected_paths": []}
+]}
+```
+
+위 예시는 두 문항만 보인다. 실제 골드셋은 12문항 이상이어야 한다. 답 없는 문항(`no_answer`)도 넣는다.
+2026-10-19 기준 검색 평가 fixture 네 개(recall·recall_advanced·recall_experience·recall_hard, 112문항)에서 답 없는
+질문은 14개(recall_hard 8개 포함)뿐이라 보류 판단을 잴 표본이 작다.
+
+**라벨 일치.** 라벨은 검색 전에 한 번, 정책을 거친 노트 목록에 맞춰 푼다. 위에서부터 처음 맞는 규칙을 쓴다.
+
+| 순서 | `match` | 조건 |
+|---|---|---|
+| 1 | `denied` / `excluded` | 라벨 경로가 deny zone이나 제외 폴더 안에 있다. 다른 규칙으로 넘어가지 않는다 |
+| 2 | `path` | 볼트 상대 경로가 그대로 같거나, 대소문자·유니코드 정규화(NFC)만 다른 노트가 하나다 |
+| 3 | `incomplete_inventory` | 경로가 없고 노트 목록이 엔진 한도 등으로 불완전해 이름이 유일한지 알 수 없다 |
+| 4 | `stem` | 확장자를 뺀 파일 이름(위키링크 대상)이 같은 노트가 하나다. 노트를 다른 폴더로 옮겨도 라벨이 유지된다 |
+| 5 | `ambiguous_stem` | 같은 파일 이름의 노트가 여럿이다. 추측하지 않고 미해결로 두며 후보(최대 5개)와 함께 경고한다 |
+| 6 | `missing` | 맞는 노트가 없다 |
+
+- `expected_paths`·`stale_paths`·`forbidden_paths`·`relevance`의 라벨에 같은 규칙을 쓴다. 라벨마다의 결과는
+  `per_query[].label_matches`, 합계는 `goldset.label_match_counts`, 경고는 `goldset.warnings`(최대 50개)와
+  표준 오류에 남는다. 경고는 실행을 막지 않는다.
+- 풀리지 않은 라벨은 검색이 돌려줄 수 없으므로 놓친 것으로 센다. 같은 문항의 두 라벨이 같은 노트로 풀리거나
+  stale·forbidden 라벨이 기대 노트로 풀리면 라벨 오류로 보고 종료 코드 2로 끝낸다.
+- [obsidian-wiki의 평가](https://github.com/Ar9av/obsidian-wiki/blob/main/obsidian_wiki/evaluate.py)는 경로,
+  확장자를 뺀 경로, 파일 이름 슬러그 중 하나만 겹쳐도 적중으로 센다. 여기서는 여러 노트가 함께 쓰는 이름을
+  적중으로 세지 않는다. 다른 노트를 맞힌 결과로 재현율이 부풀지 않게 하려는 것이다.
+
+### 개인정보와 보관
+
+- 결과는 로컬에만 남는다. 평가기는 파일을 쓰지 않으므로 결과를 어디에 저장할지는 사용자가 리디렉션으로 정한다.
+- 골드셋 질문 자체가 민감할 수 있다. 골드셋과 결과 파일을 어디에 둘지, git으로 추적할지, 동기화·백업 대상에
+  넣을지는 사용자가 정한다. 골드셋을 볼트 안에 두려면 deny zone 밖에 둔다. deny zone 안의 골드셋은 읽기 전에
+  거부하고 종료 코드 2로 끝낸다.
+- `--redact`는 보고서의 `id`(실패·오류·inspected 목록 포함), `query`, `scenario`(`by_scenario` 키 포함),
+  `required_claims`·`covered_claims`의 각 문장, `label_rationale` 같은 그 밖의 자유 텍스트 필드, 질의 확장의
+  용어·트리거·대체어를 UTF-8 sha256 16진 값으로 바꾼다. 볼트 상대 경로와 라벨, 언어, 기대 유형, 수치, 날짜는
+  남는다. 게이트는 바꾸기 전의 값으로 판정한다.
+- 해시는 암호화가 아니다. 짧거나 추측할 수 있는 문자열은 후보를 해시해 보면 되찾을 수 있다. 파일 이름도 경로로
+  남으므로 공유하기 전에 확인한다. 질문이 노트 이름과 같거나 비슷하면 경로만으로도 질문 내용이 드러난다.
+- 오류와 경고 문구에는 문항 번호(`queries[3]`)·필드·경로만 쓴다. 실패한 문항은 그 번호나 `id`의 sha256으로 찾는다.
+- `goldset.goldset_canonical_sha256`은 골드셋 JSON을 키 정렬·압축한 형태의 해시다. 줄바꿈과 BOM의 영향을 받지
+  않으며, 결과가 어느 골드셋 판에서 나왔는지 묶어 준다. 분할 파일은 보고서의 `split.definition_canonical_sha256`이
+  같은 방식으로 묶는다.
+
+### 작은 표본 주의
+
+- 항상 n을 함께 적는다. 보고서의 `query_count`·`answerable_query_count`·`no_answer_query_count`,
+  `stale_sources.labeled_query_count`, 분할의 `evaluated_query_count`가 분모다.
+- 비율 하나는 몇 개 중 몇 개다. 답 없는 질문이 4개면 오탐 1건이 0.25를 움직인다.
+- 결과는 제공한 질문과 그 시점의 볼트에만 해당한다. 일반적인 검색 품질이나 다른 볼트로 넓히지 않는다. 개선
+  주장은 같은 골드셋·같은 옵션의 짝 비교(`--compare`의 `paired_randomization`)로만 하며, 0이 아닌 쌍이 k개이면
+  최소 p는 2^(1−k)다([위 절](#시간-유효성-표시-효과와-기전-잔차) 참조).
+
+**2026-10-19 측정.** 로컬 Windows·Python 3.12.10에서 이 분할을 담은 소스로 recall_hard에 CI top3 옵션
+(`--compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500
+--max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0`)과 `--split`을 더해 실행했다. 출처 보고값이
+아닌 합성 fixture 측정이다. 전체 행은 `--split` 없이 같은 옵션으로 실행했다.
+
+| 범위 (n, 답 있는/없는) | legacy recall@3 | improved recall@3 | legacy 답 없음 오탐 | improved 답 없음 오탐 | 오탐 게이트 0.25 |
+|---|---|---|---|---|---|
+| dev (32, 28/4) | 0.714 (20/28) | 1.000 (28/28) | 3/4 | 2/4 | 실패, 종료 코드 1 |
+| heldout (32, 28/4) | 0.679 (19/28) | 1.000 (28/28) | 1/4 | 0/4 | 통과 |
+| 전체 (64, 56/8) | 0.696 (39/56) | 1.000 (56/56) | 4/8 | 2/8 | 통과 |
+
+같은 게이트라도 표본을 나누면 판정이 바뀐다. 답 없는 질문 4개에서는 한 건 차이가 0.25이므로, 이 표의 dev와
+heldout 차이를 방법의 차이로 읽지 않는다.
+
+### dev/held-out 분할과 inspected 표시
+
+```text
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --split heldout
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --derive-split
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --derive-split > GOLDSET.split.json
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --split dev --split-file GOLDSET.split.json
+```
+
+- 규칙: (`language`, `scenario`) 층마다 문항 id를 `"<seed>:<id>"`의 UTF-8 sha256 16진 값 순으로 놓고, 앞의
+  floor(n/2)개를 heldout, 나머지를 dev로 둔다. 1문항 층은 dev로 간다. seed는 평가기의 기존 무작위화 seed와 같은
+  1707이며 분할 결과를 보기 전에 정했다. 규칙과 seed는 분할 파일에도 적혀 있다.
+- recall_hard의 분할은 `tests/fixtures/recall_hard/split.json`에 커밋했다. 64문항이 dev 32, heldout 32로
+  나뉘고, 각 쪽은 언어별 16문항(답 있는 14·답 없는 2)이며 stale 라벨 문항이 5개씩이다. 테스트가 `queries.json`에서
+  분할을 다시 만들어 커밋 파일과 같은지 확인한다.
+- `--split dev|heldout`은 그쪽 문항만 평가한다. 보고서의 모든 지표가 그 분할만의 값이며, `split` 절과 표준 오류에
+  `dev n=…, heldout n=…, unassigned n=…`을 남긴다. 분할 파일에 없는 문항(`unassigned`)은 평가하지 않는다.
+  fixture 모드의 기본 분할 파일은 `<fixture>/split.json`이고, 골드셋 모드에서는 `--split-file`이 필요하다.
+- 운영 규율은 [MemPalace](https://github.com/MemPalace/mempalace)의 보고 방식을 빌렸다. 실패 분석과 조정은 dev에서만
+  하고, heldout 결과는 따로 보고한다. heldout 실패를 본 뒤 문항이나 라벨을 고쳤다면 그 문항에 `"inspected": true`를
+  붙인다.
+- `inspected: true` 문항은 헤드라인 지표, `by_language`·`by_scenario`, 게이트, 짝 통계에서 빠지고
+  `inspected_queries`에 따로 집계된다. `per_query`·`failed_queries`·`evaluation_errors`·`costs`에는 남는다.
+  표시가 없거나 `false`이면 결과가 바뀌지 않는다. 기존 fixture 문항에는 표시하지 않았다.
+- 표시 때문에 헤드라인에 문항이 하나도 남지 않거나, 답 있는 문항이 모두 표시되어 헤드라인에 답 있는 문항이
+  없으면 recall@3·MRR 게이트를 평가할 수 없으므로 기준값과 관계없이 통과로 치지 않는다. 결과 JSON은 그대로
+  출력하고 표준 오류에 이유를 남긴 뒤 종료 코드 1로 끝난다. 실패를 본 뒤 고치지 않은 문항을 더 넣어야 게이트를
+  다시 잴 수 있다. 답 있는 문항이 처음부터 없는 집합은 헤드라인에 문항이 남아 있으면 v0.24.0처럼 이 두 게이트를
+  건너뛴다.
+- recall_hard 64문항은 개발 중 이미 모두 공개·검토됐다. 이번 heldout은 앞으로의 변경을 위한 보류 집합이며,
+  지난 조정에 대해 보지 않은 집합이 아니다.
+- 개인 골드셋은 `--derive-split`으로 같은 규칙의 분할을 출력해 저장하고 고정한다. 문항을 늘린 뒤에는
+  `--derive-split --split-file 기존분할.json`을 쓴다. 기존 배정은 그대로 두고 새 문항만 같은 규칙으로 나누므로
+  dev 문항이 heldout으로 옮겨 가지 않는다(`incremental`에 유지·추가·제외 수가 남는다). 분할을 처음부터 다시
+  만들면 층마다 floor(n/2)와 순서가 달라져 dev 문항이 heldout으로 옮겨 갈 수 있다.
 
 ## 생성된 상태 변경 순서
 
@@ -270,6 +423,8 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 - [Presentation, Not Mechanism](https://arxiv.org/abs/2607.16019) (Jiang 외, arXiv v1 2026-07-17): 표시 방식을 고정한 대조군으로 시간 유효성 기전의 몫을 분리하는 방법 참고. 코드나 데이터는 사용하지 않았다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
+- [obsidian-wiki `evaluate.py`](https://github.com/Ar9av/obsidian-wiki/blob/main/obsidian_wiki/evaluate.py) (MIT): 볼트마다 손으로 라벨한 골드셋(`_meta/eval.jsonl`), 경로나 파일 이름 슬러그로 기대 노트를 맞추는 방식, recall@k·MRR 최소 기준 검사를 참고했다. 코드는 사용하지 않았고, 여러 노트가 함께 쓰는 이름은 적중으로 세지 않도록 바꿨다.
+- [MemPalace](https://github.com/MemPalace/mempalace) (MIT): dev 50문항으로 조정하고 보지 않은 held-out 450문항의 98.4%를 따로 내세우며, 틀린 답을 살펴 얻은 마지막 0.6%는 'teaching to the test'로 표시해 헤드라인에 쓰지 않는 보고 규율을 참고했다. 수치는 README의 자가 보고(2026-10-19 확인)이며 여기서 재현하지 않았다. 빌린 것은 보고 규율뿐이다.
 
 외부 코드나 데이터셋을 복사하지 않았다. 이 fixture 결과는 공식 벤치마크 점수,
 한국어 업무 전체의 정확도, 실제 볼트 보안 인증이나 일반적인 성능 개선을 뜻하지 않는다.
