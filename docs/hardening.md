@@ -240,8 +240,8 @@ PreCompact·SessionEnd 훅은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`
 checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`state: changed`)와 없어진 노트(`state: missing`)를 `checkpoint-drift` 경고로 보고한다.
 `details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
 콘솔 요약 끝에는 `⚠️checkpoint 이후 바뀐 엔진 노트 N건(§15)`가 붙는다. `hooks/hooks.json`의 SessionStart(startup·clear·resume)가 실행하는
-비동기 healthcheck도 이 비교를 한다. 그 결과는 health-report §15와 그 비동기 훅이 출력하는 한 줄 요약에만 남고, `session_start.py`가 넣는
-SessionStart 컨텍스트(handoff·hot)에는 들어가지 않는다. 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
+비동기 healthcheck도 이 비교를 한다. 그 결과는 health-report §15와 그 비동기 훅이 출력하는 한 줄 요약에 남는다. 이 요약 줄은 호스트가 대화
+컨텍스트에 덧붙일 수 있지만(README의 Claude Code 2.1.295 권장 안내 참조), `session_start.py`가 넣는 handoff·hot 본문에는 들어가지 않는다. 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
 다른 에이전트 세션 등)은 리포트 §15에서 확인한다.
 
 - "가장 최근"은 수정 시각이 늦은 checkpoint 파일 최대 64개(코드 상수) 가운데 형식이 맞고 마지막 사건 시각이 가장 늦은 기록이다.

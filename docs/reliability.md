@@ -102,13 +102,13 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --host-ve
 
 `--host-version`을 줄 때만 PATH에서 `claude`를 찾아 `claude --version`을 한 번 실행한다. 인자는
 고정이고 셸을 거치지 않는다. 4초 안에 끝나지 않으면 종료시키고 정리에 최대 1초를 더 기다린다.
-결과는 `host_version`에 `status`(`ok`·`below_recommended`·`unavailable`·`unparsed`), `version`,
-`recommended_min`(2.1.295), `reason_code`, `next_action`으로 붙는다. 옵션이 없으면 출력은 이전과
+결과는 `host_version`에 `host`(`claude-code`), `status`(`ok`·`below_recommended`·`unavailable`·`unparsed`), `version`,
+`recommended_min`(2.1.295), `reason_code`, `next_action`, `trust_boundary`로 붙는다. 옵션이 없으면 출력은 이전과
 바이트 단위로 같고, 옵션이 있어도 종료 코드는 볼트 진단의 값 그대로다.
 
 - `unavailable`: PATH에 없음(`executable_not_found`), 실행 실패·시간 초과·0이 아닌 종료 코드,
   현재 폴더에서만 찾은 실행 파일(`current_directory_executable_refused`), Windows에서 `.exe`가 아닌
-  런처(npm의 `.cmd` 등, `windows_non_exe_launcher_not_run`)다. 실행하지 않은 경우는 터미널에서
+  런처(npm의 `.cmd` 등, `windows_non_exe_launcher_not_run`), 그 밖의 예상하지 못한 실행 오류(`probe_failed`)다. 실행하지 않은 경우는 터미널에서
   `claude --version`을 직접 실행한다.
 - `unparsed`: 출력 첫 줄이 `x.y.z`(뒤에 공백과 설명 허용)가 아니다. 출력 원문은 보고하지 않는다.
 - 결과는 PATH에서 찾은 실행 파일의 버전이다. 지금 훅을 실행하는 호스트(IDE 확장, 다른 설치본)와

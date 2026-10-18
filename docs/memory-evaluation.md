@@ -175,8 +175,8 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
   답 없음 오탐률(분모: 답 없음 질의), 금지 출처 노출률(분모: `forbidden_paths` 라벨 질의),
   stale top-1 비율(분모: `stale_paths` 라벨 질의)이다. 분모가 0인 비율은 항목이 없다. 보고서 맨 위의
   `rate_upper_bound_definitions`에 정의와 해석 범위를 한 번 적는다.
-- 항목마다 분자·분모·관측 비율과 두 단측 95% 상한을 담는다. `wilson_upper`는 단측 정규 분위수
-  z = 1.645를 쓴 Wilson score 상한이다(양측 90% Wilson 구간의 위 끝). `clopper_pearson_upper`는
+- 항목마다 분자·분모·관측 비율과 두 단측 95% 상한을 담는다. `wilson_upper`는 단측 95% 정규 분위수
+  z ≈ 1.6449(코드는 `NormalDist().inv_cdf(0.95)`의 정확값)를 쓴 Wilson score 상한이다(양측 90% Wilson 구간의 위 끝). `clopper_pearson_upper`는
   P(X ≤ 분자 | 분모, p) = 0.05가 되는 p를 이항 누적분포의 이분법으로 찾은 정확 상한이다. 이항 계수는
   큰 정수(`math.comb`) 대신 `math.lgamma`로 만든 로그 값을 쓴다. 2026-10-19 로컬 측정(Windows, Python 3.12.10,
   1회)에서 분모 20,000·분자 19,999의 계산이 34.7초에서 0.10초로 줄었다. 분자가 0이면 닫힌 식 1 − 0.05^(1/n),
@@ -542,7 +542,7 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 - [LMEB](https://arxiv.org/abs/2603.12572), [LongMemEval](https://arxiv.org/abs/2410.10813): 검색과 답변을 분리하고 갱신·시간·답변 보류를 평가하는 참고.
 - [Presentation, Not Mechanism](https://arxiv.org/abs/2607.16019) (Jiang 외, arXiv v1 2026-07-17): 표시 방식을 고정한 대조군으로 시간 유효성 기전의 몫을 분리하는 방법 참고. 코드나 데이터는 사용하지 않았다.
 - [Position: Don't Use the CLT in LLM Evals With Fewer Than a Few Hundred Datapoints](https://arxiv.org/abs/2503.01747) (Bowyer·Aitchison·Ivanova, ICML 2025 Spotlight Position, arXiv v3 2025-05-28): 작은 N에서 CLT 구간이 불확실성을 크게 과소평가하며, 독립 질문 설정에서 Wilson·베이지안 구간을 권하는 근거. 저자 라이브러리(bayes_evals)는 사용하지 않았다.
-- [Statistical Significance Testing in Information Retrieval](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
+- [Statistical Significance Testing in Information Retrieval: An Empirical Analysis of Type I, Type II and Type III Errors](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
 - [obsidian-wiki `evaluate.py`](https://github.com/Ar9av/obsidian-wiki/blob/main/obsidian_wiki/evaluate.py) (MIT): 볼트마다 손으로 라벨한 골드셋(`_meta/eval.jsonl`), 경로나 파일 이름 슬러그로 기대 노트를 맞추는 방식, recall@k·MRR 최소 기준 검사를 참고했다. 코드는 사용하지 않았고, 여러 노트가 함께 쓰는 이름은 적중으로 세지 않도록 바꿨다.
