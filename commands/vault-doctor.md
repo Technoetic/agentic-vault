@@ -36,3 +36,9 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
 8. 전체 지침 분량도 요청하면 같은 Doctor에 `--instructions`를 추가한다.
    [지침 진단 안내](../docs/moai-diagnostics.md)에 따라 루트 지침·참조·중첩 규칙의 정적 분량과
    조건·누락을 보고한다. 본문을 출력하지 않으며 실제 호스트 로드나 제공자 비용으로 해석하지 않는다.
+9. 사용자가 Claude Code 버전 확인을 요청할 때만 같은 Doctor에 `--host-version`을 추가한다.
+   PATH의 `claude --version`을 고정 인자·셸 없이 한 번 실행하고(최대 약 5초) `host_version`의
+   `status`(`ok`·`below_recommended`·`unavailable`·`unparsed`)와 권장 최소 버전 2.1.295를 보고한다.
+   종료 코드는 바뀌지 않는다. PATH 실행 파일의 버전이므로 지금 훅을 실행하는 호스트와 같다고
+   단정하지 않는다. 낮은 버전이면 갱신을 권하되 설치·갱신을 직접 실행하지 않는다.
+   [권장 사유와 실측 절차](../docs/reliability.md#호스트-버전과-sessionstart-실측)
