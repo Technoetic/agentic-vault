@@ -227,12 +227,13 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
 - **설치:** 저장소 밖 새 가상환경(ensurepip의 pip 25.0.1)에서 위 설치 명령이 종료 코드 0으로 끝났고 29개 패키지가
   설치됐다(pip는 파일의 26.2.1로 바뀜). `pip check`는 `No broken requirements found.`였다.
 - **해시 대조:** PyPI JSON API와 비교하면 29개 고정 버전 모두 파일의 해시 집합이 PyPI에 올라온 그 버전의 파일 전체와
-  같았다(charset-normalizer 172개, msgpack 91개, tomli 47개, 나머지 26개 패키지는 각 2개). 29개 모두 CPython 3.12용
-  manylinux x86_64 휠과 win_amd64 휠이 있고, msgpack을 뺀 28개는 순수 Python 휠이다.
+  같았다(charset-normalizer 172개, msgpack 91개, tomli 47개, 나머지 26개 패키지는 각 2개). 29개 모두 CPython 3.12의
+  manylinux x86_64와 win_amd64에 맞는 휠이 있다. 순수 Python 휠이 없는 것은 msgpack 하나다. 나머지 28개는 순수 Python
+  휠이 있고, 그중 charset-normalizer와 tomli는 플랫폼 휠도 함께 올린다.
 - **Linux 휠:** 같은 파일을 `pip download --require-hashes --only-binary :all: --no-deps`로 받되 manylinux x86_64
   `--platform` 태그들과 `--python-version 3.12 --implementation cp --abi cp312`를 주자 29개 휠을 모두 받았고 pip가
-  각 해시를 확인했다(종료 코드 0, 1회). 플랫폼 휠이 필요한 charset-normalizer·msgpack·tomli는 cp312 manylinux
-  휠이었다. Linux에서 설치를 실행한 것은 아니다.
+  각 해시를 확인했다(종료 코드 0, 1회). 플랫폼 휠만 있는 msgpack과, 순수 Python 휠도 있는 charset-normalizer·tomli는
+  pip가 cp312 manylinux 플랫폼 휠을 골랐다(태그가 더 구체적인 휠을 우선한다). Linux에서 설치를 실행한 것은 아니다.
 - **의존성 범위:** PyPI 메타데이터의 Requires-Dist를 Python 3.12의 Linux·Windows 환경 표지로 평가해 pip-audit 2.10.1부터
   따라간 집합은 두 플랫폼 모두 고정한 29개와 같았다(빠짐 0, 남음 0). 조건이 붙은 의존성은 두 개뿐이다(CacheControl의
   `filecache` 추가 기능이 요구하는 filelock, Python 3.13 미만에서만 필요한 typing-extensions). Windows에서 만든 파일을
@@ -277,7 +278,10 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
    pip-compile은 머리 주석을 새로 쓴다. 지금 파일 맨 위 8줄처럼 `Generated <UTC 시각>` 줄, 도구 설치 명령,
    `Tool versions:` 줄을 이번 값으로 고쳐 다시 붙인다. `tests/test_supply_chain.py`가 이 줄들과 생성 명령의 필수
    옵션, 생성 시각과 `CUTOFF`의 간격(14일 이상)을 확인한다.
-4. **CI와 같은 명령으로 확인한다.** 새 가상환경에서 위 설치 명령과 감사 명령을 실행한다.
+4. **CI와 같은 명령으로 확인한다.** 새 가상환경에서 위 설치 명령과 감사 명령을 실행한다. 새 가상환경에서 해시 확인
+   설치가 끝까지 성공하는지가 파일에 의존성이 빠짐없이 들어 있는지 확인하는 유일한 검사다. `tests/test_supply_chain.py`는
+   고정 형식·해시·머리 주석만 보고 빠진 의존성은 찾지 못한다. 이미 패키지가 설치된 환경에서는 빠진 항목이 드러나지 않을 수
+   있으므로 기존 환경으로 대신하지 않는다.
 5. **diff를 검토한다.** `git diff -- ci/`로 바뀐 버전, 새로 생기거나 빠진 패키지, 버전별 해시 수, 머리 주석의
    `CUTOFF`를 확인하고, 버전이 바뀐 패키지는 변경 기록을 읽는다. 버전이 그대로인데 해시가 바뀌었으면 반영하지 말고
    원인부터 확인한다.
