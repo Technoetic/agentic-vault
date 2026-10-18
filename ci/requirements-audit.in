@@ -1,0 +1,6 @@
+# Source for ci/requirements-audit.txt: the hash-pinned pip-audit install of the
+# advisory supply-chain-audit job in .github/workflows/tests.yml.
+# Cool-down: pin only releases uploaded to PyPI at least 14 days before a refresh.
+# pip-audit 2.10.1 was uploaded on 2026-06-10 (PyPI JSON API, checked 2026-10-19).
+# Refresh procedure and review checklist: docs/release-integrity.md.
+pip-audit==2.10.1
