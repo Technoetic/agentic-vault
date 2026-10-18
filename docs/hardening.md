@@ -192,7 +192,10 @@ Codex hook 지원은 [공식 설명](https://learn.chatgpt.com/docs/hooks)을 �
 | `checkpoint_drift_check` | `true`/`false`, 없으면 꺼짐 | 가장 최근 checkpoint 이후 바뀌거나 없어진 엔진 노트를 보고한다 |
 
 스위치가 불리언이 아니거나, 패턴이 목록이 아니거나, 빈 문자열·제어 문자·`/`·`\`가 든 패턴, 개수·길이 초과는 다른 설정 오류처럼
-config 파싱 실패(exit 1)다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
+config 파싱 실패(exit 1)다. 이 검증은 `vault-config.json`을 읽는 구성 요소가 함께 쓰는 설정 검사기(`validate_config`)에 들어 있다.
+그래서 형식이 잘못된 선택 키 하나가 다른 설정 오류와 똑같이 설정을 읽는 구성 요소를 모두 멈춘다. 예를 들어 SessionStart 훅은 진단 한 줄만
+남기고 handoff·hot을 주입하지 않고, PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색·doctor도 설정 오류로 끝난다.
+키를 고치거나 지우면 돌아온다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
 `*`·`?`·`[...]`만 특수 문자다. 이름과 패턴은 NFC로 맞춘 뒤 비교한다.
 
 ### 내장 이름 규칙과 근거
@@ -237,8 +240,9 @@ PreCompact·SessionEnd 훅은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`
 checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`state: changed`)와 없어진 노트(`state: missing`)를 `checkpoint-drift` 경고로 보고한다.
 `details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
 콘솔 요약 끝에는 `⚠️checkpoint 이후 바뀐 엔진 노트 N건(§15)`가 붙는다. `hooks/hooks.json`의 SessionStart(startup·clear·resume)가 실행하는
-비동기 healthcheck도 이 비교를 하므로, 세션을 시작하면 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
-다른 에이전트 세션 등)이 보인다.
+비동기 healthcheck도 이 비교를 한다. 그 결과는 health-report §15와 그 비동기 훅이 출력하는 한 줄 요약에만 남고, `session_start.py`가 넣는
+SessionStart 컨텍스트(handoff·hot)에는 들어가지 않는다. 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
+다른 에이전트 세션 등)은 리포트 §15에서 확인한다.
 
 - "가장 최근"은 수정 시각이 늦은 checkpoint 파일 최대 64개(코드 상수) 가운데 형식이 맞고 마지막 사건 시각이 가장 늦은 기록이다.
 - runtime 폴더나 checkpoint가 없거나, JSON·필드 형식이 맞지 않거나, 파일이 64 KiB(코드 상수)를 넘으면 경고도 오류도 없이 넘어간다.
