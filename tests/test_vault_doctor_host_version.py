@@ -316,6 +316,24 @@ class HostVersionProbeTests(HostVersionTestCase):
                     self.assert_report(report, "unavailable", "windows_non_exe_launcher_not_run", None)
                     popen.assert_not_called()
 
+    def test_windows_probe_never_opens_a_console_window(self) -> None:
+        # Patched constant: the flag reaches Popen on every CI platform, not only Windows.
+        create_no_window = 0x08000000
+        native = os.path.join(os.path.dirname(FAKE_CLAUDE), "claude.exe")
+        for windows, expected in ((True, create_no_window), (False, 0)):
+            with self.subTest(windows=windows):
+                with mock.patch.object(self.doctor, "_is_windows", return_value=windows), \
+                        mock.patch.object(self.doctor.subprocess, "CREATE_NO_WINDOW",
+                                          create_no_window, create=True):
+                    report, popen = self.probe(FakeProcess(b"2.1.296 (Claude Code)\n"), found=native)
+
+                self.assertEqual(report["status"], "ok")
+                popen.assert_called_once()
+                args, kwargs = popen.call_args
+                self.assertEqual(args, ([native, "--version"],))
+                self.assertEqual(kwargs["creationflags"], expected)
+                self.assertFalse(kwargs.get("shell", False))
+
     def test_current_directory_executable_runs_only_from_an_explicit_path_entry(self) -> None:
         current = os.getcwd()
         name = "claude.exe" if os.name == "nt" else "claude"

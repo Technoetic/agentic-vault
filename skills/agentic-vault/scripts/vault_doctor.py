@@ -492,12 +492,16 @@ def _stop_host_probe(process: subprocess.Popen) -> None:
 
 def _run_host_version(executable: str) -> tuple[str, bytes]:
     """Run ``<executable> --version``: fixed argv, no shell, bounded time."""
+    # Windows: never open a console window for the probe, as the Jarvis bridge
+    # does for claude; other platforms keep the Popen default of 0.
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if _is_windows() else 0
     try:
         process = subprocess.Popen(
             [executable, "--version"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
         )
     except (OSError, ValueError):
         return "launch_failed", b""
