@@ -84,6 +84,73 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --format 
 
 기존 사용자 소유 문서의 교훈 적용 기록은 [교훈 제안 절차](lesson-proposals.md)를 따른다.
 
+## 호스트 버전과 SessionStart 실측
+
+Claude Code는 2.1.295 이상을 권장한다. 이 플러그인은 `startup|clear|resume`에 동기 훅
+`session_start.py`(handoff/hot 주입)와 비동기 훅 `vault_healthcheck.py`(stdout에 한 줄 요약)를
+등록하고, `compact`에는 `session_start.py`만 등록한다. [Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)의
+2.1.295 항목은 "Fixed an async SessionStart hook's unchanged context being added to the
+conversation again on every resume"이다(2026-10-19 원문 확인). 그 이전 버전에서는 건강 검사
+요약이 resume마다 다시 붙을 수 있으며, 이 저장소에서는 재현하지 않았다. `hooks/hooks.json`은
+바꾸지 않았고, 훅 실패 시 동작을 막는 `onFailure: "block"`(같은 버전 추가)도 채택하지 않았다.
+
+### 설치된 버전 확인 (선택)
+
+```text
+python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --host-version --format json
+```
+
+`--host-version`을 줄 때만 PATH에서 `claude`를 찾아 `claude --version`을 한 번 실행한다. 인자는
+고정이고 셸을 거치지 않는다. 4초 안에 끝나지 않으면 종료시키고 정리에 최대 1초를 더 기다린다.
+결과는 `host_version`에 `status`(`ok`·`below_recommended`·`unavailable`·`unparsed`), `version`,
+`recommended_min`(2.1.295), `reason_code`, `next_action`으로 붙는다. 옵션이 없으면 출력은 이전과
+바이트 단위로 같고, 옵션이 있어도 종료 코드는 볼트 진단의 값 그대로다.
+
+- `unavailable`: PATH에 없음(`executable_not_found`), 실행 실패·시간 초과·0이 아닌 종료 코드,
+  현재 폴더에서만 찾은 실행 파일(`current_directory_executable_refused`), Windows에서 `.exe`가 아닌
+  런처(npm의 `.cmd` 등, `windows_non_exe_launcher_not_run`)다. 실행하지 않은 경우는 터미널에서
+  `claude --version`을 직접 실행한다.
+- `unparsed`: 출력 첫 줄이 `x.y.z`(뒤에 공백과 설명 허용)가 아니다. 출력 원문은 보고하지 않는다.
+- 결과는 PATH에서 찾은 실행 파일의 버전이다. 지금 훅을 실행하는 호스트(IDE 확장, 다른 설치본)와
+  같다는 보장은 없다(`trust_boundary`). Codex 버전은 확인하지 않는다.
+
+### SessionStart 훅 실측 절차 (아직 실행하지 않음)
+
+> 이 절차는 작성만 했고 아직 실행하지 않았다. 이 문서에 측정값은 없다. 실행하면 결과를
+> 날짜·버전과 함께 [검증 기록](verification/)에 따로 남긴다.
+
+훅별 소요 시간은 Claude Code 2.1.296 이상의 디버그 로그에 남는다. 같은 변경 기록의 2.1.296 항목:
+"Improved `--debug` output for hooks: command hooks on tool calls, prompts, SessionStart and
+Stop now log their command, plugin, outcome and duration when they finish, so a slow hook is
+identifiable". `--debug-file <path>`는 지정한 경로에 디버그 로그를 쓰고 디버그 모드를 켠다
+(2026-10-19 로컬 `claude --help` 2.1.252의 설명).
+
+1. 시험용 볼트(실제 볼트면 git 작업 트리가 깨끗한 상태)에서 `claude --version`과 OS를 기록한다.
+2. 볼트 디렉터리에서 `claude --debug-file <로그1>`로 새 세션을 열고, 짧은 메시지 하나에 답을
+   받은 뒤 종료한다(resume할 대화를 남기기 위해서다).
+3. 로그에서 `session_start.py`와 `vault_healthcheck.py`가 든 훅 완료 줄을 찾아 결과(outcome)와
+   소요 시간을 옮긴다. 줄 형식은 확인하지 않았으므로 로그의 단위 그대로 기록한다.
+4. 같은 세션을 `claude --resume <세션 ID> --debug-file <로그2>`(ID 없이 쓰면 선택 화면)로 다시
+   열어 3을 반복한다. resume은 두 번 이상 한다. `--fork-session`은 쓰지 않는다. 2.1.214부터 fork로
+   시작한 세션의 SessionStart source는 `fork`이며(변경 기록) 이 플러그인의 matcher에 없다.
+5. resume마다 `--verbose` 또는 transcript 모드에서 `[vault-healthcheck]` 요약이 다시 붙었는지
+   센다. 2.1.75부터 비동기 훅 완료 메시지는 기본으로 숨겨지고 두 모드에서 보인다(변경 기록).
+   화면 표시가 대화 문맥 포함과 같은지는 확인하지 않았다.
+6. 가능하면 2.1.295 미만과 이상에서 같은 절차를 반복해 비교한다. 2.1.296 미만 로그에는 훅
+   소요 시간 줄이 없을 수 있다.
+
+| 기록 항목 | 내용 |
+|---|---|
+| 일시·실행자 | KST 일시, 측정한 사람 또는 세션 |
+| 호스트 | `claude --version`, 설치 방식(네이티브·npm 등), `--host-version` 결과 |
+| 환경 | OS·버전, Python 버전, Windows의 Git Bash 버전, 플러그인 버전·커밋 |
+| 볼트 규모 | 건강 검사 요약의 검사 노트 수, handoff/hot 예산 |
+| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간 |
+| resume 재주입 | resume 횟수 N, 그 뒤 `[vault-healthcheck]` 요약이 다시 보인 횟수 |
+
+디버그 로그에는 경로·명령·설정이 남을 수 있다. 원문 로그는 저장소에 올리지 않고, 공유할 값만
+옮긴다.
+
 ## 출처가 있는 로컬 검색
 
 Claude Code에서 `/vault-recall 배포 롤백 결정`을 사용한다. 터미널에서는:

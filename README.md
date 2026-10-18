@@ -81,6 +81,8 @@ Apart from this section, the README is in Korean, and so are the commands, rule 
 
 For Codex, register the release tag and add the plugin as described in [the Codex guide](docs/codex.md).
 
+Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) lists "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume", and this plugin registers an async health-check SessionStart hook for startup, clear and resume. `hooks/hooks.json` is unchanged and `onFailure` is not adopted; `vault_doctor.py --host-version` reports the local `claude --version` only when asked.
+
 **Core commands** (all 15 are in [commands/](commands/)):
 
 v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
@@ -541,6 +543,8 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 ### 요구사항
 
 Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). Windows에서 훅 실행은 `sh`(Git Bash)를 요구한다(Claude Code Windows가 이미 요구하는 구성). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
+
+**Claude Code는 2.1.295 이상을 권장한다.** 그 이전 버전은 이 플러그인이 `startup|clear|resume`에 등록한 비동기 건강 검사 SessionStart 훅의 바뀌지 않은 컨텍스트를 resume할 때마다 대화에 다시 붙일 수 있다. 근거는 [Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)의 2.1.295 항목 "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume"이다(2026-10-19 원문 확인, 이 저장소에서는 재현하지 않았다). handoff·hot을 넣는 `session_start.py`는 동기 훅이라 이 수정 항목의 대상이 아니다. 권장일 뿐 낮은 버전의 설치나 훅 실행을 막지 않으며 `hooks/hooks.json`은 바꾸지 않았다. 같은 버전에 추가된 `onFailure: "block"`은 훅이 시작하지 못하거나 시간 초과·예상 밖 종료 코드로 끝날 때 동작을 막도록 실패 동작을 바꾸므로 채택하지 않았고, Codex에서는 대응 필드가 확인되지 않았다. 설치된 버전은 `vault_doctor.py --host-version`으로 확인하고, 훅 소요 시간과 resume 동작은 [실측 절차(아직 실행하지 않음)](docs/reliability.md#호스트-버전과-sessionstart-실측)를 따른다.
 
 ---
 
