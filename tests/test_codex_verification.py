@@ -52,6 +52,7 @@ class CodexVerificationTests(unittest.TestCase):
             "docs/memory-patterns.md",
             "scripts/import_qmd_candidates.py",
             "scripts/evaluate_recall.py",
+            "scripts/eval_stats.py",
             "scripts/evaluate_memory_workflows.py",
             "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
         )
@@ -160,7 +161,8 @@ class CodexVerificationTests(unittest.TestCase):
                          'skills/agentic-vault/scripts/vault_memory.py',
                          'skills/agentic-vault/scripts/vault_lesson_metrics.py',
                          'docs/memory-patterns.md', 'scripts/import_qmd_candidates.py',
-                         'scripts/evaluate_recall.py', 'scripts/evaluate_memory_workflows.py'):
+                         'scripts/evaluate_recall.py', 'scripts/eval_stats.py',
+                         'scripts/evaluate_memory_workflows.py'):
             for mutation in ('changed', 'missing'):
                 with self.subTest(resource=relative, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                     source = self.make_plugin_fixture(Path(temporary))

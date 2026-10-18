@@ -215,6 +215,7 @@ def verify(codex: str) -> dict:
                          "docs/memory-patterns.md",
                          "scripts/import_qmd_candidates.py",
                          "scripts/evaluate_recall.py",
+                         "scripts/eval_stats.py",
                          "scripts/evaluate_memory_workflows.py",
                          "docs/evidence.md",
                          "docs/link-proposals.md",
