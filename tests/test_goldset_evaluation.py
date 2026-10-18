@@ -344,6 +344,36 @@ class GoldSetVaultTests(unittest.TestCase):
         plain_report = json.loads(plain)
         self.assertEqual(report["improved"]["recall_at_3"], plain_report["improved"]["recall_at_3"])
 
+    def test_small_sample_statistics_apply_to_a_redacted_goldset_run(self):
+        # --exact-paired and --rate-bounds (merged from another branch) on the gold-set input.
+        markers = ("IDMARK", "SCENMARK", "QRYMARK", "RATIONALEMARK", "EXTRAMARK", "locking the breaker")
+        plain_code, plain, _ = self.run_goldset("--compare", "--redact")
+        code, stdout, stderr = self.run_goldset("--compare", "--redact", "--exact-paired", "--rate-bounds")
+        self.assertEqual(code, plain_code, stderr)
+        for marker in markers:
+            self.assertNotIn(marker, stdout + stderr)
+        report, plain_report = json.loads(stdout), json.loads(plain)
+        self.assertEqual(report["redaction"], evaluator.REDACTION_DESCRIPTION)
+        self.assertIn("rate_upper_bound_definitions", report)
+        for arm in ("baseline", "improved"):
+            with self.subTest(arm=arm):
+                summary = report[arm]
+                self.assertEqual(summary["goldset"], plain_report[arm]["goldset"])
+                bound = summary["rate_upper_bounds"]["no_answer_false_positive_rate"]
+                self.assertEqual((bound["numerator"], bound["denominator"]),
+                                 (summary["no_answer"]["false_positive_query_count"],
+                                  summary["no_answer"]["query_count"]))
+                self.assertEqual(set(summary["by_scenario"]), set(plain_report[arm]["by_scenario"]))
+                for key, scenario in summary["by_scenario"].items():
+                    self.assertRegex(key, "^[0-9a-f]{64}$")
+                    self.assertIn("rate_upper_bounds", scenario)
+                self.assertEqual(summary["recall_at_3"], plain_report[arm]["recall_at_3"])
+        for metric, record in report["paired_randomization"].items():
+            with self.subTest(metric=metric):
+                self.assertEqual(record["mean_delta"], plain_report["paired_randomization"][metric]["mean_delta"])
+                self.assertIn("nonzero_pair_count", record)
+                self.assertIn("minimum_attainable_p_value", record)
+
     def test_gates_apply_as_in_fixture_mode(self):
         # Unresolved labels (ambiguous, denied, missing, excluded) can only miss.
         code, stdout, _ = run_main(evaluator, ["--vault", self.vault, "--goldset", self.goldset])

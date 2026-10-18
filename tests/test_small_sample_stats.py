@@ -522,6 +522,35 @@ class RateBoundEvaluatorTests(unittest.TestCase):
         self.assertEqual(json.dumps(without_bounds(json.loads(flag_out)), ensure_ascii=False, indent=2) + "\n",
                          plain_out)
 
+    def test_split_runs_take_exact_pairs_and_bounds_on_the_split_only(self):
+        # --split (merged from the gold-set branch) selects the queries; the statistics follow them.
+        hard = ROOT / "tests" / "fixtures" / "recall_hard"
+        argv = ["--fixture", str(hard), "--compare", "--expand-query", "--query-mapping", "00-meta/query-map.txt",
+                "--top-k", "3", "--max-tokens", "1500", "--max-no-answer-false-positive-rate", "0.25",
+                "--max-stale-top-1-rate", "0", "--split", "heldout"]
+        plain_code, plain_out, plain_err = run_main(argv)
+        flag_code, flag_out, flag_err = run_main([*argv, "--exact-paired", "--rate-bounds"])
+        self.assertEqual(flag_code, plain_code)
+        plain, flagged = json.loads(plain_out), json.loads(flag_out)
+        # Without the added keys and the paired records the reports are identical.
+        self.assertEqual({k: v for k, v in without_bounds(flagged).items() if k != "paired_randomization"},
+                         {k: v for k, v in plain.items() if k != "paired_randomization"})
+        improved = flagged["improved"]
+        self.assertEqual(improved["split"]["name"], "heldout")
+        self.assertEqual(improved["query_count"], improved["split"]["evaluated_query_count"])
+        bound = improved["rate_upper_bounds"]["no_answer_false_positive_rate"]
+        self.assertEqual((bound["numerator"], bound["denominator"]),
+                         (improved["no_answer"]["false_positive_query_count"], improved["no_answer"]["query_count"]))
+        for metric, record in flagged["paired_randomization"].items():
+            with self.subTest(metric=metric):
+                self.assertEqual(record["mean_delta"], plain["paired_randomization"][metric]["mean_delta"])
+                self.assertLessEqual(record["paired_query_count"], improved["query_count"])
+                if record["nonzero_pair_count"] <= stats.EXACT_PAIRED_MAX_NONZERO:
+                    self.assertEqual(record["method"], stats.EXACT_PAIRED_METHOD)
+        # The split note stays first; rate-bound notes only add lines.
+        self.assertTrue(flag_err.startswith(plain_err), flag_err)
+        self.assertIn("recall evaluation split: heldout n=32", flag_err)
+
 
 if __name__ == "__main__":
     unittest.main()
