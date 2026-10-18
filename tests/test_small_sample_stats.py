@@ -456,6 +456,14 @@ class RateBoundEvaluatorTests(unittest.TestCase):
         self.assertEqual(extended["temporal_decomposition"], self.comparison["temporal_decomposition"])
         self.assertEqual(extended["paired_randomization"], self.comparison["paired_randomization"])
         self.assertEqual(list(extended).count("rate_upper_bound_definitions"), 1)
+        # --expand-query adds an expansion_ablation arm; it gains bounds like the others.
+        expanded = {"benchmark": "paired retrieval comparison", "interpretation": "synthetic",
+                    "baseline": self.single, "improved": self.single, "expansion_ablation": self.single}
+        extended = evaluator.with_rate_bounds(expanded)
+        self.assertEqual(without_bounds(extended), expanded)
+        for arm in ("baseline", "expansion_ablation", "improved"):
+            with self.subTest(arm=arm):
+                self.assert_summary_bounds(extended[arm])
         for invalid in ([], {}, {"baseline": {}}):
             with self.subTest(report=invalid), self.assertRaises(ValueError):
                 evaluator.with_rate_bounds(invalid)
