@@ -21,6 +21,7 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCTOR = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_doctor.py"
+BRIDGE = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py"
 FAKE_CLAUDE = os.path.abspath(
     os.path.join(os.sep, "agentic-vault-fake-bin", "claude.exe" if os.name == "nt" else "claude")
 )
@@ -109,18 +110,22 @@ READY_REPORT = {
 }
 
 
-def load_doctor():
+def load_module(name: str, path: Path):
     saved_path = list(sys.path)
     try:
-        spec = importlib.util.spec_from_file_location("doctor_host_version_under_test", DOCTOR)
+        spec = importlib.util.spec_from_file_location(name, path)
         if spec is None or spec.loader is None:  # pragma: no cover - import guard
-            raise RuntimeError(f"cannot load module: {DOCTOR}")
+            raise RuntimeError(f"cannot load module: {path}")
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
     finally:
         sys.path[:] = saved_path
+
+
+def load_doctor():
+    return load_module("doctor_host_version_under_test", DOCTOR)
 
 
 def platform_bytes(text: str) -> bytes:
@@ -356,6 +361,57 @@ class HostVersionProbeTests(HostVersionTestCase):
 
         self.assertEqual((report["status"], report["reason_code"]), ("unparsed", "version_unparsed"))
         self.assertIsNone(report["version"])
+
+
+class CurrentDirectoryRuleEquivalenceTests(unittest.TestCase):
+    """The doctor copies the Jarvis bridge's current-directory rule; both must agree."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.doctor = load_doctor()
+        # Import only: the bridge defines functions and constants and starts nothing.
+        cls.bridge = load_module("jarvis_bridge_current_directory_rule", BRIDGE)
+
+    def test_doctor_and_bridge_agree_on_the_same_inputs(self) -> None:
+        current = os.getcwd()
+        name = "claude.exe" if os.name == "nt" else "claude"
+        elsewhere = os.path.dirname(FAKE_CLAUDE)
+        executables = (
+            os.path.join(current, name),
+            os.path.join(current, "sub", name),
+            os.path.join(elsewhere, name),
+            os.path.join(current.upper(), name),
+            os.path.join(current.lower(), name),
+            os.path.join(os.curdir, name),
+            name,
+        )
+        path_values = (
+            elsewhere,
+            "",
+            os.pathsep.join([elsewhere, current]),
+            os.pathsep.join([elsewhere, current + os.sep]),
+            os.pathsep.join([elsewhere, ""]),
+            os.pathsep.join([elsewhere, os.curdir]),
+            os.pathsep.join([current.upper(), elsewhere]),
+            os.pathsep.join([os.path.join(current, "sub"), elsewhere]),
+        )
+        outcomes = set()
+        for executable in executables:
+            for path_value in path_values:
+                with self.subTest(executable=executable, path=path_value), \
+                        mock.patch.dict(os.environ, {"PATH": path_value}):
+                    doctor_result = self.doctor._found_only_in_current_directory(executable)
+                    bridge_result = self.bridge._found_only_in_current_directory(executable)
+                    self.assertEqual(doctor_result, bridge_result)
+                    outcomes.add(doctor_result)
+        # Both outcomes occur, so the comparison is not vacuous.
+        self.assertEqual(outcomes, {True, False})
+        in_current = os.path.join(current, name)
+        with mock.patch.dict(os.environ, {"PATH": elsewhere}):
+            self.assertTrue(self.doctor._found_only_in_current_directory(in_current))
+            self.assertFalse(self.doctor._found_only_in_current_directory(os.path.join(elsewhere, name)))
+        with mock.patch.dict(os.environ, {"PATH": os.pathsep.join([elsewhere, current])}):
+            self.assertFalse(self.doctor._found_only_in_current_directory(in_current))
 
 
 class HostVersionCliTests(HostVersionTestCase):
