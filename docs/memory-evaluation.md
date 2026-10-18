@@ -10,7 +10,8 @@ v0.24.0의 [언어 매트릭스·Kiwi/qmd 비교·Windows 편집 보강](evaluat
 외부 문구를 접한 모델이 어떤 도구를 호출하는지를 나눠 확인한다. 두 선택형 옵션은 여기서 더
 나눈다. `evaluate_recall.py --render-matched`는 시간 유효성 처리의 겉보기 이득 중 실제 제외
 기전의 몫을 따로 재고, `evaluate_tool_safety.py --receipt-out`은 실제 모델의 도구 호출 실패를
-유형별로 분류해 전체 영수증으로 남긴다.
+유형별로 분류해 전체 영수증으로 남긴다. 개발 브랜치의 `evaluate_recall.py --exact-paired`·`--rate-bounds`는
+작은 표본의 쌍 비교 p값을 정확값으로 바꾸고 0건·소수 건 비율에 단측 상한을 붙인다(아래 소표본 통계).
 
 이 문서는 v0.24.0의 선택형 개발·평가 도구를 설명한다. 위 두 옵션은 v0.23.0에서 더했다. 기본 세션 훅·검색·주입·설치 동작에
 모델 호출이나 새 런타임 의존성을 추가하지 않는다. 실제 사용자 볼트나 업무 자료를
@@ -66,7 +67,8 @@ python scripts/evaluate_korean_memory.py --render-matched
   `not_evaluated`·`unknown`뿐이고 `invalid`도 빼지 않으므로 두 값이 남기는 출처가 같다.
 - `display_effect = render_matched − legacy`, `mechanism_residual = advanced − render_matched`이다.
   같은 질문 쌍에서 두 평균의 합은 겉보기 이득(`advanced − legacy`)과 같다. 각 값에 기존
-  `paired_randomization`(부호 무작위화, 양측, seed 1707, 10,000회)의 p값을 붙인다.
+  `paired_randomization`(부호 무작위화, 양측, seed 1707, 10,000회)의 p값을 붙인다. `--exact-paired`를
+  더하면 0이 아닌 쌍이 20개 이하인 검정은 정확 열거 p값을 쓴다(아래 소표본 통계).
 - 판정 지표는 nDCG@5, recall@k, stale top-1 비율, 답 없음 오탐 비율이다. 뒤의 두 지표는 낮을수록
   좋으므로 음수 잔차가 이득이다. 반환 순위 전체의 stale 노출은 결과를 본 뒤 추가한 서술 지표라
   판정에 넣지 않는다.
@@ -136,6 +138,113 @@ fixture 측정이다. recall 행은 CI와 같은 옵션에 `--render-matched`만
   0이 아닌 쌍이 지표마다 최소 6개 필요하다(최소 p 2^(1−6)=0.031).
 - 읽는 모델이 없으므로 표시(렌더링) 자체가 답변에 주는 효과는 측정하지 않는다.
 - 측정 기록: [render-matched-20261017.md](verification/render-matched-20261017.md)
+
+## 소표본 통계: 정확 부호 검정과 비율 상한
+
+질문 수가 작으면 두 가지 오해가 생긴다. 몬테카를로 p값은 같은 차이에서도 0인 쌍이 놓인 위치에
+따라 흔들리고, 관측 0건은 "0%"로만 보인다. 개발 브랜치에서 더한 두 선택형 옵션이 정확한 p값과
+비율의 단측 상한을 함께 기록한다. 플래그가 없으면 통계 모듈(`scripts/eval_stats.py`)을 읽지 않으며
+기본 실행·출력·종료 코드·CI 게이트는 이전과 바이트 단위로 같다.
+
+```text
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --render-matched --exact-paired
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --rate-bounds --max-stale-top-1-rate 0
+```
+
+**`--exact-paired`** (`--compare` 필요)
+
+- 비교 보고서의 `paired_randomization`과 `--render-matched` 분해의 세 검정(`apparent_gain`·
+  `display_effect`·`mechanism_residual`)에 적용한다.
+- 0이 아닌 쌍이 k개이고 k ≤ 20이면 부호 2^k가지를 모두 열거한다. 통계량(차이의 합)과 동률 규칙
+  (|합| ≥ |관측 합| − 1e-12)은 기존 몬테카를로와 같다. 0인 쌍은 어떤 합도 바꾸지 않으므로 n쌍 전체의
+  2^n가지와 분포가 같다. 결과에 표본 추출 오차가 없다.
+- k > 20이면 기존 몬테카를로 p값(seed 1707, 10,000회)을 그대로 쓰고 `method`에 그 사실을 적는다.
+  이때 add-one 추정의 최솟값은 1/10,001이다.
+- 모든 기록이 `method`에 방식을 밝히고 `nonzero_pair_count`(k)와 `minimum_attainable_p_value`
+  (2^(1−k), k=0이면 1)를 더한다. 분해의 기존 `mechanism_nonzero_pair_count`·`mechanism_minimum_attainable_p_value`·
+  `mechanism_power_limited`는 그대로이며 `mechanism_residual` 기록의 두 값과 같다.
+- 정확값은 몬테카를로의 흔들림만 없앤다. 이산성은 그대로라 k ≤ 5이면 효과가 커도 p < 0.05가 될 수 없다.
+- 0/1 지표(stale top-1, 답 없음 오탐)의 쌍 차이는 −1·0·+1뿐이다. 이때 이 검정은 0이 아닌 쌍에서
+  +1과 −1의 개수만 비교하는 양측 정확 부호 검정과 같다.
+
+**`--rate-bounds`**
+
+- 모든 요약(전체·언어별·시나리오별, 비교 모드의 각 팔)에 `rate_upper_bounds`를 더한다. 대상은
+  답 없음 오탐률(분모: 답 없음 질의), 금지 출처 노출률(분모: `forbidden_paths` 라벨 질의),
+  stale top-1 비율(분모: `stale_paths` 라벨 질의)이다. 분모가 0인 비율은 항목이 없다. 보고서 맨 위의
+  `rate_upper_bound_definitions`에 정의와 해석 범위를 한 번 적는다.
+- 항목마다 분자·분모·관측 비율과 두 단측 95% 상한을 담는다. `wilson_upper`는 단측 정규 분위수
+  z = 1.645를 쓴 Wilson score 상한이다(양측 90% Wilson 구간의 위 끝). `clopper_pearson_upper`는
+  P(X ≤ 분자 | 분모, p) = 0.05가 되는 p를 `math.comb`로 만든 이항 누적분포의 이분법으로 찾은 정확
+  상한이다. 분자가 0이면 닫힌 식 1 − 0.05^(1/n), 분자가 분모와 같으면 1이다.
+- 0건이 말해 주는 것: 21건 중 0건이어도 Clopper-Pearson 상한은 0.1329, Wilson 상한은 0.1141이다
+  (계산값). 이 표본으로는 비율이 약 13%보다 작다는 데까지만 말할 수 있다는 뜻이지 비율이 0이라는
+  뜻이 아니다.
+- 게이트와 종료 코드는 계속 관측 비율만 읽는다. 게이트를 통과했지만 정확 상한이 그 최댓값보다
+  크면 stderr에 `rate-bounds note (non-blocking)`를 남긴다. 실패한 게이트에는 알림을 더하지 않는다.
+
+**해석과 한계**
+
+- **게이트가 아니라 사람 판단의 입력이다.** 상한은 합격·승격·실패 판정에 쓰지 않는다. 비율·요약마다
+  따로 계산한 95%이며, 여러 값을 함께 볼 때의 동시 포함 확률은 보장하지 않는다.
+- **신뢰 상한은 확률 진술이 아니다.** 같은 방식으로 표본을 다시 뽑아 상한을 계산하기를 반복하면
+  그중 95%가 실제 비율 이상이라는 뜻이다. "실제 비율이 상한 아래일 확률이 95%"는 사전분포가 필요한
+  베이지안 신용구간의 해석이다. Bowyer 외도 신뢰구간이 신용구간으로 흔히 잘못 해석된다고 지적한다.
+- **사전분포.** 두 상한은 사전분포를 쓰지 않는다. 베이지안 상한은 사전분포에 따라 달라진다. 예를 들어
+  균등 사전분포 Beta(1,1)에서 21건 중 0건의 사후분포 95% 분위수는 1 − 0.05^(1/22) = 0.1273으로 두
+  상한 사이에 있다(계산값). 베이지안 구간은 구현하지 않았다.
+- **포함 확률.** Clopper-Pearson은 구성상 모든 실제 비율에서 포함 확률이 95% 이상이고, 그만큼
+  보수적이라 넓다. Wilson은 근사다. Bowyer 외는 실제 비율을 Beta(1,1)에서 뽑아 평균한 포함 확률을
+  기준으로, 작은 N에서도 Wilson과 베이지안 구간은 명목 수준을 지키고 Clopper-Pearson은 지나치게
+  보수적이라며 Wilson이나 베이지안 구간을 권한다(출처 보고). 평균이 아닌 특정 비율에서는 Wilson 단측
+  상한이 95%에 못 미칠 수 있다. 21건에서 실제 비율이 0.12이면 93.2%, 0.2이면 94.2%이고 같은 조건의
+  Clopper-Pearson은 100%, 99.1%다(정확 이항 합으로 계산한 값). 그래서 두 상한을 함께 싣는다.
+- **이항 모형의 가정.** 두 상한 모두 질의가 서로 독립이고 한 비율을 공유한다고 가정한다. fixture 질의는
+  일부러 만든 사례이지 실제 사용에서 뽑은 표본이 아니다. 상한은 "이런 사례를 반복한다면"이라는 가정
+  아래의 서술이며 실제 볼트의 오탐률이나 노출률의 추정치가 아니다.
+- **정확 검정의 근거.** Urbano 외는 TREC 자료 기반 시뮬레이션에서 순열 검정과 t 검정이 주제 25·50·100개,
+  양측·단측 모두에서 1종 오류율을 유의수준에 맞게 유지했다고 보고한다(순열은 100만 회 몬테카를로, 출처
+  보고). 저자들의 첫 권고는 더 단순한 t 검정이다. 이 fixture의 k ≤ 20은 그 연구 범위보다 작고, 정확 열거는
+  귀무가설에서 차이의 부호가 교환 가능하다는 가정에만 기댄다. 그 연구의 오류율을 이 fixture에 옮기지 않는다.
+
+### 2026-10-19 측정
+
+로컬 Windows·Python 3.12.10에서 소스 `ad876ea`를 실제로 실행한 값이다(합성 fixture 측정, 출처 보고값
+아님). CI와 같은 옵션에 `--render-matched`를 더해 한 번, 다시 `--exact-paired --rate-bounds`를 더해 한 번
+실행했다. 몬테카를로 열은 seed 1707·10,000회 add-one 추정이다. 아래 값은 recall_hard top3와 top5가 같다.
+
+| 구성 | 기전 잔차 지표 (쌍 분모) | 0 아닌 쌍 k | 몬테카를로 p | 정확 p (= 최소 p) |
+|---|---|---|---|---|
+| recall_advanced top3 | nDCG@5 (답 있는 14) | 2 | 0.5057 | 0.5 |
+| recall_advanced top3 | stale top-1 (stale 라벨 4) | 4 | 0.1301 | 0.125 |
+| recall_advanced top3 | 답 없음 오탐 (답 없음 2) | 2 | 0.49995 | 0.5 |
+| recall_hard top3·top5 | stale top-1 (stale 라벨 10) | 2 | 0.5058 | 0.5 |
+| recall_hard top3·top5 | 답 없음 오탐 (답 없음 8) | 2 | 0.4973 | 0.5 |
+
+- 세 구성 모두 결정 `defer_richer_ledger_typing`과 `power_limited_metrics`가 플래그 전후로 같다. 0이 아닌
+  쌍이 없는 잔차(recall_advanced의 recall@k, recall_hard의 nDCG@5·recall@k)는 두 방식 모두 p=1이다.
+- 0이 아닌 같은 방향 쌍 2개를 n=10·14 안의 서로 다른 세 위치에 놓으면 몬테카를로 p는 0.4956~0.5143으로
+  흔들리고 정확값은 0.5다(같은 날 계산값). 2026-10-17 표의 0.51·0.50·0.13은 이 흔들림이 들어간 추정이다.
+- 정확 p가 몬테카를로의 바닥 아래로 내려가기도 한다. recall_hard의 recall@k 비교(`paired_randomization`,
+  답 있는 56쌍 중 0이 아닌 쌍 top3 17개·top5 16개, 모두 같은 방향)는 몬테카를로 0.0001·0.0002, 정확값
+  2^(−16)≈0.0000153·2^(−15)≈0.0000305다.
+- 0이 아닌 쌍이 20개를 넘는 검정(nDCG@5 비교 46개, 주장 포함 비교 45·44개, 분해의 nDCG@5 겉보기·표시
+  효과 47개)은 몬테카를로 p를 그대로 썼다. 서술 지표 stale 노출의 기전 잔차는 top3(k=9)에서 0.0030 →
+  0.0039, top5(k=10)에서 0.0016 → 0.0020이다.
+
+| 구성 | 개선 팔 비율 (분모) | 관측 | Wilson 상한 | Clopper-Pearson 상한 | CI 게이트 최댓값 |
+|---|---|---|---|---|---|
+| recall_advanced top3 | 답 없음 오탐 (답 없음 질의 2) | 0/2 | 0.5750 | 0.7764 | 0 |
+| recall_advanced top3 | 금지 출처 노출 (금지 라벨 2) | 0/2 | 0.5750 | 0.7764 | 0 |
+| recall_advanced top3 | stale top-1 (stale 라벨 4) | 0/4 | 0.4035 | 0.5271 | 0 |
+| recall_hard top3·top5 | 답 없음 오탐 (답 없음 질의 8) | 2/8 | 0.5398 | 0.5997 | 0.25 |
+| recall_hard top3·top5 | stale top-1 (stale 라벨 10) | 0/10 | 0.2129 | 0.2589 | 0 |
+
+- 모든 게이트가 통과했고 종료 코드는 플래그 전후 모두 0이다. 다섯 행 모두 정확 상한이 게이트 최댓값을
+  넘어 실행마다 비차단 알림을 남겼다(세 실행에서 7건). recall_hard에는 금지 출처 라벨이 없어 그 항목이 없다.
+- 0건 게이트 네 행의 통과는 이 fixture에서 해당 비율이 0.26~0.78보다 작다는 데까지만 보여 준다.
+- 플래그 없는 명령줄 11개(CI의 recall 단계 4개, render-matched 2개, hangul2, experience, `--advanced`, 사용
+  오류 2개)의 stdout·stderr·종료 코드는 기준 커밋 `d2b9315`와 바이트 단위로 같았다(시계를 고정해 같은 날 측정).
 
 ## 생성된 상태 변경 순서
 
@@ -266,6 +375,8 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 
 - [LMEB](https://arxiv.org/abs/2603.12572), [LongMemEval](https://arxiv.org/abs/2410.10813): 검색과 답변을 분리하고 갱신·시간·답변 보류를 평가하는 참고.
 - [Presentation, Not Mechanism](https://arxiv.org/abs/2607.16019) (Jiang 외, arXiv v1 2026-07-17): 표시 방식을 고정한 대조군으로 시간 유효성 기전의 몫을 분리하는 방법 참고. 코드나 데이터는 사용하지 않았다.
+- [Position: Don't Use the CLT in LLM Evals With Fewer Than a Few Hundred Datapoints](https://arxiv.org/abs/2503.01747) (Bowyer·Aitchison·Ivanova, ICML 2025 Spotlight Position, arXiv v3 2025-05-28): 작은 N에서 CLT 구간이 불확실성을 크게 과소평가하며, 독립 질문 설정에서 Wilson·베이지안 구간을 권하는 근거. 저자 라이브러리(bayes_evals)는 사용하지 않았다.
+- [Statistical Significance Testing in Information Retrieval](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
 
