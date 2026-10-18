@@ -66,8 +66,10 @@ python scripts/evaluate_tool_matrix.py --backend local-model --model <local-mode
   기본으로 켜져 있고 `--no-slots`로 끌 수 있으며, 응답 예시는 슬롯마다 `id`·`is_processing` 등을 담은 배열이다.
 - 이 저장소의 [2026-10-18 관측](verification/eval-stability-20261018.md)에서 첫 32에피소드는 별도 구조화 기억 추론과
   동시에 실행해 모델 오류 8건(요청 시간 초과 7, transport 오류 1)이 났다. 뒤의 8에피소드(0/4와 4/4)는 경쟁 호출 없이
-  실행했다. 당시에는 슬롯 부하·프롬프트 캐시·반복 일치를 기록하지 않아, 두 반복이 같은 출력을 되풀이했는지 부하가
-  결과를 바꿨는지 영수증만으로 가를 수 없었다.
+  실행했다. v0.24.0의 행렬 도구도 원 응답은 영수증에 보관하므로 반복끼리 출력을 비교할 수는 있었다. 빠진 것은 같은
+  seed의 반복과 조건 기록이다. 반복은 seed를 하나씩 올려 요청했고(뒤의 8에피소드는 17과 18) 같은 구성의 반복이 아니었으며, 슬롯
+  부하와 프롬프트 캐시 설정도 남기지 않았다. 그래서 반복 사이의 차이가 seed 때문인지 부하·캐시 때문인지, 오류가 부하
+  때문인지 영수증만으로 가를 수 없었다.
 
 ### 기록 형식
 
@@ -93,7 +95,8 @@ python scripts/evaluate_tool_matrix.py --backend local-model --model <local-mode
 `transport_error`, `slots_timeout`, `slots_bytes_exceeded`, `invalid_slots_json`, `slots_not_array`,
 `slots_fields_absent`(빈 배열, 4,096개 초과, 객체가 아닌 항목, 불리언 `is_processing` 없음), `non_loopback_endpoint`,
 `invalid_api_key`. `scripted-control`은 요청 없이 `scripted_control`, `probe_slots`가 없는 사용자 정의 전송 객체는
-`slots_probe_unavailable`, 그 함수의 예외·형식 오류는 `slots_probe_error`다. 스냅샷 실패는 종료 코드를 바꾸지 않는다.
+`slots_probe_unavailable`, 그 함수의 예외·형식 오류는 `slots_probe_error`다. 사용자 정의 `probe_slots`도 모델 요청과
+같은 시간 제한 도우미로 감싸므로 5초 안에 돌아오지 않으면 기다리지 않고 `slots_timeout`으로 남긴다. 스냅샷 실패는 종료 코드를 바꾸지 않는다.
 
 시작 스냅샷의 바쁜 슬롯은 모두 다른 요청으로 센다. 앞 에피소드가 시간 초과로 남긴 이 평가기의 요청일 수도 있다.
 요청 시간 초과·에피소드 시간 초과·transport 오류로 끝난 에피소드는 자기 마지막 요청이 서버에서 아직 돌 수 있으므로

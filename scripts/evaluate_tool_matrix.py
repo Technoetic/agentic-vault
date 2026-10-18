@@ -321,8 +321,13 @@ def evaluate_matrix(*, spec=None, backend='scripted-control', transport=None, co
 
 
 def _add_measurements(report, groups, rows, *, no_prompt_cache, slot_snapshots, repeat_agreement):
-    """Opt-in keys only; every default key keeps its value and order except the seed policy text,
-    which states the identical-seed rule when repeat agreement is on."""
+    """Add the opt-in measurement keys; existing keys keep their order.
+
+    The only value rewritten here is the seed policy text, which states the identical-seed rule
+    when repeat agreement is on. Repeat agreement also changes values earlier: plan_trials gives
+    every repeat the base seed, so from the second repeat on each trial's seed, its
+    evaluation_conditions.seed and the seed sent with its requests differ from a default run.
+    """
     conditions = safety.measurement_conditions(no_prompt_cache=no_prompt_cache, slot_snapshots=slot_snapshots)
     if repeat_agreement:
         report['seed_policy'] = ('Base seed shuffles order; with repeat agreement every repeat requests the '
