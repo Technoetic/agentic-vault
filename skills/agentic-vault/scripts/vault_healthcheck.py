@@ -27,6 +27,9 @@
   14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
   14b 링크·정션 제외 — 따라가지 않은 링크 경로를 조용히 빼지 않고 보고 (관리성)
       ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
+  15  확장 경고 — 경고 전용 (관리성). 선택 키 sync_conflict_check·checkpoint_drift_check를
+      켜면 동기화 충돌·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트도 여기에
+      더한다(full 모드만, 기본 꺼짐 — 키가 없으면 출력이 그대로다).
 
 종료 코드(fail-closed):
   0 = 볼트 아님(조용히 통과) 또는 치명 이슈 0건 (관리성 이슈는 리포트만)
@@ -42,11 +45,15 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import dataclass
+import fnmatch
+import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
@@ -348,6 +355,44 @@ def _validate_gates(raw: object) -> dict:
     return out
 
 
+# Opt-in sync warnings. The keys are deliberately absent from DEFAULT_CONFIG:
+# an unconfigured vault gets the same validated mapping and the same healthcheck
+# output as before. Each key is validated only when present.
+_SYNC_BOOL_KEYS = ("sync_conflict_check", "checkpoint_drift_check")
+MAX_SYNC_CONFLICT_PATTERNS = 32
+MAX_SYNC_CONFLICT_PATTERN_CHARS = 128
+
+
+def _validate_sync_warning_keys(config: dict) -> None:
+    """Reject malformed opt-in sync warning settings (fail-closed like other keys)."""
+    for key in _SYNC_BOOL_KEYS:
+        if key in config and not isinstance(config[key], bool):
+            raise HealthcheckError(f"{key} must be true/false")
+    if "sync_conflict_patterns" not in config:
+        return
+    patterns = config["sync_conflict_patterns"]
+    if not isinstance(patterns, list):
+        raise HealthcheckError("sync_conflict_patterns must be a list")
+    if len(patterns) > MAX_SYNC_CONFLICT_PATTERNS:
+        raise HealthcheckError(
+            f"sync_conflict_patterns must have at most {MAX_SYNC_CONFLICT_PATTERNS} entries")
+    for index, pattern in enumerate(patterns):
+        label = f"sync_conflict_patterns[{index}]"
+        if not isinstance(pattern, str):
+            raise HealthcheckError(f"{label} must be a string")
+        if not pattern.strip():
+            raise HealthcheckError(f"{label} must not be empty")
+        if len(pattern) > MAX_SYNC_CONFLICT_PATTERN_CHARS:
+            raise HealthcheckError(
+                f"{label} must be at most {MAX_SYNC_CONFLICT_PATTERN_CHARS} characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in pattern):
+            raise HealthcheckError(f"{label} contains a control character")
+        if "/" in pattern or "\\" in pattern:
+            raise HealthcheckError(
+                f"{label} matches file names only; '/' and '\\' are not allowed")
+    config["sync_conflict_patterns"] = list(patterns)
+
+
 def validate_config(raw: object) -> dict:
     """Validate untrusted JSON config and return a normalized independent mapping."""
     if not isinstance(raw, dict):
@@ -356,6 +401,7 @@ def validate_config(raw: object) -> dict:
     config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
     config["gates"] = _validate_gates(config.get("gates"))
     _validated_warning_policy(config)
+    _validate_sync_warning_keys(config)
 
     for key in _STRING_KEYS:
         value = config.get(key)
@@ -863,13 +909,16 @@ def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
 
 
 def collect_md_files(vault: Path, exclude_names: set[str],
-                     skipped: list[str] | None = None) -> list[Path]:
+                     skipped: list[str] | None = None, *,
+                     file_entries: list[Path] | None = None) -> list[Path]:
     """exclude_dirs(이름 매칭)를 걷기 단계에서 가지치기하며 .md 를 수집한다.
     deny_zones 는 여기서 제외하지 않는다 — 링크 해석 인덱스에는 포함돼야
     아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다.
     심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다.
     건너뛴 디렉토리·.md 파일의 볼트 상대 경로는 skipped에 남긴다 — 조용히
-    빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고)."""
+    빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고).
+    file_entries(선택, 기본 None)를 넘기면 같은 걷기에서 본 모든 파일 항목
+    (확장자 무관)의 경로를 덧붙인다 — 이름 검사용이며 열거나 따라가지 않는다."""
     results: list[Path] = []
     def scan_error(error: OSError) -> None:
         if skipped is not None:
@@ -896,6 +945,8 @@ def collect_md_files(vault: Path, exclude_names: set[str],
             safe_dirs.append(dirname)
         dirs[:] = safe_dirs
         for f in files:
+            if file_entries is not None:
+                file_entries.append(root_path / f)
             if f.lower().endswith(".md"):
                 candidate = root_path / f
                 try:
@@ -906,6 +957,294 @@ def collect_md_files(vault: Path, exclude_names: set[str],
                     continue
                 results.append(candidate)
     return results
+
+
+# --- Opt-in sync warnings: names only + checkpoint drift (warning-only) ------
+# Built-in names are limited to what official documentation states verbatim:
+#   Syncthing, "Understanding Synchronization" (SYNCTHING_SYNCING_DOC):
+#     conflict copy  "<filename>.sync-conflict-<date>-<time>-<modifiedBy>.<ext>"
+#     temporary file ".syncthing.original-filename.ext.tmp", on Windows
+#                    "~syncthing~original-filename.ext.tmp" (a hash replaces
+#                    names that would be too long; the prefix rule covers both)
+#   Obsidian Sync, "Troubleshoot Obsidian Sync" (OBSIDIAN_SYNC_TROUBLESHOOT_DOC),
+#     option "Create conflict file" (Obsidian 1.9.7+):
+#                    "original-note-name (Conflicted copy device-name YYYYMMDDHHMM).md"
+# Dropbox and OneDrive naming is not confirmed by official documentation, so
+# no default is shipped for them; users add sync_conflict_patterns globs.
+SYNCTHING_SYNCING_DOC = "https://docs.syncthing.net/users/syncing.html"
+OBSIDIAN_SYNC_TROUBLESHOOT_DOC = (
+    "https://github.com/obsidianmd/obsidian-help/blob/master/en/"
+    "Obsidian%20Sync/Troubleshoot%20Obsidian%20Sync.md"
+)
+_SYNC_NAME_RULES = (
+    # (pattern id, finding code, file-name regex used with search, source)
+    ("syncthing-temp", "sync-temp-file",
+     re.compile(r"^(?:\.syncthing\.|~syncthing~).+\.tmp\Z"), SYNCTHING_SYNCING_DOC),
+    ("syncthing-conflict", "sync-conflict-copy",
+     re.compile(r"\.sync-conflict-[^-]+-[^-]+-."), SYNCTHING_SYNCING_DOC),
+    ("obsidian-sync-conflict", "sync-conflict-copy",
+     re.compile(r"^.+ \(Conflicted copy .+ [0-9]{12}\)\.md\Z"), OBSIDIAN_SYNC_TROUBLESHOOT_DOC),
+)
+_SYNC_NAME_MESSAGES = {
+    "sync-temp-file": ("File name matches a sync-client temporary-file pattern; "
+                       "a transfer may be unfinished or may have failed"),
+    "sync-conflict-copy": ("File name matches a sync-client conflict-copy pattern; "
+                           "compare it with the original and merge or remove it manually"),
+    "sync-user-pattern": "File name matches a configured sync_conflict_patterns glob",
+}
+MAX_SYNC_NAME_WARNINGS = 200
+
+
+def _sync_name_match(name: str, globs: list[str]) -> tuple[str, dict] | None:
+    """Return (finding code, details) for the first matching rule, else None."""
+    for pattern_id, code, regex, source in _SYNC_NAME_RULES:
+        if regex.search(name):
+            return code, {"pattern": pattern_id, "source": source}
+    for glob in globs:
+        if fnmatch.fnmatchcase(name, glob):
+            return "sync-user-pattern", {"pattern": "user", "glob": glob}
+    return None
+
+
+def sync_name_warnings(vault: Path, entries: list[Path], config: dict) -> tuple[list[dict], int]:
+    """Opt-in names-only scan of walked file entries of any extension.
+
+    Matched entries are never opened, read or followed. Deny zones, exclude_dirs
+    and the engine runtime are skipped by the shared warning inventory rule.
+    Names and globs are NFC-normalized and compared case-sensitively.
+    Returns (findings, total match count); findings are capped like lint output.
+    """
+    globs = [unicodedata.normalize("NFC", glob)
+             for glob in config.get("sync_conflict_patterns") or []]
+    matches: list[tuple[str, str, dict]] = []
+    for entry in entries:
+        try:
+            rel = rel_posix(entry, vault)
+        except ValueError:
+            continue
+        if not _warning_inventory_allowed(rel, config):
+            continue
+        hit = _sync_name_match(unicodedata.normalize("NFC", entry.name), globs)
+        if hit is not None:
+            matches.append((rel, hit[0], hit[1]))
+    matches.sort(key=lambda item: (item[0], item[1]))
+    findings = [make_warning(code, rel, 0, _SYNC_NAME_MESSAGES[code], details=details)
+                for rel, code, details in matches[:MAX_SYNC_NAME_WARNINGS]]
+    if len(matches) > MAX_SYNC_NAME_WARNINGS:
+        findings.append(make_warning(
+            "lint-incomplete", "", 0,
+            "Sync file-name warnings exceeded the output limit; further matches are omitted",
+            details={"reasons": ["sync file-name output limit"],
+                     "omitted": len(matches) - MAX_SYNC_NAME_WARNINGS}))
+    return findings, len(matches)
+
+
+# vault_state.write_checkpoint names and shapes these runtime records.
+CHECKPOINT_NAME_RE = re.compile(r"checkpoint-[0-9a-f]{32}\.json")
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
+_CHECKPOINT_KEYS = frozenset({"version", "session_sha256", "config_sha256",
+                              "sources", "events", "pending_references"})
+_CHECKPOINT_EVENTS = frozenset({"PreCompact", "SessionEnd"})
+MAX_CHECKPOINT_BYTES = 64 * 1024        # vault_state.MAX_RUNTIME_BYTES
+MAX_CHECKPOINT_CANDIDATES = 64          # newest files by mtime that are parsed
+MAX_CHECKPOINT_SOURCES = 16
+MAX_CHECKPOINT_SOURCE_BYTES = 1_000_000
+_CHECKPOINT_MESSAGES = {
+    "changed": ("Engine note changed after the most recent checkpoint; the writer is "
+                "unknown (external editor, sync client or another session)"),
+    "missing": ("Engine note recorded by the most recent checkpoint is missing now; "
+                "it may have been moved, renamed or deleted outside the engine"),
+}
+
+
+def _read_regular_bytes(path: Path, limit: int) -> bytes | None:
+    """Read one regular non-link file of at most `limit` bytes, else None.
+
+    The opened descriptor must be the same file the pre-open lstat saw, so a
+    path swapped for a link between the check and the open is skipped.
+    """
+    try:
+        before = path.lstat()
+        if (not stat.S_ISREG(before.st_mode)
+                or getattr(before, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+                or before.st_size > limit):
+            return None
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                return None
+            data = stream.read(limit + 1)
+    except OSError:
+        return None
+    return data if len(data) <= limit else None
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _checkpoint_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    offset = parsed.utcoffset()
+    if offset is None or offset.total_seconds() != 0:
+        return None
+    return parsed
+
+
+def _parse_checkpoint(raw: bytes) -> tuple[datetime, str, str, list[dict]] | None:
+    """Validate one checkpoint record; None for anything unexpected (fail-soft).
+
+    Returns (last event time, last event name, raw last event time, sources).
+    The sources were captured when the last event was written.
+    """
+    try:
+        record = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    if not isinstance(record, dict) or set(record) != _CHECKPOINT_KEYS:
+        return None
+    if type(record["version"]) is not int or record["version"] != 1:
+        return None
+    for key in ("session_sha256", "config_sha256"):
+        if not isinstance(record[key], str) or not _SHA256_HEX_RE.fullmatch(record[key]):
+            return None
+    if not isinstance(record["pending_references"], list):
+        return None
+    events = record["events"]
+    if not isinstance(events, list) or not 1 <= len(events) <= 16:
+        return None
+    for event in events:
+        if (not isinstance(event, dict) or set(event) != {"event", "at"}
+                or not isinstance(event["event"], str)
+                or event["event"] not in _CHECKPOINT_EVENTS
+                or _checkpoint_time(event["at"]) is None):
+            return None
+    sources = record["sources"]
+    if not isinstance(sources, list) or len(sources) > MAX_CHECKPOINT_SOURCES:
+        return None
+    seen: set[str] = set()
+    checked: list[dict] = []
+    for source in sources:
+        if not isinstance(source, dict) or set(source) != {"path", "sha256", "size"}:
+            return None
+        path, digest, size = source["path"], source["sha256"], source["size"]
+        if (not isinstance(path, str) or not path or len(path) > 1024 or "\\" in path
+                or not path.casefold().endswith(".md")
+                or any(unsafe_path_segment(part) for part in path.split("/"))
+                or not isinstance(digest, str) or not _SHA256_HEX_RE.fullmatch(digest)
+                or type(size) is not int or size < 0 or path.casefold() in seen):
+            return None
+        seen.add(path.casefold())
+        checked.append({"path": path, "sha256": digest, "size": size})
+    last = events[-1]
+    return _checkpoint_time(last["at"]), last["event"], last["at"], checked
+
+
+def _latest_checkpoint(vault: Path, config: dict) -> tuple[str, str, str, list[dict]] | None:
+    """Pick the valid record whose last event is newest among the newest files.
+
+    Returns (file name, event, raw event time, sources) or None. Only the
+    MAX_CHECKPOINT_CANDIDATES most recently modified checkpoint files are parsed.
+    """
+    deny_zones = config.get("deny_zones")
+    runtime = vault / ENGINE_RUNTIME_RELPATH
+    candidates: list[tuple[int, str]] = []
+    try:
+        _ensure_vault_path(vault, runtime, "engine runtime", deny_zones)
+        if not runtime.is_dir():
+            return None
+        with os.scandir(runtime) as listing:
+            for entry in listing:
+                if not CHECKPOINT_NAME_RE.fullmatch(entry.name):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if stat.S_ISREG(info.st_mode):
+                    candidates.append((info.st_mtime_ns, entry.name))
+    except (OSError, HealthcheckError):
+        return None
+    best: tuple[datetime, str, str, str, list[dict]] | None = None
+    for _mtime, name in sorted(candidates, reverse=True)[:MAX_CHECKPOINT_CANDIDATES]:
+        path = runtime / name
+        try:
+            _ensure_vault_path(vault, path, "engine checkpoint", deny_zones)
+        except HealthcheckError:
+            continue
+        raw = _read_regular_bytes(path, MAX_CHECKPOINT_BYTES)
+        parsed = _parse_checkpoint(raw) if raw is not None else None
+        if parsed is None:
+            continue
+        at, event, at_text, sources = parsed
+        if best is None or (at, name) > (best[0], best[1]):
+            best = (at, name, event, at_text, sources)
+    if best is None:
+        return None
+    return best[1], best[2], best[3], best[4]
+
+
+def checkpoint_drift_warnings(vault: Path, config: dict) -> list[dict]:
+    """Opt-in: report notes whose bytes differ from the newest valid checkpoint.
+
+    Compares the hot/handoff/log/tasks hashes that vault_state.write_checkpoint
+    recorded at PreCompact/SessionEnd with the current files. Fail-soft: a
+    missing runtime directory, no valid checkpoint, or an unsafe or unreadable
+    path yields no finding and no error. Reads only; never writes notes.
+    """
+    latest = _latest_checkpoint(vault, config)
+    if latest is None:
+        return []
+    name, event, at_text, sources = latest
+    findings: list[dict] = []
+    for source in sources:
+        rel = source["path"]
+        if not _warning_inventory_allowed(rel, config):
+            continue
+        path = vault / rel
+        try:
+            _ensure_vault_path(vault, path, "checkpoint source", config.get("deny_zones"))
+        except HealthcheckError:
+            continue
+        current: str | None = None
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            state = "missing"
+        except OSError:
+            continue
+        else:
+            if (not stat.S_ISREG(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT):
+                continue
+            if info.st_size <= MAX_CHECKPOINT_SOURCE_BYTES:
+                data = _read_regular_bytes(path, MAX_CHECKPOINT_SOURCE_BYTES)
+                if data is None:
+                    continue
+                current = hashlib.sha256(data).hexdigest()
+                if current == source["sha256"]:
+                    continue
+            state = "changed"
+        findings.append(make_warning(
+            "checkpoint-drift", rel, 0, _CHECKPOINT_MESSAGES[state],
+            details={"checkpoint": name, "event": event, "at": at_text, "state": state,
+                     "recorded_sha256": source["sha256"], "current_sha256": current}))
+    findings.sort(key=lambda finding: (finding["path"], finding["issue_id"]))
+    return findings
 
 
 def split_frontmatter(text: str) -> tuple[str | None, str]:
@@ -1390,6 +1729,12 @@ def main() -> int:
 
     fact_patterns = compile_fact_patterns(cfg.get("ssot_facts"), warnings)
 
+    # 선택형 동기화 경고(기본 꺼짐). 키가 없으면 아래 어느 줄도 출력을 바꾸지 않는다.
+    sync_name_check = cfg.get("sync_conflict_check") is True
+    if cfg.get("sync_conflict_patterns") and not sync_name_check:
+        warnings.append("sync_conflict_patterns는 sync_conflict_check가 true일 때만 쓰인다 — "
+                        "동기화 파일 이름 검사 생략.")
+
     config_derived_output = not args.output
     out_rel = args.output or norm_cfg_path(cfg.get("health_report")) or "00-meta/health-report.md"
     out = vault / out_rel  # out_rel 이 절대경로면 pathlib 이 그대로 절대경로를 취한다
@@ -1415,7 +1760,9 @@ def main() -> int:
 
     # --- 파일 수집 ------------------------------------------------------------
     link_skipped: list[str] = []
-    all_md = collect_md_files(vault, exclude_names, link_skipped)
+    # 이름 검사가 켜졌을 때만 같은 걷기에서 모든 파일 항목(확장자 무관)을 모은다.
+    file_entries: list[Path] | None = [] if sync_name_check and _EXTENSIONS_AVAILABLE else None
+    all_md = collect_md_files(vault, exclude_names, link_skipped, file_entries=file_entries)
     # 링크 해석용 인덱스는 deny zone 포함 전체(아카이브로 이동한 노트 링크는 유효),
     # 린트 대상은 deny zone·도구 문서·리포트 자신을 제외한 활성 영역만.
     # 주의: 옵시디언 frontmatter aliases 는 원시 위키링크를 해석하지 못한다 —
@@ -1722,6 +2069,18 @@ def main() -> int:
         input_complete=not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
                        and not any(_warning_inventory_allowed(rel, cfg) for rel in link_skipped),
         consumer_paths=consumer_paths)
+    # 선택형 동기화 경고: 경고 전용이라 승격·치명 집계에 들어가지 않는다. 확장 모듈이
+    # 없으면 위 extension_warnings가 이미 lint-extension-unavailable을 보고한다.
+    sync_name_count = 0
+    checkpoint_change_count = 0
+    if _EXTENSIONS_AVAILABLE:
+        if file_entries is not None:
+            sync_findings, sync_name_count = sync_name_warnings(vault, file_entries, cfg)
+            extension_diagnostics.extend(sync_findings)
+        if cfg.get("checkpoint_drift_check") is True:
+            drift_findings = checkpoint_drift_warnings(vault, cfg)
+            checkpoint_change_count = len(drift_findings)
+            extension_diagnostics.extend(drift_findings)
     promoted_count = sum(x["severity"] == "fatal" for x in extension_diagnostics)
 
     # --- 집계 ------------------------------------------------------------------
@@ -1903,8 +2262,13 @@ def main() -> int:
     drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
     read_note = f" ⚠️읽기 실패 {len(unreadable)}건(§14)" if unreadable else ""
     link_note = f" ⚠️링크·정션 제외 {len(link_skipped)}건(§14b)" if link_skipped else ""
+    sync_note = (f" ⚠️동기화 충돌·임시 파일 이름 {sync_name_count}건(§15)"
+                 if sync_name_count else "")
+    checkpoint_note = (f" ⚠️checkpoint 이후 바뀐 엔진 노트 {checkpoint_change_count}건(§15)"
+                       if checkpoint_change_count else "")
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
-          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}")
+          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}"
+          f"{sync_note}{checkpoint_note}")
     return 1 if critical > 0 else 0
 
 
