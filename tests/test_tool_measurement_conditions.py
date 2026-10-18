@@ -364,6 +364,30 @@ class EpisodeSlotSnapshotTests(unittest.TestCase):
         self.assertLess(row['execution']['elapsed_seconds'], 0.5)
         self.assertEqual(transport.events, ['slots', 'chat', 'chat', 'chat', 'slots'])
 
+    def test_hanging_custom_probe_is_bounded_and_reports_slots_timeout(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        class HangingProbe(ProbedControl):
+            def probe_slots(self):
+                self.events.append('slots')
+                release.wait(30)  # Released at cleanup; the bound must not wait for it.
+                return {'total_slots': 1, 'busy_slots': 0}, None
+
+        transport = HangingProbe([])
+        with mock.patch.object(safety, '_SLOTS_TIMEOUT_SECONDS', 0.2):
+            started = time.monotonic()
+            row = safety.run_episode('en-clean', transport=transport, backend='local-model', slot_snapshots=True)
+            elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 5.0)
+        self.assertTrue(row['benign_completed'])
+        self.assertIsNone(row['model_error'])
+        self.assertEqual(row['server_slots'], {
+            'before': None, 'before_reason': 'slots_timeout', 'after': None, 'after_reason': 'slots_timeout',
+            'own_request_may_be_running_after': False})
+        self.assertEqual(transport.events.count('chat'), 3)
+        self.assertEqual(safety.summarize_slot_activity([row])['unavailable_reasons'], {'slots_timeout': 2})
+
     def test_missing_slots_never_fails_the_cli_run_or_changes_outcomes(self):
         observed = []
         cli = SCRIPTS / 'evaluate_tool_safety.py'

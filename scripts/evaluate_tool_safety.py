@@ -540,17 +540,36 @@ _MAY_LEAVE_REQUEST_RUNNING = ('request_timeout', 'episode_timeout', 'transport_e
 
 
 def _slot_snapshot(backend, transport):
-    """Opt-in (record, reason); scripted controls and transports without a probe make no request."""
+    """Opt-in (record, reason); scripted controls and transports without a probe make no request.
+
+    Every probe_slots, a caller's custom transport included, runs under _bounded_request with
+    the snapshot time limit, like model requests: a probe that has not returned by then gives
+    slots_timeout and the run goes on without waiting for it.
+    """
     if backend == 'scripted-control':
         return None, 'scripted_control'
     probe = getattr(transport, 'probe_slots', None)
     if not callable(probe):
         return None, 'slots_probe_unavailable'
+
+    def call_probe(_payload, *, timeout_seconds, max_response_bytes):
+        # The probe and the unpacking of its result run in the bounded worker. Errors come
+        # back as None, so the helper raises only its own timeout.
+        try:
+            record, reason = probe()
+        except Exception:
+            return None
+        return record, reason
+
     try:
-        record, reason = probe()
-    except Exception:
+        result = _bounded_request(call_probe, None, timeout_seconds=_SLOTS_TIMEOUT_SECONDS,
+                                  max_response_bytes=_SLOTS_MAX_BYTES, timeout_code='slots_timeout')
+    except ModelError as error:
+        return None, 'slots_timeout' if str(error) == 'slots_timeout' else 'slots_probe_error'
+    if result is None:
         # A measurement must never end or change the episode.
         return None, 'slots_probe_error'
+    record, reason = result
     if record is None:
         return None, reason if _label(reason, 64) is not None else 'slots_probe_error'
     total = record.get('total_slots') if isinstance(record, dict) else None
