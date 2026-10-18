@@ -361,6 +361,21 @@ class GoldSetVaultTests(unittest.TestCase):
         code, stdout, _ = self.run_goldset("--compare", "--max-stale-top-1-rate", "0")
         self.assertIn("optional_gates", json.loads(stdout)["improved"])
 
+    def test_inspected_marks_cannot_empty_the_gated_headline(self):
+        for item in self.queries:
+            if item["expected_paths"]:
+                item["inspected"] = True
+        self.save()
+        # run_goldset sets both thresholds to 0; a gate without answerable queries still cannot pass.
+        code, stdout, stderr = self.run_goldset()
+        self.assertEqual(code, 1)
+        report = json.loads(stdout)
+        self.assertEqual((report["query_count"], report["answerable_query_count"]), (2, 0))
+        self.assertEqual(report["inspected_queries"]["summary"]["answerable_query_count"], 10)
+        self.assertEqual(report["evaluation_errors"], [])
+        self.assertIn("recall evaluation gate failed: 10 inspected=true queries leave no answerable query "
+                      "in the headline", stderr)
+
     def test_vault_policy_and_label_problems_exit_2_with_reasons(self):
         cases = []
         no_config = self.root / "plain-folder"
@@ -600,6 +615,11 @@ class InspectedQueryTests(unittest.TestCase):
     def save(self):
         (self.fixture / "queries.json").write_text(json.dumps({"queries": self.queries}), encoding="utf-8")
 
+    @staticmethod
+    def no_answer(index: int) -> dict:
+        return {"id": f"n{index:02d}", "language": "en", "scenario": "short", "query": "zebra harmonica",
+                "expectation": "no_answer", "expected_paths": []}
+
     def test_inspected_queries_leave_headline_metrics_gates_and_pairs(self):
         for index in (0, 1):
             self.queries[index].update(expected_paths=["other.md"], inspected=True)
@@ -632,6 +652,79 @@ class InspectedQueryTests(unittest.TestCase):
         self.assertNotIn("inspected_queries", marked)
         for key in ("query_count", "recall_at_3", "mrr", "ndcg_at_5", "by_language", "by_scenario", "no_answer"):
             self.assertEqual(marked[key], plain[key], key)
+
+    def test_marks_that_empty_the_headline_fail_the_recall_and_mrr_gates(self):
+        # Review finding: with every answerable query inspected, recall@3 and MRR were None, the
+        # None-tolerant gates passed and a run whose every query missed exited 0.
+        misses = [dict(item, expected_paths=["other.md"], inspected=True) for item in self.queries]
+        hits = [dict(item, inspected=True) for item in self.queries]
+        for label, queries, inspected, gap in (
+            ("every query inspected, all miss", misses, 12, "no query"),
+            ("every query inspected, all hit", hits, 12, "no query"),
+            ("answerable inspected, no_answer kept", misses[:10] + [self.no_answer(0), self.no_answer(1)], 10,
+             "no answerable query"),
+        ):
+            self.queries = queries
+            self.save()
+            for extra in ([], ["--compare"], ["--min-recall-at-3", "0", "--min-mrr", "0"]):
+                with self.subTest(case=label, extra=extra):
+                    code, stdout, stderr = run_main(evaluator, ["--fixture", self.fixture, *extra])
+                    self.assertEqual(code, 1)
+                    gated = json.loads(stdout)
+                    gated = gated.get("improved", gated)
+                    self.assertEqual((gated["answerable_query_count"], gated["recall_at_3"], gated["mrr"]),
+                                     (0, None, None))
+                    self.assertEqual(gated["inspected_queries"]["query_count"], inspected)
+                    # Nothing else fails these runs: every search is complete and no optional gate is set.
+                    self.assertEqual((gated["evaluation_errors"], gated["optional_gates"]), ([], {}))
+                    self.assertIn(f"recall evaluation gate failed: {inspected} inspected=true queries leave "
+                                  f"{gap} in the headline, so --min-recall-at-3 and --min-mrr cannot be "
+                                  "evaluated", stderr)
+                    self.assertNotIn("(non-blocking)", stderr)
+        # The same all-hit queries pass once they are no longer marked.
+        self.queries = [dict(item, inspected=False) for item in hits]
+        self.save()
+        code, _, stderr = run_main(evaluator, ["--fixture", self.fixture])
+        self.assertEqual((code, stderr), (0, ""))
+
+    def test_the_gate_rule_applies_to_the_evaluated_split(self):
+        for item in self.queries[6:]:
+            item["inspected"] = True
+        self.save()
+        (self.fixture / "split.json").write_text(json.dumps({
+            "dev": [f"q{index:02d}" for index in range(6)],
+            "heldout": [f"q{index:02d}" for index in range(6, 12)]}), encoding="utf-8")
+        code, _, stderr = run_main(evaluator, ["--fixture", self.fixture, "--split", "dev"])
+        self.assertEqual(code, 0, stderr)
+        code, stdout, stderr = run_main(evaluator, ["--fixture", self.fixture, "--split", "heldout"])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(stdout)["split"]["evaluated_inspected_query_count"], 6)
+        self.assertIn("recall evaluation gate failed: 6 inspected=true queries leave no query in the headline",
+                      stderr)
+
+    def test_sets_without_answerable_queries_keep_the_v0240_recall_gate(self):
+        # Regression: v0.24.0 (d2b9315) skips recall@3 and MRR for a set without answerable queries
+        # and exits 0 on this fixture. Marks on some no_answer queries remove no answerable query.
+        for marked in (0, 6):
+            with self.subTest(marked=marked):
+                self.queries = [self.no_answer(index) for index in range(12)]
+                for item in self.queries[:marked]:
+                    item["inspected"] = True
+                self.save()
+                code, stdout, stderr = run_main(evaluator, ["--fixture", self.fixture])
+                self.assertEqual(code, 0, stderr)
+                report = json.loads(stdout)
+                self.assertEqual((report["query_count"], report["recall_at_3"], report["mrr"]),
+                                 (12 - marked, None, None))
+                self.assertEqual(report["no_answer"]["false_positive_query_count"], 0)
+                self.assertNotIn("gate failed", stderr)
+        # Marking every query leaves an empty headline, which cannot pass.
+        self.queries = [dict(item, inspected=True) for item in self.queries]
+        self.save()
+        code, stdout, stderr = run_main(evaluator, ["--fixture", self.fixture])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(stdout)["query_count"], 0)
+        self.assertIn("12 inspected=true queries leave no query in the headline", stderr)
 
     def test_inspected_must_be_boolean(self):
         for value in ("yes", 1, None):

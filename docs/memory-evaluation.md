@@ -278,6 +278,11 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
 - `inspected: true` 문항은 헤드라인 지표, `by_language`·`by_scenario`, 게이트, 짝 통계에서 빠지고
   `inspected_queries`에 따로 집계된다. `per_query`·`failed_queries`·`evaluation_errors`·`costs`에는 남는다.
   표시가 없거나 `false`이면 결과가 바뀌지 않는다. 기존 fixture 문항에는 표시하지 않았다.
+- 표시 때문에 헤드라인에 문항이 하나도 남지 않거나, 답 있는 문항이 모두 표시되어 헤드라인에 답 있는 문항이
+  없으면 recall@3·MRR 게이트를 평가할 수 없으므로 기준값과 관계없이 통과로 치지 않는다. 결과 JSON은 그대로
+  출력하고 표준 오류에 이유를 남긴 뒤 종료 코드 1로 끝난다. 실패를 본 뒤 고치지 않은 문항을 더 넣어야 게이트를
+  다시 잴 수 있다. 답 있는 문항이 처음부터 없는 집합은 헤드라인에 문항이 남아 있으면 v0.24.0처럼 이 두 게이트를
+  건너뛴다.
 - recall_hard 64문항은 개발 중 이미 모두 공개·검토됐다. 이번 heldout은 앞으로의 변경을 위한 보류 집합이며,
   지난 조정에 대해 보지 않은 집합이 아니다.
 - 개인 골드셋은 `--derive-split`으로 같은 규칙의 분할을 출력해 저장하고 고정한다. 문항을 늘린 뒤에는

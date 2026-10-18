@@ -397,7 +397,10 @@ def evaluate(fixture: Path, *, max_tokens: int = 1500, advanced: bool = False,
             "summary": _summary(inspected),
             "note": "Queries marked inspected=true were edited after looking at failures. They are excluded "
                     "from the headline metrics, by_language, by_scenario, gates and paired statistics, and "
-                    "reported here only; per_query, failed_queries, evaluation_errors and costs keep them.",
+                    "reported here only; per_query, failed_queries, evaluation_errors and costs keep them. "
+                    "If they leave the headline with no query, or with no answerable query while some of "
+                    "them are answerable, the recall@3 and MRR gates cannot be evaluated and the command "
+                    "exits 1.",
         }
     if prepared is not None:
         report.update(prepared.sections)
@@ -1098,6 +1101,24 @@ def _mode_error(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _inspected_gate_gap(report: dict) -> str | None:
+    """Name what inspected=true marks left the gated headline without, or None.
+
+    As in v0.24.0, the recall@3 and MRR gates are skipped for a query set
+    without answerable queries. They cannot pass when the marks themselves
+    leave the headline with no query at all, or with no answerable query
+    while inspected answerable queries exist. Always None without marks.
+    """
+    inspected = report.get("inspected_queries")
+    if inspected is None:
+        return None
+    if not report["query_count"]:
+        return "no query"
+    if not report["answerable_query_count"] and inspected["summary"]["answerable_query_count"]:
+        return "no answerable query"
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     thresholds = (args.min_recall_at_3, args.min_mrr, args.max_no_answer_false_positive_rate,
@@ -1163,11 +1184,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Opt-in notes (gold set, split, inspected); a fixture path has none.
     for note in (source.notes if isinstance(source, EvaluationInput) else ()):
         print(note, file=sys.stderr)
-    if "inspected_queries" in gated:
+    # Inspected marks must not turn the recall@3/MRR gates into a vacuous pass.
+    gate_gap = _inspected_gate_gap(gated)
+    if gate_gap is not None:
+        print(f"recall evaluation gate failed: {gated['inspected_queries']['query_count']} inspected=true "
+              f"queries leave {gate_gap} in the headline, so --min-recall-at-3 and --min-mrr cannot be "
+              "evaluated; add queries that were not edited after looking at failures", file=sys.stderr)
+    elif "inspected_queries" in gated:
         print(f"recall evaluation note (non-blocking): {gated['inspected_queries']['query_count']} inspected "
               "queries are excluded from headline metrics and gates; see inspected_queries", file=sys.stderr)
     passed = (
-        (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
+        gate_gap is None
+        and (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)
         and (gated["mrr"] is None or gated["mrr"] >= args.min_mrr)
         and not gated["evaluation_errors"]
         and all(gate["passed"] for gate in gated["optional_gates"].values())
