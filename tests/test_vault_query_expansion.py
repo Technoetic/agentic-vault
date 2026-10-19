@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +13,18 @@ from unittest.mock import patch
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / 'skills/agentic-vault/scripts'
 sys.path.insert(0, str(SCRIPT_DIR))
 import vault_recall as recall
+
+
+def restore_mtime(path, mtime_ns):
+    """Put a directory time back and require it to stay there briefly."""
+    for _ in range(50):
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+        time.sleep(0.002)
+        if os.stat(path).st_mtime_ns == mtime_ns:
+            time.sleep(0.005)
+            if os.stat(path).st_mtime_ns == mtime_ns:
+                return
+    raise AssertionError('directory time could not be restored')
 
 
 class QueryExpansionTests(unittest.TestCase):
@@ -281,6 +295,178 @@ class QueryExpansionTests(unittest.TestCase):
         self.assertEqual(changed['context'], '')
         self.assertEqual(changed['matches'], [])
         self.assertFalse(changed['diagnostics']['search_complete'])
+
+    # Listing fingerprint (limit A11). Directory times can miss an entry change
+    # (coarse or lagging Windows directory times). Only dev/ino/mtime are kept
+    # in directory marks here so the mtime restore below reproduces that miss
+    # on every platform (POSIX ctime/size would otherwise reveal the change).
+    def masked_directory_marks(self, expansion):
+        original = expansion.inventory_mark
+        seen = {}
+        def mark(path, *, directory=False):
+            value = original(path, directory=directory)
+            if not directory:
+                return value
+            seen.setdefault(Path(path).name, value[3])
+            return (value[0], value[1], 0, value[3], 0)
+        return patch.object(expansion, 'inventory_mark', side_effect=mark), seen
+
+    def listing_mutations(self):
+        folder = self.vault / '20-knowledge'
+        return {
+            'add': lambda: self.write('20-knowledge/New competitor.md', '---\naliases: ["LOTO"]\n---\n# Competing destination\n'),
+            'remove': lambda: (folder / 'Spare.txt').unlink(),
+            'rename': lambda: (folder / 'Spare.txt').rename(folder / 'Spare renamed.txt'),
+        }
+
+    def reset_listing_fixture(self):
+        folder = self.vault / '20-knowledge'
+        for name in ('New competitor.md', 'Spare renamed.txt', 'Extra.txt'):
+            if (folder / name).exists():
+                (folder / name).unlink()
+        self.write('20-knowledge/Spare.txt', 'attachment\n')
+
+    def run_with_listing_change(self, expansion, mutate, *, integrated):
+        folder = self.vault / '20-knowledge'
+        marks, seen = self.masked_directory_marks(expansion)
+        verify = expansion.verify_mapping
+        def mutate_listing(*args, **kwargs):
+            result = verify(*args, **kwargs)
+            mutate()
+            restore_mtime(folder, seen['20-knowledge'])
+            return result
+        with marks, patch.object(expansion, 'verify_mapping', side_effect=mutate_listing):
+            if integrated:
+                result = recall.recall(self.vault, 'LOTO', expand_query=True, query_mapping='00-meta/query-map.txt')
+                return result['diagnostics']['status'], result['diagnostics']['query_expansion']
+            changed = expansion.expand_query(self.vault, 'LOTO', enabled=True, mapping='00-meta/query-map.txt')
+            return changed['status'], changed
+
+    def test_listing_change_behind_restored_directory_time_is_diagnosed(self):
+        expansion = self.expansion()
+        self.write('00-meta/query-map.txt', 'trip => isolation procedure\n')
+        for kind, mutate in self.listing_mutations().items():
+            for integrated in (False, True):
+                with self.subTest(kind=kind, integrated=integrated):
+                    self.reset_listing_fixture()
+                    status, changed = self.run_with_listing_change(expansion, mutate, integrated=integrated)
+                    checked = changed['inventory_verification']
+                    # A listing-only difference invalidates like a metadata change.
+                    self.assertEqual(status, 'source_changed')
+                    self.assertEqual(checked['status'], 'source_changed')
+                    self.assertEqual(changed['expansions'], [])
+                    self.assertEqual(changed['terms'], ['loto'])
+                    self.assertEqual(checked['changed_directory'], {'path': '20-knowledge', 'change': 'listing'})
+                    self.assertEqual(checked['listing_diagnostics'],
+                                     [{'code': 'directory_listing_changed', 'path': '20-knowledge'}])
+                    self.assertIn('one bounded listing per marked directory', checked['method'])
+
+    def test_directory_change_kinds_are_distinguished(self):
+        expansion = self.expansion()
+        self.write('00-meta/query-map.txt', 'trip => isolation procedure\n')
+        self.reset_listing_fixture()
+        folder = self.vault / '20-knowledge'
+        def touch():
+            os.utime(folder, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+        verify = expansion.verify_mapping
+        def mutate(*args, **kwargs):
+            result = verify(*args, **kwargs)
+            touch()
+            return result
+        with patch.object(expansion, 'verify_mapping', side_effect=mutate):
+            changed = expansion.expand_query(self.vault, 'LOTO', enabled=True, mapping='00-meta/query-map.txt')
+        checked = changed['inventory_verification']
+        self.assertEqual(changed['status'], 'source_changed')
+        self.assertEqual(checked['changed_directory'], {'path': '20-knowledge', 'change': 'metadata'})
+        self.assertEqual(checked['listing_diagnostics'], [])
+        verify_inventory = expansion.verify_inventory
+        def unreadable(*args, **kwargs):
+            with patch('os.scandir', side_effect=PermissionError('listing denied')):
+                return verify_inventory(*args, **kwargs)
+        with patch.object(expansion, 'verify_inventory', side_effect=unreadable):
+            denied = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        self.assertEqual(denied['inventory_verification']['changed_directory'], {'path': '.', 'change': 'unavailable'})
+        unchanged = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        self.assertEqual(unchanged['status'], 'ok')
+        self.assertNotIn('changed_directory', unchanged['inventory_verification'])
+
+    def test_unchanged_listing_records_no_listing_diagnostic(self):
+        expansion = self.expansion()
+        self.write('20-knowledge/Spare.txt', 'attachment\n')
+        result = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        checked = result['inventory_verification']
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(checked['listing_diagnostics'], [])
+        self.assertEqual(checked['directories_checked'], 3)
+
+    def test_unreadable_or_over_cap_listing_at_check_time_fails_closed(self):
+        expansion = self.expansion()
+        self.write('00-meta/query-map.txt', 'trip => isolation procedure\n')
+        self.reset_listing_fixture()
+        verify = expansion.verify_inventory
+        def unreadable(*args, **kwargs):
+            with patch('os.scandir', side_effect=PermissionError('listing denied')):
+                return verify(*args, **kwargs)
+        with patch.object(expansion, 'verify_inventory', side_effect=unreadable):
+            denied = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        self.assertEqual(denied['status'], 'source_changed')
+        self.assertEqual(denied['expansions'], [])
+        scanned = expansion.expand_query(self.vault, 'LOTO', enabled=True,
+                                         mapping='00-meta/query-map.txt')['inventory_diagnostics']['entries_scanned']
+        with patch.object(recall, 'MAX_DIRECTORY_ENTRIES', scanned):
+            unchanged = expansion.expand_query(self.vault, 'LOTO', enabled=True, mapping='00-meta/query-map.txt')
+            self.assertEqual(unchanged['status'], 'ok')
+            status, changed = self.run_with_listing_change(
+                expansion, lambda: self.write('20-knowledge/Extra.txt', 'x\n'), integrated=False)
+        self.assertEqual(status, 'source_changed')
+        self.assertEqual(changed['inventory_verification']['status'], 'source_changed')
+        self.assertEqual(changed['expansions'], [])
+
+    def test_check_lists_each_marked_directory_once_without_rescan(self):
+        expansion = self.expansion()
+        verify = expansion.verify_inventory
+        real_scandir = os.scandir
+        listed = []
+        def counting_scandir(path, *args, **kwargs):
+            listed.append(os.path.normcase(os.fspath(path)))
+            return real_scandir(path, *args, **kwargs)
+        def counted(*args, **kwargs):
+            with patch('os.scandir', side_effect=counting_scandir):
+                return verify(*args, **kwargs)
+        scan = recall._markdown_paths
+        calls = []
+        def count_scan(*args, **kwargs):
+            calls.append(1)
+            return scan(*args, **kwargs)
+        with patch.object(expansion, 'verify_inventory', side_effect=counted), \
+                patch.object(recall, '_markdown_paths', side_effect=count_scan):
+            result = recall.recall(self.vault, 'LOTO', expand_query=True)
+        checked = result['diagnostics']['query_expansion']['inventory_verification']
+        self.assertEqual(calls, [1])
+        self.assertEqual(len(listed), checked['directories_checked'])
+        self.assertEqual(len(set(listed)), len(listed))
+        self.assertGreater(len(listed), 0)
+
+    def test_same_name_recreation_is_not_a_listing_change(self):
+        # The name set cannot see a delete-and-recreate under the same name.
+        # A note is still caught by its document stamp (inode/ctime); a non-note
+        # file is outside the alias inventory and is documented as not caught.
+        expansion = self.expansion()
+        self.write('00-meta/query-map.txt', 'trip => isolation procedure\n')
+        self.write('20-knowledge/Other.md', '# Unrelated\nNothing relevant.\n')
+        folder = self.vault / '20-knowledge'
+        def recreate(name):
+            path = folder / name
+            data, times = path.read_bytes(), path.stat()
+            path.unlink()
+            path.write_bytes(data)
+            os.utime(path, ns=(times.st_atime_ns, times.st_mtime_ns))
+        for name, expected in (('Other.md', 'source_changed'), ('Spare.txt', 'ok')):
+            with self.subTest(name=name):
+                self.reset_listing_fixture()
+                status, changed = self.run_with_listing_change(expansion, lambda: recreate(name), integrated=False)
+                self.assertEqual(status, expected)
+                self.assertEqual(changed['inventory_verification']['listing_diagnostics'], [])
 
 
 if __name__ == '__main__':

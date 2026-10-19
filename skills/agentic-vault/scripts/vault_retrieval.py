@@ -444,9 +444,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     diagnostics["query_truncated"] = int(len(query) > _legacy.MAX_QUERY_CHARS)
     alias_directories = {}
     if expand_query:
-        def bind_alias_directory(rel, path):
-            alias_directories[rel] = _query_expansion.inventory_mark(path, directory=True)
-        paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics, directory_sink=bind_alias_directory)
+        bind_mark, bind_listing = _query_expansion.directory_sinks(alias_directories)
+        paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics,
+                                        directory_sink=bind_mark, listing_sink=bind_listing)
     else:
         paths = _legacy._markdown_paths(safe_vault, deny, exclude, diagnostics)
     # Filename ambiguity is determined before file-count trimming. If the walk

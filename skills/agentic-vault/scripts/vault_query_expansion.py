@@ -4,11 +4,19 @@
 Plain mappings contain one ``trigger => replacement`` per line, with optional
 blank/comment lines. They are data only. Conflicting triggers and shared aliases
 are diagnosed and omitted. No cache, dependency, model or network is involved.
+
+Alias inventory checks bind each scanned directory to a metadata mark and to a
+SHA-256 of its sorted entry names (the walk's own listing; names only). The
+final check lists every marked directory once more; a changed name set
+invalidates the expansion like a changed directory mark. Limits: a same-name
+delete-and-recreate leaves the name set unchanged (note document stamps still
+apply), and every listing is a point-in-time check, not a lock on writers.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import stat
 from pathlib import Path
@@ -44,21 +52,74 @@ def inventory_mark(path, *, directory=False):
     return (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
 
 
+def listing_digest(names):
+    """SHA-256 of sorted entry names only: no inode numbers, sizes or contents."""
+    digest = hashlib.sha256()
+    for name in sorted(names):
+        digest.update(name.encode('utf-8', 'surrogatepass') + b'\0')
+    return digest.hexdigest()
+
+
+def directory_names(path, limit):
+    """List entry names with one non-recursive os.scandir; fail past ``limit``."""
+    names = []
+    with os.scandir(path) as iterator:
+        for entry in iterator:
+            if len(names) >= limit:
+                raise ValueError('directory listing limit')
+            names.append(entry.name)
+    return names
+
+
+def directory_sinks(directories):
+    """Walk sinks binding each directory's mark and then its listing digest.
+
+    A directory whose listing did not complete keeps a mark without a digest;
+    verify_inventory treats that as unverifiable (fail-closed).
+    """
+    def bind_mark(rel, path):
+        directories[rel] = inventory_mark(path, directory=True)
+
+    def bind_listing(rel, names):
+        if rel in directories:
+            directories[rel] = (*directories[rel][:5], listing_digest(names))
+    return bind_mark, bind_listing
+
+
+def _listing_diagnostic(result, rel):
+    if len(result['listing_diagnostics']) < MAX_EXPANSIONS:
+        result['listing_diagnostics'].append({'code': 'directory_listing_changed', 'path': rel or '.'})
+    else:
+        result['listing_diagnostics_omitted'] += 1
+
+
 def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
     """Check every already-scanned potential alias destination and directory.
 
-    No second walk or payload reread occurs. Directory marks detect membership
+    No second walk or payload reread occurs; each marked directory gets one
+    bounded, non-recursive name listing (total entries capped by recall's
+    directory entry limit). Directory marks and listings detect membership
     changes; note marks include notes without aliases and temporal rejects.
-    These are metadata point checks, not an atomic snapshot or a lock on
-    writers. A rewrite preserving the checked marks can evade this detector.
-    Source SHA values bind the initial read; this sweep does not freshly hash
-    every possible destination or certify its current bytes cryptographically.
+    A listing that differs only by names is recorded in listing_diagnostics
+    and invalidates like a metadata change (source_changed, with
+    changed_directory.change 'listing' instead of 'metadata'). An unreadable or
+    over-cap listing, or a mark without a scan-time listing, fails closed as
+    source_changed ('unavailable').
+    These are point checks, not an atomic snapshot or a lock on writers. A
+    rewrite preserving the checked marks, or a same-name delete-and-recreate of
+    a non-note entry, can evade this detector (a recreated note changes its
+    document stamp). Source SHA values bind the initial read; this sweep does
+    not freshly hash every possible destination or certify its current bytes.
     """
     import vault_recall as recall
     from vault_paths import relative_parts, resolve_note_path
     result = {'status': 'ok', 'documents_checked': 0, 'directories_checked': 0,
-              'method': 'bounded marks from the original scan; no second scan or payload reads',
-              'assurance': 'metadata_generation_only; preserved marks can evade checks; initial source hashes do not certify current inventory bytes'}
+              'listing_entries': 0, 'listing_diagnostics': [], 'listing_diagnostics_omitted': 0,
+              'method': 'bounded marks from the original scan; one bounded listing per marked directory; no second walk or payload reads',
+              'assurance': 'metadata_generation_and_name_listing; listing differences invalidate like metadata changes; '
+                           'same-name recreation and preserved marks can evade checks; point-in-time checks, not a lock; '
+                           'initial source hashes do not certify current inventory bytes'}
+    budget = recall.MAX_DIRECTORY_ENTRIES
     try:
         for rel, doc in sorted(documents.items()):
             parts = relative_parts(rel, 'alias inventory member')
@@ -77,8 +138,24 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
                 # again without inventing an empty relative-note path.
                 resolve_note_path(vault, recall.CONFIG_RELPATH)
                 path = vault
-            if inventory_mark(path, directory=True) != expected:
+            # changed_directory names the first failing directory and the kind
+            # of evidence (metadata, listing, unavailable); it is removed again
+            # when the directory passes.
+            result['changed_directory'] = {'path': rel or '.', 'change': 'unavailable'}
+            if len(expected) != 6:
+                raise ValueError('alias inventory directory unlisted')
+            result['changed_directory']['change'] = 'metadata'
+            if inventory_mark(path, directory=True) != expected[:5]:
                 raise ValueError('alias inventory directory changed')
+            result['changed_directory']['change'] = 'unavailable'
+            names = directory_names(path, budget)
+            budget -= len(names)
+            result['listing_entries'] += len(names)
+            if listing_digest(names) != expected[5]:
+                _listing_diagnostic(result, rel)
+                result['changed_directory']['change'] = 'listing'
+                raise ValueError('alias inventory directory changed')
+            del result['changed_directory']
             result['directories_checked'] += 1
     except (OSError, ValueError, KeyError):
         result['status'] = 'source_changed'
@@ -295,9 +372,9 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
             return result
         deny, exclude = tuple(config.get('deny_zones') or ()), (*tuple(config.get('exclude_dirs') or ()), '.git')
         directories = {}
-        def bind_directory(rel, path):
-            directories[rel] = inventory_mark(path, directory=True)
-        paths = recall._markdown_paths(safe_vault, deny, exclude, diagnostics, directory_sink=bind_directory)
+        bind_mark, bind_listing = directory_sinks(directories)
+        paths = recall._markdown_paths(safe_vault, deny, exclude, diagnostics,
+                                       directory_sink=bind_mark, listing_sink=bind_listing)
         if len(paths) > recall.MAX_FILES:
             recall._omit(diagnostics, 'file_count_limit')
         documents = {}

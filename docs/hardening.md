@@ -288,5 +288,15 @@ CLI `--action calibrate|drift|estimate|measure-local`에 해당 API 인자 JSON�
 alias와 mapping은 검색어만 보강하고 위키링크의 실제 파일명을 바꾸지 않는다. 애매한 목적지는 선택하지 않는다.
 mapping은 `trigger => replacement`의 평문이며 원본 경로/해시와 inventory 세대 검사를 보고한다.
 inventory 전체의 stat 세대 검사는 metadata-preserving rewrite를 잡는 암호학적 스냅샷이 아니다.
+디렉터리는 처음 스캔의 stat 표지와 함께 항목 이름 목록의 SHA-256도 묶는다. 이름만 정렬해 쓰고 inode·크기·내용은 넣지 않는다.
+끝의 확인은 표지가 있는 디렉터리마다 이름 목록을 한 번만 다시 읽는다. 하위로 내려가지 않고, 항목 합계는 디렉터리 항목 상한(20,000개)을 따른다.
+Windows는 항목을 바꾼 직후에도 디렉터리 수정 시각이 그대로이거나 늦게 바뀔 수 있다([MS Learn File Times](https://learn.microsoft.com/en-us/windows/win32/sysinfo/file-times)).
+이름 목록만 다르면 `inventory_verification.listing_diagnostics`에 `directory_listing_changed`와 디렉터리 상대 경로(루트는 `.`)를 남기고, 표지가 바뀐 경우처럼 `source_changed`로 닫는다.
+처음 걸린 디렉터리는 `inventory_verification.changed_directory`에 경로와 종류로 남는다. 종류는 `listing`(이름 목록), `metadata`(stat 표지), `unavailable`(목록을 다시 읽지 못함·상한 초과)이다.
+목록을 다시 읽지 못하거나 상한을 넘어도 `source_changed`로 닫는다.
+같은 이름으로 지웠다 다시 만든 항목은 이름 목록으로 잡지 못한다. 노트는 문서 stat 표지(inode·변경 시각)가 잡지만 노트가 아닌 파일은 잡지 않는다.
+목록 확인은 한 시점의 확인이며 쓰기를 막는 잠금이 아니다.
+추가 비용은 `python scripts/bench_directory_listing.py [--runs 7]`로 잰다. 엔진 상한(노트 2,000개, 디렉터리 항목 20,000개, 지침 파일 128개·항목 512개)에 맞춘 합성 볼트를 임시 디렉터리에 만든다.
+목록 단계를 켠 경우와 뺀 경우를 번갈아 돌려 중앙값, 전체 추가 시간, 디렉터리당 추가 시간을 JSON으로 낸다. 값은 기계와 부하에 따라 다르므로 한가한 기계에서 중앙값으로 비교한다.
 `scripts/evaluate_recall.py --help`의 hard fixture/top-k/같은 예산별 ablation을 사용한다.
 반환 context claim coverage, nDCG, paired 통계와 abstention을 함께 본다. synthetic label 성능을 실제 업무 정확도로 일반화하지 않는다.
