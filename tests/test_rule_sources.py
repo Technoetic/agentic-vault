@@ -9,10 +9,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
+
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -357,12 +361,10 @@ class LinkedComponentSourceTests(unittest.TestCase):
 
     def link_directory_or_skip(self, link: Path) -> None:
         if os.name == "nt":
-            result = subprocess.run(
-                ["cmd", "/c", "mklink", "/J", str(link), str(self.outside)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                encoding="utf-8", errors="replace", check=False)
-            if result.returncode != 0:
-                self.skipTest(f"junction creation is unsupported: {result.stderr}")
+            try:
+                make_junction(link, self.outside)
+            except OSError as exc:
+                self.skipTest(f"junction creation is unsupported: {exc}")
             return
         try:
             link.symlink_to(self.outside, target_is_directory=True)

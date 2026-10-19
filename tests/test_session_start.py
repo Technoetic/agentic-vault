@@ -14,6 +14,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SESSION_HOOK = REPO_ROOT / "hooks" / "session_start.py"
@@ -1317,15 +1322,10 @@ class ResolveNotePathTests(unittest.TestCase):
         outside.mkdir()
         (outside / "secret.md").write_text("JUNCTION_SECRET", encoding="utf-8")
         junction = self.vault / "junction"
-        result = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            self.skipTest(f"junction creation unavailable: {result.stderr.strip()}")
+        try:
+            make_junction(junction, outside)
+        except OSError as exc:
+            self.skipTest(f"junction creation unavailable: {exc}")
         self.addCleanup(lambda: os.rmdir(junction) if junction.exists() else None)
 
         with self.assertRaises((ValueError, OSError)):

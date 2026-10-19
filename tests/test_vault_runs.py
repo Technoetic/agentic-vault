@@ -11,6 +11,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 try:
@@ -377,16 +382,17 @@ class VaultRunsTests(unittest.TestCase):
         outside.mkdir()
         (outside / 'candidate.md').write_text('Outside file\n')
         linked = self.vault / 'junction'
-        result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(linked), str(outside)],
-                                capture_output=True, timeout=10)
-        if result.returncode:
+        try:
+            make_junction(linked, outside)
+        except OSError:
             self.skipTest('junction creation unavailable')
         self.error(self.prepare, candidate='junction/candidate.md')
         runtime = self.vault / runs.RUNTIME_DIR
         runtime.parent.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(runtime), str(outside)],
-                                capture_output=True, timeout=10)
-        self.assertEqual(result.returncode, 0)
+        try:
+            make_junction(runtime, outside)
+        except OSError as exc:
+            self.fail(f'junction creation failed: {exc}')
         self.error(self.prepare)
         self.assertEqual(sorted(p.name for p in outside.iterdir()), ['candidate.md'])
 

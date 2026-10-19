@@ -13,6 +13,11 @@ import time
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 try:
@@ -346,9 +351,10 @@ class VaultOperationTests(unittest.TestCase):
         outside.mkdir()
         link = parent / 'runtime'
         if os.name == 'nt':
-            run = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(outside)],
-                                 capture_output=True, timeout=10)
-            self.assertEqual(run.returncode, 0)
+            try:
+                make_junction(link, outside)
+            except OSError as exc:
+                self.fail(f'junction creation failed: {exc}')
         else:
             link.symlink_to(outside, target_is_directory=True)
         with self.assertRaises(operations.OperationError):

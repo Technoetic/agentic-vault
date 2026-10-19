@@ -10,6 +10,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
@@ -265,9 +270,9 @@ class InstructionBudgetTests(unittest.TestCase):
         self.write('target/hidden.md', 'FORBIDDEN\n')
         parent = self.vault / '.claude/rules'
         parent.mkdir(parents=True)
-        result = subprocess.run(['cmd', '/c', 'mklink', '/J', str(parent / 'linked'), str(self.vault / 'target')],
-                                capture_output=True, timeout=10)
-        if result.returncode:
+        try:
+            make_junction(parent / 'linked', self.vault / 'target')
+        except OSError:
             self.skipTest('junction creation unavailable')
         report = self.diagnose()
         self.assertNotIn('.claude/rules/linked/hidden.md', self.paths(report))

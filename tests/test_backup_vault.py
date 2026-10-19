@@ -11,6 +11,11 @@ import threading
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/agentic-vault/scripts/backup_vault.py"
 SPEC = importlib.util.spec_from_file_location("backup_vault", SCRIPT)
@@ -236,9 +241,9 @@ class SnapshotTests(unittest.TestCase):
         except OSError:
             if os.name != "nt" or not directory:
                 self.skipTest("symlink creation unavailable")
-            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                                    capture_output=True)
-            if result.returncode:
+            try:
+                make_junction(link, outside)
+            except OSError:
                 self.skipTest("junction creation unavailable")
             self.addCleanup(lambda: os.rmdir(link) if link.exists() else None)
         return outside
