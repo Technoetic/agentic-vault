@@ -291,5 +291,7 @@ Windows는 항목을 바꾼 직후에도 디렉터리 수정 시각이 그대로
 목록을 다시 읽지 못하거나 상한을 넘으면 `source_changed`로 닫는다.
 같은 이름으로 지웠다 다시 만든 항목은 이름 목록으로 잡지 못한다. 노트는 문서 stat 표지(inode·변경 시각)가 잡지만 노트가 아닌 파일은 잡지 않는다.
 목록 확인은 한 시점의 확인이며 쓰기를 막는 잠금이 아니다.
+추가 비용은 `python scripts/bench_directory_listing.py [--runs 7]`로 잰다. 엔진 상한(노트 2,000개, 디렉터리 항목 20,000개, 지침 파일 128개·항목 512개)에 맞춘 합성 볼트를 임시 디렉터리에 만든다.
+목록 단계를 켠 경우와 뺀 경우를 번갈아 돌려 중앙값, 전체 추가 시간, 디렉터리당 추가 시간을 JSON으로 낸다. 값은 기계와 부하에 따라 다르므로 한가한 기계에서 중앙값으로 비교한다.
 `scripts/evaluate_recall.py --help`의 hard fixture/top-k/같은 예산별 ablation을 사용한다.
 반환 context claim coverage, nDCG, paired 통계와 abstention을 함께 본다. synthetic label 성능을 실제 업무 정확도로 일반화하지 않는다.
