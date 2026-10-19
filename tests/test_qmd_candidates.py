@@ -11,6 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "scripts" / "import_qmd_candidates.py"
 
@@ -199,8 +204,10 @@ class QmdCandidatesTests(unittest.TestCase):
         real.mkdir()
         (real / "input.json").write_text('[{"file":"qmd://qmd/SECRET.md"}]', encoding="utf-8")
         linked = self.directory / "junction"
-        created = subprocess.run(["cmd", "/c", "mklink", "/J", str(linked), str(real)], capture_output=True, text=True, encoding="utf-8")
-        self.assertEqual(created.returncode, 0, created.stderr)
+        try:
+            make_junction(linked, real)
+        except OSError as exc:
+            self.fail(f"junction creation failed: {exc}")
         self.addCleanup(os.rmdir, linked)
         run = self.cli(["--collection", "qmd", "--input", str(linked / "input.json")])
         self.assertEqual(run.returncode, 2)

@@ -13,6 +13,11 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = REPO_ROOT / "skills" / "agentic-vault" / "scripts"
@@ -771,11 +776,10 @@ class VaultRecallTests(unittest.TestCase):
         outside_dir = Path(self._tmp.name) / "outside"
         outside_dir.mkdir()
         (outside_dir / "a.md").write_text("# Outside\nneedle OUTSIDE_MARKER\n", encoding="utf-8")
-        created = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(source_dir), str(outside_dir)],
-            text=True, encoding="utf-8", capture_output=True, check=False,
-        )
-        self.assertEqual(created.returncode, 0, created.stderr)
+        try:
+            make_junction(source_dir, outside_dir)
+        except OSError as exc:
+            self.fail(f"junction creation failed: {exc}")
         try:
             result = recall_module.recall(self.vault, "needle")
         finally:

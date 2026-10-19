@@ -12,6 +12,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
@@ -431,17 +436,10 @@ class CliModeTests(unittest.TestCase):
     def junction_or_skip(self, link: Path, target: Path) -> None:
         if os.name != "nt":
             self.skipTest("Windows junction boundary")
-        result = subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-        if result.returncode != 0:
-            self.skipTest(f"junction creation is unsupported: {result.stderr}")
+        try:
+            make_junction(link, target)
+        except OSError as exc:
+            self.skipTest(f"junction creation is unsupported: {exc}")
 
     def test_staged_mode_reads_index_config_and_never_writes_report(self) -> None:
         config_path = self.write_config(frontmatter_roots=["20-knowledge"])
