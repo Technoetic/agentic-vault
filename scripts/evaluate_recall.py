@@ -3,18 +3,23 @@
 
 Opt-in: --vault/--goldset evaluates a user gold set against a real vault in
 place (local output only), --split evaluates one side of a committed
-dev/held-out split, and --redact hashes gold-set free text in the report.
+dev/held-out split, and --redact hashes gold-set free text in the report
+(--redact-key-file and --redact-ephemeral use a secret key and also cover
+vault-relative paths).
 """
 from __future__ import annotations
 
 import argparse
 import functools
 import hashlib
+import hmac
 import importlib.util
 import json
 import math
+import os
 import random
 import re
+import secrets
 import stat
 import sys
 import time
@@ -827,20 +832,24 @@ class _LabelResolver:
         return {"match": "missing", "path": None}
 
 
+_LABEL_WARNING_TEXTS = {
+    "missing": "no eligible note has this path or filename stem; the label can only miss",
+    "denied": "label is inside a deny zone; it is never read or matched",
+    "excluded": "label is inside an excluded directory; retrieval never returns it",
+    "incomplete_inventory": "path not found and the note listing is incomplete; stem matching is off",
+}
+_AMBIGUOUS_WARNING_END = "; label left unresolved, give the full vault-relative path"
+
+
 def _label_warning(index: int, field_name: str, position: int, found: dict) -> str:
     kind = found["match"]
     if kind == "ambiguous_stem":
         shown = ", ".join(found["candidates"])
         more = ", ..." if found["candidate_count"] > len(found["candidates"]) else ""
-        text = (f"filename stem is shared by {found['candidate_count']} eligible notes ({shown}{more}); "
-                "label left unresolved, give the full vault-relative path")
+        text = (f"filename stem is shared by {found['candidate_count']} eligible notes ({shown}{more})"
+                + _AMBIGUOUS_WARNING_END)
     else:
-        text = {
-            "missing": "no eligible note has this path or filename stem; the label can only miss",
-            "denied": "label is inside a deny zone; it is never read or matched",
-            "excluded": "label is inside an excluded directory; retrieval never returns it",
-            "incomplete_inventory": "path not found and the note listing is incomplete; stem matching is off",
-        }[kind]
+        text = _LABEL_WARNING_TEXTS[kind]
     return f"queries[{index}].{field_name}[{position}]: {text}"
 
 
@@ -1085,106 +1094,295 @@ REDACTION_DESCRIPTION = {
     "limits": "A hash is not encryption: short or guessable text can be recovered by hashing candidates. "
               "File names stay readable in paths.",
 }
+REDACTION_KEY_MIN_BYTES = 32
+REDACTION_KEY_MAX_BYTES = 64 * 1024
+# Directory entries examined when looking for the report file next to the key.
+MAX_KEY_DIRECTORY_ENTRIES = 4096
+_KEYED_REPLACED = [
+    *REDACTION_DESCRIPTION["replaced"],
+    "vault-relative paths, each hashed whole: expected, forbidden, stale and retrieved paths, relevance keys, "
+    "label_matches labels, paths and candidates, external candidates, excluded sources, the query mapping "
+    "and paths in diagnostics",
+    "fingerprints (goldset_canonical_sha256, definition_canonical_sha256, source and mapping sha256): "
+    "the keyed hash of their sha256 hex",
+    "candidate paths inside gold-set warnings; a warning of an unknown shape is hashed whole",
+]
+_KEYED_LIMITS = (
+    "Pseudonymisation, not encryption or anonymisation. Equal values get equal tokens within this report, so "
+    "repeats and frequencies stay visible. Whole values are hashed, not single words. The report never "
+    "records the key or a fingerprint of it.")
+KEYED_REDACTION_DESCRIPTION = {
+    "method": "HMAC-SHA256 hex, under a secret key of at least 32 bytes, of the UTF-8 text; a non-text value "
+              "is hashed as its compact sorted JSON",
+    "replaced": _KEYED_REPLACED,
+    "kept": "languages, expectations, label match kinds, numbers, booleans, dates, option names and enums",
+    "limits": _KEYED_LIMITS + " Only someone without the key cannot link tokens back or confirm a guess; "
+              "whoever holds the key can. Keeping the key next to the vault or the report defeats this.",
+}
+EPHEMERAL_REDACTION_DESCRIPTION = {
+    **KEYED_REDACTION_DESCRIPTION,
+    "method": "HMAC-SHA256 hex, under a random 32-byte key drawn for this run and never stored, of the UTF-8 "
+              "text; a non-text value is hashed as its compact sorted JSON",
+    "limits": _KEYED_LIMITS + " The key is gone after the run: nobody, the operator included, can link tokens "
+              "back, and tokens from two runs cannot be compared.",
+}
+# Keyed modes: fields whose string values (or list items) are vault-relative
+# paths, dictionaries keyed by paths, and sha256 fingerprints.
+_PATH_FIELDS = frozenset({
+    "path", "source_path", "label", "query_mapping", "external_candidates", "candidates", "source_paths",
+    "excluded_sources", "expected_paths", "forbidden_paths", "stale_paths", "retrieved_paths",
+    "forbidden_retrieved_paths", "stale_retrieved_paths"})
+_PATH_KEYED_MAPS = frozenset({"relevance"})
+_FINGERPRINT_FIELDS = frozenset({"sha256", "source_sha256", "goldset_canonical_sha256",
+                                 "definition_canonical_sha256"})
+_WARNING_LABEL = r"queries\[\d+\]\.(?:expected_paths|forbidden_paths|stale_paths|relevance)\[\d+\]: "
+_FIXED_WARNING = re.compile(_WARNING_LABEL + "(?:" + "|".join(
+    re.escape(text) for text in _LABEL_WARNING_TEXTS.values()) + ")")
+_AMBIGUOUS_WARNING = re.compile("(" + _WARNING_LABEL + r"filename stem is shared by \d+ eligible notes) \(.*\)"
+                                + re.escape(_AMBIGUOUS_WARNING_END), re.DOTALL)
+_LISTING_WARNING = re.compile(r"note listing incomplete \([a-z0-9_, ]*\); labels whose path was not found "
+                              r"are not matched by filename stem")
+_GOLDSET_NOTE_PREFIX = "goldset warning (non-blocking): "
+_OMITTED_WARNINGS_NOTE = re.compile(r"\d+ more not listed")
+
+
+def _canonical_text(value: object) -> str:
+    return value if isinstance(value, str) else json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _digest(value: object) -> str:
-    text = value if isinstance(value, str) else json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_text(value).encode("utf-8")).hexdigest()
 
 
-def _redacted_candidates(value: object) -> object:
+def _keyed_digest(key: bytes):
+    """HMAC-SHA256 digest function; a closure, so no repr ever shows the key."""
+    if type(key) is not bytes:
+        raise ValueError("redaction key must be bytes")
+    if len(key) < REDACTION_KEY_MIN_BYTES:
+        raise ValueError(f"redaction key must hold at least {REDACTION_KEY_MIN_BYTES} bytes")
+
+    def digest(value: object) -> str:
+        return hmac.new(key, _canonical_text(value).encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest
+
+
+def _redacted_candidates(value: object, digest=_digest) -> object:
     """External candidates are paths and ranks; any other provider text is hashed."""
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        return {key: (_redacted_candidates(item) if key == "candidates" else _digest(item))
+        return {key: (_redacted_candidates(item, digest) if key == "candidates" else digest(item))
                 for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [item if isinstance(item, str) else
-                {key: (entry if key in ("path", "rank") else _digest(entry)) for key, entry in item.items()}
-                if isinstance(item, dict) else _digest(item) for item in value]
-    return _digest(value)
+                {key: (entry if key in ("path", "rank") else digest(entry)) for key, entry in item.items()}
+                if isinstance(item, dict) else digest(item) for item in value]
+    return digest(value)
 
 
-def _redacted_option(key: str, value: object) -> object:
+def _redacted_option(key: str, value: object, digest=_digest) -> object:
     if key in ("query_mapping", "excluded_sources"):
         return value  # vault-relative paths
     if key == "external_candidates":
-        return _redacted_candidates(value)
+        return _redacted_candidates(value, digest)
     if key == "as_of":
-        return value if isinstance(value, str) and _AS_OF_SHAPE.fullmatch(value) else _digest(value)
+        return value if isinstance(value, str) and _AS_OF_SHAPE.fullmatch(value) else digest(value)
     if key == "expand_links":
-        return value if type(value) is int else _digest(value)
+        return value if type(value) is int else digest(value)
     if key == "expand_query":
-        return value if type(value) is bool else _digest(value)
+        return value if type(value) is bool else digest(value)
     if key in _OPTION_ENUMS:
-        return value if isinstance(value, str) and value in _OPTION_ENUMS[key] else _digest(value)
-    return _digest(value)
+        return value if isinstance(value, str) and value in _OPTION_ENUMS[key] else digest(value)
+    return digest(value)
 
 
-def _redacted_diagnostics(diagnostics: object) -> object:
+def _redacted_diagnostics(diagnostics: object, digest=_digest) -> object:
     expansion = diagnostics.get("query_expansion") if isinstance(diagnostics, dict) else None
     if not isinstance(expansion, dict):
         return diagnostics
 
     def entry(value: dict) -> dict:
-        changed = {key: _digest(value[key]) for key in ("trigger", "replacement") if key in value}
+        changed = {key: digest(value[key]) for key in ("trigger", "replacement") if key in value}
         if "added_terms" in value:
-            changed["added_terms"] = [_digest(term) for term in value["added_terms"]]
+            changed["added_terms"] = [digest(term) for term in value["added_terms"]]
         return {**value, **changed}
 
-    expansion = {**expansion, "terms": [_digest(term) for term in expansion.get("terms", ())],
+    expansion = {**expansion, "terms": [digest(term) for term in expansion.get("terms", ())],
                  "expansions": [entry(value) for value in expansion.get("expansions", ())],
                  "ambiguities": [entry(value) for value in expansion.get("ambiguities", ())]}
     return {**diagnostics, "query_expansion": expansion}
 
 
-def _redacted_row(row: dict) -> dict:
+def _redacted_row(row: dict, digest=_digest) -> dict:
     redacted = {}
     for key, value in row.items():
         if key in ("required_claims", "covered_claims"):
-            redacted[key] = [_digest(claim) for claim in value]
+            redacted[key] = [digest(claim) for claim in value]
         elif key == "diagnostics":
-            redacted[key] = _redacted_diagnostics(value)
+            redacted[key] = _redacted_diagnostics(value, digest)
         elif key == "retrieval_options":
-            redacted[key] = {name: _redacted_option(name, option) for name, option in value.items()}
+            redacted[key] = {name: _redacted_option(name, option, digest) for name, option in value.items()}
         elif key in ("as_of", "expand_links", "backend", "external_candidates", "excluded_sources"):
-            redacted[key] = _redacted_option(key, value)
+            redacted[key] = _redacted_option(key, value, digest)
         elif key in _ROW_RESULT_KEYS or key in _ROW_STRUCTURED_LABEL_KEYS:
             redacted[key] = value
         else:
             # id, query, scenario, label_rationale and any unknown field.
-            redacted[key] = _digest(value)
+            redacted[key] = digest(value)
     return redacted
 
 
-def _redacted_evaluation(report: dict) -> dict:
+def _redacted_evaluation(report: dict, digest=_digest) -> dict:
     redacted = {**report,
-                "by_scenario": {_digest(key): value for key, value in report["by_scenario"].items()},
-                "per_query": [_redacted_row(row) for row in report["per_query"]],
-                "failed_queries": [{**row, "id": _digest(row["id"])} for row in report["failed_queries"]],
-                "evaluation_errors": [_redacted_diagnostics({**row, "id": _digest(row["id"])})
+                "by_scenario": {digest(key): value for key, value in report["by_scenario"].items()},
+                "per_query": [_redacted_row(row, digest) for row in report["per_query"]],
+                "failed_queries": [{**row, "id": digest(row["id"])} for row in report["failed_queries"]],
+                "evaluation_errors": [_redacted_diagnostics({**row, "id": digest(row["id"])}, digest)
                                       for row in report["evaluation_errors"]]}
     if "inspected_queries" in report:
         redacted["inspected_queries"] = {**report["inspected_queries"],
-                                         "ids": [_digest(value) for value in report["inspected_queries"]["ids"]]}
+                                         "ids": [digest(value) for value in report["inspected_queries"]["ids"]]}
     return redacted
 
 
-def redact_report(report: dict) -> dict:
+def _keyed_warning(warning: object, digest) -> str:
+    """A gold-set warning without its candidate paths; any other shape is hashed whole."""
+    if isinstance(warning, str):
+        if _FIXED_WARNING.fullmatch(warning) or _LISTING_WARNING.fullmatch(warning):
+            return warning
+        ambiguous = _AMBIGUOUS_WARNING.fullmatch(warning)
+        if ambiguous:
+            return ambiguous.group(1) + " (paths pseudonymised in label_matches)" + _AMBIGUOUS_WARNING_END
+    return digest(warning)
+
+
+def _keyed_note(note: str, digest) -> str:
+    """Keyed modes: the stderr form of a gold-set warning gets the same treatment."""
+    if not note.startswith(_GOLDSET_NOTE_PREFIX):
+        return note  # counts and split sizes only
+    rest = note[len(_GOLDSET_NOTE_PREFIX):]
+    if _OMITTED_WARNINGS_NOTE.fullmatch(rest):
+        return note
+    return _GOLDSET_NOTE_PREFIX + _keyed_warning(rest, digest)
+
+
+def _keyed_paths(value: object, digest, field: str | None = None) -> object:
+    """Replace path and fingerprint values, wherever they sit, with keyed hashes.
+
+    Runs after the text redaction, which keeps these fields readable. Each path
+    is hashed whole: a directory prefix would leave folder names (people,
+    projects) readable, while whole-path tokens still keep equality within the
+    report, which is what comparing labels with retrieved paths needs.
+    """
+    if isinstance(value, dict):
+        if field in _PATH_KEYED_MAPS:
+            return {digest(name): _keyed_paths(item, digest) for name, item in value.items()}
+        redacted = {name: _keyed_paths(item, digest, name) for name, item in value.items()}
+        if field == "goldset" and isinstance(redacted.get("warnings"), list):
+            redacted["warnings"] = [_keyed_warning(warning, digest) for warning in redacted["warnings"]]
+        return redacted
+    if isinstance(value, list):
+        return [_keyed_paths(item, digest, field) for item in value]
+    if isinstance(value, str) and (field in _PATH_FIELDS or field in _FINGERPRINT_FIELDS):
+        return digest(value)
+    return value
+
+
+def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = False) -> dict:
     """Replace gold-set free text with sha256 hex; paths, numbers and enums remain.
 
     Works on one evaluate() report or on any report whose arms (baseline,
     improved, expansion_ablation, render_matched, ...) are evaluate() reports.
+    With ``key`` (bytes, at least 32) the same fields, every vault-relative
+    path and the sha256 fingerprints become HMAC-SHA256 hex under that key;
+    ``ephemeral`` only records that the key was drawn for this run. The key
+    and any fingerprint of it are never part of the result.
     """
+    if key is None and ephemeral:
+        raise ValueError("ephemeral redaction needs a key")
+    digest = _digest if key is None else _keyed_digest(key)
     if "per_query" in report:
-        redacted = _redacted_evaluation(report)
+        redacted = _redacted_evaluation(report, digest)
     else:
-        redacted = {key: (_redacted_evaluation(value) if isinstance(value, dict) and "per_query" in value
-                          else value) for key, value in report.items()}
-    redacted["redaction"] = REDACTION_DESCRIPTION
+        redacted = {name: (_redacted_evaluation(value, digest) if isinstance(value, dict) and "per_query" in value
+                           else value) for name, value in report.items()}
+    if key is None:
+        redacted["redaction"] = REDACTION_DESCRIPTION
+        mode, algorithm = "unkeyed", "sha256"
+    else:
+        redacted = _keyed_paths(redacted, digest)
+        redacted["redaction"] = EPHEMERAL_REDACTION_DESCRIPTION if ephemeral else KEYED_REDACTION_DESCRIPTION
+        mode, algorithm = ("ephemeral" if ephemeral else "keyed"), "hmac-sha256"
+    redacted["redaction_mode"] = mode
+    redacted["redaction_algorithm"] = algorithm
     return redacted
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def read_redaction_key(path: Path, evaluated: Path) -> bytes:
+    """Read the --redact-key-file bytes; refuse a key inside the evaluated tree.
+
+    ``evaluated`` is the --vault directory, or the fixture directory (its vault
+    and labels). Both the lexical absolute path and the resolved path are
+    checked, before anything is read. Messages never name the file or echo it.
+    """
+    locations, roots = [Path(os.path.abspath(path))], [Path(os.path.abspath(evaluated))]
+    for candidate, target in ((path, locations), (evaluated, roots)):
+        try:
+            target.append(candidate.resolve())
+        except (OSError, RuntimeError):
+            pass
+    if any(_within(location, root) for location in locations for root in roots):
+        raise GoldSetError("redaction key file is inside the evaluated vault; keep the key outside the vault "
+                           "and away from the report")
+    unreadable = (f"redaction key file is not a readable regular file of at most "
+                  f"{REDACTION_KEY_MAX_BYTES} bytes")
+    try:
+        metadata = path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > REDACTION_KEY_MAX_BYTES:
+            raise GoldSetError(unreadable)
+        with path.open("rb") as handle:
+            key = handle.read(REDACTION_KEY_MAX_BYTES + 1)
+    except OSError as exc:
+        raise GoldSetError(unreadable) from exc
+    if len(key) > REDACTION_KEY_MAX_BYTES:
+        raise GoldSetError(unreadable)
+    if len(key) < REDACTION_KEY_MIN_BYTES:
+        raise GoldSetError(f"redaction key file must hold at least {REDACTION_KEY_MIN_BYTES} bytes")
+    return key
+
+
+def key_near_report(path: Path, stream=None) -> bool:
+    """Best effort: is the key in the working directory or next to a stdout file?
+
+    Standard output that is a regular file is found by its file identity among
+    at most MAX_KEY_DIRECTORY_ENTRIES entries of the key's directory. A pipe
+    (including Windows PowerShell 5.1 redirection) can only be judged by the
+    working directory.
+    """
+    try:
+        directory = path.resolve().parent
+        if Path(os.getcwd()).resolve() == directory:
+            return True
+        output = os.fstat((sys.stdout if stream is None else stream).fileno())
+    except (AttributeError, OSError, ValueError, RuntimeError):
+        return False
+    if not stat.S_ISREG(output.st_mode) or not output.st_ino:
+        return False
+    try:
+        with os.scandir(directory) as entries:
+            for count, entry in enumerate(entries):
+                if count >= MAX_KEY_DIRECTORY_ENTRIES:
+                    break
+                if entry.inode() == output.st_ino and os.stat(entry.path).st_dev == output.st_dev:
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1230,7 +1428,20 @@ def _parser() -> argparse.ArgumentParser:
                               'path, then by a unique filename stem (wikilink target); cannot be combined with --fixture')
     goldset.add_argument('--redact', action='store_true',
                          help='replace ids, queries, scenarios, claims and other gold-set free text in the report '
-                              'with sha256 hex; vault-relative paths remain')
+                              'with unkeyed sha256 hex; vault-relative paths remain. Short or guessable text can '
+                              'be recovered by hashing candidates; prefer --redact-key-file or --redact-ephemeral')
+    keyed = goldset.add_mutually_exclusive_group()
+    keyed.add_argument('--redact-key-file', type=Path, metavar='FILE',
+                       help='implies --redact: HMAC-SHA256 with the secret key in FILE (at least 32 random bytes, '
+                            'outside the vault and away from the report) over the same text and over every '
+                            'vault-relative path; the key and any fingerprint of it are never printed. Equal values '
+                            'still get equal tokens, so repeats and frequencies inside one report stay visible; '
+                            'only someone without the key cannot link tokens back. Whole values are hashed, words '
+                            'are not hashed one by one')
+    keyed.add_argument('--redact-ephemeral', action='store_true',
+                       help='implies --redact: like --redact-key-file with a random 32-byte key drawn for this run '
+                            'and never stored, so nobody can link the tokens back and two runs cannot be compared; '
+                            'repeats and frequencies inside one report stay visible')
     split = parser.add_argument_group('dev/held-out split (opt-in)')
     split.add_argument('--split', choices=SPLIT_NAMES,
                        help='evaluate only this side of the split definition and report n per split')
@@ -1276,6 +1487,8 @@ def _inspected_gate_gap(report: dict) -> str | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.redact_key_file is not None or args.redact_ephemeral:
+        args.redact = True
     thresholds = (args.min_recall_at_3, args.min_mrr, args.max_no_answer_false_positive_rate,
                   args.max_forbidden_exposure_rate, args.max_stale_top_1_rate)
     if any(value is not None and not 0.0 <= value <= 1.0 for value in thresholds):
@@ -1296,6 +1509,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     fixture = DEFAULT_FIXTURE if args.fixture is None else args.fixture
     source = fixture
+    redaction_key = None
+    if args.redact_key_file is not None:
+        try:
+            redaction_key = read_redaction_key(args.redact_key_file,
+                                               fixture if args.vault is None else args.vault)
+        except GoldSetError as exc:
+            print(f"recall evaluation unavailable: {exc}", file=sys.stderr)
+            return 2
+        if key_near_report(args.redact_key_file):
+            print("recall evaluation warning (non-blocking): the redaction key file is in the report's output "
+                  "directory or the working directory; keep the key away from the report", file=sys.stderr)
+    elif args.redact_ephemeral:
+        redaction_key = secrets.token_bytes(REDACTION_KEY_MIN_BYTES)
     try:
         if args.goldset is not None:
             source = load_goldset(args.vault, args.goldset)
@@ -1338,14 +1564,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                "passed": observed is not None and observed <= maximum}
         for name, (observed, maximum) in optional_gates.items() if maximum is not None
     }
-    print(json.dumps(redact_report(report) if args.redact else report, ensure_ascii=False, indent=2))
+    printed = (report if not args.redact else redact_report(report) if redaction_key is None else
+               redact_report(report, key=redaction_key, ephemeral=args.redact_ephemeral))
+    print(json.dumps(printed, ensure_ascii=False, indent=2))
     if args.lexical_ngrams is not None and lexical_ngrams_ignored(report):
         print(LEXICAL_NGRAMS_IGNORED_NOTE, file=sys.stderr)
     for warning in report.get('temporal_decomposition', {}).get('warnings', ()):
         print(f"render-matched warning (non-blocking): {warning}", file=sys.stderr)
     # Opt-in notes (gold set, split, inspected); a fixture path has none.
+    note_digest = None if redaction_key is None else _keyed_digest(redaction_key)
     for note in (source.notes if isinstance(source, EvaluationInput) else ()):
-        print(note, file=sys.stderr)
+        print(note if note_digest is None else _keyed_note(note, note_digest), file=sys.stderr)
     # Inspected marks must not turn the recall@3/MRR gates into a vacuous pass.
     gate_gap = _inspected_gate_gap(gated)
     if gate_gap is not None:

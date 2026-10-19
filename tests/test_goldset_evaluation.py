@@ -6,7 +6,9 @@ before these options existed, with capture_default_outputs() below.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import importlib.util
 import io
 import json
@@ -145,8 +147,8 @@ class DefaultOutputTests(unittest.TestCase):
         self.assertNotIn("split", report)
 
 
-class GoldSetVaultTests(unittest.TestCase):
-    """A temporary real-shaped vault evaluated in place."""
+class GoldSetVaultCase(unittest.TestCase):
+    """A temporary real-shaped vault evaluated in place (fixture only, no tests)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -210,6 +212,8 @@ class GoldSetVaultTests(unittest.TestCase):
         return run_main(evaluator, ["--vault", self.vault, "--goldset", self.goldset,
                                     "--min-recall-at-3", "0", "--min-mrr", "0", *extra])
 
+
+class GoldSetVaultTests(GoldSetVaultCase):
     def test_labels_resolve_by_path_or_unique_stem_and_report_the_match_kind(self):
         code, stdout, stderr = self.run_goldset()
         self.assertEqual(code, 0, stderr)
@@ -847,6 +851,360 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(redacted["paired_randomization"], report["paired_randomization"])
         self.assertEqual(redacted["redaction"], evaluator.REDACTION_DESCRIPTION)
         self.assertIn("SECRET", json.dumps(report))  # the input report is not modified
+
+
+
+# --- Keyed pseudonymisation (--redact-key-file, --redact-ephemeral) --------
+# Captured from the unchanged v0.25.0 code (833d394) with the canonical text
+# rules above; plain --redact must keep these bytes apart from the two added
+# redaction fields.
+PLAIN_REDACT_CASES = (
+    ("recall_advanced", ["--compare", "--render-matched", "--redact"],
+     "19b04565fd0c345b806bc4609a8c0eebfd99d33ef17575f943933013b59d4f4a"),
+    ("recall_hard", [*HARD_CI, "--redact"],
+     "f76b03b3f4823a3fc8e0f00b117d33f5e8c430d9b8b5c0a3132e7b094309e3b0"),
+)
+ADDED_REDACTION_FIELDS = ("redaction_mode", "redaction_algorithm")
+KEY_A = b"KEYMARK-alpha:" + bytes(range(200, 232))
+KEY_B = b"KEYMARK-bravo:" + bytes(range(100, 132))
+FIXED_EPHEMERAL = b"KEYMARK-ephemeral:" + bytes(range(1, 33))
+GOLDSET_PATH_TEXT = ("20-knowledge", "Switchgear isolation", "Checklist", "Rollback plan", "Legacy rollback",
+                     "Switchgear secret", "Draft", "private/", "scratch/", ".md")
+
+
+def hmac_hex(key: bytes, text: str) -> str:
+    return hmac.new(key, text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def key_forms(key: bytes) -> list[str]:
+    """Every printable form of the key or of an unkeyed fingerprint of it."""
+    encoded = [base64.b64encode(key).decode(), base64.urlsafe_b64encode(key).decode(),
+               base64.b32encode(key).decode()]
+    return ["KEYMARK", key.hex(), key.hex().upper(), *encoded, *(value.rstrip("=") for value in encoded),
+            hashlib.sha256(key).hexdigest(), hashlib.sha1(key).hexdigest(), hashlib.md5(key).hexdigest(),
+            hashlib.sha256(key.hex().encode()).hexdigest()]
+
+
+def without_added_fields(stdout: str) -> str:
+    report = json.loads(stdout)
+    for name in ADDED_REDACTION_FIELDS:
+        report.pop(name, None)
+    return json.dumps(report, ensure_ascii=False)
+
+
+def dict_keys(value) -> list[str]:
+    if isinstance(value, dict):
+        return [*value, *(key for item in value.values() for key in dict_keys(item))]
+    if isinstance(value, list):
+        return [key for item in value for key in dict_keys(item)]
+    return []
+
+
+class PlainRedactionCompatibilityTests(unittest.TestCase):
+    def test_plain_redact_output_is_unchanged_apart_from_the_added_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for name, args, expected in PLAIN_REDACT_CASES:
+                with self.subTest(fixture=name):
+                    fixture = lf_fixture_copy(name, Path(temporary))
+                    code, stdout, stderr = run_main(evaluator, ["--fixture", fixture, *args])
+                    _, _, plain_stderr = run_main(evaluator, ["--fixture", fixture,
+                                                              *(arg for arg in args if arg != "--redact")])
+                    self.assertEqual(code, 0, stderr)
+                    self.assertEqual(stderr, plain_stderr)
+                    report = json.loads(stdout)
+                    self.assertEqual((report["redaction_mode"], report["redaction_algorithm"]),
+                                     ("unkeyed", "sha256"))
+                    self.assertEqual(list(report)[-3:], ["redaction", *ADDED_REDACTION_FIELDS])
+                    self.assertEqual(report["redaction"], evaluator.REDACTION_DESCRIPTION)
+                    self.assertEqual(sha256_text(canonical_report_text(without_added_fields(stdout))), expected)
+
+    def test_default_output_has_no_redaction_fields(self):
+        code, stdout, stderr = run_main(evaluator, [])
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertFalse({"redaction", *ADDED_REDACTION_FIELDS}.intersection(json.loads(stdout)))
+
+    def test_keyed_options_are_off_by_default(self):
+        args = evaluator._parser().parse_args([])
+        self.assertIsNone(args.redact_key_file)
+        self.assertFalse(args.redact_ephemeral)
+
+
+class KeyedRedactionTests(GoldSetVaultCase):
+    def setUp(self):
+        super().setUp()
+        self.keys = self.root / "keys"
+        self.keys.mkdir()
+        self.key_a = self.write_key("KEYPATHMARK-a.bin", KEY_A)
+        self.key_b = self.write_key("KEYPATHMARK-b.bin", KEY_B)
+
+    def write_key(self, name: str, data: bytes, directory: Path | None = None) -> Path:
+        path = (directory or self.keys) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def run_compare(self, *extra):
+        return self.run_goldset("--compare", "--expand-query", *extra)
+
+    def assert_hidden(self, text: str, markers) -> None:
+        for marker in markers:
+            self.assertNotIn(marker, text)
+
+    def test_keyed_tokens_depend_on_the_key_and_repeat_with_it(self):
+        _, unkeyed, _ = self.run_compare("--redact")
+        code, first, stderr = self.run_compare("--redact-key-file", self.key_a)
+        self.assertEqual(code, 0, stderr)
+        _, again, _ = self.run_compare("--redact-key-file", self.key_a)
+        _, other, _ = self.run_compare("--redact-key-file", self.key_b)
+        self.assertEqual(canonical_report_text(first), canonical_report_text(again))
+        self.assertNotEqual(canonical_report_text(first), canonical_report_text(other))
+        self.assertNotEqual(canonical_report_text(without_added_fields(first)),
+                            canonical_report_text(without_added_fields(unkeyed)))
+        report, plain = json.loads(first), json.loads(unkeyed)
+        self.assertEqual((report["redaction_mode"], report["redaction_algorithm"]), ("keyed", "hmac-sha256"))
+        self.assertEqual(report["redaction"], evaluator.KEYED_REDACTION_DESCRIPTION)
+        row = report["improved"]["per_query"][0]
+        self.assertEqual(row["query"], hmac_hex(KEY_A, self.queries[0]["query"]))
+        self.assertEqual(row["id"], hmac_hex(KEY_A, "IDMARK00"))
+        self.assertEqual(row["required_claims"], [hmac_hex(KEY_A, "locking the breaker")])
+        self.assertEqual(row["label_rationale"], hmac_hex(KEY_A, "RATIONALEMARK00"))
+        self.assertIn(hmac_hex(KEY_A, "SCENMARK0"), report["improved"]["by_scenario"])
+        self.assertNotIn(sha256_text("IDMARK00"), first)
+        self.assert_hidden(first + stderr, ("IDMARK", "SCENMARK", "QRYMARK", "RATIONALEMARK", "EXTRAMARK",
+                                            "locking the breaker", "quantum teleportation"))
+        # Metrics come from the unredacted run.
+        for arm in ("baseline", "improved"):
+            for metric in ("recall_at_3", "mrr", "query_count"):
+                self.assertEqual(report[arm][metric], plain[arm][metric])
+        self.assertEqual(report["paired_randomization"], plain["paired_randomization"])
+
+    def test_paths_labels_and_fingerprints_are_pseudonymised_with_the_key(self):
+        # The Korean alias of "Rollback plan" brings a frontmatter_alias expansion with a source path.
+        self.queries[2] = self.query(2, "되돌리기 계획", ["20-knowledge/Rollback plan.md"])
+        self.save()
+        code, plain_out, _ = self.run_compare("--redact")
+        self.assertEqual(code, 0)
+        self.assertTrue(all(text in plain_out for text in ("20-knowledge", "Checklist", ".md")))
+        code, stdout, stderr = self.run_compare("--redact-key-file", self.key_a)
+        self.assertEqual(code, 0, stderr)
+        self.assert_hidden(stdout + stderr, GOLDSET_PATH_TEXT)
+        report, plain = json.loads(stdout), json.loads(plain_out)
+        arm = report["improved"]
+        rows = arm["per_query"]
+        moved = "20-knowledge/procedures/Switchgear isolation.md"
+        self.assertEqual(rows[0]["expected_paths"], [hmac_hex(KEY_A, moved)])
+        self.assertEqual(rows[0]["label_matches"], [{
+            "field": "expected_paths", "label": hmac_hex(KEY_A, "20-knowledge/Switchgear isolation.md"),
+            "match": "stem", "path": hmac_hex(KEY_A, moved)}])
+        self.assertEqual(rows[0]["retrieved_paths"][0], hmac_hex(KEY_A, moved))
+        self.assertEqual(rows[0]["relevance"], {hmac_hex(KEY_A, moved): 1})
+        self.assertEqual(rows[1]["label_matches"], [{
+            "field": "expected_paths", "label": hmac_hex(KEY_A, "Checklist.md"), "match": "ambiguous_stem",
+            "path": None, "candidate_count": 2,
+            "candidates": [hmac_hex(KEY_A, "20-knowledge/a/Checklist.md"),
+                           hmac_hex(KEY_A, "20-knowledge/b/Checklist.md")]}])
+        self.assertEqual(rows[7]["stale_retrieved_paths"],
+                         [hmac_hex(KEY_A, "20-knowledge/history/Legacy rollback.md")])
+        expansion = rows[2]["diagnostics"]["query_expansion"]
+        alias = [entry for entry in expansion["expansions"] if entry["source_kind"] == "frontmatter_alias"]
+        self.assertTrue(alias)
+        self.assertEqual(alias[0]["source_path"], hmac_hex(KEY_A, "20-knowledge/Rollback plan.md"))
+        plain_alias = [entry for entry in plain["improved"]["per_query"][2]["diagnostics"]["query_expansion"]
+                       ["expansions"] if entry["source_kind"] == "frontmatter_alias"][0]
+        self.assertEqual(alias[0]["source_sha256"], hmac_hex(KEY_A, plain_alias["source_sha256"]))
+        for failed in arm["failed_queries"]:
+            self.assertTrue(all(len(path) == 64 for path in failed["expected_paths"] + failed["retrieved_paths"]))
+        # Whole-value fingerprints become keyed too; the key holder can still recompute them.
+        section = arm["goldset"]
+        self.assertEqual(section["goldset_canonical_sha256"],
+                         hmac_hex(KEY_A, plain["improved"]["goldset"]["goldset_canonical_sha256"]))
+        warning = ("queries[1].expected_paths[0]: filename stem is shared by 2 eligible notes "
+                   "(paths pseudonymised in label_matches); label left unresolved, give the full "
+                   "vault-relative path")
+        self.assertIn(warning, section["warnings"])
+        self.assertIn("queries[3].expected_paths[0]: label is inside a deny zone; it is never read or matched",
+                      section["warnings"])
+        self.assertEqual(len(section["warnings"]), len(plain["improved"]["goldset"]["warnings"]))
+        self.assertIn(f"goldset warning (non-blocking): {warning}", stderr)
+        self.assertEqual(section["label_match_counts"], plain["improved"]["goldset"]["label_match_counts"])
+
+    def test_unknown_warning_text_is_hashed_whole(self):
+        report = {"per_query": [], "by_scenario": {}, "failed_queries": [], "evaluation_errors": [],
+                  "goldset": {"warnings": ["queries[0].expected_paths[0]: something new about a/b.md"]}}
+        redacted = evaluator.redact_report(report, key=KEY_A)
+        self.assertEqual(redacted["goldset"]["warnings"],
+                         [hmac_hex(KEY_A, "queries[0].expected_paths[0]: something new about a/b.md")])
+
+    def test_split_definition_fingerprint_is_keyed(self):
+        split = self.root / "split.json"
+        definition = {"seed": 3, "dev": [f"IDMARK{index:02d}" for index in range(6)],
+                      "heldout": [f"IDMARK{index:02d}" for index in range(6, 12)]}
+        split.write_text(json.dumps(definition), encoding="utf-8")
+        _, plain, _ = self.run_goldset("--split", "dev", "--split-file", split, "--redact")
+        code, stdout, stderr = self.run_goldset("--split", "dev", "--split-file", split,
+                                                "--redact-key-file", self.key_a)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["split"]["definition_canonical_sha256"],
+                         hmac_hex(KEY_A, json.loads(plain)["split"]["definition_canonical_sha256"]))
+        self.assert_hidden(stdout + stderr, ("IDMARK", *GOLDSET_PATH_TEXT))
+
+    def test_ephemeral_runs_differ_and_use_a_fresh_32_byte_key(self):
+        code, first, stderr = self.run_compare("--redact-ephemeral")
+        self.assertEqual(code, 0, stderr)
+        _, second, _ = self.run_compare("--redact-ephemeral")
+        self.assertNotEqual(canonical_report_text(first), canonical_report_text(second))
+        report = json.loads(first)
+        self.assertEqual((report["redaction_mode"], report["redaction_algorithm"]), ("ephemeral", "hmac-sha256"))
+        self.assertEqual(report["redaction"], evaluator.EPHEMERAL_REDACTION_DESCRIPTION)
+        self.assert_hidden(first + stderr, ("IDMARK", "QRYMARK", *GOLDSET_PATH_TEXT))
+        with mock.patch.object(evaluator.secrets, "token_bytes", return_value=FIXED_EPHEMERAL) as token:
+            code, stdout, stderr = self.run_compare("--redact-ephemeral")
+        token.assert_called_once_with(32)
+        self.assertEqual(code, 0, stderr)
+        row = json.loads(stdout)["improved"]["per_query"][0]
+        self.assertEqual(row["query"], hmac_hex(FIXED_EPHEMERAL, self.queries[0]["query"]))
+        self.assert_hidden(stdout + stderr, key_forms(FIXED_EPHEMERAL))
+
+    def test_key_material_never_appears_in_the_report_or_stderr(self):
+        for argv in (["--redact-key-file", self.key_a], ["--redact", "--redact-key-file", self.key_a]):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = self.run_compare(*argv)
+                self.assertEqual(code, 0, stderr)
+                self.assert_hidden(stdout + stderr, [*key_forms(KEY_A), "KEYPATHMARK", str(self.keys)])
+                self.assertFalse([key for key in dict_keys(json.loads(stdout))
+                                  if "fingerprint" in key.casefold() or "key" in key.casefold()])
+
+    def test_short_missing_or_oversized_keys_are_refused_with_exit_2(self):
+        unreadable = ("recall evaluation unavailable: redaction key file is not a readable regular file of at "
+                      "most 65536 bytes")
+        short = "recall evaluation unavailable: redaction key file must hold at least 32 bytes"
+        cases = (
+            (self.write_key("KEYPATHMARK-short.bin", KEY_A[:31]), short),
+            (self.write_key("KEYPATHMARK-empty.bin", b""), short),
+            (self.keys / "KEYPATHMARK-missing.bin", unreadable),
+            (self.keys, unreadable),
+            (self.write_key("KEYPATHMARK-big.bin", KEY_A * 2000), unreadable),
+        )
+        for path, message in cases:
+            with self.subTest(path=path.name):
+                with mock.patch.object(evaluator, "load_goldset", side_effect=AssertionError("evaluated")):
+                    code, stdout, stderr = self.run_compare("--redact-key-file", path)
+                self.assertEqual((code, stdout), (2, ""))
+                self.assertEqual(stderr.strip(), message)
+                self.assert_hidden(stderr, [*key_forms(KEY_A), "KEYPATHMARK"])
+        # Exactly 32 bytes is enough.
+        code, _, stderr = self.run_compare("--redact-key-file", self.write_key("exact.bin", KEY_A[-32:]))
+        self.assertEqual(code, 0, stderr)
+
+    def test_key_inside_the_evaluated_vault_is_refused_before_evaluation(self):
+        message = ("recall evaluation unavailable: redaction key file is inside the evaluated vault; "
+                   "keep the key outside the vault and away from the report")
+        inside = self.write_key("KEYPATHMARK.bin", KEY_A, self.vault / "00-meta")
+        dotted = self.keys / ".." / "vault" / "00-meta" / "KEYPATHMARK.bin"
+        for path in (inside, dotted):
+            with self.subTest(path=str(path)):
+                with mock.patch.object(evaluator, "load_goldset", side_effect=AssertionError("evaluated")):
+                    code, stdout, stderr = self.run_compare("--redact-key-file", path)
+                self.assertEqual((code, stdout), (2, ""))
+                self.assertEqual(stderr.strip(), message)
+                self.assert_hidden(stderr, [*key_forms(KEY_A), "KEYPATHMARK"])
+        # Fixture mode: the fixture directory holds the evaluated vault and its labels.
+        fixture = lf_fixture_copy("recall", self.root)
+        for path in (self.write_key("k.bin", KEY_A, fixture), self.write_key("k.bin", KEY_A, fixture / "vault")):
+            with self.subTest(path=str(path)):
+                code, stdout, stderr = run_main(evaluator, ["--fixture", fixture, "--redact-key-file", path])
+                self.assertEqual((code, stdout, stderr.strip()), (2, "", message))
+        code, stdout, stderr = run_main(evaluator, ["--fixture", fixture, "--redact-key-file", self.key_a])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["redaction_mode"], "keyed")
+
+    def test_key_next_to_the_report_warns_without_blocking(self):
+        warning = ("recall evaluation warning (non-blocking): the redaction key file is in the report's "
+                   "output directory or the working directory; keep the key away from the report")
+        argv = ["--vault", self.vault, "--goldset", self.goldset, "--min-recall-at-3", "0", "--min-mrr", "0",
+                "--redact-key-file", self.key_a]
+        for directory, warned in ((self.keys, True), (self.root, False)):
+            with self.subTest(directory=directory.name):
+                stderr = io.StringIO()
+                with open(directory / "report.json", "w", encoding="utf-8") as report, \
+                        redirect_stdout(report), redirect_stderr(stderr):
+                    code = evaluator.main([str(value) for value in argv])
+                self.assertEqual(code, 0, stderr.getvalue())
+                self.assertEqual(warning in stderr.getvalue(), warned)
+                self.assertEqual(json.loads((directory / "report.json").read_text(encoding="utf-8"))
+                                 ["redaction_mode"], "keyed")
+        # Standard output that is not a file (a pipe, PowerShell 5.1 redirection): the working directory.
+        with mock.patch.object(evaluator.os, "getcwd", return_value=str(self.keys)):
+            code, _, stderr = run_main(evaluator, argv)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn(warning, stderr)
+        code, _, stderr = run_main(evaluator, argv)
+        self.assertNotIn(warning, stderr)
+
+    def test_keyed_options_imply_redact_and_exclude_each_other(self):
+        error = io.StringIO()
+        with redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+            evaluator._parser().parse_args(["--redact-key-file", str(self.key_a), "--redact-ephemeral"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("not allowed with argument", error.getvalue())
+        self.assert_hidden(error.getvalue(), ["KEYMARK"])
+        for argv in (["--derive-split", "--redact-ephemeral"], ["--derive-split", "--redact-key-file", self.key_a]):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = run_main(evaluator, argv)
+                self.assertEqual((code, stdout), (2, ""))
+                self.assertEqual(stderr.strip(), "--derive-split cannot be combined with --split or --redact")
+        code, stdout, stderr = run_main(evaluator, ["--redact-ephemeral"])
+        self.assertEqual(code, 0, stderr)
+        report = json.loads(stdout)
+        self.assertEqual(report["redaction_mode"], "ephemeral")
+        self.assertNotIn(".md", stdout)
+
+    def test_help_text_carries_the_linkability_warning(self):
+        flat = " ".join(evaluator._parser().format_help().split())
+        for phrase in ("--redact-key-file", "--redact-ephemeral", "repeats and frequencies",
+                       "without the key", "not hashed one by one"):
+            self.assertIn(phrase, flat)
+
+
+class KeyedRedactReportTests(unittest.TestCase):
+    report = RedactionTests.report
+
+    def test_keyed_redaction_hashes_text_and_paths_with_the_key(self):
+        source = self.report()
+        redacted = evaluator.redact_report(source, key=KEY_A)
+        text = json.dumps(redacted, ensure_ascii=False)
+        self.assertNotIn("SECRET", text)
+        self.assertNotIn(".md", text)
+        row = redacted["per_query"][0]
+        self.assertEqual(row["query"], hmac_hex(KEY_A, "SECRET words"))
+        self.assertEqual(row["custom"], hmac_hex(KEY_A, '{"nested":"SECRET"}'))
+        self.assertEqual(row["expected_paths"], [hmac_hex(KEY_A, "a.md")])
+        self.assertEqual(row["relevance"], {hmac_hex(KEY_A, "a.md"): 1})
+        self.assertEqual(row["external_candidates"], [
+            {"path": hmac_hex(KEY_A, "a.md"), "rank": 1, "note": hmac_hex(KEY_A, "provider SECRET")},
+            hmac_hex(KEY_A, "b.md")])
+        options = row["retrieval_options"]
+        self.assertEqual({key: options[key] for key in ("as_of", "backend", "expand_links", "excluded_sources")},
+                         {"as_of": "2026-01-01", "backend": "hybrid", "expand_links": 1,
+                          "excluded_sources": [hmac_hex(KEY_A, "x/y.md")]})
+        self.assertEqual((row["language"], row["source_recall_at_3"]), ("ko", 1.0))
+        self.assertEqual(redacted["failed_queries"][0]["expected_paths"], [hmac_hex(KEY_A, "a.md")])
+        self.assertEqual((redacted["redaction_mode"], redacted["redaction_algorithm"]), ("keyed", "hmac-sha256"))
+        self.assertIn("SECRET", json.dumps(source))  # the input report is not modified
+        ephemeral = evaluator.redact_report(source, key=KEY_A, ephemeral=True)
+        self.assertEqual(ephemeral["redaction_mode"], "ephemeral")
+        self.assertEqual(ephemeral["per_query"], redacted["per_query"])
+        plain = evaluator.redact_report(source)
+        self.assertEqual((plain["redaction_mode"], plain["redaction_algorithm"]), ("unkeyed", "sha256"))
+        self.assertEqual(plain["per_query"][0]["expected_paths"], ["a.md"])
+
+    def test_short_or_non_bytes_keys_are_rejected(self):
+        for key in (KEY_A[:31], b"", "x" * 40, bytearray(KEY_A)):
+            with self.subTest(key=type(key).__name__), self.assertRaises(ValueError) as raised:
+                evaluator.redact_report(self.report(), key=key)
+            self.assertNotIn("KEYMARK", str(raised.exception))
+        with self.assertRaises(ValueError):
+            evaluator.redact_report(self.report(), ephemeral=True)
 
 
 if __name__ == "__main__":
