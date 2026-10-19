@@ -288,7 +288,9 @@ inventory 전체의 stat 세대 검사는 metadata-preserving rewrite를 잡는 
 끝의 확인은 표지가 있는 디렉터리마다 이름 목록을 한 번만 다시 읽는다. 하위로 내려가지 않고, 항목 합계는 디렉터리 항목 상한(20,000개)을 따른다.
 Windows는 항목을 바꾼 직후에도 디렉터리 수정 시각이 그대로이거나 늦게 바뀔 수 있다([MS Learn File Times](https://learn.microsoft.com/en-us/windows/win32/sysinfo/file-times)).
 이름 목록만 다르면 `inventory_verification.listing_diagnostics`에 `directory_listing_changed`와 디렉터리 상대 경로(루트는 `.`)를 남기고, 표지가 바뀐 경우처럼 `source_changed`로 닫는다.
-처음 걸린 디렉터리는 `inventory_verification.changed_directory`에 경로와 종류로 남는다. 종류는 `listing`(이름 목록), `metadata`(stat 표지), `unavailable`(목록을 다시 읽지 못함·상한 초과)이다.
+표지나 이름 목록 확인에서 처음 걸린 디렉터리는 `inventory_verification.changed_directory`에 경로와 종류로 남는다. 종류는 `listing`(이름 목록), `metadata`(stat 표지), `unavailable`(목록을 다시 읽지 못함·상한 초과)이다.
+그보다 먼저 걸린 경우는 `changed_directory`를 남기지 않는다. 노트의 문서 표지가 바뀌었거나, 디렉터리가 제외·금지 경로나 안전하지 않은 경로가 된 경우다. 이때도 `source_changed`로 닫는다.
+이 확인은 처음 바뀐 디렉터리에서 멈춘다. 그래서 `listing_diagnostics`는 많아야 한 줄이고 `listing_diagnostics_omitted`는 0이다.
 목록을 다시 읽지 못하거나 상한을 넘어도 `source_changed`로 닫는다.
 같은 이름으로 지웠다 다시 만든 항목은 이름 목록으로 잡지 못한다. 노트는 문서 stat 표지(inode·변경 시각)가 잡지만 노트가 아닌 파일은 잡지 않는다.
 목록 확인은 한 시점의 확인이며 쓰기를 막는 잠금이 아니다.
