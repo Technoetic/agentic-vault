@@ -264,6 +264,7 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
 ```text
 python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json
 python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact > RESULT.json
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact-key-file KEY_PATH > RESULT.json
 ```
 
 - 볼트는 엔진의 정책으로만 읽는다. `00-meta/vault-config.json`을 엔진 설정 검사기로 검증하고 빠진 키는
@@ -342,11 +343,43 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   남는다. 게이트는 바꾸기 전의 값으로 판정한다.
 - 해시는 암호화가 아니다. 짧거나 추측할 수 있는 문자열은 후보를 해시해 보면 되찾을 수 있다. 파일 이름도 경로로
   남으므로 공유하기 전에 확인한다. 질문이 노트 이름과 같거나 비슷하면 경로만으로도 질문 내용이 드러난다.
+  보고서를 남에게 넘길 때는 아래 키 옵션을 쓴다.
+- `--redact-key-file FILE`과 `--redact-ephemeral`은 비밀 키를 쓰는 가명화다. 둘 다 `--redact`를 포함하며 함께 쓸
+  수 없다. 위의 자유 텍스트를 sha256 대신 HMAC-SHA256(키, UTF-8 텍스트)의 16진 값으로 바꾼다. 볼트 상대 경로도 같은
+  키로 바꾼다. 기대·금지·낡은·반환 경로, `relevance` 키, `label_matches`의 라벨·경로·후보, 외부 후보, 제외 출처,
+  질의 매핑, 진단 안의 경로가 모두 해당한다.
+- 경로는 통째로 해시한다. 앞쪽 폴더만 남기면 사람·프로젝트 이름 같은 폴더 이름이 그대로 드러나기 때문이다. 같은
+  경로는 한 보고서 안에서 같은 값이 되므로, 라벨과 반환 경로가 같은지는 그대로 읽힌다.
+- `goldset_canonical_sha256`·`definition_canonical_sha256`과 질의 확장 진단의 sha256은 그 16진 값을 같은 키로 다시
+  해시한 값이 된다. 키를 가진 사람은 다시 계산해 맞춰 볼 수 있다. `goldset.warnings`와 표준 오류의 골드셋 경고는
+  후보 경로를 빼고 종류만 남긴다. 형태를 모르는 경고는 통째로 해시한다.
+- 키 파일은 32바이트 이상, 64 KiB 이하의 일반 파일이어야 한다. 짧거나 읽을 수 없으면 종료 코드 2로 끝낸다. 평가하는
+  볼트 안(fixture 모드에서는 fixture 디렉터리 안)에 있으면 읽기 전에 거부하고 종료 코드 2로 끝낸다. 위치는 적힌 그대로의
+  절대 경로와 실제 경로를 모두 본다. 작업 디렉터리나 표준 출력 파일과 같은 디렉터리에 있으면 경고만 한다. 표준 출력이
+  파이프이면(Windows PowerShell 5.1의 `>` 포함) 작업 디렉터리만 확인할 수 있다. 오류·경고 문구에는 키 파일의 경로도
+  내용도 쓰지 않는다.
+- 키는 무작위로 만든다. 예: `python -c "import secrets, pathlib; pathlib.Path('KEY_PATH').write_bytes(secrets.token_bytes(32))"`.
+  평가기는 길이만 확인하고 무작위성은 확인하지 못한다. 비밀 값의 엔트로피가 충분해야 한다는 점은 EDPB 지침
+  01/2025(의견 수렴판, 2025-01-16 채택)도 요구한다.
+- `--redact-ephemeral`은 실행마다 `secrets.token_bytes(32)`로 키를 만들고 어디에도 저장하지 않는다. 운영자를 포함해
+  아무도 값을 되돌려 맞춰 볼 수 없다. 두 실행의 값도 서로 비교할 수 없다.
+- 보고서에는 `redaction_mode`(`unkeyed`·`keyed`·`ephemeral`)와 `redaction_algorithm`(`sha256`·`hmac-sha256`)이
+  남는다. 키와 키의 지문(해시 등)은 보고서·표준 오류 어디에도 남기지 않는다. `--redact`만 쓴 보고서는 이 두 필드가
+  더해진 것 말고 v0.25.0과 같다. 옵션 없는 기본 출력은 바뀌지 않는다.
+- 키를 써도 한계가 있다. 키 해시는 결정적이어서 한 보고서 안에서 같은 값은 같은 토큰이 된다. 그래서 반복과 빈도는
+  드러난다. 말할 수 있는 것은 "키가 없는 사람은 토큰을 원문에 되돌려 연결할 수 없다"뿐이다. 키를 가진 사람은 후보를
+  해시해 맞춰 볼 수 있다. 키를 볼트나 보고서 옆에 두면 효과가 없다. 값은 통째로 해시하며 단어(토큰)마다 따로 해시하지
+  않는다. 검색 로그를 단어별로 해시하면 되돌릴 수 있다는 것이 알려져 있다(Kumar 외, WWW 2007).
+- 근거: ENISA 「Pseudonymisation techniques and best practices」(2019-11)는 키 없는 해시가 무차별 대입·사전 공격에
+  열려 있고, 비밀 키를 쓴 MAC은 키 없이는 연결할 수 없지만 결정적이라 반복과 빈도를 드러낸다고 정리한다. Demir 외
+  「The Pitfalls of Hashing for Privacy」(IEEE COMST, 2018)와 미국 FTC 기술국 글(2024-07-24)은 입력 집합이 작으면
+  해시를 추측해 맞출 수 있다고 지적한다.
 - `--derive-split`이 출력하는 분할 파일에는 문항 `id`(`dev`·`heldout` 목록)와 층의 `scenario` 이름이 원문 그대로
-  들어간다. `--derive-split`은 `--redact`와 함께 쓸 수 없다. 그래서 분할 파일도 골드셋과 같은 결정에 따라 보관 위치와
+  들어간다. `--derive-split`은 `--redact`(키 옵션 포함)와 함께 쓸 수 없다. 그래서 분할 파일도 골드셋과 같은 결정에 따라 보관 위치와
   git 추적 여부를 정한다. `id`는 `q01`처럼 질문 내용을 드러내지 않는 값으로 짓기를 권한다. 설명적인 `id`는 분할
   파일과 `--redact` 없는 보고서에 그대로 남는다.
-- 오류와 경고 문구에는 문항 번호(`queries[3]`)·필드·경로만 쓴다. 실패한 문항은 그 번호나 `id`의 sha256으로 찾는다.
+- 오류와 경고 문구에는 문항 번호(`queries[3]`)·필드·경로만 쓴다. 실패한 문항은 그 번호나 `id`의 sha256(키
+  옵션에서는 같은 키의 HMAC-SHA256)으로 찾는다.
 - `goldset.goldset_canonical_sha256`은 골드셋 JSON을 키 정렬·압축한 형태의 해시다. 줄바꿈과 BOM의 영향을 받지
   않으며, 결과가 어느 골드셋 판에서 나왔는지 묶어 준다. 분할 파일은 보고서의 `split.definition_canonical_sha256`이
   같은 방식으로 묶는다.
