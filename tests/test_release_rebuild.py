@@ -12,12 +12,14 @@ import io
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 import warnings
 import zipfile
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -92,6 +94,41 @@ BASE_FILES = {
     "dropdir/inner.txt": b"not exported either\n",
 }
 BASE_ATTRIBUTES = "ignored.txt export-ignore\ndropdir export-ignore\n"
+EOCD = b"PK\x05\x06"
+
+
+def _drop_central_record(data: bytes, name: str) -> bytes:
+    """Remove one central-directory record and fix the end record; its local entry stays in place."""
+    eocd = data.rindex(EOCD)
+    _sig, disk, disk_cd, entries_disk, entries, cd_size, cd_offset, comment_len = struct.unpack(
+        "<4s4H2LH", data[eocd:eocd + 22])
+    records, pos = [], cd_offset
+    while pos < cd_offset + cd_size:
+        name_len, extra_len, comment = struct.unpack("<3H", data[pos + 28:pos + 34])
+        end = pos + 46 + name_len + extra_len + comment
+        records.append((data[pos + 46:pos + 46 + name_len], data[pos:end]))
+        pos = end
+    kept = [raw for record_name, raw in records if record_name != name.encode("utf-8")]
+    assert len(kept) == len(records) - 1
+    central = b"".join(kept)
+    end_record = struct.pack("<4s4H2LH", EOCD, disk, disk_cd, entries_disk - 1, entries - 1, len(central),
+                             cd_offset, comment_len)
+    return data[:cd_offset] + central + end_record + data[eocd + 22:]
+
+
+class _Unseekable(io.RawIOBase):
+    """A write-only stream, so zipfile writes data descriptors after each member."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.data = bytearray()
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, chunk) -> int:
+        self.data += chunk
+        return len(chunk)
 
 
 @unittest.skipUnless(GIT, "git is not installed")
@@ -249,6 +286,8 @@ class ReleaseRebuildTests(unittest.TestCase):
         self.assertEqual(counts["export_ignored"], 2)
         self.assertEqual(counts["matched"], 6)
         self.assertTrue(report["l2"]["archive_comment_is_commit"])
+        self.assertEqual(report["l2"]["parser_ambiguity"], [])
+        self.assertEqual(report["l2"]["conversion_unverified"], [])
 
     def test_plain_git_archive_in_another_zone_differs_at_l1_and_matches_at_l2(self) -> None:
         plain = self.base / "plain-kst.zip"
@@ -316,28 +355,49 @@ class ReleaseRebuildTests(unittest.TestCase):
                 return [*entries, (info, data)]
             return mutate
 
-        def duplicate(entries):
-            first = next((info, data) for info, data in entries if info.filename == PREFIX + "README.txt")
-            return [*entries, first]
+        def duplicate(changed):
+            def mutate(entries):
+                info, data = next((info, data) for info, data in entries if info.filename == PREFIX + "README.txt")
+                # A fresh ZipInfo: writestr() updates the object it is given, so reusing it would point both
+                # central records at the second copy.
+                second = zipfile.ZipInfo(info.filename, info.date_time)
+                return [*entries, (second, data + b"second copy" if changed else data)]
+            return mutate
 
+        backslash = chr(92)
+        bidi = PREFIX + "rtl" + chr(0x202E) + "txt.exe"
+        c1 = PREFIX + "c1" + chr(0x85) + ".txt"
         cases = (("dotdot", add(PREFIX + "../evil.txt"), PREFIX + "../evil.txt", "dot_dot_segment"),
                  ("symlink", add(PREFIX + "link", b"README.txt", 0o120777), PREFIX + "link", "symlink"),
-                 ("duplicate", duplicate, PREFIX + "README.txt", "duplicate"),
+                 ("duplicate", duplicate(False), PREFIX + "README.txt", "duplicate"),
+                 ("duplicate-differs", duplicate(True), PREFIX + "README.txt", "duplicate"),
                  ("absolute", add("/abs.txt"), "/abs.txt", "absolute_path"),
                  ("backslash", add(PREFIX + "sub\\file.txt"), PREFIX + "sub\\file.txt", "backslash"),
                  ("drive", add("C:/drive.txt"), "C:/drive.txt", "drive_letter"),
-                 ("outside", add("elsewhere/file.txt"), "elsewhere/file.txt", "outside_prefix"))
+                 ("outside", add("elsewhere/file.txt"), "elsewhere/file.txt", "outside_prefix"),
+                 ("control", add(PREFIX + "a" + chr(1) + "b.txt"),
+                  PREFIX + "a" + backslash + "u0001b.txt", "control_character"),
+                 ("bidi", add(bidi), PREFIX + "rtl" + backslash + "u202etxt.exe", "control_character"),
+                 ("c1", add(c1), PREFIX + "c1" + backslash + "u0085.txt", "control_character"),
+                 ("empty-segment", add(PREFIX + "a//b.txt"), PREFIX + "a//b.txt", "empty_or_dot_segment"),
+                 ("dot-segment", add(PREFIX + "./b.txt"), PREFIX + "./b.txt", "empty_or_dot_segment"))
         for name, mutate, member, reason in cases:
             with self.subTest(name=name):
-                code, report = self._check(self._variant(f"unsafe-{name}.zip", mutate))
+                result = self._run_script(["check", "--repo", str(self.repo), "--tag", TAG, "--zip",
+                                           str(self._variant(f"unsafe-{name}.zip", mutate))])
+                code, report = result.returncode, json.loads(result.stdout)
                 self.assertEqual(code, 0)
                 self.assertEqual(report["l2"]["status"], "mismatch")
                 flagged = {item["name"]: item["reasons"] for item in report["l2"]["unsafe"]}
                 self.assertIn(member, flagged)
                 self.assertIn(reason, flagged[member])
-                if name == "duplicate":
+                # Format and C0/C1 control characters from ZIP names never reach the output raw.
+                for raw in (chr(0x202E), chr(0x85), chr(1)):
+                    self.assertNotIn(raw, result.stdout)
+                if name.startswith("duplicate"):
                     self.assertEqual(report["l2"]["duplicates"], [PREFIX + "README.txt"])
-                    self.assertEqual(report["l2"]["counts"]["matched"], 6)
+                    self.assertEqual(report["l2"]["counts"]["matched"], 6)  # the first copy is compared
+                    self.assertEqual(report["l2"]["mismatched"], [])
 
     def test_check_refuses_oversized_archives(self) -> None:
         module = self.module
@@ -348,10 +408,133 @@ class ReleaseRebuildTests(unittest.TestCase):
                 self.assertEqual(report["status"], "refused")
                 self.assertEqual(report["reason"], "members_over_limit" if constant == "MAX_MEMBERS"
                                  else "uncompressed_over_limit")
+        report = module.check_members(self.reference, repo=self.repo, commit=self.reference_spec["commit"],
+                                      prefix=PREFIX, max_zip_bytes=1)
+        self.assertEqual((report["status"], report["reason"]), ("refused", "zip_over_limit"))
         small = self._variant("one-member.zip", lambda entries: entries[:1])
         report = module.check_members(small, repo=self.repo, commit=self.reference_spec["commit"], prefix=PREFIX,
                                       max_members=3)
         self.assertEqual((report["status"], report["reason"]), ("refused", "tree_over_limit"))
+
+    def _ambiguous(self, name: str, data: bytes) -> dict:
+        path = self.base / f"ambiguous-{name}.zip"
+        path.write_bytes(data)
+        code, report = self._check(path)
+        self.assertEqual(code, 0)
+        return report
+
+    def test_check_flags_zip_parser_ambiguity(self) -> None:
+        reference = self.reference.read_bytes()
+        hostile = io.BytesIO()
+        with zipfile.ZipFile(hostile, "w") as archive:
+            archive.writestr(PREFIX + "README.txt", b"hostile readme\n")
+
+        def inserted(position):
+            def mutate(entries):
+                extra = (zipfile.ZipInfo(PREFIX + "hidden.txt", (2026, 1, 1, 0, 0, 0)), b"hidden\n")
+                return [*entries[:position], extra, *entries[position:]]
+            return mutate
+
+        middle = _drop_central_record(self._variant("hidden-middle.zip", inserted(1)).read_bytes(),
+                                      PREFIX + "hidden.txt")
+        last = _drop_central_record(self._variant("hidden-last.zip", inserted(10 ** 6)).read_bytes(),
+                                    PREFIX + "hidden.txt")
+        with zipfile.ZipFile(io.BytesIO(middle)) as archive:
+            after_hidden = sorted(archive.infolist(), key=lambda info: info.header_offset)[1].filename
+        with zipfile.ZipFile(self.reference) as archive:
+            directory = next(info for info in archive.infolist() if info.is_dir())
+        renamed = bytearray(reference)
+        renamed[directory.header_offset + 30] ^= 0x03  # local name only; the central name is unchanged
+
+        def unicode_path(entries):
+            raw = PREFIX + "alias.txt"
+            alias = (PREFIX + "README.txt").encode("utf-8")
+            info = zipfile.ZipInfo(raw, (2026, 1, 1, 0, 0, 0))
+            info.extra = struct.pack("<2HBL", 0x7075, 5 + len(alias), 1,
+                                     zlib.crc32(raw.encode("ascii"))) + alias
+            return [*entries, (info, b"alias\n")]
+
+        aliased = self._variant("unicode-path.zip", unicode_path).read_bytes()
+        cases = (("prepended-junk", b"JUNK" * 16 + reference, "data_before_first_entry", None),
+                 ("prepended-zip", hostile.getvalue() + reference, "data_before_first_entry", None),
+                 ("unreferenced-middle", middle, "gap_before_entry", after_hidden),
+                 ("unreferenced-last", last, "data_before_central_directory", None),
+                 ("trailing", reference + b"trailing bytes", "data_after_end_record", None),
+                 ("local-name", bytes(renamed), "local_name_differs", directory.filename),
+                 ("unicode-path", aliased, "unicode_path_field", PREFIX + "alias.txt"))
+        for name, data, code, member in cases:
+            with self.subTest(name=name):
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:  # zipfile itself accepts every variant
+                    self.assertGreater(len(archive.infolist()), 0)
+                report = self._ambiguous(name, data)
+                self.assertEqual(report["l2"]["status"], "mismatch")
+                self.assertIn(code, report["l2"]["parser_ambiguity"])
+                flagged = {item["name"]: item["reasons"] for item in report["l2"]["unsafe"]}
+                if member is not None:
+                    self.assertIn("parser_ambiguity", flagged.get(member, []))
+                self.assertNotIn("hostile", json.dumps(report))
+                self.assertNotIn("hidden", json.dumps(report))
+
+    def test_check_accepts_zip64_data_descriptors(self) -> None:
+        stream = _Unseekable()
+        with zipfile.ZipFile(self.reference) as source:
+            entries = [(info, source.read(info)) for info in source.infolist()]
+            comment = source.comment
+        with zipfile.ZipFile(stream, "w") as target:
+            target.comment = comment
+            for info, data in entries:
+                copy = zipfile.ZipInfo(info.filename, info.date_time)
+                if info.is_dir():
+                    target.writestr(copy, b"")
+                    continue
+                copy.compress_type = zipfile.ZIP_DEFLATED
+                with target.open(copy, "w", force_zip64=True) as member:
+                    member.write(data)
+        path = self.base / "zip64-descriptors.zip"
+        path.write_bytes(bytes(stream.data))
+        with zipfile.ZipFile(path) as archive:
+            self.assertTrue(any(info.flag_bits & 0x08 for info in archive.infolist()))
+        report = self.module.check_members(path, repo=self.repo, commit=self.reference_spec["commit"], prefix=PREFIX)
+        self.assertEqual(report["parser_ambiguity"], [])
+        self.assertEqual(report["unsafe"], [])
+        self.assertEqual((report["status"], report["counts"]["matched"]), ("match", 6))
+
+    def test_check_attr_failure_keeps_the_l1_report(self) -> None:
+        module = self.module
+        real_run = module.subprocess.run
+
+        def fake(argv, *args, **kwargs):
+            if "check-attr" in argv:
+                return subprocess.CompletedProcess(argv, 129, b"", b"")
+            return real_run(argv, *args, **kwargs)
+
+        with mock.patch.object(module.subprocess, "run", fake), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            code = module.main(["check", "--repo", str(self.repo), "--tag", TAG, "--zip", str(self.reference)])
+        self.assertEqual(code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["l1"]["status"], "match")
+        self.assertEqual((report["l2"]["status"], report["l2"]["reason"]), ("refused", "git_check_attr_failed"))
+
+    def test_ambient_core_autocrlf_true_does_not_change_the_zip(self) -> None:
+        config = self.base / "autocrlf.gitconfig"
+        config.write_text("[core]\n\tautocrlf = true\n", encoding="utf-8")
+        env = _isolated_env(self.base)
+        env["GIT_CONFIG_GLOBAL"] = str(config)
+        plain = self.base / "plain-autocrlf.zip"
+        subprocess.run([GIT, "archive", "--format=zip", "--prefix=" + PREFIX, "-o", str(plain), TAG],
+                       cwd=self.repo, env=env, check=True)
+        with zipfile.ZipFile(plain) as archive:  # the ambient setting is in effect without the -c option
+            self.assertEqual(archive.read(PREFIX + "README.txt"), b"fixture readme\r\n")
+        out = self.base / "build-autocrlf.zip"
+        build = subprocess.run([sys.executable, str(SCRIPT), "build", "--repo", str(self.repo), "--tag", TAG,
+                                "--out", str(out)], env=env, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(build.returncode, 0, build.stderr)
+        self.assertEqual(out.read_bytes(), self.reference.read_bytes())
+        check = subprocess.run([sys.executable, str(SCRIPT), "check", "--repo", str(self.repo), "--tag", TAG,
+                                "--zip", str(out)], env=env, capture_output=True, text=True, encoding="utf-8")
+        report = json.loads(check.stdout)
+        self.assertEqual((report["l1"]["status"], report["l2"]["status"]), ("match", "match"))
 
     def test_check_refuses_a_file_that_is_not_a_zip(self) -> None:
         bogus = self.base / "bogus.zip"
@@ -402,7 +585,8 @@ class ReleaseRebuildDocTests(unittest.TestCase):
                         "equivalence_levels", "L1_bytes", "L2_members_blobs", "export-ignore", "export-subst",
                         "](../scripts/release_rebuild.py)", "--tz KST-9",
                         "d39adcfa0e2b728d913ae001e2d754c9555884050bf6ede08900e1c9e7c88044",
-                        "b53d4d94a2b9adc1a79c95e63b0386a92e6658b4cce98403940ab6ffd7012627"):
+                        "b53d4d94a2b9adc1a79c95e63b0386a92e6658b4cce98403940ab6ffd7012627",
+                        "parser_ambiguity", "conversion_unverified", "git_check_attr_failed", "git 2.40"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, self.doc)
 
@@ -432,6 +616,55 @@ class ExportSubstTests(unittest.TestCase):
             self.assertEqual(report["l2"]["status"], "partial")
             self.assertEqual(report["l2"]["export_subst_unverified"], ["version.txt"])
             self.assertEqual(report["l2"]["counts"]["matched"], 2)  # .gitattributes and plain.txt
+
+    def _build_and_check(self, files: dict, attributes: str, config: tuple = ()) -> tuple[Path, dict]:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        base = Path(tmp.name)
+        repo = _make_repo(base, files, attributes)
+        env = _isolated_env(base, "UTC0")
+        for key, value in config:
+            subprocess.run([GIT, "config", key, value], cwd=repo, env=env, check=True)
+        out = base / "out.zip"
+        build = subprocess.run([sys.executable, str(SCRIPT), "build", "--repo", str(repo), "--tag", TAG,
+                                "--out", str(out)], env=env, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(build.returncode, 0, build.stderr)
+        check = subprocess.run([sys.executable, str(SCRIPT), "check", "--repo", str(repo), "--tag", TAG,
+                                "--zip", str(out)], env=env, capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(check.returncode, 0, check.stderr)
+        return out, json.loads(check.stdout)
+
+    def test_export_attributes_follow_git_archive(self) -> None:
+        files = {"keep.txt": b"keep\n", "kept-anyway.txt": b"string value\n", "dirpat/inner.txt": b"dropped\n",
+                 "subst-string.txt": b"$Format:%H$\n", "win.txt": b"one\ntwo\n", "id.txt": b"$" + b"Id$\n",
+                 "text-auto.txt": b"a\nb\n", "lf.txt": b"a\nb\n", "binary.txt": b"a\nb\n", "input.txt": b"a\nb\n"}
+        attributes = ("dirpat/ export-ignore\nkept-anyway.txt export-ignore=no\n"
+                      "subst-string.txt export-subst=yes\nwin.txt eol=crlf\nid.txt ident\n"
+                      "text-auto.txt text=auto\nlf.txt text eol=lf\nbinary.txt -text eol=crlf\n"
+                      "input.txt text=input\n")
+        out, report = self._build_and_check(files, attributes)
+        with zipfile.ZipFile(out) as archive:  # git archive converted win.txt and ignored only dirpat/
+            self.assertEqual(archive.read(PREFIX + "win.txt"), b"one\r\ntwo\r\n")
+            self.assertIn(PREFIX + "kept-anyway.txt", archive.namelist())
+            self.assertFalse(any(name.startswith(PREFIX + "dirpat") for name in archive.namelist()))
+        l2 = report["l2"]
+        self.assertEqual(report["l1"]["status"], "match")
+        for key in ("missing", "extra", "mismatched", "unsafe", "export_subst_unverified", "parser_ambiguity"):
+            with self.subTest(key=key):
+                self.assertEqual(l2.get(key), [])
+        self.assertEqual(l2.get("conversion_unverified"), ["id.txt", "text-auto.txt", "win.txt"])
+        self.assertEqual(l2["status"], "partial")
+        self.assertEqual((l2["counts"]["export_ignored"], l2["counts"]["matched"]), (1, 7))
+
+    def test_git_archive_data_descriptors_are_accepted(self) -> None:
+        files = {"big.bin": bytes(range(256)) * 32, "big.txt": b"line\n" * 2000, "small.txt": b"small\n"}
+        out, report = self._build_and_check(files, "", config=(("core.bigFileThreshold", "1k"),))
+        with zipfile.ZipFile(out) as archive:
+            streamed = [info.filename for info in archive.infolist() if info.flag_bits & 0x08]
+        self.assertEqual(sorted(streamed), [PREFIX + "big.bin", PREFIX + "big.txt"])
+        self.assertEqual(report["l1"]["status"], "match")
+        self.assertEqual(report["l2"].get("parser_ambiguity"), [])
+        self.assertEqual((report["l2"]["status"], report["l2"]["counts"]["matched"]), ("match", 4))
 
 
 if __name__ == "__main__":

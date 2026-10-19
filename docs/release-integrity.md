@@ -165,7 +165,9 @@ try {
 ```
 
 - `core.autocrlf=false`: `core.autocrlf=true`인 Windows에서 텍스트 파일이 CRLF로 바뀌어 들어가지 않게 한다.
-  ZIP의 파일 바이트가 Git blob과 같아진다.
+  변환 속성(`eol`, `text`, `ident`, `filter`, `working-tree-encoding`)이 없는 파일은 ZIP의 파일 바이트가 Git
+  blob과 같아진다. 이런 속성이 있는 파일은 이 설정과 상관없이 `git archive`가 바꿔 넣을 수 있다. 예를 들어
+  `eol=crlf` 파일은 CRLF로 들어간다.
 - `--prefix`: 모든 항목이 `agentic-vault-VERSION/` 폴더 아래에 들어간다. 이것이 빠지면 같은 파일이 나오지 않는다.
 - PowerShell 형식은 v0.25.0 태그로 실행해 아래 UTC0 측정과 같은 SHA-256을 얻었고, 실행 뒤 `$env:TZ`는 원래대로
   비어 있었다(2026-10-20, 1회).
@@ -197,7 +199,7 @@ v0.25.0 다음 릴리스부터 `verification.json`에 `rebuild_spec` 블록을 �
 ### 재빌드 확인(선택, 보고 전용)
 
 태그가 있는 저장소 사본(`git fetch --tags`)에서 실행한다. `--spec`에는 `rebuild_spec` 블록이 든 `verification.json`이나
-그 블록만 담은 JSON 파일을 준다.
+그 블록만 담은 JSON 파일을 준다. L2는 `git check-attr --source`를 쓰므로 git 2.40 이상이 필요하다.
 
 ```text
 python scripts/release_rebuild.py check --tag vVERSION --zip agentic-vault-VERSION.zip
@@ -208,22 +210,36 @@ python scripts/release_rebuild.py check --spec verification.json --zip agentic-v
   `TZ`를 바꿀 수 있다. v0.25.0까지처럼 `TZ` 없이 한국 시간대 PC에서 만든 릴리스는 `--tz KST-9`로 재현한다.
   `--spec`을 주면 주어진 ZIP이 `expected_sha256`과 같은지, 태그 커밋과 git 버전이 명세와 같은지도 함께 보고한다.
 - **L2(`L2_members_blobs`):** 주어진 ZIP을 풀지 않고 읽는다. 항목 이름 중복, 절대 경로, `..` 경로, 역슬래시,
-  드라이브 문자, prefix 밖 항목, 심볼릭 링크 항목(`external_attr`)을 위험 항목으로 표시한다. 그다음 prefix를 뗀
-  파일 항목(폴더 항목은 제외)과 `git ls-tree -r TAG`의 파일 목록을 비교한다. 경로 집합이 같고, 각 파일 바이트로
-  계산한 Git blob id(`blob <크기>\0` + 바이트의 해시)가 트리의 id와 같으면 일치다.
+  드라이브 문자, 빈 경로 조각과 `.` 조각, 제어 문자(방향 바꿈 같은 서식 문자 포함), prefix 밖 항목, 심볼릭 링크
+  항목(`external_attr`)을 위험 항목으로 표시한다. 그다음 prefix를 뗀 파일 항목(폴더 항목은 제외)과
+  `git ls-tree -r TAG`의 파일 목록을 비교한다. 경로 집합이 같고, 각 파일 바이트로 계산한 Git blob id
+  (`blob <크기>\0` + 바이트의 해시)가 트리의 id와 같으면 일치다.
+- **ZIP 구조(`parser_ambiguity`):** ZIP은 끝의 중앙 디렉터리로 읽는 프로그램과 앞에서부터 항목을 읽는
+  프로그램이 다른 내용을 볼 수 있다. 그래서 L2는 두 방식이 같은 항목을 보는지 확인한다. 첫 항목은 0바이트에서
+  시작해야 하고, 항목들은 빈틈이나 겹침 없이 중앙 디렉터리 앞까지 이어져야 한다(데이터 서술자와 ZIP64 포함).
+  각 항목 머리의 이름은 중앙 디렉터리의 이름과 같아야 하고, 끝 레코드 뒤에는 ZIP 주석만 있어야 한다. 앞에 붙은
+  데이터, 중앙 디렉터리에 없는 숨은 항목, 뒤에 붙은 데이터가 있으면 `parser_ambiguity`에 사유 코드를 적고 L2를
+  `mismatch`로 보고한다. 특정 항목의 문제이면 그 항목을 위험 항목(`parser_ambiguity`)으로도 표시한다.
 - **`export-ignore`·`export-subst`:** `git archive`처럼 태그 트리의 속성(`git check-attr --source`)을 읽는다.
-  `export-ignore` 파일과 폴더 아래 파일은 기대 목록에서 뺀다. `export-subst` 파일은 내용이 바뀌어 들어가므로
-  있는지만 확인하고 바이트는 대조하지 않는다. 이런 파일이 있으면 L2 상태는 `match`가 아니라 `partial`이다.
-  v0.25.0 태그는 두 속성을 쓰지 않는다(아래 측정에서 제외 0개).
+  폴더는 `dir/`처럼 끝에 `/`를 붙여 묻고, 값이 설정(`set`)일 때만 적용한다(`export-ignore=no` 같은 문자열 값은
+  적용하지 않는다). `export-ignore` 파일과 폴더 아래 파일은 기대 목록에서 뺀다. `export-subst` 파일은 내용이 바뀌어
+  들어가므로 있는지만 확인하고 바이트는 대조하지 않는다. 이런 파일이 있으면 L2 상태는 `match`가 아니라
+  `partial`이다. v0.25.0 태그는 두 속성을 쓰지 않는다(아래 측정에서 제외 0개).
+- **변환 속성(`conversion_unverified`):** `git archive`가 바꿔 넣을 수 있는 파일도 있는지만 확인하고 바이트는
+  대조하지 않는다. `ident`, `filter`, `working-tree-encoding`이 있는 파일, `-text`가 아니면서 `eol=crlf`인 파일,
+  `eol=lf` 없이 `text`나 `text=auto`인 파일이다(이때는 플랫폼의 `core.eol`이 줄 끝을 정한다). 이런 파일이
+  있으면 L2 상태는 `partial`이다. v0.25.0 태그의 `text` 속성은 모두 `eol=lf`와 함께 쓰여 해당 파일이 없다.
 - **출력과 종료 코드:** JSON으로 `l1`·`l2` 단계별 상태, 개수, 빠진·남는·다른·위험 항목 이름(각 50개까지)을
-  출력한다. 파일 내용은 출력하지 않는다. 일치든 불일치든 종료 코드 0이다. 사용법 오류, 없는 태그, git 실패는 종료
-  코드 2와 오류 코드만 출력한다.
+  출력한다. 이름 속 제어 문자와 서식 문자는 `\u202e`처럼 바꿔 적는다. 파일 내용은 출력하지 않는다. 일치든
+  불일치든 종료 코드 0이다. 사용법 오류, 없는 태그, git 실패는 종료 코드 2와 오류 코드만 출력한다.
+- **git 2.40 미만:** `git check-attr --source`가 실패하면 L1 결과는 그대로 출력하고, L2는 대조하지 않고
+  `refused`(사유 `git_check_attr_failed`)로 보고한다. 종료 코드는 0이다.
 - **한도:** ZIP 256 MiB, 항목 20,000개, 압축을 푼 크기 합 512 MiB를 넘으면 L2는 대조하지 않고 `refused`로 보고한다.
 
 ### 재현의 한계
 
 - 바이트 재현(L1)은 같은 git 빌드(git 2.55.0.windows.3)에서만 측정했다. 다른 git 버전이나 OS에서 같은 바이트가
-  나오는지는 측정하지 않았다. 그때는 L2 blob 대조를 기준으로 쓴다.
+  나오는지는 측정하지 않았다. 그때는 L2 blob 대조를 기준으로 쓴다. L2에는 git 2.40 이상이 필요하다.
 - L2는 파일 목록과 내용만 본다. 항목 시각, 실행 권한, 압축 방식, ZIP 주석은 비교하지 않는다(ZIP 주석이 커밋
   id인지는 참고로만 보고한다).
 - 재빌드 확인은 ZIP이 태그 소스에서 다시 만들어지는지를 보여 준다. 그 ZIP이 게시된 자산과 같은지는 위의
@@ -243,7 +259,8 @@ python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0
 - `--tz KST-9`와 prefix로 다시 만든 ZIP은 게시 파일과 바이트 단위로 같았다(L1 일치).
 - 기본 `UTC0`로 만든 ZIP은 `b53d4d94a2b9adc1a79c95e63b0386a92e6658b4cce98403940ab6ffd7012627`로 달랐다(L1 불일치).
 - 두 경우 모두 L2는 일치였다. 항목 473개(폴더 63개, 파일 410개), 파일 410개 모두 태그 트리의 blob과 같았고 위험
-  항목은 0개였다.
+  항목은 0개였다. ZIP 구조 확인(`parser_ambiguity`)과 변환 속성 확인을 더한 뒤 다시 실행해도 두 경우의 L1·L2
+  결과는 같았고, 구조 사유와 변환 대상은 0개였다(2026-10-20).
 - prefix 없이 만든 ZIP은 `KST-9`와 `UTC0` 모두 게시 파일과 달랐다.
 - 게시 전에 잠긴 v0.25.0 `verification.json`은 고치지 않는다. 그 파일에는 `rebuild_spec`이 없으므로 v0.25.0은
   `--tag`와 `--tz KST-9`로 확인한다. 이 기록은 영수증 밖의 게시 후 관측이다.
@@ -253,7 +270,7 @@ python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0
 | 확인 | 증명하는 것 | 증명하지 않는 것 |
 |---|---|---|
 | `SHA256SUMS` 대조 | 내려받은 파일이 같은 릴리스의 `SHA256SUMS` 목록과 같다. 전송 중 손상을 찾는다 | 목록의 진위. 불변이 아닌 릴리스에서는 자산과 목록을 함께 바꿀 수 있다 |
-| 재빌드 확인(`release_rebuild.py check`) | L1 일치: 이 git으로 태그에서 다시 만든 ZIP과 바이트가 같다. L2 일치: 파일 목록과 각 파일 바이트가 태그 트리의 blob과 같고 위험한 항목 이름이 없다 | 게시된 자산과 같은지, 누가 만들었는지, 다른 git 빌드에서도 같은 바이트가 나오는지, 항목 시각·권한·압축 방식(L2) |
+| 재빌드 확인(`release_rebuild.py check`) | L1 일치: 이 git으로 태그에서 다시 만든 ZIP과 바이트가 같다. L2 일치: 파일 목록과 각 파일 바이트가 태그 트리의 blob과 같고 위험한 항목 이름이 없으며 ZIP 구조가 한 가지로만 읽힌다 | 게시된 자산과 같은지, 누가 만들었는지, 다른 git 빌드에서도 같은 바이트가 나오는지, 항목 시각·권한·압축 방식(L2) |
 | 릴리스 증명(`verify`·`verify-asset`) | 파일이 GitHub가 그 태그로 게시한 자산과 같고, 태그가 증명에 적힌 커밋을 가리킨다 | 누가 어떤 환경에서 ZIP을 만들었는지(빌드 출처), ZIP이 태그 소스에서 재현되는지, 게시를 승인한 사람의 신원, 내용의 안전성 |
 
 - **서명 주체:** 다른 저장소의 불변 릴리스 1건(zizmorcore/zizmor-action v0.7.1)을 `--format json`으로 보면 인증서
