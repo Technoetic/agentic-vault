@@ -1309,11 +1309,19 @@ def tg_send(token: str, chat_id: int, text: str) -> bool:
 
 
 def _capture_origin(message: dict, body: str = "") -> str:
-    """Host transport metadata wins over origin/trust statements in message text."""
+    """Return the host-observed origin; transport metadata beats message text.
+
+    Precedence: "forwarded" (any forward_* field; it describes the original
+    author), then "via_bot" (Message.via_bot: an inline bot produced the text even
+    though `from` is the whitelisted user), then "url" (a lone URL with url or
+    text_link entities), then "own". Only "own" is host-trusted.
+    """
     if any(message.get(key) is not None for key in (
             "forward_origin", "forward_from", "forward_from_chat", "forward_sender_name",
             "forward_date")):
         return "forwarded"
+    if message.get("via_bot") is not None:
+        return "via_bot"
     entities = message.get("entities") or []
     if re.fullmatch(r'https?://\S+', body.strip(), re.I) and isinstance(entities, list) and any(isinstance(entity, dict) and entity.get("type")
                                         in ("url", "text_link") for entity in entities):
@@ -1658,6 +1666,8 @@ def serve(vault: Path, cfg: dict) -> None:
                 vault, cfg, token, first, last_butler, butler_file,
                 time.time(), butler_backoff)
         # --- 수신 ---
+        # Only "message" updates are requested. guest_message (Bot API 10.0) and
+        # other kinds stay unrequested; process_update ignores them anyway.
         try:
             resp = tg_call(token, "getUpdates", http_timeout=65, offset=offset + 1,
                            timeout=50, allowed_updates='["message"]')

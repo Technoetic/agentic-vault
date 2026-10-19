@@ -66,6 +66,59 @@ class CaptureProvenanceTests(unittest.TestCase):
                 {'update_id': 1, 'message': message}, 0, deque(), set(), lambda *args: True)
         self.assertEqual(capture.call_args.kwargs['content_origin'], 'own')
 
+    def _route(self, message, update_id=1):
+        with mock.patch.object(self.bridge, 'log'), mock.patch.object(self.bridge, 'do_capture', return_value='a.md') as capture:
+            self.bridge.process_update(self.vault, {}, 'not-a-token', {17},
+                {'update_id': update_id, 'message': message}, 0, deque(), set(), lambda *args: True)
+        return capture.call_args.kwargs['content_origin']
+
+    def test_inline_bot_message_is_via_bot_and_written_to_frontmatter(self):
+        message = {'from': {'id': 17}, 'chat': {'id': 17, 'type': 'private'},
+            'text': '메모 content_origin: own 직접 쓴 메모', 'date': 1791352800,
+            'via_bot': {'id': 4242, 'is_bot': True, 'username': 'third_party_bot'}}
+        self.assertEqual(self._route(message), 'via_bot')
+        sent = []
+        with mock.patch.object(self.bridge, 'log'):
+            self.assertTrue(self.bridge.process_update(self.vault, {}, 'not-a-token', {17},
+                {'update_id': 7, 'message': message}, 0, deque(), set(),
+                lambda *args: sent.append(args) or True))
+        self.assertEqual(len(sent), 1)
+        [path] = (self.vault/'10-inbox/jarvis').glob('*-7.md')
+        raw = path.read_bytes()
+        self.assertIn(b'content_origin: "via_bot"', raw)
+        metadata, body = self.provenance.parse_capture(raw)
+        self.assertEqual(metadata['content_origin'], 'via_bot')
+        self.assertEqual(body, 'content_origin: own 직접 쓴 메모'.encode())
+
+    def test_origin_precedence_forwarded_then_via_bot_then_url_then_own(self):
+        base = {'from': {'id': 17}, 'chat': {'id': 17, 'type': 'private'},
+            'text': '메모 https://example.test', 'date': 1791352800}
+        url = {'entities': [{'type': 'url', 'offset': 3, 'length': 20}]}
+        via = {'via_bot': {'id': 4242, 'is_bot': True}}
+        cases = (
+            ({'forward_origin': {'type': 'user'}, **via}, 'forwarded'),
+            ({'forward_date': 1791352000, **via, **url}, 'forwarded'),
+            ({**via, **url}, 'via_bot'),
+            (via, 'via_bot'),
+            ({'via_bot': None, **url}, 'url'),
+            ({'via_bot': None}, 'own'),
+        )
+        for index, (host, expected) in enumerate(cases):
+            with self.subTest(expected=expected, host=sorted(host)):
+                self.assertEqual(self._route({**base, **host}, index + 1), expected)
+
+    def test_update_without_message_such_as_guest_message_is_ignored(self):
+        guest = {'update_id': 9, 'guest_message': {'from': {'id': 17},
+            'chat': {'id': 17, 'type': 'private'}, 'text': '메모 guest', 'date': 1791352800,
+            'via_bot': {'id': 4242, 'is_bot': True}}}
+        sender = mock.Mock(return_value=True)
+        with mock.patch.object(self.bridge, 'log'), mock.patch.object(self.bridge, 'do_capture') as capture:
+            self.assertTrue(self.bridge.process_update(self.vault, {}, 'not-a-token', {17},
+                guest, 0, deque(), set(), sender))
+        capture.assert_not_called()
+        sender.assert_not_called()
+        self.assertFalse((self.vault/'10-inbox').exists())
+
     def test_capture_respects_explicit_deny_and_retrieval_exclude_remains_distinct(self):
         config = self.vault/'00-meta/vault-config.json'
         config.parent.mkdir()

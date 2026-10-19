@@ -62,7 +62,7 @@ class ProvenanceTests(unittest.TestCase):
             health.validate_config({})), [])
 
     def test_forwarded_and_url_are_untrusted_without_overwriting_classification(self):
-        for origin in ('forwarded', 'url'):
+        for origin in ('forwarded', 'url', 'via_bot'):
             with self.subTest(origin=origin):
                 manifest = self.derive(self.capture('10-inbox/a.md', origin=origin))
                 self.assertEqual(manifest['trust'], 'untrusted')
@@ -199,6 +199,40 @@ class ProvenanceTests(unittest.TestCase):
         self.assertIn('index_inventory', findings[0]['details']['reason'])
         findings = self.module.analyze_notes({source['path']: original+'changed'}, {})
         self.assertEqual([row['code'] for row in findings], ['provenance-body-mismatch'])
+
+    def test_origin_set_and_untrusted_origins_include_via_bot(self):
+        self.assertEqual(self.module.ORIGINS, frozenset({'own', 'forwarded', 'url', 'via_bot'}))
+        self.assertEqual(self.module.UNTRUSTED_ORIGINS,
+            frozenset({'forwarded', 'url', 'via_bot', 'derived'}))
+        self.assertNotIn('own', self.module.UNTRUSTED_ORIGINS)
+        with self.assertRaises(self.module.ProvenanceError):
+            self.module.render_capture('x', captured_via='telegram', content_origin='via-bot')
+
+    def test_staged_privileged_note_consuming_via_bot_capture_is_unresolved(self):
+        for origin, expected in (('via_bot', ['provenance-unresolved']),
+                                 ('forwarded', ['provenance-unresolved']),
+                                 ('url', ['provenance-unresolved']), ('own', [])):
+            with self.subTest(origin=origin):
+                source = self.capture('20-knowledge/inline.md', origin=origin)
+                original = (self.vault/source['path']).read_bytes().decode()
+                linked = '\n'.join(('---', 'title: "hot"', '---', '[[inline]]'))
+                listed = '\n'.join(('---', 'provenance_sources: ["20-knowledge/inline.md"]',
+                                    '---', 'summary'))
+                for privileged in (linked, listed):
+                    findings = self.module.analyze_notes({source['path']: original,
+                        '00-meta/hot.md': privileged}, {'hot_note': '00-meta/hot.md'})
+                    self.assertEqual([row['code'] for row in findings], expected)
+                    if expected:
+                        self.assertEqual(findings[0]['path'], '00-meta/hot.md')
+
+    def test_privileged_note_that_is_itself_a_via_bot_capture_is_unresolved(self):
+        for origin, expected in (('via_bot', ['provenance-unresolved']), ('own', [])):
+            with self.subTest(origin=origin):
+                source = self.capture('00-meta/hot.md', origin=origin)
+                original = (self.vault/source['path']).read_bytes().decode()
+                findings = self.module.analyze_notes({source['path']: original},
+                    {'hot_note': '00-meta/hot.md'})
+                self.assertEqual([row['code'] for row in findings], expected)
 
     def test_staged_analyzer_does_not_read_sidecars_or_denied_originals(self):
         source = self.capture('20-knowledge/own.md')

@@ -45,7 +45,12 @@ SOURCE_FIELDS = frozenset({'path', 'sha256', 'size', 'content_origin', 'classifi
 TARGET_FIELDS = frozenset({'path', 'sha256', 'size'})
 RESERVED = ('00-meta/.agentic-vault/runtime', '00-meta/evidence', '00-meta/proposals')
 HASH_RE = re.compile(r'[0-9a-f]{64}\Z')
-ORIGINS = frozenset({'own', 'forwarded', 'url'})
+# Host-observed capture origins. Only 'own' is host-trusted; via_bot marks a
+# message composed through an inline bot, even when the sender is whitelisted.
+ORIGINS = frozenset({'own', 'forwarded', 'url', 'via_bot'})
+# Origins whose content stays untrusted for privileged consumption. 'derived'
+# is the manifest-only origin of a nested derivative, never a capture origin.
+UNTRUSTED_ORIGINS = frozenset(ORIGINS - {'own'} | {'derived'})
 
 
 class ProvenanceError(Exception):
@@ -508,7 +513,7 @@ emit provenance-unresolved until the separate explicit validator is run.
         if path.casefold() not in privileged:
             continue
         fields = metadata[path]
-        risk = fields.get('content_origin') in ('forwarded', 'url', 'derived') or fields.get('provenance_trust') == 'untrusted' or bool(fields.get('provenance_manifest'))
+        risk = fields.get('content_origin') in UNTRUSTED_ORIGINS or fields.get('provenance_trust') == 'untrusted' or bool(fields.get('provenance_manifest'))
         references = fields.get('provenance_sources', [])
         references = references if isinstance(references, list) else []
         references = [ref for ref in references[:128] if isinstance(ref, str)]
@@ -519,7 +524,7 @@ emit provenance-unresolved until the separate explicit validator is run.
                 destinations = by_name.get(Path(ref).stem.casefold(), [])
                 candidate = destinations[0] if len(destinations) == 1 else ''
             source = metadata.get(candidate, {})
-            if candidate in unsafe or source.get('content_origin') in ('forwarded', 'url', 'derived') or source.get('provenance_trust') == 'untrusted' or source.get('provenance_manifest'):
+            if candidate in unsafe or source.get('content_origin') in UNTRUSTED_ORIGINS or source.get('provenance_trust') == 'untrusted' or source.get('provenance_manifest'):
                 risk = True
         if risk:
             findings.append(make_warning('provenance-unresolved', path, 1,

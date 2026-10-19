@@ -145,7 +145,11 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 ## 수집과 경고
 
 Jarvis 수집은 `captured_via`, `content_origin`, `captured_at`, `body_sha256`을 호스트가 만든다.
-직접 작성한 메모는 own, 전달 자료는 forwarded, 호스트가 선택한 URL 수집은 url이다. 링크를 포함한 직접 메모 전체를 외부 자료로 낮추지 않는다.
+직접 작성한 메모는 own, 전달 자료는 forwarded, 인라인 봇을 거친 메시지(`via_bot`)는 via_bot, 호스트가 선택한 URL 수집은 url이다. 링크를 포함한 직접 메모 전체를 외부 자료로 낮추지 않는다.
+판정 순서는 forwarded → via_bot → url → own이다. 전달 정보가 원래 작성자를 가리키므로 먼저 본다.
+via_bot은 허용된 사용자가 보냈더라도 본문을 제3자 봇이 만들었다는 뜻이라 forwarded·url처럼 신뢰하지 않는다. 사용자가 일부러 인라인 봇으로 보낸 메모도 같다.
+privileged 노트가 via_bot 수집을 참조하면 `provenance-unresolved`가 붙는다. 브리지는 `getUpdates`에 `message`만 요청한다. `guest_message` 등 다른 업데이트는 받지 않고, 와도 무시한다.
+Jarvis를 인증된 채널로 옮기는 작업은 아직 남아 있다.
 파생 노트의 manifest 참조는 `provenance_manifest: "00-meta/provenance/<ID>.json"`으로 둘 수 있다.
 기본 frontmatter 상한을 넘기지 않도록 긴 manifest는 별도 JSON으로 보존한다. `verified_by` 문자열은 증명이 아니다.
 Git staged 검사는 index 원문만 사용한다. JSON 근거를 직접 확인할 수 없는 privileged 파생 자료는

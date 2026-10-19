@@ -2185,6 +2185,22 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         namespace = _BRIDGE.state_dir_for(self.vault, token, _BRIDGE.STATE_ROOT)
         self.assertFalse((namespace / "offset").exists())
 
+    def test_get_updates_requests_only_message_updates(self):
+        # Pinned: guest_message (Bot API 10.0) and other update kinds stay
+        # unrequested, so only ordinary private messages reach process_update.
+        token = "12345:secret-value"
+        cfg = {
+            "telegram_user_ids": [],
+            "_briefing_slots": [(7, 30)],
+            "butler_interval_hours": 24,
+        }
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}),                 patch.object(_BRIDGE, "tg_call", side_effect=KeyboardInterrupt) as caller,                 patch.object(_BRIDGE, "log"),                 self.assertRaises(KeyboardInterrupt):
+            _BRIDGE.serve(self.vault, cfg)
+
+        caller.assert_called_once()
+        self.assertEqual(caller.call_args.args[1], "getUpdates")
+        self.assertEqual(json.loads(caller.call_args.kwargs["allowed_updates"]), ["message"])
+
     def test_http_protocol_poll_failure_is_sanitized_and_retried(self):
         token = "12345:secret-value"
         cfg = {

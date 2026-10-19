@@ -39,8 +39,9 @@ updated: YYYY-MM-DD
 
 ## 강제 규칙
 
-수집 선택 필드는 `captured_via`, `content_origin`(own/forwarded/url), `captured_at`,
-`body_sha256`이다. 호스트가 만든 원본 body SHA와 파생 source/target 해시를 보존한다.
+수집 선택 필드는 `captured_via`, `content_origin`(own/forwarded/url/via_bot), `captured_at`,
+`body_sha256`이다. own만 신뢰한다. forwarded·url·via_bot(인라인 봇 경유)은 신뢰하지 않는다.
+호스트가 만든 원본 body SHA와 파생 source/target 해시를 보존한다.
 긴 파생 manifest는 별도 JSON에 두고 `provenance_manifest`로 참조한다. 기존 필수 키·Enum·
 줄 상한은 유지하며 이 필드를 이유로 임의 확대하지 않는다. `verified_by` 표기는 검증 증명이 아니다.
 aliases는 명시적인 query expansion에만 쓰며 위키링크 대상 파일명의 해석은 바꾸지 않는다.
