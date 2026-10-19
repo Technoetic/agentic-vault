@@ -371,7 +371,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   한계는 그대로 남는다.
 - 보고서에는 `redaction_mode`(`unkeyed`·`keyed`·`ephemeral`)와 `redaction_algorithm`(`sha256`·`hmac-sha256`)이
   남는다. 키와 키의 지문(해시 등)은 보고서·표준 오류 어디에도 남기지 않는다. `--redact`만 쓴 보고서는 이 두 필드가
-  더해진 것 말고 v0.25.0과 같다. 옵션 없는 기본 출력은 바뀌지 않는다.
+  더해진 것 말고 v0.25.0과 같다(`--expand-query`를 쓰면 hardening.md에 적은 `inventory_verification`
+  필드도 달라진다). 옵션 없는 기본 출력은 바뀌지 않는다.
 - 키를 써도 한계가 있다. 키 해시는 결정적이어서 한 보고서 안에서 같은 값은 같은 토큰이 된다. 그래서 반복과 빈도는
   드러난다. 말할 수 있는 것은 "키가 없는 사람은 토큰을 다시 계산하거나 추측을 확인할 수 없다"뿐이다. 키를 가진
   사람은 후보를 해시해 맞춰 볼 수 있다. 키를 볼트나 보고서 옆에 두면 효과가 없다. 값은 통째로 해시하며 단어(토큰)마다 따로 해시하지

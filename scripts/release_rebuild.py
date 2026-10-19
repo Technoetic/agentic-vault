@@ -19,7 +19,8 @@ check is report-only and compares a given ZIP with the tag at two levels:
                     export-subst members and members that git archive may convert
                     (eol, text, ident, filter, working-tree-encoding) are present
                     but their bytes are unverified.
-Exit 0 for match or mismatch; exit 2 for usage errors, a missing tag or Git failures.
+Exit 0 for match or mismatch (a failing `git check-attr --source`, as with git older than 2.40,
+refuses L2 and keeps exit 0); exit 2 for usage errors, a missing tag or other Git failures.
 Output is JSON. File contents, Git stderr and caller-supplied paths are never printed;
 member names from the ZIP or the tree appear only in bounded lists.
 The repository is located only by --repo (default: this script's repository);

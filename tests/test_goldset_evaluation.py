@@ -1184,6 +1184,43 @@ class KeyedRedactionTests(GoldSetVaultCase):
         self.assertEqual(evaluator.read_redaction_key(Path(extended + str(self.key_a)),
                                                       Path(extended + str(self.vault))), KEY_A)
 
+    @unittest.skipUnless(sys.platform == "win32", "administrative shares are a Windows spelling")
+    def test_admin_share_spelling_cannot_bypass_the_inside_vault_refusal(self):
+        # Only the file-identity branch of _key_inside sees through \\localhost\C$ spellings.
+        inside = self.write_key("KEYPATHMARK.bin", KEY_A, self.vault / "00-meta")
+        drive, rest = os.path.splitdrive(str(inside))
+        vault_drive, vault_rest = os.path.splitdrive(str(self.vault))
+        if len(drive) != 2 or drive[1] != ":" or vault_drive != drive:
+            self.skipTest("the temporary directory is not on a lettered drive")
+        share = "\\\\localhost\\" + drive[0] + "$"
+        shared_key, shared_vault = Path(share + rest), Path(share + vault_rest)
+        try:
+            reachable = shared_key.is_file() and shared_vault.is_dir()
+        except OSError:
+            reachable = False
+        if not reachable:
+            self.skipTest("the administrative share is not reachable on this host")
+        cases = {"share key": (self.vault, shared_key), "share vault": (shared_vault, inside)}
+        for name, (vault, key) in cases.items():
+            with self.subTest(case=name):
+                self.assert_key_refused(["--vault", vault, "--goldset", self.goldset, "--min-recall-at-3", "0",
+                                         "--min-mrr", "0", "--redact-key-file", key])
+        # A key outside the vault stays accepted under the share spelling.
+        outside_drive, outside_rest = os.path.splitdrive(str(self.key_a))
+        if outside_drive == drive:
+            self.assertEqual(evaluator.read_redaction_key(Path(share + outside_rest), shared_vault), KEY_A)
+
+    @unittest.skipUnless(sys.platform == "win32", "extended-length paths are a Windows spelling")
+    def test_extended_length_spelling_is_refused_without_the_identity_check(self):
+        # Pins _plain_spelling on its own: with no file identity available, only the prefix stripping
+        # lets the lexical comparison see that \\?\ spellings point inside the vault.
+        inside = self.write_key("KEYPATHMARK.bin", KEY_A, self.vault / "00-meta")
+        extended = "\\\\?\\"
+        with mock.patch.object(evaluator, "_identity", return_value=None):
+            self.assertTrue(evaluator._key_inside(Path(extended + str(inside)), self.vault))
+            self.assertTrue(evaluator._key_inside(inside, Path(extended + str(self.vault))))
+            self.assertFalse(evaluator._key_inside(Path(extended + str(self.key_a)), self.vault))
+
     @unittest.skipUnless(sys.platform == "win32", "directory junctions are a Windows feature")
     def test_key_reached_through_a_link_into_the_vault_is_refused(self):
         target = self.vault / "00-meta"
