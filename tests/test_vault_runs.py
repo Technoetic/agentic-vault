@@ -11,17 +11,24 @@ import tempfile
 import unittest
 from unittest import mock
 
-SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
+TESTS = Path(__file__).resolve().parent
+SCRIPTS = TESTS.parent / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
+if str(TESTS) not in sys.path:
+    sys.path.insert(0, str(TESTS))
+import runtime_failures  # noqa: E402 - test support beside this module
 try:
     runs = importlib.import_module('vault_runs')
 except ModuleNotFoundError:
     runs = None
 
 
+# Children report unexpected errors through runtime_failures.classify: class
+# names, errno, winerror, code site and runtime path category only.
 RUN_CHILD = """
 import json, re, sys
 sys.path.insert(0, sys.argv[1]); import vault_runs as runs
+import runtime_failures
 verb = sys.argv[3]
 try:
     if verb == 'prepare':
@@ -38,17 +45,25 @@ except runs.RunError as error:
     elif verb == 'record' and str(error) == 'immutable_receipt_exists':
         print(json.dumps({'ok': False, 'error': 'immutable_receipt_exists'}))
     else:
-        chain = []
-        while error is not None:
-            code = str(error) if re.fullmatch(r'[a-z_]{1,80}', str(error)) else None
-            chain.append({'type': type(error).__name__, 'code': code,
-                          'winerror': getattr(error, 'winerror', None)})
-            error = error.__cause__
-        print(json.dumps({'unexpected_error': chain})); sys.exit(2)
+        chain = runtime_failures.classify(error)
+        print(json.dumps({'unexpected_error': chain,
+                          'summary': runtime_failures.summarize(chain)})); sys.exit(2)
 else:
     print(json.dumps({'ok': True, 'result': result}))
 """
 
+
+# Test-only child prelude: deny the transition guard's exclusive create with
+# EACCES and no winerror, the shape os.open gives for ERROR_ACCESS_DENIED.
+GUARD_OPEN_DENIED = """
+import errno, os
+_real_open = os.open
+def _denied_guard_open(path, flags, *args, **kwargs):
+    if str(path).endswith('.guard'):
+        raise PermissionError(errno.EACCES, 'Access is denied', str(path))
+    return _real_open(path, flags, *args, **kwargs)
+os.open = _denied_guard_open
+"""
 
 class VaultRunsTests(unittest.TestCase):
     def setUp(self):
@@ -85,8 +100,14 @@ class VaultRunsTests(unittest.TestCase):
     def write_json(self, relative, value):
         return self.write(relative, json.dumps(value, allow_nan=False))
 
-    def run_children(self, verb, *args, count=2):
-        children = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', RUN_CHILD,
+    def run_children(self, verb, *args, count=2, prelude='', timeout=20):
+        """Run concurrent children; fail with a content-free classification of each failure.
+
+        Every child is collected before failing, so one message shows all failing
+        children. No retry: a retry would hide the cause being classified.
+        """
+        code = '\n'.join(('import sys; sys.path.insert(0, %r)' % str(TESTS), prelude, RUN_CHILD))
+        children = [subprocess.Popen([sys.executable, '-X', 'utf8', '-c', code,
             str(SCRIPTS), str(self.vault), verb, *args], stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding='utf-8') for _ in range(count)]
         def cleanup():
@@ -96,12 +117,22 @@ class VaultRunsTests(unittest.TestCase):
             for child in children:
                 child.communicate(timeout=5)
         self.addCleanup(cleanup)
-        results = []
-        for child in children:
-            stdout, stderr = child.communicate(timeout=20)
-            self.assertEqual(child.returncode, 0, stdout + stderr)
-            self.assertEqual(stderr, '')
-            results.append(json.loads(stdout))
+        results, failures = [], []
+        for index, child in enumerate(children):
+            try:
+                stdout, stderr = child.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate(timeout=5)
+                failures.append({'child': index, 'failure': 'timeout'})
+                continue
+            failure = runtime_failures.child_failure(child.returncode, stdout, stderr)
+            if failure is not None:
+                failures.append({'child': index, **failure})
+            else:
+                results.append(json.loads(stdout))
+        if failures:
+            self.fail(runtime_failures.report(verb, failures, count))
         return results
 
     def prepare(self, candidate='notes/candidate.md', **kwargs):
@@ -454,6 +485,33 @@ class VaultRunsTests(unittest.TestCase):
         self.assertEqual(inspected['status'], 'complete' if receipts else 'prepared')
         self.assertEqual(len(list(runtime.glob('*prepared.json'))), 1)
         self.assertEqual((self.vault / prepared['path']).read_bytes(), original)
+
+    def test_child_failures_are_classified_without_raw_paths(self):
+        # Deterministic stand-in for the unmeasured Windows failure: os.open on
+        # the guard is denied the way the C runtime reports ERROR_ACCESS_DENIED.
+        with self.assertRaises(AssertionError) as caught:
+            self.run_children('prepare', count=2, prelude=GUARD_OPEN_DENIED)
+        message = str(caught.exception)
+        self.assertIn('prepare: 2 of 2 children failed; lock_access_denied=2', message)
+        self.assertIn('PermissionError errno=13 winerror=None path=lock(guard)', message)
+        self.assertIn('codes=unsafe_or_invalid_input>unsafe_lock', message)
+        self.assertNotIn(str(self.vault), message)
+        self.assertNotIn(Path(self.tmp.name).name, message)
+        self.assertNotIn('Access is denied', message)
+        self.assertEqual(list((self.vault / runs.RUNTIME_DIR).glob('*prepared.json')), [])
+
+    def test_child_crashes_and_timeouts_are_classified(self):
+        crash = ("import sys; raise PermissionError(13, 'Access is denied', "
+                 "sys.argv[2] + '/00-meta/.agentic-vault/runtime/x')")
+        with self.assertRaises(AssertionError) as caught:
+            self.run_children('prepare', count=1, prelude=crash)
+        message = str(caught.exception)
+        self.assertIn('prepare: 1 of 1 children failed', message)
+        self.assertIn('child 0: crash PermissionError', message)
+        self.assertNotIn(str(self.vault), message)
+        with self.assertRaises(AssertionError) as caught:
+            self.run_children('prepare', count=1, prelude='import time; time.sleep(30)', timeout=1)
+        self.assertIn('child 0: timeout', str(caught.exception))
 
     def test_held_run_lease_refuses_without_receipt_change_then_serial_reuse_succeeds(self):
         prepared = self.prepare()
