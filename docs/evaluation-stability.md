@@ -171,12 +171,75 @@ Python 3.12의 경로 해석 중 다른 프로세스가 guard를 지우면 남�
 UNC/device 표기를 임의로 같은 경로로 취급하지 않는다. 협조 잠금은 잠금에 참여하는 writer를 위한
 것이며 다중 파일 트랜잭션·외부 앱 편집의 완전한 차단을 제공하지 않는다.
 
+## 간헐 실패 테스트: 분류와 반복 측정
+
+`tests/test_vault_runs.py`의 동시 prepare 테스트
+(`test_concurrent_prepares_preserve_one_manifest_and_at_most_one_completion`)는 Windows에서 가끔
+실패한다. 원인은 아직 측정하지 못했다. 그래서 고치기 전에 실패를 분류하고, 효과는 반복 횟수와
+상한으로 잰다.
+
+### 실패 분류
+
+- 동시 실행한 자식이 예상하지 못한 오류로 끝나면 테스트는 모든 자식을 모은 뒤 한 번 실패한다.
+  메시지에는 자식마다 예외 클래스, errno, winerror, 가장 안쪽 코드 위치, 경로 범주가 들어간다.
+- 경로 범주는 엔진의 런타임 배치에서 나온다. `lock`(잠금 lease와 `.guard`), `temp`
+  (`.vault-state-` 임시 파일), `manifest`(`run-*-prepared.json`), `receipt`(`run-*-completed.json`,
+  `run-compare-*.json`), `other`다. 원래 경로·노트 내용·예외 문장은 싣지 않는다.
+- `replace_failed`처럼 `from None`으로 원인을 감춘 오류도 암묵 context를 따라가 분류한다.
+  비정상 종료와 시간 초과도 따로 적는다.
+- 분류 코드는 테스트 지원 모듈 `tests/runtime_failures.py`에 있다. 엔진은 이 모듈을 가져오지 않으며
+  엔진 동작은 바뀌지 않는다.
+
+### 재시도는 아직 넣지 않는다
+
+[DeleteFileW 문서](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew)에
+따르면 지운 파일은 마지막 핸들이 닫힐 때까지 삭제 대기 상태로 남는다. 그 사이 같은 이름을 열면
+ERROR_ACCESS_DENIED(5)로 실패한다. guard를 지우고 곧바로 다시 만드는 잠금 경로가 이 상태에 걸린다는
+가설이 있지만 확인하지 못했다. 지금 재시도를 넣으면 다른 원인까지 가린다.
+
+- 분류 메시지의 `lock_access_denied`는 lock·guard 경로의 접근 거부를 뜻한다. `os.open`은 C 런타임을
+  거치며 EACCES(13)만 남기고 winerror를 비운다. 그래서 winerror 5와 winerror 없는 errno 13을 함께
+  센다. 이 표시는 후보일 뿐 삭제 대기의 확인이 아니다. POSIX의 errno 13은 보통의 권한 거부다.
+- 재시도는 lock 경로의 삭제 대기(lock 경로의 winerror 5)가 반복 측정으로 확인된 뒤에만 검토한다.
+  그때도 새 일정을 만들지 않고 원자적 교체의 기존 제한 재시도(`REPLACE_RETRY_DELAYS`, WinError 5/32,
+  최대 6회·총 대기 0.31초)를 재사용한다. 지속적인 거부·정책 변경·소유자 변경은 계속 fail-closed로 남긴다.
+
+### 반복 측정 도구
+
+```text
+python scripts/flaky_repeat.py test_vault_runs.VaultRunsTests.test_concurrent_prepares_preserve_one_manifest_and_at_most_one_completion -n 300
+python scripts/flaky_repeat.py <module.Class.test_name> -n 30 --fresh-process --json
+```
+
+- unittest id 하나를 N번 실행한다. 기본은 같은 프로세스이고 `--fresh-process`는 실행마다 새
+  인터프리터를 띄운다. 통과·실패·오류·건너뜀을 센다. 기본 검색 경로는 `tests/`다.
+- 실패와 오류가 실패 사건(x)이다. 건너뛴 실행은 분모에서 뺀다. 상한은 `scripts/eval_stats.py`의
+  단측 95% Clopper-Pearson이다.
+- 출력은 `x/N failures; failure rate <= p`다. x가 0이면 `not observed in N runs (rate <= p)`라고 쓰고
+  고쳤다고 쓰지 않는다. 상한이 관측률보다 1%p 넘게 높으면 상한이 넓다고 적는다.
+- 실패 서명은 예외 클래스와 메시지 첫 줄만 남기고 경로를 `<path>`로 바꾼다. 서로 다른 서명은
+  10개까지 보존한다.
+- 실행을 마치면 x와 관계없이 종료 코드 0, 사용법 오류는 2다. 측정 도구이며 게이트가 아니다.
+
+### 수정 효과를 재는 규칙
+
+- 수정 효과는 영향받는 테스트(또는 최소 재현)를 수백 번 겨냥해 반복해서 잰다. 결과는 x/N과
+  정확한 상한으로 보고한다.
+- 0/30의 상한은 약 0.095, 0/300은 약 0.0099다. 30번 연속 통과로는 실패율이 10% 미만이라는 말도
+  95% 신뢰로 하지 못한다.
+- 전체 테스트 한 번 통과는 회귀 확인일 뿐이다. 간헐 실패가 사라졌다는 근거가 아니다.
+- 같은 기계에서 다른 작업이 돌았다면 그 조건을 함께 적는다.
+- Gruber 등(ICST 2021)은 Python 프로젝트 22,352개의 테스트 876,186개를 분석했다. 통과한 테스트가
+  flaky가 아니라고 95% 신뢰로 말하려면 평균 약 170회의 재실행이 필요하다고 추정했다. Linux에서
+  실행한 데이터셋의 평균이며 이 테스트 묶음의 고정 기준이 아니다.
+
 ## 연구와 관측
 
 - [LongMemEval-V2](https://arxiv.org/abs/2605.12493), [MemoryAgentBench](https://arxiv.org/abs/2507.05257): 상태 변화와 실제 기억 사용을 분리하는 평가 설계 참고.
 - [MLCL](https://arxiv.org/abs/2601.05366), [BFCL](https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard): 언어별 도구 인자 실패를 가르는 실험 틀. MLCL의 한국어 검증을 재현한 것은 아니다.
 - [Kiwi](https://doi.org/10.23287/KJDH.2024.1.1.6), [qmd](https://github.com/tobi/qmd): 선택형 검색 대조군.
 - [Git의 Windows rename 수정](https://github.com/git/git/commit/391bceae4350): 열린 핸들 때문에 교체가 거부되는 원인과 제한된 재시도의 참고.
+- [An Empirical Study of Flaky Tests in Python](https://arxiv.org/abs/2101.09077)(Gruber 등, ICST 2021), [DeleteFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew): 재실행 횟수와 상한으로 간헐 실패를 보고하는 규칙, 삭제 대기 가설의 근거. 논문의 170회는 데이터셋 평균이며 출처의 측정은 재현하지 않았다.
 - [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/), [llama.cpp 서버 README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md): 부하·배치 크기와 프롬프트 캐시가 temperature 0 출력을 바꿀 수 있다는 근거. 출처의 측정은 재현하지 않았다.
 
 공식 논문의 데이터·코드를 복사하거나 공식 벤치마크 점수를 재현했다고 주장하지 않는다.

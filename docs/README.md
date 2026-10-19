@@ -22,7 +22,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [link-proposals.md](link-proposals.md) | 관련 노트 후보·해시·검토용 diff를 반환하는 읽기 전용 연결 제안 |
 | [memory-patterns.md](memory-patterns.md) | 아홉 논문/공식 코드의 적용 범위, 시간·연결·BM25/RRF·qmd·기억 단위·교훈 관측·연속 작업 평가, 선택형 한글 음절 bigram BM25 |
 | [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가와 실패 진단, 시간 유효성 render-matched 대조군, 선택형 소표본 정확 부호 검정·비율 상한, 선택형 실제 볼트 골드셋 제자리 평가·dev/held-out 분할 |
-| [evaluation-stability.md](evaluation-stability.md) | v0.24.0의 선택형 언어·문자열 보존 매트릭스, 공개 fixture Kiwi/qmd 순위 비교, Windows 편집 보강과 실제 관측의 한계, v0.25.0의 선택형 측정 조건 기록(프롬프트 캐시·슬롯 부하·반복 일치) |
+| [evaluation-stability.md](evaluation-stability.md) | v0.24.0의 선택형 언어·문자열 보존 매트릭스, 공개 fixture Kiwi/qmd 순위 비교, Windows 편집 보강과 실제 관측의 한계, v0.25.0의 선택형 측정 조건 기록(프롬프트 캐시·슬롯 부하·반복 일치), 간헐 실패 테스트의 실패 분류와 반복 측정(x/N·정확 상한) 규칙 |
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고 |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차 |
