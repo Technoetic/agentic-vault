@@ -7,7 +7,8 @@ are diagnosed and omitted. No cache, dependency, model or network is involved.
 
 Alias inventory checks bind each scanned directory to a metadata mark and to a
 SHA-256 of its sorted entry names (the walk's own listing; names only). The
-final check lists every marked directory once more. Limits: a same-name
+final check lists every marked directory once more; a changed name set
+invalidates the expansion like a changed directory mark. Limits: a same-name
 delete-and-recreate leaves the name set unchanged (note document stamps still
 apply), and every listing is a point-in-time check, not a lock on writers.
 """
@@ -100,8 +101,10 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
     directory entry limit). Directory marks and listings detect membership
     changes; note marks include notes without aliases and temporal rejects.
     A listing that differs only by names is recorded in listing_diagnostics
-    without changing the status. An unreadable or over-cap listing, or a mark
-    without a scan-time listing, fails closed as source_changed.
+    and invalidates like a metadata change (source_changed, with
+    changed_directory.change 'listing' instead of 'metadata'). An unreadable or
+    over-cap listing, or a mark without a scan-time listing, fails closed as
+    source_changed ('unavailable').
     These are point checks, not an atomic snapshot or a lock on writers. A
     rewrite preserving the checked marks, or a same-name delete-and-recreate of
     a non-note entry, can evade this detector (a recreated note changes its
@@ -113,7 +116,7 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
     result = {'status': 'ok', 'documents_checked': 0, 'directories_checked': 0,
               'listing_entries': 0, 'listing_diagnostics': [], 'listing_diagnostics_omitted': 0,
               'method': 'bounded marks from the original scan; one bounded listing per marked directory; no second walk or payload reads',
-              'assurance': 'metadata_generation_and_name_listing; listing-only differences are diagnostic, not enforced; '
+              'assurance': 'metadata_generation_and_name_listing; listing differences invalidate like metadata changes; '
                            'same-name recreation and preserved marks can evade checks; point-in-time checks, not a lock; '
                            'initial source hashes do not certify current inventory bytes'}
     budget = recall.MAX_DIRECTORY_ENTRIES
@@ -135,15 +138,24 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
                 # again without inventing an empty relative-note path.
                 resolve_note_path(vault, recall.CONFIG_RELPATH)
                 path = vault
+            # changed_directory names the first failing directory and the kind
+            # of evidence (metadata, listing, unavailable); it is removed again
+            # when the directory passes.
+            result['changed_directory'] = {'path': rel or '.', 'change': 'unavailable'}
             if len(expected) != 6:
                 raise ValueError('alias inventory directory unlisted')
+            result['changed_directory']['change'] = 'metadata'
             if inventory_mark(path, directory=True) != expected[:5]:
                 raise ValueError('alias inventory directory changed')
+            result['changed_directory']['change'] = 'unavailable'
             names = directory_names(path, budget)
             budget -= len(names)
             result['listing_entries'] += len(names)
             if listing_digest(names) != expected[5]:
                 _listing_diagnostic(result, rel)
+                result['changed_directory']['change'] = 'listing'
+                raise ValueError('alias inventory directory changed')
+            del result['changed_directory']
             result['directories_checked'] += 1
     except (OSError, ValueError, KeyError):
         result['status'] = 'source_changed'

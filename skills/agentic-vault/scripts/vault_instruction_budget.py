@@ -6,7 +6,8 @@ leave this module. A static 'always' role does not assert runtime loading.
 
 Walked directories are bound to (dev, ino, mtime) and a SHA-256 of their sorted
 entry names, taken from the walk's own listing. finish() lists each walked
-directory once more (non-recursive, names only, capped by MAX_ENTRIES in total).
+directory once more (non-recursive, names only, capped by MAX_ENTRIES in total);
+a changed name set makes the report partial like a changed directory time.
 Limits: a same-name delete-and-recreate leaves the name set unchanged (the
 finish rehash still catches changed bytes of a measured file), and a listing is
 a point-in-time check, not a lock on writers.
@@ -164,7 +165,8 @@ class _Inventory:
         self.issue_keys = set()
         self.attempts = self.entries = self.read_bytes = self.relisted = 0
 
-    def issue(self, code, path=None):
+    def issue(self, code, path=None, change=None):
+        # ``change`` (metadata or listing) tells directory change evidence apart.
         self.report['status'] = 'partial'
         key = (code, path)
         if key in self.issue_keys:
@@ -172,7 +174,8 @@ class _Inventory:
         self.issue_keys.add(key)
         if len(self.report['issues']) >= MAX_ISSUES:
             return
-        self.report['issues'].append({'code': code, **({'path': path} if path is not None else {})})
+        self.report['issues'].append({'code': code, **({'path': path} if path is not None else {}),
+                                      **({'change': change} if change is not None else {})})
 
     def resolve(self, relative):
         parts = relative_parts(relative, 'instruction')
@@ -282,7 +285,7 @@ class _Inventory:
                     items.append(entry.name)
             after = self.resolve(relative).lstat()
             if (before.st_dev, before.st_ino, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_mtime_ns):
-                self.issue('directory_changed_during_diagnosis', relative)
+                self.issue('directory_changed_during_diagnosis', relative, 'metadata')
                 return
             # A truncated listing has no complete name set to compare later.
             self.directories[relative] = (after.st_dev, after.st_ino, after.st_mtime_ns,
@@ -332,6 +335,8 @@ class _Inventory:
         if _listing_digest(names) != expected:
             if len(self.report['listing_diagnostics']) < MAX_ISSUES:
                 self.report['listing_diagnostics'].append({'code': 'directory_listing_changed', 'path': relative})
+            # A changed name set counts as a change even behind an unchanged time.
+            self.issue('directory_changed_during_diagnosis', relative, 'listing')
 
     def finish(self):
         for relative, expected in self.directories.items():
@@ -339,10 +344,10 @@ class _Inventory:
                 metadata = self.resolve(relative).lstat()
                 current = (metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns)
                 if current != expected[:3]:
-                    self.issue('directory_changed_during_diagnosis', relative)
+                    self.issue('directory_changed_during_diagnosis', relative, 'metadata')
                     continue
             except (OSError, ValueError, RuntimeError):
-                self.issue('directory_changed_during_diagnosis', relative)
+                self.issue('directory_changed_during_diagnosis', relative, 'metadata')
                 continue
             if expected[3] is not None:
                 self.check_listing(relative, expected[3])
@@ -380,7 +385,8 @@ loading semantics. Supported imports are local @file.md, including quoted names;
 code examples are excluded. Limits, skips and inconsistent reads yield partial.
 Each walked directory gets one bounded name listing at the end; a name-set
 difference behind an unchanged directory time is reported in
-listing_diagnostics without changing the status.
+listing_diagnostics and as directory_changed_during_diagnosis with
+change='listing' (metadata differences carry change='metadata').
 """
     try:
         config = validate_config(config)

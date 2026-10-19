@@ -351,12 +351,44 @@ class QueryExpansionTests(unittest.TestCase):
                     self.reset_listing_fixture()
                     status, changed = self.run_with_listing_change(expansion, mutate, integrated=integrated)
                     checked = changed['inventory_verification']
-                    # Stage 1: a listing-only difference is recorded, not enforced.
-                    self.assertEqual(status, 'ok')
-                    self.assertEqual(checked['status'], 'ok')
+                    # A listing-only difference invalidates like a metadata change.
+                    self.assertEqual(status, 'source_changed')
+                    self.assertEqual(checked['status'], 'source_changed')
+                    self.assertEqual(changed['expansions'], [])
+                    self.assertEqual(changed['terms'], ['loto'])
+                    self.assertEqual(checked['changed_directory'], {'path': '20-knowledge', 'change': 'listing'})
                     self.assertEqual(checked['listing_diagnostics'],
                                      [{'code': 'directory_listing_changed', 'path': '20-knowledge'}])
                     self.assertIn('one bounded listing per marked directory', checked['method'])
+
+    def test_directory_change_kinds_are_distinguished(self):
+        expansion = self.expansion()
+        self.write('00-meta/query-map.txt', 'trip => isolation procedure\n')
+        self.reset_listing_fixture()
+        folder = self.vault / '20-knowledge'
+        def touch():
+            os.utime(folder, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+        verify = expansion.verify_mapping
+        def mutate(*args, **kwargs):
+            result = verify(*args, **kwargs)
+            touch()
+            return result
+        with patch.object(expansion, 'verify_mapping', side_effect=mutate):
+            changed = expansion.expand_query(self.vault, 'LOTO', enabled=True, mapping='00-meta/query-map.txt')
+        checked = changed['inventory_verification']
+        self.assertEqual(changed['status'], 'source_changed')
+        self.assertEqual(checked['changed_directory'], {'path': '20-knowledge', 'change': 'metadata'})
+        self.assertEqual(checked['listing_diagnostics'], [])
+        verify_inventory = expansion.verify_inventory
+        def unreadable(*args, **kwargs):
+            with patch('os.scandir', side_effect=PermissionError('listing denied')):
+                return verify_inventory(*args, **kwargs)
+        with patch.object(expansion, 'verify_inventory', side_effect=unreadable):
+            denied = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        self.assertEqual(denied['inventory_verification']['changed_directory'], {'path': '.', 'change': 'unavailable'})
+        unchanged = expansion.expand_query(self.vault, 'LOTO', enabled=True)
+        self.assertEqual(unchanged['status'], 'ok')
+        self.assertNotIn('changed_directory', unchanged['inventory_verification'])
 
     def test_unchanged_listing_records_no_listing_diagnostic(self):
         expansion = self.expansion()

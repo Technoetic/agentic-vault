@@ -429,11 +429,22 @@ class InstructionBudgetTests(unittest.TestCase):
                 self.vault.mkdir()
                 mtime_ns = self.listing_fixture()
                 report = self.diagnose_with_change(self.listing_mutations()[kind], mtime_ns)
-                # Stage 1: a listing-only difference is recorded, not enforced.
-                self.assertEqual(report['status'], 'complete')
-                self.assertEqual(report['issues'], [])
+                # A listing-only difference makes the report partial.
+                self.assertEqual(report['status'], 'partial')
+                self.assertEqual(report['issues'], [{'code': 'directory_changed_during_diagnosis',
+                                                     'path': '.claude/rules', 'change': 'listing'}])
                 self.assertEqual(report['listing_diagnostics'],
                                  [{'code': 'directory_listing_changed', 'path': '.claude/rules'}])
+
+    def test_directory_time_change_is_reported_as_metadata_kind(self):
+        mtime_ns = self.listing_fixture()
+        folder = self.vault / '.claude/rules'
+        report = self.diagnose_with_change(lambda: None, mtime_ns + 1_000_000_000)
+        self.assertEqual(report['status'], 'partial')
+        self.assertEqual(report['issues'], [{'code': 'directory_changed_during_diagnosis',
+                                             'path': '.claude/rules', 'change': 'metadata'}])
+        self.assertEqual(report['listing_diagnostics'], [])
+        self.assertTrue(folder.is_dir())
 
     def test_unchanged_listing_records_no_listing_diagnostic(self):
         self.listing_fixture()
