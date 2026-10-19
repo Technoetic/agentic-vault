@@ -1102,36 +1102,43 @@ _KEYED_REPLACED = [
     *REDACTION_DESCRIPTION["replaced"],
     "vault-relative paths, each hashed whole: expected, forbidden, stale and retrieved paths, relevance keys, "
     "label_matches labels, paths and candidates, external candidates, excluded sources, the query mapping "
-    "and paths in diagnostics",
+    "and paths in diagnostics, including the temporal superseded_by link",
+    "temporal valid_from, valid_until, checked_at and superseded_at values that are not date-shaped",
     "fingerprints (goldset_canonical_sha256, definition_canonical_sha256, source and mapping sha256): "
     "the keyed hash of their sha256 hex",
     "candidate paths inside gold-set warnings; a warning of an unknown shape is hashed whole",
 ]
 _KEYED_LIMITS = (
     "Pseudonymisation, not encryption or anonymisation. Equal values get equal tokens within this report, so "
-    "repeats and frequencies stay visible. Whole values are hashed, not single words. The report never "
-    "records the key or a fingerprint of it.")
+    "repeats and frequencies stay visible. Whole values are hashed, not single words. Rows keep the gold-set "
+    "order, so whoever holds the gold set, or part of it, can link rows, and the path tokens labelled in them, "
+    "by position; sort or shuffle rows before sharing to avoid that. The report never records the key or a "
+    "fingerprint of it.")
 KEYED_REDACTION_DESCRIPTION = {
     "method": "HMAC-SHA256 hex, under a secret key of at least 32 bytes, of the UTF-8 text; a non-text value "
               "is hashed as its compact sorted JSON",
     "replaced": _KEYED_REPLACED,
     "kept": "languages, expectations, label match kinds, numbers, booleans, dates, option names and enums",
-    "limits": _KEYED_LIMITS + " Only someone without the key cannot link tokens back or confirm a guess; "
+    "limits": _KEYED_LIMITS + " Without the key, tokens cannot be recomputed and a guess cannot be confirmed; "
               "whoever holds the key can. Keeping the key next to the vault or the report defeats this.",
 }
 EPHEMERAL_REDACTION_DESCRIPTION = {
     **KEYED_REDACTION_DESCRIPTION,
     "method": "HMAC-SHA256 hex, under a random 32-byte key drawn for this run and never stored, of the UTF-8 "
               "text; a non-text value is hashed as its compact sorted JSON",
-    "limits": _KEYED_LIMITS + " The key is gone after the run: nobody, the operator included, can link tokens "
-              "back, and tokens from two runs cannot be compared.",
+    "limits": _KEYED_LIMITS + " The key is gone after the run: nobody, the operator included, can recompute a "
+              "token or confirm a guess, and tokens from two runs cannot be compared.",
 }
 # Keyed modes: fields whose string values (or list items) are vault-relative
 # paths, dictionaries keyed by paths, and sha256 fingerprints.
 _PATH_FIELDS = frozenset({
     "path", "source_path", "label", "query_mapping", "external_candidates", "candidates", "source_paths",
     "excluded_sources", "expected_paths", "forbidden_paths", "stale_paths", "retrieved_paths",
-    "forbidden_retrieved_paths", "stale_retrieved_paths"})
+    "forbidden_retrieved_paths", "stale_retrieved_paths",
+    # Temporal diagnostics: the raw successor wikilink, which names a note and can name folders.
+    "superseded_by"})
+# Keyed modes: raw temporal frontmatter values stay readable only when date-shaped.
+_DATE_FIELDS = frozenset({"valid_from", "valid_until", "checked_at", "superseded_at"})
 _PATH_KEYED_MAPS = frozenset({"relevance"})
 _FINGERPRINT_FIELDS = frozenset({"sha256", "source_sha256", "goldset_canonical_sha256",
                                  "definition_canonical_sha256"})
@@ -1286,6 +1293,8 @@ def _keyed_paths(value: object, digest, field: str | None = None) -> object:
         return [_keyed_paths(item, digest, field) for item in value]
     if isinstance(value, str) and (field in _PATH_FIELDS or field in _FINGERPRINT_FIELDS):
         return digest(value)
+    if isinstance(value, str) and field in _DATE_FIELDS and not _AS_OF_SHAPE.fullmatch(value):
+        return digest(value)
     return value
 
 
@@ -1323,12 +1332,36 @@ def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
-def read_redaction_key(path: Path, evaluated: Path) -> bytes:
-    """Read the --redact-key-file bytes; refuse a key inside the evaluated tree.
+_EXTENDED_PREFIX = "\\\\?\\"
+_EXTENDED_UNC_PREFIX = _EXTENDED_PREFIX + "UNC\\"
 
-    ``evaluated`` is the --vault directory, or the fixture directory (its vault
-    and labels). Both the lexical absolute path and the resolved path are
-    checked, before anything is read. Messages never name the file or echo it.
+
+def _plain_spelling(path: Path) -> Path:
+    """Drop a Windows extended-length prefix (plain or UNC) so two spellings compare equal."""
+    text = str(path)
+    if text.startswith(_EXTENDED_UNC_PREFIX):
+        return Path("\\\\" + text[len(_EXTENDED_UNC_PREFIX):])
+    if text.startswith(_EXTENDED_PREFIX):
+        return Path(text[len(_EXTENDED_PREFIX):])
+    return path
+
+
+def _identity(path: Path) -> tuple | None:
+    try:
+        metadata = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return (metadata.st_dev, metadata.st_ino) if metadata.st_ino else None
+
+
+def _key_inside(path: Path, evaluated: Path) -> bool:
+    """Is the key file, under any spelling, inside the evaluated tree?
+
+    Compares the lexical absolute path and the resolved path, each without a
+    Windows extended-length prefix, and then the file identity (st_dev, st_ino)
+    of every ancestor of both key paths with that of the evaluated root,
+    which also covers other spellings of the same directory (an admin share,
+    an 8.3 short name). Only metadata is read; the key file is not opened.
     """
     locations, roots = [Path(os.path.abspath(path))], [Path(os.path.abspath(evaluated))]
     for candidate, target in ((path, locations), (evaluated, roots)):
@@ -1336,7 +1369,24 @@ def read_redaction_key(path: Path, evaluated: Path) -> bytes:
             target.append(candidate.resolve())
         except (OSError, RuntimeError):
             pass
+    locations = [_plain_spelling(location) for location in locations]
+    roots = [_plain_spelling(root) for root in roots]
     if any(_within(location, root) for location in locations for root in roots):
+        return True
+    root_ids = {identity for identity in map(_identity, roots) if identity is not None}
+    return bool(root_ids) and any(_identity(ancestor) in root_ids
+                                  for location in locations for ancestor in (location, *location.parents))
+
+
+def read_redaction_key(path: Path, evaluated: Path) -> bytes:
+    """Read the --redact-key-file bytes; refuse a key inside the evaluated tree.
+
+    ``evaluated`` is the --vault directory, or the fixture directory (its vault
+    and labels). The lexical absolute path, the resolved path and the file
+    identity of the resolved path's ancestors are checked before the key is
+    read (see _key_inside). Messages never name the file or echo it.
+    """
+    if _key_inside(path, evaluated):
         raise GoldSetError("redaction key file is inside the evaluated vault; keep the key outside the vault "
                            "and away from the report")
     unreadable = (f"redaction key file is not a readable regular file of at most "
@@ -1436,12 +1486,13 @@ def _parser() -> argparse.ArgumentParser:
                             'outside the vault and away from the report) over the same text and over every '
                             'vault-relative path; the key and any fingerprint of it are never printed. Equal values '
                             'still get equal tokens, so repeats and frequencies inside one report stay visible; '
-                            'only someone without the key cannot link tokens back. Whole values are hashed, words '
-                            'are not hashed one by one')
+                            'without the key, tokens cannot be recomputed or a guess confirmed, but rows keep the '
+                            'gold-set order, so whoever holds the gold set can link them by position. Whole values '
+                            'are hashed, words are not hashed one by one')
     keyed.add_argument('--redact-ephemeral', action='store_true',
                        help='implies --redact: like --redact-key-file with a random 32-byte key drawn for this run '
-                            'and never stored, so nobody can link the tokens back and two runs cannot be compared; '
-                            'repeats and frequencies inside one report stay visible')
+                            'and never stored, so nobody can recompute the tokens and two runs cannot be compared; '
+                            'rows keep the gold-set order, and repeats and frequencies inside one report stay visible')
     split = parser.add_argument_group('dev/held-out split (opt-in)')
     split.add_argument('--split', choices=SPLIT_NAMES,
                        help='evaluate only this side of the split definition and report n per split')
