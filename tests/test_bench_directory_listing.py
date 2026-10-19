@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -38,6 +39,19 @@ class BenchDirectoryListingTests(unittest.TestCase):
                 row = report[name]
                 self.assertEqual(row['marked_directories'], directories)
                 self.assertEqual([len(row['runs_ms'][key]) for key in ('listing', 'baseline')], [1, 1])
+
+    def test_instruction_budget_directory_count_is_measured(self):
+        # The per-directory cost must divide by directories the diagnosis
+        # really walked, not by the count the vault builder intended.
+        bench = load_bench()
+        with tempfile.TemporaryDirectory() as temporary,                 mock.patch.object(bench.budget, 'MAX_FILES', 8),                 mock.patch.object(bench.budget, 'MAX_ENTRIES', 64):
+            root = Path(temporary) / 'budget'
+            shape = bench.build_budget_vault(root)
+            result = bench.budget_call(root)()
+            self.assertEqual(result['walked_directories'], shape['directories'])
+            self.assertEqual(bench.check_budget(result, shape['directories']), shape['directories'])
+            with self.assertRaises(RuntimeError):
+                bench.check_budget(result, shape['directories'] + 1)
 
     def test_out_of_range_options_are_rejected(self):
         bench = load_bench()

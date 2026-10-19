@@ -121,14 +121,40 @@ def check_expand(result: dict, expected_directories: int) -> int:
     return checked['directories_checked']
 
 
-def check_budget(report: dict, expected_directories: int) -> int:
+BUDGET_CONFIG = {'deny_zones': [], 'exclude_dirs': [], 'hot_note': '', 'handoff_note': ''}
+
+
+def budget_call(vault: Path):
+    """Run the diagnosis and count the directories its walk marked.
+
+    The report has no directory count, so the count is read from the
+    inventory when finish() starts (each marked directory is re-listed there).
+    """
+    def call() -> dict:
+        walked = []
+        finish = budget._Inventory.finish
+
+        def counting_finish(inventory):
+            walked.append(len(inventory.directories))
+            return finish(inventory)
+        with mock.patch.object(budget._Inventory, 'finish', counting_finish):
+            report = budget.diagnose_instructions(vault, BUDGET_CONFIG)
+        return {'report': report, 'walked_directories': walked[-1] if walked else 0}
+    return call
+
+
+def check_budget(result: dict, expected_directories: int) -> int:
+    report = result['report']
     if report['status'] != 'complete' or report['totals']['unique_files'] != budget.MAX_FILES:
         raise RuntimeError('synthetic instruction inventory was not complete')
-    return expected_directories
+    if result['walked_directories'] != expected_directories:
+        raise RuntimeError('unexpected walked directory count')
+    return result['walked_directories']
 
 
 def measure(call, baseline, check, expected_directories: int, runs: int) -> dict:
     timings = {'listing': [], 'baseline': []}
+    counted = set()
     order = ('listing', 'baseline')
     for run in range(runs + 1):
         for variant in (order if run % 2 == 0 else order[::-1]):
@@ -138,17 +164,19 @@ def measure(call, baseline, check, expected_directories: int, runs: int) -> dict
                 started = time.perf_counter()
                 result = call()
                 elapsed = (time.perf_counter() - started) * 1000
-            check(result, expected_directories)
+            counted.add(check(result, expected_directories))
             if run:  # the first round only warms caches
                 timings[variant].append(round(elapsed, 3))
     with_listing = statistics.median(timings['listing'])
     without = statistics.median(timings['baseline'])
     added = with_listing - without
-    return {'marked_directories': expected_directories,
+    # check() raises unless every run counted the expected directories.
+    marked, = counted
+    return {'marked_directories': marked,
             'median_ms_with_listing': round(with_listing, 3),
             'median_ms_without_listing': round(without, 3),
             'added_ms_total': round(added, 3),
-            'added_us_per_directory': round(added * 1000 / expected_directories, 2),
+            'added_us_per_directory': round(added * 1000 / marked, 2),
             'runs_ms': timings}
 
 
@@ -183,9 +211,8 @@ def main(argv=None) -> int:
                 lambda: expansion.expand_query(recall_vault, QUERY, enabled=True),
                 recall_baseline, check_expand, directories, args.runs),
             'instruction_budget': measure(
-                lambda: budget.diagnose_instructions(root / 'budget', {
-                    'deny_zones': [], 'exclude_dirs': [], 'hot_note': '', 'handoff_note': ''}),
-                budget_baseline, check_budget, budget_shape['directories'], args.runs),
+                budget_call(root / 'budget'), budget_baseline, check_budget,
+                budget_shape['directories'], args.runs),
         }
     print(json.dumps(report, indent=2))
     return 0
