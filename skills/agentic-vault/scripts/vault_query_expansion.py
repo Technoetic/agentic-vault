@@ -86,13 +86,6 @@ def directory_sinks(directories):
     return bind_mark, bind_listing
 
 
-def _listing_diagnostic(result, rel):
-    if len(result['listing_diagnostics']) < MAX_EXPANSIONS:
-        result['listing_diagnostics'].append({'code': 'directory_listing_changed', 'path': rel or '.'})
-    else:
-        result['listing_diagnostics_omitted'] += 1
-
-
 def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
     """Check every already-scanned potential alias destination and directory.
 
@@ -102,9 +95,13 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
     changes; note marks include notes without aliases and temporal rejects.
     A listing that differs only by names is recorded in listing_diagnostics
     and invalidates like a metadata change (source_changed, with
-    changed_directory.change 'listing' instead of 'metadata'). An unreadable or
-    over-cap listing, or a mark without a scan-time listing, fails closed as
-    source_changed ('unavailable').
+    changed_directory.change 'listing' instead of 'metadata'). The check stops
+    at the first changed directory, so listing_diagnostics holds at most one
+    row; listing_diagnostics_omitted stays 0 and is kept for schema stability.
+    An unreadable or over-cap listing fails closed as source_changed
+    ('unavailable'). A mark without a scan-time listing is handled the same
+    way, defensively: the walk leaves one only when the inventory is
+    incomplete, and alias expansion is then already refused.
     These are point checks, not an atomic snapshot or a lock on writers. A
     rewrite preserving the checked marks, or a same-name delete-and-recreate of
     a non-note entry, can evade this detector (a recreated note changes its
@@ -138,9 +135,11 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
                 # again without inventing an empty relative-note path.
                 resolve_note_path(vault, recall.CONFIG_RELPATH)
                 path = vault
-            # changed_directory names the first failing directory and the kind
-            # of evidence (metadata, listing, unavailable); it is removed again
-            # when the directory passes.
+            # changed_directory names the first directory that fails its mark
+            # or listing check and the kind of evidence (metadata, listing,
+            # unavailable); it is removed again when the directory passes.
+            # Earlier failures (a document stamp, or a directory that became
+            # excluded or unsafe) leave no changed_directory.
             result['changed_directory'] = {'path': rel or '.', 'change': 'unavailable'}
             if len(expected) != 6:
                 raise ValueError('alias inventory directory unlisted')
@@ -152,7 +151,7 @@ def verify_inventory(vault, documents, directories, *, deny=(), exclude=()):
             budget -= len(names)
             result['listing_entries'] += len(names)
             if listing_digest(names) != expected[5]:
-                _listing_diagnostic(result, rel)
+                result['listing_diagnostics'].append({'code': 'directory_listing_changed', 'path': rel or '.'})
                 result['changed_directory']['change'] = 'listing'
                 raise ValueError('alias inventory directory changed')
             del result['changed_directory']
