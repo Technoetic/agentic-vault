@@ -110,6 +110,14 @@ LEGACY_INVENTORY_WORDING = {
     "assurance": "metadata_generation_only; preserved marks can evade checks; "
                  "initial source hashes do not certify current inventory bytes",
 }
+# The wording replaced above must be the current (listing-enforcing) text.
+CURRENT_INVENTORY_WORDING = {
+    "method": "bounded marks from the original scan; one bounded listing per marked directory; "
+              "no second walk or payload reads",
+    "assurance": "metadata_generation_and_name_listing; listing differences invalidate like metadata changes; "
+                 "same-name recreation and preserved marks can evade checks; point-in-time checks, not a lock; "
+                 "initial source hashes do not certify current inventory bytes",
+}
 
 
 def legacy_inventory_verification(value):
@@ -117,6 +125,9 @@ def legacy_inventory_verification(value):
         return value
     if value["listing_diagnostics"] or value.get("listing_diagnostics_omitted"):
         raise AssertionError("fixture runs must not observe listing changes")
+    for key, expected in CURRENT_INVENTORY_WORDING.items():
+        if value.get(key) != expected:
+            raise AssertionError(f"unexpected inventory_verification {key}: {value.get(key)!r}")
     legacy = {key: item for key, item in value.items()
               if key not in {"listing_entries", "listing_diagnostics", "listing_diagnostics_omitted"}}
     return {**legacy, **LEGACY_INVENTORY_WORDING}

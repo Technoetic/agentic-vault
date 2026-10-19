@@ -421,6 +421,34 @@ class QueryExpansionTests(unittest.TestCase):
         self.assertEqual(status, 'source_changed')
         self.assertEqual(changed['inventory_verification']['status'], 'source_changed')
         self.assertEqual(changed['expansions'], [])
+        # The re-listing cap, not the name-set comparison, must stop this run:
+        # without the cap the extra name would be reported as kind 'listing'.
+        self.assertEqual(changed['inventory_verification']['changed_directory'],
+                         {'path': '20-knowledge', 'change': 'unavailable'})
+        self.assertEqual(changed['inventory_verification']['listing_diagnostics'], [])
+
+    def test_directory_mark_without_scan_time_listing_fails_closed(self):
+        # Defensive: the walk leaves a mark without a listing only for an
+        # incomplete inventory, where alias expansion is refused anyway.
+        expansion = self.expansion()
+        checked = expansion.verify_inventory(
+            self.vault, {}, {'': expansion.inventory_mark(self.vault, directory=True)})
+        self.assertEqual(checked['status'], 'source_changed')
+        self.assertEqual(checked['changed_directory'], {'path': '.', 'change': 'unavailable'})
+        self.assertEqual(checked['directories_checked'], 0)
+        self.assertEqual(checked['listing_entries'], 0)
+
+    def test_inventory_verification_wording_is_pinned(self):
+        # The golden canonicalizers replace this wording; pin it here so a
+        # stale stage-1 text (listing differences only diagnosed) cannot pass.
+        checked = self.expansion().expand_query(self.vault, 'LOTO', enabled=True)['inventory_verification']
+        self.assertEqual(checked['method'], 'bounded marks from the original scan; one bounded listing per '
+                                            'marked directory; no second walk or payload reads')
+        self.assertEqual(checked['assurance'], 'metadata_generation_and_name_listing; listing differences '
+                                               'invalidate like metadata changes; same-name recreation and '
+                                               'preserved marks can evade checks; point-in-time checks, not a '
+                                               'lock; initial source hashes do not certify current inventory bytes')
+        self.assertEqual(list(checked)[-2:], ['method', 'assurance'])
 
     def test_check_lists_each_marked_directory_once_without_rescan(self):
         expansion = self.expansion()
