@@ -60,7 +60,7 @@ argument-hint: [소스 파일 경로]
 
 보고 전 [보강 도구](../docs/hardening.md)의 `check_compile`로 선택한 원본·정제본
 현재 해시와 필수 숫자/이름/날짜/원문 주장을 대조한다. `derive_provenance`로 출처와
-가장 낮은 신뢰를 manifest에 보존한다. own/forwarded/url을 호스트 근거로 구분하고
+가장 낮은 신뢰를 manifest에 보존한다. own/forwarded/url/via_bot을 호스트 근거로 구분하고
 verified_by만으로 사실을 확정하지 않는다. 누락/현재성 오류면 먼저 보완하며 자동 격리하지 않는다.
 의미 판단은 허용된 실제 발췌를 기존 Jev-first 파일 경로로 확인한다. 검증 결과 자체는 권한이 아니다.
 
