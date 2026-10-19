@@ -67,6 +67,27 @@ def lf_fixture_copy(name: str, root: Path) -> Path:
     return target
 
 
+# v0.26.0 (listing fingerprint, limit A11) changed only the query-expansion
+# inventory_verification diagnostic: new listing_* fields and the method and
+# assurance wording. Map it back to the earlier shape so the pinned digests
+# keep proving that ranking, context and every other field are unchanged.
+LEGACY_INVENTORY_WORDING = {
+    "method": "bounded marks from the original scan; no second scan or payload reads",
+    "assurance": "metadata_generation_only; preserved marks can evade checks; "
+                 "initial source hashes do not certify current inventory bytes",
+}
+
+
+def legacy_inventory_verification(value):
+    if not isinstance(value, dict) or "listing_diagnostics" not in value:
+        return value
+    if value["listing_diagnostics"] or value.get("listing_diagnostics_omitted"):
+        raise AssertionError("fixture runs must not observe listing changes")
+    legacy = {key: item for key, item in value.items()
+              if key not in {"listing_entries", "listing_diagnostics", "listing_diagnostics_omitted"}}
+    return {**legacy, **LEGACY_INVENTORY_WORDING}
+
+
 def canonical_report_text(stdout: str) -> str:
     """The printed JSON with wall-clock values replaced and floats at 12 significant digits.
 
@@ -75,7 +96,9 @@ def canonical_report_text(stdout: str) -> str:
     """
     def walk(value):
         if isinstance(value, dict):
-            return {key: ("<wall-clock>" if key in TIMING_FIELDS else walk(item)) for key, item in value.items()}
+            return {key: ("<wall-clock>" if key in TIMING_FIELDS
+                          else walk(legacy_inventory_verification(item)) if key == "inventory_verification"
+                          else walk(item)) for key, item in value.items()}
         if isinstance(value, list):
             return [walk(item) for item in value]
         if isinstance(value, float):

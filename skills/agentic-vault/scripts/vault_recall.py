@@ -188,8 +188,11 @@ def _markdown_paths(
     deny_zones: Sequence[str],
     exclude_dirs: Sequence[str],
     diagnostics: dict,
-    *, directory_sink=None,
+    *, directory_sink=None, listing_sink=None,
 ) -> list[tuple[str, Path]]:
+    # listing_sink(rel, names) receives the entry names of each directory whose
+    # single listing completed within the entry cap; it reuses this walk's
+    # listing so callers can fingerprint membership without a second scan.
     found: list[tuple[str, Path]] = []
     pending: list[tuple[tuple[str, ...], Path]] = [((), vault)]
     hit_entry_limit = False
@@ -209,6 +212,8 @@ def _markdown_paths(
                         break
                     diagnostics["entries_scanned"] += 1
                     entries.append(entry)
+            if listing_sink is not None and not hit_entry_limit:
+                listing_sink('/'.join(rel_parts), [entry.name for entry in entries])
         except (OSError, ValueError):
             diagnostics["skipped_unreadable"] += 1
             _omit(diagnostics, "unreadable_path")

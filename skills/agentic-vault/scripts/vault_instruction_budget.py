@@ -3,9 +3,17 @@
 Counts Unicode code points in unique UTF-8 files, including their frontmatter.
 No instruction text, condition expressions, exact token estimates or cost claims
 leave this module. A static 'always' role does not assert runtime loading.
+
+Walked directories are bound to (dev, ino, mtime) and a SHA-256 of their sorted
+entry names, taken from the walk's own listing. finish() lists each walked
+directory once more (non-recursive, names only, capped by MAX_ENTRIES in total).
+Limits: a same-name delete-and-recreate leaves the name set unchanged (the
+finish rehash still catches changed bytes of a measured file), and a listing is
+a point-in-time check, not a lock on writers.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import json
 from pathlib import Path
@@ -43,12 +51,31 @@ _HEADER_KEY = re.compile(r'^("(?:[^"\\]|\\.)*"|\x27(?:[^\x27]|\x27\x27)*\x27|[A-
 def _empty(status='partial'):
     return {'schema_version': 1, 'status': status, 'runtime_loading': 'unverified',
             'character_measure': 'unicode_code_points', 'entrypoint': None,
-            'files': [], 'issues': [],
+            'files': [], 'issues': [], 'listing_diagnostics': [],
             'totals': {'unique_files': 0, 'characters': 0, 'bytes': 0,
                        'by_classification': {role: {'files': 0, 'characters': 0} for role in _ROLES}},
             'limits': {'files': MAX_FILES, 'directory_entries': MAX_ENTRIES, 'depth': MAX_DEPTH,
                        'file_bytes': MAX_FILE_BYTES, 'total_bytes': MAX_TOTAL_BYTES,
                        'imports_per_file': MAX_IMPORTS_PER_FILE, 'issues': MAX_ISSUES}}
+
+
+def _listing_digest(names):
+    """SHA-256 of sorted entry names only: no inode numbers, sizes or contents."""
+    digest = hashlib.sha256()
+    for name in sorted(names):
+        digest.update(name.encode('utf-8', 'surrogatepass') + b'\0')
+    return digest.hexdigest()
+
+
+def _directory_names(path, limit):
+    """One non-recursive os.scandir of names; None when ``limit`` is exceeded."""
+    names = []
+    with os.scandir(path) as scan:
+        for entry in scan:
+            if len(names) >= limit:
+                return None
+            names.append(entry.name)
+    return names
 
 
 def _secret(parts):
@@ -135,7 +162,7 @@ class _Inventory:
         self.directories = {}
         self.seen = {}
         self.issue_keys = set()
-        self.attempts = self.entries = self.read_bytes = 0
+        self.attempts = self.entries = self.read_bytes = self.relisted = 0
 
     def issue(self, code, path=None):
         self.report['status'] = 'partial'
@@ -244,10 +271,12 @@ class _Inventory:
                 self.issue('unsafe_instruction_directory', relative)
                 return
             items = []
+            complete = True
             with os.scandir(directory) as scan:
                 for entry in scan:
                     if self.entries >= MAX_ENTRIES:
                         self.issue('directory_entry_limit')
+                        complete = False
                         break
                     self.entries += 1
                     items.append(entry.name)
@@ -255,7 +284,9 @@ class _Inventory:
             if (before.st_dev, before.st_ino, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_mtime_ns):
                 self.issue('directory_changed_during_diagnosis', relative)
                 return
-            self.directories[relative] = (after.st_dev, after.st_ino, after.st_mtime_ns)
+            # A truncated listing has no complete name set to compare later.
+            self.directories[relative] = (after.st_dev, after.st_ino, after.st_mtime_ns,
+                                          _listing_digest(items) if complete else None)
         except FileNotFoundError:
             return
         except (ValueError, RuntimeError):
@@ -280,15 +311,41 @@ class _Inventory:
             elif name.casefold().endswith('.md'):
                 self.visit(child, 'candidate' if origin == 'agents_candidates' else 'always', origin)
 
+    def check_listing(self, relative, expected):
+        """List an already walked directory once; record a name-set difference.
+
+        Unreadable or over-cap listings fail closed like the walk itself.
+        """
+        try:
+            names = _directory_names(self.resolve(relative), MAX_ENTRIES - self.relisted)
+        except (ValueError, RuntimeError):
+            self.issue('unsafe_instruction_directory', relative)
+            return
+        except OSError:
+            self.issue('unreadable_instruction_directory', relative)
+            return
+        if names is None:
+            self.relisted = MAX_ENTRIES
+            self.issue('directory_entry_limit')
+            return
+        self.relisted += len(names)
+        if _listing_digest(names) != expected:
+            if len(self.report['listing_diagnostics']) < MAX_ISSUES:
+                self.report['listing_diagnostics'].append({'code': 'directory_listing_changed', 'path': relative})
+
     def finish(self):
         for relative, expected in self.directories.items():
             try:
                 metadata = self.resolve(relative).lstat()
                 current = (metadata.st_dev, metadata.st_ino, metadata.st_mtime_ns)
-                if current != expected:
+                if current != expected[:3]:
                     self.issue('directory_changed_during_diagnosis', relative)
+                    continue
             except (OSError, ValueError, RuntimeError):
                 self.issue('directory_changed_during_diagnosis', relative)
+                continue
+            if expected[3] is not None:
+                self.check_listing(relative, expected[3])
         # A second bounded descriptor read detects earlier files changing while
         # later imports/directories were inspected, including restored mtimes.
         for relative, record in list(self.records.items()):
@@ -321,6 +378,9 @@ Claude rules with a paths field are conditional static candidates. All .agents
 Markdown is candidate-only because this diagnostic cannot establish its host's
 loading semantics. Supported imports are local @file.md, including quoted names;
 code examples are excluded. Limits, skips and inconsistent reads yield partial.
+Each walked directory gets one bounded name listing at the end; a name-set
+difference behind an unchanged directory time is reported in
+listing_diagnostics without changing the status.
 """
     try:
         config = validate_config(config)

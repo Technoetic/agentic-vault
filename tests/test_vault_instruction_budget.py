@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -14,6 +15,28 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
 DOCTOR = SCRIPTS / 'vault_doctor.py'
+
+
+def settled_mtime(path):
+    """Return a directory time that stays unchanged across two reads."""
+    for _ in range(50):
+        first = os.stat(path).st_mtime_ns
+        time.sleep(0.005)
+        if os.stat(path).st_mtime_ns == first:
+            return first
+    raise AssertionError('directory time did not settle')
+
+
+def restore_mtime(path, mtime_ns):
+    """Put a directory time back and require it to stay there briefly."""
+    for _ in range(50):
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+        time.sleep(0.002)
+        if os.stat(path).st_mtime_ns == mtime_ns:
+            time.sleep(0.005)
+            if os.stat(path).st_mtime_ns == mtime_ns:
+                return
+    raise AssertionError('directory time could not be restored')
 
 
 class InstructionBudgetTests(unittest.TestCase):
@@ -366,6 +389,114 @@ class InstructionBudgetTests(unittest.TestCase):
                 report = self.diagnose()
                 self.assertEqual(self.paths(report)['.claude/rules/scoped.md']['classification'], 'candidate')
                 self.assertEqual(report['status'], 'partial')
+
+    # Listing fingerprint (limit A11). The directory time is restored after
+    # each entry change, reproducing a coarse or lagging Windows directory time.
+    def listing_fixture(self):
+        self.write('AGENTS.md', 'root\n')
+        self.write('.claude/rules/first.md', 'first\n')
+        self.write('.claude/rules/notes.txt', 'notes\n')
+        self.write('.agents/last.md', 'last\n')
+        return settled_mtime(self.vault / '.claude/rules')
+
+    def listing_mutations(self):
+        folder = self.vault / '.claude/rules'
+        return {
+            'add': lambda: self.write('.claude/rules/new.md', 'new\n'),
+            'remove': lambda: (folder / 'notes.txt').unlink(),
+            'rename': lambda: (folder / 'notes.txt').rename(folder / 'renamed.txt'),
+        }
+
+    def diagnose_with_change(self, mutate, mtime_ns):
+        module = self.module()
+        read = module.stable_read
+        changed = False
+        def changing_read(resolver, limit, **kwargs):
+            nonlocal changed
+            result = read(resolver, limit, **kwargs)
+            if resolver().name == 'last.md' and not changed:
+                changed = True
+                mutate()
+                restore_mtime(self.vault / '.claude/rules', mtime_ns)
+            return result
+        with mock.patch.object(module, 'stable_read', side_effect=changing_read):
+            return module.diagnose_instructions(self.vault, self.config)
+
+    def test_listing_change_behind_restored_directory_time_is_diagnosed(self):
+        for kind in ('add', 'remove', 'rename'):
+            with self.subTest(kind=kind):
+                self.vault = Path(self.temp.name, kind).resolve()
+                self.vault.mkdir()
+                mtime_ns = self.listing_fixture()
+                report = self.diagnose_with_change(self.listing_mutations()[kind], mtime_ns)
+                # Stage 1: a listing-only difference is recorded, not enforced.
+                self.assertEqual(report['status'], 'complete')
+                self.assertEqual(report['issues'], [])
+                self.assertEqual(report['listing_diagnostics'],
+                                 [{'code': 'directory_listing_changed', 'path': '.claude/rules'}])
+
+    def test_unchanged_listing_records_no_listing_diagnostic(self):
+        self.listing_fixture()
+        report = self.diagnose()
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(report['listing_diagnostics'], [])
+
+    def test_unreadable_or_over_cap_listing_at_finish_fails_closed(self):
+        mtime_ns = self.listing_fixture()
+        module = self.module()
+        finish = module._Inventory.finish
+        def unreadable(inventory):
+            with mock.patch('os.scandir', side_effect=PermissionError('listing denied')):
+                return finish(inventory)
+        with mock.patch.object(module._Inventory, 'finish', unreadable):
+            report = module.diagnose_instructions(self.vault, self.config)
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn({'code': 'unreadable_instruction_directory', 'path': '.claude/rules'}, report['issues'])
+        # The walk sees exactly three entries; one more at the recheck exceeds the cap.
+        with mock.patch.object(module, 'MAX_ENTRIES', 3):
+            self.assertEqual(module.diagnose_instructions(self.vault, self.config)['status'], 'complete')
+            report = self.diagnose_with_change(lambda: self.write('.claude/rules/extra.txt', 'x\n'), mtime_ns)
+        self.assertEqual(report['status'], 'partial')
+        self.assertIn('directory_entry_limit', {row['code'] for row in report['issues']})
+
+    def test_finish_lists_each_walked_directory_once(self):
+        self.listing_fixture()
+        module = self.module()
+        finish = module._Inventory.finish
+        real_scandir = os.scandir
+        listed = []
+        def counting_scandir(path, *args, **kwargs):
+            listed.append(os.path.normcase(os.fspath(path)))
+            return real_scandir(path, *args, **kwargs)
+        def counted(inventory):
+            with mock.patch('os.scandir', side_effect=counting_scandir):
+                return finish(inventory)
+        with mock.patch.object(module._Inventory, 'finish', counted):
+            report = module.diagnose_instructions(self.vault, self.config)
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(len(listed), 2)
+        self.assertEqual(len(set(listed)), 2)
+
+    def test_same_name_recreation_is_not_a_listing_change(self):
+        # The name set cannot see a delete-and-recreate under the same name.
+        # The finish rehash catches different bytes; identical bytes leave the
+        # measured result unchanged and are documented as not reported.
+        for data, expected in ((b'first\n', 'complete'), (b'FIRST!\n', 'partial')):
+            with self.subTest(data=data):
+                self.vault = Path(self.temp.name, expected).resolve()
+                self.vault.mkdir()
+                mtime_ns = self.listing_fixture()
+                path = self.vault / '.claude/rules/first.md'
+                def recreate():
+                    times = path.stat()
+                    path.unlink()
+                    path.write_bytes(data)
+                    os.utime(path, ns=(times.st_atime_ns, times.st_mtime_ns))
+                report = self.diagnose_with_change(recreate, mtime_ns)
+                self.assertEqual(report['status'], expected)
+                self.assertEqual(report['listing_diagnostics'], [])
+                codes = {row['code'] for row in report['issues']}
+                self.assertEqual(codes, set() if expected == 'complete' else {'file_changed_during_diagnosis'})
 
 
 if __name__ == '__main__':

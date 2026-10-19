@@ -101,12 +101,34 @@ def _vault_digest(vault: Path) -> str:
     return digest.hexdigest()
 
 
+# v0.26.0 (listing fingerprint, limit A11) changed only the query-expansion
+# inventory_verification diagnostic: new listing_* fields and the method and
+# assurance wording. Map it back to the earlier shape so the pinned digests
+# keep proving that ranking, context and every other field are unchanged.
+LEGACY_INVENTORY_WORDING = {
+    "method": "bounded marks from the original scan; no second scan or payload reads",
+    "assurance": "metadata_generation_only; preserved marks can evade checks; "
+                 "initial source hashes do not certify current inventory bytes",
+}
+
+
+def legacy_inventory_verification(value):
+    if not isinstance(value, dict) or "listing_diagnostics" not in value:
+        return value
+    if value["listing_diagnostics"] or value.get("listing_diagnostics_omitted"):
+        raise AssertionError("fixture runs must not observe listing changes")
+    legacy = {key: item for key, item in value.items()
+              if key not in {"listing_entries", "listing_diagnostics", "listing_diagnostics_omitted"}}
+    return {**legacy, **LEGACY_INVENTORY_WORDING}
+
+
 def _canonical(value):
     # Ten significant digits absorb last-ulp libm differences between CI platforms.
     if isinstance(value, float):
         return format(value, ".10g")
     if isinstance(value, dict):
-        return {key: _canonical(item) for key, item in value.items()}
+        return {key: _canonical(legacy_inventory_verification(item) if key == "inventory_verification" else item)
+                for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_canonical(item) for item in value]
     return value
