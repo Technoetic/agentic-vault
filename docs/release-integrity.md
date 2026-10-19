@@ -19,12 +19,13 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 |---|---|
 | `agentic-vault-VERSION.zip` | 태그 커밋의 소스 ZIP. 릴리스에 직접 올린 파일이며 GitHub가 내려받을 때 만드는 "Source code (zip/tar.gz)"와 다르다 |
 | `SHA256SUMS` | ZIP과 `verification.json`의 SHA-256 목록 |
-| `verification.json` | 최종 Git 소스, 메타데이터 검사, CI, 압축본·blob 대조, 독립 검토를 담은 검증 영수증 |
+| `verification.json` | 최종 Git 소스, 메타데이터 검사, CI, 압축본·blob 대조, 독립 검토를 담은 검증 영수증. v0.25.0 다음 릴리스부터 재빌드 명세(`rebuild_spec`)도 담는다 |
 
 아래 `TAG`는 확인할 릴리스 태그(예: `v0.25.0`), `VERSION`은 태그에서 앞의 `v`를 뺀 번호다.
 2026-10-17 v0.23.0 게시 전 GitHub 릴리스 23개 중 v0.15.0부터 v0.22.1까지 10개가
 이 세 파일을 올렸다(당시 측정).
 ZIP은 유지관리자가 `git archive`로 만들어 올린다. CI가 만든 파일이 아니다(v0.22.1 `verification.json` 기록).
+만드는 명령과 다시 만들어 대조하는 방법은 아래 "ZIP 재현과 재빌드 명세"에 적는다.
 
 ## v0.23.0부터: 불변 릴리스
 
@@ -133,11 +134,126 @@ gh release verify-asset TAG agentic-vault-VERSION.zip -R Technoetic/agentic-vaul
   (공식 문서). 릴리스에 올린 `agentic-vault-VERSION.zip`을 확인한다.
 - 이 확인은 건너뛰어도 된다. 하는 경우 1의 `SHA256SUMS` 대조와 함께 쓴다.
 
+## ZIP 재현과 재빌드 명세
+
+ZIP 항목의 시각 필드에는 시간대가 없다. git은 `git archive`로 ZIP을 만들 때 커밋 시각을 실행 환경의 지역
+시간대로 바꿔 적는다(git 소스 `archive-zip.c`의 `localtime_r`). 그래서 같은 태그도 시간대가 다르면 다른 파일이
+된다. Reproducible Builds의 [Archive metadata](https://reproducible-builds.org/docs/archives/) 문서는 ZIP 시각에
+시간대가 없으니 풀 때 `TZ=UTC`를 쓰라고 권하고, `git archive`가 결정적인 출력을 약속하지 않는다고 적는다(문서 보고).
+만들 때 `TZ=UTC0`로 고정하는 근거는 이 권고가 아니라 위 git 소스와 아래 측정이다.
+
+### 만드는 명령(v0.25.0 다음 릴리스부터)
+
+유지관리자는 태그를 만든 저장소에서 다음 명령으로 ZIP을 만든다. `VERSION`은 앞의 `v`를 뺀 번호다.
+
+Linux·macOS·Git Bash:
+
+```text
+TZ=UTC0 git -c core.autocrlf=false archive --format=zip --prefix=agentic-vault-VERSION/ -o agentic-vault-VERSION.zip vVERSION
+```
+
+Windows PowerShell(원래 `$env:TZ`를 저장했다가 끝나면 되돌린다):
+
+```powershell
+$savedTz = $env:TZ
+try {
+  $env:TZ = 'UTC0'
+  git -c core.autocrlf=false archive --format=zip --prefix=agentic-vault-VERSION/ -o agentic-vault-VERSION.zip vVERSION
+} finally {
+  $env:TZ = $savedTz
+}
+```
+
+- `core.autocrlf=false`: `core.autocrlf=true`인 Windows에서 텍스트 파일이 CRLF로 바뀌어 들어가지 않게 한다.
+  ZIP의 파일 바이트가 Git blob과 같아진다.
+- `--prefix`: 모든 항목이 `agentic-vault-VERSION/` 폴더 아래에 들어간다. 이것이 빠지면 같은 파일이 나오지 않는다.
+- PowerShell 형식은 v0.25.0 태그로 실행해 아래 UTC0 측정과 같은 SHA-256을 얻었고, 실행 뒤 `$env:TZ`는 원래대로
+  비어 있었다(2026-10-20, 1회).
+
+같은 일을 하는 선택형 스크립트 [`scripts/release_rebuild.py`](../scripts/release_rebuild.py)도 있다. 표준
+라이브러리만 쓰고 네트워크를 쓰지 않는다. 위 명령을 그대로 실행하되 `TZ`는 git 하위 프로세스의 환경 사본에만
+넣고, 이미 있는 출력 파일은 덮어쓰지 않는다. 끝나면 아래 `rebuild_spec` JSON을 출력한다.
+
+```text
+python scripts/release_rebuild.py build --tag vVERSION --out agentic-vault-VERSION.zip
+```
+
+### verification.json의 rebuild_spec
+
+v0.25.0 다음 릴리스부터 `verification.json`에 `rebuild_spec` 블록을 넣는다. 위 스크립트의 출력을 그대로 쓴다.
+
+| 필드 | 내용 |
+|---|---|
+| `schema` | `agentic-vault/rebuild-spec/v1` |
+| `tag`, `commit` | 릴리스 태그와 그 태그가 가리키는 커밋(`TAG^{commit}`) |
+| `git_version` | ZIP을 만든 git 버전(`git --version`의 번호, 예: `2.55.0.windows.3`) |
+| `tz` | git에 준 `TZ` 값. 기본 `UTC0` |
+| `prefix` | `agentic-vault-VERSION/` |
+| `core_autocrlf`, `format` | `false`, `zip` |
+| `argv` | 실행한 명령의 인자 목록. 출력 경로는 `agentic-vault-VERSION.zip`으로 바꿔 적는다 |
+| `expected_sha256` | 만든 ZIP의 SHA-256 |
+| `equivalence_levels` | `["L1_bytes", "L2_members_blobs"]`. 아래 두 확인 단계 |
+
+### 재빌드 확인(선택, 보고 전용)
+
+태그가 있는 저장소 사본(`git fetch --tags`)에서 실행한다. `--spec`에는 `rebuild_spec` 블록이 든 `verification.json`이나
+그 블록만 담은 JSON 파일을 준다.
+
+```text
+python scripts/release_rebuild.py check --tag vVERSION --zip agentic-vault-VERSION.zip
+python scripts/release_rebuild.py check --spec verification.json --zip agentic-vault-VERSION.zip
+```
+
+- **L1(`L1_bytes`):** 명세의 값(태그·`TZ`·prefix)으로 ZIP을 다시 만들어 주어진 ZIP과 SHA-256을 비교한다. `--tz`로
+  `TZ`를 바꿀 수 있다. v0.25.0까지처럼 `TZ` 없이 한국 시간대 PC에서 만든 릴리스는 `--tz KST-9`로 재현한다.
+  `--spec`을 주면 주어진 ZIP이 `expected_sha256`과 같은지, 태그 커밋과 git 버전이 명세와 같은지도 함께 보고한다.
+- **L2(`L2_members_blobs`):** 주어진 ZIP을 풀지 않고 읽는다. 항목 이름 중복, 절대 경로, `..` 경로, 역슬래시,
+  드라이브 문자, prefix 밖 항목, 심볼릭 링크 항목(`external_attr`)을 위험 항목으로 표시한다. 그다음 prefix를 뗀
+  파일 항목(폴더 항목은 제외)과 `git ls-tree -r TAG`의 파일 목록을 비교한다. 경로 집합이 같고, 각 파일 바이트로
+  계산한 Git blob id(`blob <크기>\0` + 바이트의 해시)가 트리의 id와 같으면 일치다.
+- **`export-ignore`·`export-subst`:** `git archive`처럼 태그 트리의 속성(`git check-attr --source`)을 읽는다.
+  `export-ignore` 파일과 폴더 아래 파일은 기대 목록에서 뺀다. `export-subst` 파일은 내용이 바뀌어 들어가므로
+  있는지만 확인하고 바이트는 대조하지 않는다. 이런 파일이 있으면 L2 상태는 `match`가 아니라 `partial`이다.
+  v0.25.0 태그는 두 속성을 쓰지 않는다(아래 측정에서 제외 0개).
+- **출력과 종료 코드:** JSON으로 `l1`·`l2` 단계별 상태, 개수, 빠진·남는·다른·위험 항목 이름(각 50개까지)을
+  출력한다. 파일 내용은 출력하지 않는다. 일치든 불일치든 종료 코드 0이다. 사용법 오류, 없는 태그, git 실패는 종료
+  코드 2와 오류 코드만 출력한다.
+- **한도:** ZIP 256 MiB, 항목 20,000개, 압축을 푼 크기 합 512 MiB를 넘으면 L2는 대조하지 않고 `refused`로 보고한다.
+
+### 재현의 한계
+
+- 바이트 재현(L1)은 같은 git 빌드(git 2.55.0.windows.3)에서만 측정했다. 다른 git 버전이나 OS에서 같은 바이트가
+  나오는지는 측정하지 않았다. 그때는 L2 blob 대조를 기준으로 쓴다.
+- L2는 파일 목록과 내용만 본다. 항목 시각, 실행 권한, 압축 방식, ZIP 주석은 비교하지 않는다(ZIP 주석이 커밋
+  id인지는 참고로만 보고한다).
+- 재빌드 확인은 ZIP이 태그 소스에서 다시 만들어지는지를 보여 준다. 그 ZIP이 게시된 자산과 같은지는 위의
+  `SHA256SUMS` 대조와 릴리스 증명으로 확인한다. 누가 어떤 환경에서 만들었는지(빌드 출처)는 여전히 증명하지 않는다.
+
+### v0.25.0 게시 후 기록(2026-10-20)
+
+v0.25.0 ZIP은 `TZ`를 지정하지 않고 한국 시간대 Windows PC에서 만들었다. 게시된 자산(SHA-256
+`d39adcfa0e2b728d913ae001e2d754c9555884050bf6ede08900e1c9e7c88044`)을 git 2.55.0.windows.3으로 오프라인에서 다시
+확인했다(측정).
+
+```text
+python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0.zip --tz KST-9
+python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0.zip
+```
+
+- `--tz KST-9`와 prefix로 다시 만든 ZIP은 게시 파일과 바이트 단위로 같았다(L1 일치).
+- 기본 `UTC0`로 만든 ZIP은 `b53d4d94a2b9adc1a79c95e63b0386a92e6658b4cce98403940ab6ffd7012627`로 달랐다(L1 불일치).
+- 두 경우 모두 L2는 일치였다. 항목 473개(폴더 63개, 파일 410개), 파일 410개 모두 태그 트리의 blob과 같았고 위험
+  항목은 0개였다.
+- prefix 없이 만든 ZIP은 `KST-9`와 `UTC0` 모두 게시 파일과 달랐다.
+- 게시 전에 잠긴 v0.25.0 `verification.json`은 고치지 않는다. 그 파일에는 `rebuild_spec`이 없으므로 v0.25.0은
+  `--tag`와 `--tz KST-9`로 확인한다. 이 기록은 영수증 밖의 게시 후 관측이다.
+
 ## 증명하는 것과 증명하지 않는 것
 
 | 확인 | 증명하는 것 | 증명하지 않는 것 |
 |---|---|---|
 | `SHA256SUMS` 대조 | 내려받은 파일이 같은 릴리스의 `SHA256SUMS` 목록과 같다. 전송 중 손상을 찾는다 | 목록의 진위. 불변이 아닌 릴리스에서는 자산과 목록을 함께 바꿀 수 있다 |
+| 재빌드 확인(`release_rebuild.py check`) | L1 일치: 이 git으로 태그에서 다시 만든 ZIP과 바이트가 같다. L2 일치: 파일 목록과 각 파일 바이트가 태그 트리의 blob과 같고 위험한 항목 이름이 없다 | 게시된 자산과 같은지, 누가 만들었는지, 다른 git 빌드에서도 같은 바이트가 나오는지, 항목 시각·권한·압축 방식(L2) |
 | 릴리스 증명(`verify`·`verify-asset`) | 파일이 GitHub가 그 태그로 게시한 자산과 같고, 태그가 증명에 적힌 커밋을 가리킨다 | 누가 어떤 환경에서 ZIP을 만들었는지(빌드 출처), ZIP이 태그 소스에서 재현되는지, 게시를 승인한 사람의 신원, 내용의 안전성 |
 
 - **서명 주체:** 다른 저장소의 불변 릴리스 1건(zizmorcore/zizmor-action v0.7.1)을 `--format json`으로 보면 인증서
@@ -315,5 +431,10 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
 - [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity):
   `gh release verify`·`verify-asset`, 자동 생성 소스 압축본 제외
 - [GitHub CLI v2.93.0 릴리스 노트](https://github.com/cli/cli/releases/tag/v2.93.0): GHSA-8xvp-7hj6-mcj9
+- [Archive metadata](https://reproducible-builds.org/docs/archives/)(Reproducible Builds): ZIP 시각에 시간대가 없음,
+  풀 때 `TZ=UTC` 권고, `git archive` 출력의 결정성 미보장
+- [Reproducibility is Not Enough](https://arxiv.org/abs/2608.18180)(Solarin 외, 2026-08): 재빌드 검증을 주로 막는 것이
+  소스 커밋 복구이고, 빠진 소스·빌드 메타데이터가 검증 가능성을 제한한다고 보고. `rebuild_spec`에 커밋·명령·`TZ`·git
+  버전을 적는 이유
 - [Secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/): pip 해시 확인 모드(`--require-hashes`)와
   소스 배포본 금지(`--only-binary :all:`)
