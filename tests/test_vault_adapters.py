@@ -23,6 +23,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
@@ -313,12 +318,11 @@ class AdapterReportTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "junctions are Windows only")
     def test_junctioned_scripts_directory_is_not_followed(self) -> None:
-        import _winapi
         outside = Path(self._tmp.name) / "outside-junction"
         outside.mkdir()
         (outside / "aside-up.ps1").write_text(self.bundled_helper(), encoding="utf-8")
         (self.vault / "00-meta").mkdir(exist_ok=True)
-        _winapi.CreateJunction(str(outside), str(self.vault / "00-meta" / "scripts"))
+        make_junction(self.vault / "00-meta" / "scripts", outside)
         aside = self.report()
         self.assertEqual(aside["helper"]["state"], "unsafe_path")
         self.assertIn("review_helper", aside["actions"])

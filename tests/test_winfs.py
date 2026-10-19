@@ -150,12 +150,16 @@ class MakeJunctionDispatchTests(unittest.TestCase):
 
 class JunctionCallSiteTests(unittest.TestCase):
     def test_test_modules_create_junctions_only_through_the_helper(self) -> None:
+        # Both ways of making a junction outside the helper are flagged: shelling
+        # out to mklink and calling _winapi.CreateJunction directly.
         tests_dir = Path(__file__).resolve().parent
         helper_files = {"_winfs.py", Path(__file__).name}
+        markers = ("mklink", "CreateJunction")
         offenders = sorted(
             path.name for path in tests_dir.glob("*.py")
             if path.name not in helper_files
-            and "mklink" in path.read_text(encoding="utf-8", errors="replace"))
+            and any(marker in path.read_text(encoding="utf-8", errors="replace")
+                    for marker in markers))
         self.assertEqual(offenders, [])
 
 
