@@ -4,19 +4,26 @@
     python scripts/flaky_repeat.py test_vault_runs.VaultRunsTests.test_x -n 300
     python scripts/flaky_repeat.py MODULE.CLASS.TEST -n 30 --fresh-process --json
 
-Each run loads the test again and runs it once: in this process by default, or
-in a new interpreter per run with --fresh-process. Runs are counted as passed,
-failed, error or skipped. Failures and errors are failure events; skipped runs
-are left out of the denominator. The one-sided 95% Clopper-Pearson upper bound
-comes from scripts/eval_stats.py.
+Each run builds a new test instance and runs it once. By default the runs share
+this process: the module is imported once, so module- and class-level state
+carries over between runs. With --fresh-process every run starts a new
+interpreter that imports the module again; use it when isolation matters.
+Runs are counted as passed, failed, error or skipped. Failures and errors are
+failure events; skipped runs are left out of the denominator. The one-sided 95%
+Clopper-Pearson upper bound comes from scripts/eval_stats.py.
 
 Wording rules built into the report: zero failures read "not observed in N
 runs (rate <= p)", never a claim that the test is repaired, and a bound wider
 than WIDE_MARGIN above the observed rate is called wide. Failure signatures keep
-the exception class and the first message line with paths replaced by <path>;
-at most MAX_SIGNATURES distinct signatures are kept. The tool measures; it is
-not a gate. Exit code 0 when the runs happened (whatever x is), 2 for usage
-errors, which are reported as content-free codes.
+the exception class and the first message line. Absolute paths in that line
+become <path>: a quoted path up to its closing quote, an unquoted one up to the
+first whitespace. Relative paths and other message text are kept, so review
+signatures before sharing them. At most MAX_SIGNATURES distinct signatures are
+kept. The tool measures; it is not a gate. Exit code 0 when the runs happened
+(whatever x is), 2 for usage errors, which are reported as content-free codes.
+A test id that cannot be loaded is a usage error on the first run only; a later
+load failure is counted as an error event (LoadError, or ChildLoadError with
+--fresh-process), so an import-time flake does not discard completed runs.
 """
 from __future__ import annotations
 
@@ -44,6 +51,10 @@ MAX_SIGNATURE_CHARS = 200
 # A bound more than one percentage point above the observed rate is reported as wide.
 WIDE_MARGIN = 0.01
 TEST_ID_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,99}(?:\.[A-Za-z_][A-Za-z0-9_]{0,99}){1,9}')
+# A quoted absolute path (the OSError form) is replaced up to its closing quote,
+# so a directory name with spaces does not leak; _PATH_RE then handles the rest.
+_QUOTED_PATH_RE = re.compile(
+    r'([\'"])(?:\\\\|[A-Za-z]:[\\/]|~?/)(?:(?!\1).)*\1')
 _PATH_RE = re.compile(
     r'\\\\[^\s\'"]+'                                  # UNC and \\?\ extended paths
     r'|(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\'"]*'       # drive paths
@@ -86,7 +97,8 @@ def signature(exc_type, exc_value):
     except Exception:  # noqa: BLE001 - an unprintable message keeps the class only
         text = ''
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    first = _PATH_RE.sub('<path>', lines[0]) if lines else ''
+    first = lines[0] if lines else ''
+    first = _PATH_RE.sub('<path>', _QUOTED_PATH_RE.sub(r'\1<path>\1', first))
     value = name + ': ' + first if first else name
     return value[:MAX_SIGNATURE_CHARS]
 
@@ -183,11 +195,18 @@ def repeat(test_id, runs, *, fresh_process=False, paths=(), timeout=DEFAULT_TIME
     counts = {'pass': 0, 'fail': 0, 'error': 0, 'skip': 0}
     signatures, not_shown = {}, 0
     started = time.monotonic()
-    for _ in range(runs):
-        if fresh_process:
-            outcome, sig = _child(test_id, paths, timeout)
-        else:
-            outcome, sig = run_once(test_id)
+    for index in range(runs):
+        try:
+            if fresh_process:
+                outcome, sig = _child(test_id, paths, timeout)
+            else:
+                outcome, sig = run_once(test_id)
+        except UsageError as error:
+            # Only the first run decides whether the id is usable. A later load
+            # failure (an import-time flake) is a failure event, not a usage error.
+            if index == 0 or str(error) != 'invalid_test_id':
+                raise
+            outcome, sig = 'error', 'ChildLoadError' if fresh_process else 'LoadError'
         counts[outcome] += 1
         if outcome in ('fail', 'error'):
             sig = sig or 'unknown'
@@ -212,8 +231,10 @@ def summarize(events, trials, skipped, bounds):
         text = ('0/%d failures; not observed in %d runs (rate <= %.4f, %s). '
                 'Absence in %d runs is not proof of absence.' % (trials, trials, upper, method, trials))
     if upper - bounds['observed_rate'] > WIDE_MARGIN:
-        text += (' The bound is wide at N=%d: it is %.4f above the observed rate; '
-                 'hundreds of targeted repeats narrow it.' % (trials, upper - bounds['observed_rate']))
+        advice = ('hundreds of targeted repeats narrow it' if not events
+                  else 'more repeats narrow it')
+        text += (' The bound is wide at N=%d: it is %.4f above the observed rate (more than %.2f); '
+                 '%s.' % (trials, upper - bounds['observed_rate'], WIDE_MARGIN, advice))
     if skipped:
         text += ' %d skipped runs are not in the denominator.' % skipped
     return text

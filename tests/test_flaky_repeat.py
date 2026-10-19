@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,23 @@ class Synthetic(unittest.TestCase):
         self.skipTest('synthetic skip')
 '''
 
+# Fails at import time on the second load only; counts every load of the module.
+IMPORT_FLAKY = '''
+import unittest
+from pathlib import Path
+
+LOADS = Path({loads!r})
+COUNT = int(LOADS.read_text()) + 1 if LOADS.exists() else 1
+LOADS.write_text(str(COUNT))
+if COUNT == 2:
+    raise RuntimeError('import flake in ' + str(LOADS))
+
+
+class Loaded(unittest.TestCase):
+    def test_passes(self):
+        pass
+'''
+
 
 class FlakyRepeatTests(unittest.TestCase):
     def setUp(self):
@@ -71,7 +89,10 @@ class FlakyRepeatTests(unittest.TestCase):
                               capture_output=True, text=True, encoding='utf-8', timeout=timeout)
 
     def report(self, name, *args):
-        result = self.tool(self.module + '.Synthetic.' + name, '--json', *args)
+        return self.report_id(self.module + '.Synthetic.' + name, *args)
+
+    def report_id(self, test_id, *args):
+        result = self.tool(test_id, '--json', *args)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn(self.dir.name, result.stdout + result.stderr)
         return json.loads(result.stdout)
@@ -135,6 +156,38 @@ class FlakyRepeatTests(unittest.TestCase):
         self.assertEqual(value['bounds']['clopper_pearson_upper'],
                          stats.clopper_pearson_upper_bound(3, 6))
 
+    def write_import_flaky(self):
+        name = 'import_flaky_' + uuid.uuid4().hex[:12]
+        loads = self.dir / (name + '.loads')
+        (self.dir / (name + '.py')).write_text(IMPORT_FLAKY.format(loads=str(loads)),
+                                               encoding='utf-8')
+        return name + '.Loaded.test_passes', loads
+
+    def test_fresh_process_counts_a_later_import_failure_as_an_error_event(self):
+        test_id, loads = self.write_import_flaky()
+        result = self.tool(test_id, '-n', '4', '--fresh-process', '--json')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual((value['runs'], value['passed'], value['errors'], value['failure_events']),
+                         (4, 3, 1, 1))
+        self.assertEqual(value['signatures'], [{'signature': 'ChildLoadError', 'count': 1}])
+        self.assertEqual(loads.read_text(), '4')
+        self.assertNotIn(self.dir.name, result.stdout + result.stderr)
+
+    def test_fresh_process_import_failure_on_the_first_run_is_a_usage_error(self):
+        test_id, loads = self.write_import_flaky()
+        loads.write_text('1')  # the first child is the module's second load
+        result = self.tool(test_id, '-n', '3', '--fresh-process', '--json')
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'ok': False, 'error': 'invalid_test_id'})
+        self.assertEqual(loads.read_text(), '2')
+
+    def test_in_process_repeats_import_the_module_once(self):
+        test_id, loads = self.write_import_flaky()
+        value = self.report_id(test_id, '-n', '3')
+        self.assertEqual((value['passed'], value['failure_events']), (3, 0))
+        self.assertEqual(loads.read_text(), '1')
+
     def test_signatures_are_bounded(self):
         value = self.report('test_distinct', '-n', '15')
         self.assertEqual(value['failed'], 15)
@@ -192,7 +245,18 @@ class SignatureTests(unittest.TestCase):
              "OSError: [Errno 5] denied: '<path>'"),
             (PermissionError(13, 'denied', 'D:/vault/x.md'),
              "PermissionError: [Errno 13] denied: '<path>'"),
+            (FileNotFoundError(2, 'No such file', r'C:\Users\Jane Doe\vault\x.md'),
+             "FileNotFoundError: [Errno 2] No such file: '<path>'"),
+            (PermissionError(13, 'denied', '/home/Jane Doe/vault/x.md'),
+             "PermissionError: [Errno 13] denied: '<path>'"),
+            (OSError(5, 'denied', r'\\server\share name\x.md'),
+             "OSError: [Errno 5] denied: '<path>'"),
+            (AssertionError(r"'C:\Program Files\vault' != 'other'"),
+             "AssertionError: '<path>' != 'other'"),
+            (AssertionError('"/tmp/Jane Doe/x.md" missing'), 'AssertionError: "<path>" missing'),
             (AssertionError('ratio 1/30 and a/b stay'), 'AssertionError: ratio 1/30 and a/b stay'),
+            (AssertionError('relative notes/a b.md is kept'),
+             'AssertionError: relative notes/a b.md is kept'),
             (AssertionError(''), 'AssertionError'),
         ]
         for error, expected in cases:
@@ -200,6 +264,34 @@ class SignatureTests(unittest.TestCase):
                 self.assertEqual(self.tool.signature(type(error), error), expected)
         long = self.tool.signature(AssertionError, AssertionError('x' * 1000))
         self.assertLessEqual(len(long), self.tool.MAX_SIGNATURE_CHARS)
+
+
+class SummaryAndRepeatTests(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(TOOL.is_file(), 'scripts/flaky_repeat.py is missing')
+        self.tool = _load('flaky_repeat_summary_under_test', TOOL)
+
+    def test_in_process_load_failure_after_the_first_run_is_an_error_event(self):
+        results = [('pass', None), self.tool.UsageError('invalid_test_id'), ('pass', None)]
+        with mock.patch.object(self.tool, 'run_once', side_effect=results):
+            counts, signatures, not_shown, _ = self.tool.repeat('m.C.test_x', 3)
+        self.assertEqual(counts, {'pass': 2, 'fail': 0, 'error': 1, 'skip': 0})
+        self.assertEqual((signatures, not_shown), ({'LoadError': 1}, 0))
+        with mock.patch.object(self.tool, 'run_once',
+                               side_effect=self.tool.UsageError('invalid_test_id')):
+            with self.assertRaises(self.tool.UsageError):
+                self.tool.repeat('m.C.test_x', 3)
+
+    def test_wide_bound_advice_depends_on_observed_failures(self):
+        events = stats.rate_upper_bounds(50, 1000)
+        self.assertGreater(events['clopper_pearson_upper'] - events['observed_rate'], 0.01)
+        text = self.tool.summarize(50, 1000, 0, events)
+        self.assertIn('wide at N=1000', text)
+        self.assertIn('more than 0.01', text)
+        self.assertNotIn('hundreds', text)
+        self.assertIn('more repeats narrow it', text)
+        zero = self.tool.summarize(0, 30, 0, stats.rate_upper_bounds(0, 30))
+        self.assertIn('hundreds of targeted repeats narrow it', zero)
 
 
 if __name__ == '__main__':
