@@ -381,6 +381,37 @@ class ReleaseRebuildTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["error"], "invalid_spec")
 
 
+class ReleaseRebuildDocTests(unittest.TestCase):
+    DOC = ROOT / "docs" / "release-integrity.md"
+
+    def setUp(self) -> None:
+        self.doc = self.DOC.read_text(encoding="utf-8")
+
+    def test_documents_the_utc_build_command_in_bash_and_powershell(self) -> None:
+        argv = " ".join(_load()._argv("vVERSION", "agentic-vault-VERSION/", "agentic-vault-VERSION.zip"))
+        self.assertIn("TZ=UTC0 " + argv, self.doc.splitlines())
+        powershell = ("$savedTz = $env:TZ", "try {", "$env:TZ = 'UTC0'", "} finally {", "$env:TZ = $savedTz")
+        lines = [line.strip() for line in self.doc.splitlines()]
+        for literal in powershell:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, lines)
+        self.assertIn(argv, lines)
+
+    def test_documents_the_spec_fields_levels_and_script(self) -> None:
+        for literal in ("rebuild_spec", "schema", "git_version", "core_autocrlf", "expected_sha256",
+                        "equivalence_levels", "L1_bytes", "L2_members_blobs", "export-ignore", "export-subst",
+                        "](../scripts/release_rebuild.py)", "--tz KST-9",
+                        "d39adcfa0e2b728d913ae001e2d754c9555884050bf6ede08900e1c9e7c88044",
+                        "b53d4d94a2b9adc1a79c95e63b0386a92e6658b4cce98403940ab6ffd7012627"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, self.doc)
+
+    def test_docs_index_mentions_the_rebuild_check(self) -> None:
+        index = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+        row = next(line for line in index.splitlines() if "](release-integrity.md)" in line)
+        self.assertIn("rebuild_spec", row)
+
+
 @unittest.skipUnless(GIT, "git is not installed")
 class ExportSubstTests(unittest.TestCase):
     def test_export_subst_members_are_reported_as_unverified(self) -> None:
