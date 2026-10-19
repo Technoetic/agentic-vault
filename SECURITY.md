@@ -127,8 +127,12 @@ them being bypassed in a way the documentation does not describe is still welcom
   a memo the user deliberately sends through an inline bot. Forward metadata still
   wins (`forwarded`). A privileged note that consumes such a capture gets
   `provenance-unresolved`. The bridge requests only `message` updates, so
-  `guest_message` and other update kinds are not processed. Moving Jarvis to an
-  authenticated channel is still open.
+  `guest_message` and other update kinds are not processed. Captures stored before
+  this change are not relabelled: an inline-bot memo captured by an older bridge
+  stays `own` (or `url`), so review older `10-inbox/jarvis/` captures by hand if
+  inline bots were used. Engines older than v0.26.0 report `via_bot` captures as
+  `provenance-invalid`, so update every installation that reads the vault together.
+  Moving Jarvis to an authenticated channel is still open.
 - **The outbound secret filter is pattern-based.** Before a Jev request it rejects
   text that matches a known credential shape. Text is checked as written and again
   after NFKC normalization with invisible format characters (such as zero-width
