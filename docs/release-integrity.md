@@ -8,9 +8,9 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 보고한 내용이다. 아래 2026-10-17의 개수·종료 코드·출력은 당시 GitHub API와 GitHub CLI 2.98.0으로
 직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
 2026-10-19 API 조회에서 `"enabled": true`, `"enforced_by_owner": false`였다. v0.23.0과 v0.24.0은
-불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0의
-최종 소스·CI·ZIP/blob 대조는 [릴리스 검증](verification/v0.25.0.md)과 게시 전 릴리스 자산
-`verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0도 2026-10-19
+게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). v0.26.0의 최종 소스·CI·ZIP/blob 대조와
+재빌드 명세는 [릴리스 검증](verification/v0.26.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
 `post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산
@@ -19,9 +19,9 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 |---|---|
 | `agentic-vault-VERSION.zip` | 태그 커밋의 소스 ZIP. 릴리스에 직접 올린 파일이며 GitHub가 내려받을 때 만드는 "Source code (zip/tar.gz)"와 다르다 |
 | `SHA256SUMS` | ZIP과 `verification.json`의 SHA-256 목록 |
-| `verification.json` | 최종 Git 소스, 메타데이터 검사, CI, 압축본·blob 대조, 독립 검토를 담은 검증 영수증. v0.25.0 다음 릴리스부터 재빌드 명세(`rebuild_spec`)도 담는다 |
+| `verification.json` | 최종 Git 소스, 메타데이터 검사, CI, 압축본·blob 대조, 독립 검토를 담은 검증 영수증. v0.26.0부터 재빌드 명세(`rebuild_spec`)도 담는다 |
 
-아래 `TAG`는 확인할 릴리스 태그(예: `v0.25.0`), `VERSION`은 태그에서 앞의 `v`를 뺀 번호다.
+아래 `TAG`는 확인할 릴리스 태그(예: `v0.26.0`), `VERSION`은 태그에서 앞의 `v`를 뺀 번호다.
 2026-10-17 v0.23.0 게시 전 GitHub 릴리스 23개 중 v0.15.0부터 v0.22.1까지 10개가
 이 세 파일을 올렸다(당시 측정).
 ZIP은 유지관리자가 `git archive`로 만들어 올린다. CI가 만든 파일이 아니다(v0.22.1 `verification.json` 기록).
@@ -142,9 +142,10 @@ ZIP 항목의 시각 필드에는 시간대가 없다. git은 `git archive`로 Z
 시간대가 없으니 풀 때 `TZ=UTC`를 쓰라고 권하고, `git archive`가 결정적인 출력을 약속하지 않는다고 적는다(문서 보고).
 만들 때 `TZ=UTC0`로 고정하는 근거는 이 권고가 아니라 위 git 소스와 아래 측정이다.
 
-### 만드는 명령(v0.25.0 다음 릴리스부터)
+### 만드는 명령(v0.26.0부터)
 
 유지관리자는 태그를 만든 저장소에서 다음 명령으로 ZIP을 만든다. `VERSION`은 앞의 `v`를 뺀 번호다.
+v0.26.0 ZIP이 이 절차로 만드는 첫 릴리스 자산이다(`TZ=UTC0`, `--prefix agentic-vault-0.26.0/`).
 
 Linux·macOS·Git Bash:
 
@@ -182,7 +183,8 @@ python scripts/release_rebuild.py build --tag vVERSION --out agentic-vault-VERSI
 
 ### verification.json의 rebuild_spec
 
-v0.25.0 다음 릴리스부터 `verification.json`에 `rebuild_spec` 블록을 넣는다. 위 스크립트의 출력을 그대로 쓴다.
+v0.26.0부터 `verification.json`에 `rebuild_spec` 블록을 넣는다. 위 스크립트의 출력을 그대로 쓴다.
+v0.26.0의 블록은 게시 전 영수증에만 적고, 이 문서에 값을 미리 옮겨 적지 않는다.
 
 | 필드 | 내용 |
 |---|---|

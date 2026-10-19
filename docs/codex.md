@@ -1,12 +1,12 @@
 # Claude Code · Codex 겸용 사용
 
-v0.25.0은 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가·소표본 통계](memory-evaluation.md), [llama-server 측정 조건 기록](evaluation-stability.md)을 기본값이 꺼진 선택형으로 더하고 CI의 경고 전용 pip-audit 설치를 해시로 고정한다. 평가·진단 도구는 기본 모델·네트워크 호출이나 의존성을 추가하지 않는다. v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·공개 fixture Kiwi/qmd 비교](evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](memory-evaluation.md), [한글 음절 bigram BM25](memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](hardening.md)와 [GitHub 불변 릴리스](release-integrity.md)를 유지한다. v0.22.1의 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md), 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)과 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
-아래 GitHub 설치 ref는 v0.25.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
+v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `via_bot` 출처로 수집하도록 기본 동작을 바꾸고([수집과 경고](hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단이 디렉터리 이름 목록도 대조하게 한다. [골드셋 보고서 키 가명화](memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 반복 측정](evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)은 명시적으로 실행하는 선택형 도구다. 평가·진단 도구는 기본 모델·네트워크 호출이나 의존성을 추가하지 않는다. v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가·소표본 통계](memory-evaluation.md), [llama-server 측정 조건 기록](evaluation-stability.md)과 해시로 고정한 CI 경고 전용 pip-audit 설치를 유지한다. v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·공개 fixture Kiwi/qmd 비교](evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](memory-evaluation.md), [한글 음절 bigram BM25](memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](hardening.md)와 [GitHub 불변 릴리스](release-integrity.md)를 유지한다. v0.22.1의 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md), 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)과 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
+아래 GitHub 설치 ref는 v0.26.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
 기존 캐시·설정·활성 범위는 갱신 전에 확인하고 보존한다.
 
-`v0.25.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 코드·CI·설치 상태는 [v0.25.0 검증 기록](verification/v0.25.0.md)에서 확인한다.
-이전 [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
+`v0.26.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 코드·CI·설치 상태는 [v0.26.0 검증 기록](verification/v0.26.0.md)에서 확인한다.
+이전 [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
@@ -29,7 +29,7 @@ v0.19.0은 compact 제약 재주입, 모델 없이 기록하는 수명주기 체
 공유 상태 부분 수정, 시간 대장, 교훈 델타, 정제 품질·전송 경고와 명시적 토큰 보정을
 더한다. 기억 단위·교훈 관측·연속 작업 평가와 선택형 검색 확장도 포함한다.
 v0.20.0의 비교·복구·작업 기록과 단계 연결 진단은 명시적 helper로 수행한다.
-v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 개발·평가 도구와 v0.23.0의 진단·대조군·경고도 선택해서 사용한다. v0.24.0의 언어·문자열 보존 매트릭스와 검색 비교, v0.25.0의 골드셋 평가·소표본 통계·측정 조건 기록·호스트 버전 확인도 명시적으로 실행한다. 기본 네트워크 호출이나 자동 적용은 추가하지 않는다.
+v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 개발·평가 도구와 v0.23.0의 진단·대조군·경고도 선택해서 사용한다. v0.24.0의 언어·문자열 보존 매트릭스와 검색 비교, v0.25.0의 골드셋 평가·소표본 통계·측정 조건 기록·호스트 버전 확인, v0.26.0의 골드셋 키 가명화·릴리스 ZIP 재빌드 확인·간헐 실패 반복 측정도 명시적으로 실행한다. 기본 네트워크 호출이나 자동 적용은 추가하지 않는다.
 설정을 바꾸거나 교훈·SSOT를 실제로 갱신하는 작업은 명시적 적용 경로를 쓴다.
 
 ## 설치
@@ -37,7 +37,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.25.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.26.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -45,27 +45,28 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.25.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.26.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.25.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.26.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.25.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.26.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
 경고를 `fatal`로 승격한 볼트는 갱신 전에 인증서를 다시 만들 준비를 한다.
-v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다. 그래서 v0.25.0 이하에서
-만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이 설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고,
-새 설치본에서 `vault_warning_policy.py --certificate`로 다시 생성한 뒤 승격한다. 이전 버전 사이의 조건은
-[경고 인증서 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
+v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다(`2ef4b9d4…`에서
+`84cf5235…`로, 저장소 바이트로 측정). 그래서 v0.25.0 이하에서 만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이
+설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로
+다시 생성한 뒤 승격한다. 측정과 되돌리기 조건은 [v0.26.0 업그레이드 안내](releases/v0.26.0.md#하위호환업그레이드)에,
+이전 버전 사이의 조건은 [v0.25.0 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 Claude Code와 Codex 설치본을 함께 갱신한다.
 게시만으로 활성 캐시나 볼트 엔진이 갱신되지는 않는다.
 

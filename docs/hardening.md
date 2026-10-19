@@ -1,14 +1,17 @@
 # 출처와 공유 상태 보강
 
+v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 [via_bot 수집 출처](#수집과-경고)로 기록하게 하고,
+[검색 평가](#검색-평가)의 별칭 inventory 확인에 디렉터리 이름 목록 대조를 더한다.
 v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택)를
-기본값이 꺼진 경고 전용 검사로 더한다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
+기본값이 꺼진 경고 전용 검사로 더했다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
 실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
 기존 설치 캐시와 볼트의 갱신은 별도 작업이다. v0.26.0은 [via_bot 수집 출처](#수집과-경고)를 위해
 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는
-새 설치본에서 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`). 경고를 fatal로 승격한 볼트는
+새 설치본에서 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0은 `84cf5235…`). 경고를 fatal로 승격한 볼트는
 갱신 전에 승격 단계를 `warning`으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로 인증서를
 다시 만든 뒤 승격한다. 되돌리지 않으면 `promotion certificate checker_sha256 differs from current harmless replay`와
-함께 설정 오류(종료 코드 1)로 멈추고 SessionStart 훅이 주입하지 않는다. 이전 버전 사이의 조건은
+함께 설정 오류(종료 코드 1)로 멈추고 SessionStart 훅이 주입하지 않는다. 측정과 되돌리기 조건은
+[v0.26.0 업그레이드 안내](releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
 [v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 
 기존 Markdown/Git 노트를 유지하면서 필요한 helper를 명시적으로 선택한다.

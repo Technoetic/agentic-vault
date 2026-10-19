@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.25.0: opt-in, default-off additions. Claude Code 2.1.295 or later is recommended (async SessionStart resume fix) and vault_doctor.py --host-version checks the PATH claude only on request; warning-only healthcheck checks flag sync-client conflict or temporary file names and engine notes changed after the last checkpoint; recall evaluation can run a hand-labelled gold set in place with redaction, a dev/held-out split and inspected marks, plus exact paired p-values and rate upper bounds; tool-call runs can record llama-server prompt-cache, slot and repeat-agreement conditions. The advisory CI audit installs pip-audit from hash-pinned wheels. Existing memory, diagnostics, budgets and the Jarvis API-auth boundary remain. No default network/model call or automatic vault migration.",
+    "longDescription": "Release v0.26.0: Jarvis records messages sent through an inline bot as the untrusted via_bot capture origin, a default change that also changes the warning-promotion checker hash, so promoted warnings need new certificates. Opt-in query expansion and instruction-budget checks also compare each marked directory's name listing, so a listing-only change counts as a change. Gold-set recall reports can be pseudonymised with a key file or a one-run key. Maintainer tools build the release ZIP reproducibly with TZ=UTC0, check a ZIP against its tag at byte and blob level, and repeat one test N times with an exact failure-rate upper bound. Existing memory, diagnostics, budgets and the Jarvis API-auth boundary remain. No default network/model call, new runtime dependency or automatic vault migration.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [
