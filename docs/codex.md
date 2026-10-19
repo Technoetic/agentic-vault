@@ -5,7 +5,8 @@ v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `v
 기존 캐시·설정·활성 범위는 갱신 전에 확인하고 보존한다.
 
 `v0.26.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 코드·CI·설치 상태는 [v0.26.0 검증 기록](verification/v0.26.0.md)에서 확인한다.
+사용한다. 이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.26.0 검증 기록](verification/v0.26.0.md)에 있다.
+최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다.
 이전 [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
