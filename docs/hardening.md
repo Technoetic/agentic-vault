@@ -194,9 +194,12 @@ Codex hook 지원은 [공식 설명](https://learn.chatgpt.com/docs/hooks)을 �
 | `checkpoint_drift_check` | `true`/`false`, 없으면 꺼짐 | 가장 최근 checkpoint 이후 바뀌거나 없어진 엔진 노트를 보고한다 |
 
 스위치가 불리언이 아니거나, 패턴이 목록이 아니거나, 빈 문자열·제어 문자·`/`·`\`가 든 패턴, 개수·길이 초과는 다른 설정 오류처럼
-config 파싱 실패(exit 1)다. 이 검증은 `vault-config.json`을 읽는 구성 요소가 함께 쓰는 설정 검사기(`validate_config`)에 들어 있다.
-그래서 형식이 잘못된 선택 키 하나가 다른 설정 오류와 똑같이 설정을 읽는 구성 요소를 모두 멈춘다. 예를 들어 SessionStart 훅은 진단 한 줄만
-남기고 handoff·hot을 주입하지 않고, PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색·doctor도 설정 오류로 끝난다.
+config 파싱 실패(exit 1)다. 이 검증은 엔진의 공용 설정 검사기(`validate_config`)에 들어 있다. 그래서 형식이 잘못된 선택 키 하나가
+다른 설정 오류와 똑같이 이 검사기를 거치는 구성 요소를 멈춘다. healthcheck full 모드는 exit 1로 끝나고, Git index의 설정을 읽는
+`--staged`도 그 설정에 키가 있으면 exit 1이라 볼트 pre-commit 훅이 커밋을 막는다. SessionStart 훅은 진단 한 줄만 남기고 handoff·hot을 주입하지 않고,
+PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색(recall)·doctor는 설정 오류(exit 2)로 끝난다. Jarvis 브리지는 설정 로더가
+오류 없이 설정을 돌려주지만 캡처와 Q&A·브리핑의 근거 구성이 실패한다. 반면 자체 로더로 `backup_target`·`exclude_dirs`만 검사하는
+`backup_vault.py`는 스냅숏을 계속 만든다(2026-10-19 측정).
 키를 고치거나 지우면 돌아온다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
 `*`·`?`·`[...]`만 특수 문자다. 이름과 패턴은 NFC로 맞춘 뒤 비교한다.
 

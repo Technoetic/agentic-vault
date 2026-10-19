@@ -47,11 +47,20 @@ def exact(deltas):
     return stats.exact_paired_sign_flip([0.0] * len(deltas), list(deltas))
 
 
+def sum_left_to_right(values):
+    """Plain float addition in order. Built-in sum() adds floats with compensation from
+    Python 3.12, so tie-breaking float noise would depend on the interpreter."""
+    total = 0.0
+    for value in values:
+        total += value
+    return total
+
+
 def brute_force_p(deltas, tolerance=1e-12):
     """Independent definition: all 2^n sign patterns (zeros included), summed left to right."""
-    threshold = abs(sum(deltas)) - tolerance
+    threshold = abs(sum_left_to_right(deltas)) - tolerance
     patterns = list(itertools.product((1, -1), repeat=len(deltas)))
-    return sum(abs(sum(sign * value for sign, value in zip(signs, deltas))) >= threshold
+    return sum(abs(sum_left_to_right(sign * value for sign, value in zip(signs, deltas))) >= threshold
                for signs in patterns) / len(patterns)
 
 
@@ -141,11 +150,12 @@ class ExactPairedSignFlipTests(unittest.TestCase):
         self.assertIsNone(evaluator.paired_randomization([], [])["p_value"])
 
     def test_ties_use_the_monte_carlo_tolerance(self):
-        # Mathematically 12 of 16 patterns tie or beat |0.3|; float noise breaks two ties.
+        # Mathematically 12 of 16 patterns tie or beat |0.3|, six of them as exact ties.
+        # Summed strictly left to right, float noise breaks four of those ties on every Python.
         deltas = [0.1, 0.2, 0.3, -0.3]
         self.assertEqual(exact(deltas)["p_value"], 0.75)
         self.assertEqual(brute_force_p(deltas), 0.75)
-        self.assertEqual(brute_force_p(deltas, tolerance=0.0), 0.625)
+        self.assertEqual(brute_force_p(deltas, tolerance=0.0), 0.5)
         self.assertEqual(exact([0.3, -0.1, -0.2, 0.5])["p_value"], 0.625)
 
     def test_matches_brute_force_enumeration(self):
