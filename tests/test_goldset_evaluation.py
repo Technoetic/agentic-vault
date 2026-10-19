@@ -1141,6 +1141,59 @@ class KeyedRedactionTests(GoldSetVaultCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(json.loads(stdout)["redaction_mode"], "keyed")
 
+    KEY_INSIDE_MESSAGE = ("recall evaluation unavailable: redaction key file is inside the evaluated vault; "
+                          "keep the key outside the vault and away from the report")
+
+    def assert_key_refused(self, argv) -> None:
+        with mock.patch.object(evaluator, "load_goldset", side_effect=AssertionError("evaluated")):
+            code, stdout, stderr = run_main(evaluator, argv)
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertEqual(stderr.strip(), self.KEY_INSIDE_MESSAGE)
+        self.assert_hidden(stderr, [*key_forms(KEY_A), "KEYPATHMARK"])
+
+    @unittest.skipUnless(sys.platform == "win32", "extended-length paths are a Windows spelling")
+    def test_extended_length_spellings_cannot_bypass_the_inside_vault_refusal(self):
+        extended = "\\\\?\\"
+        inside = self.write_key("KEYPATHMARK.bin", KEY_A, self.vault / "00-meta")
+        cases = {
+            "extended key": (self.vault, Path(extended + str(inside))),
+            "extended vault": (Path(extended + str(self.vault)), inside),
+            "both extended": (Path(extended + str(self.vault)), Path(extended + str(inside))),
+        }
+        for name, (vault, key) in cases.items():
+            with self.subTest(case=name):
+                self.assert_key_refused(["--vault", vault, "--goldset", self.goldset, "--min-recall-at-3", "0",
+                                         "--min-mrr", "0", "--redact-key-file", key])
+        # A key outside the vault stays accepted under the extended spelling.
+        self.assertEqual(evaluator.read_redaction_key(Path(extended + str(self.key_a)),
+                                                      Path(extended + str(self.vault))), KEY_A)
+
+    @unittest.skipUnless(sys.platform == "win32", "directory junctions are a Windows feature")
+    def test_key_reached_through_a_link_into_the_vault_is_refused(self):
+        import _winapi
+        target = self.vault / "00-meta"
+        self.write_key("KEYPATHMARK.bin", KEY_A, target)
+        links = []
+        junction = self.keys / "junction"
+        _winapi.CreateJunction(str(target), str(junction))
+        self.addCleanup(os.rmdir, junction)  # removes the junction only; cleanups run before the tree removal
+        links.append(junction)
+        symlink = self.keys / "symlink"
+        try:
+            os.symlink(target, symlink, target_is_directory=True)
+        except OSError:
+            pass  # creating symlinks needs Developer Mode or the privilege
+        else:
+            self.addCleanup(os.rmdir, symlink)
+            links.append(symlink)
+        for link in links:
+            with self.subTest(link=link.name):
+                # The written path lies outside the vault; only the resolved path is inside.
+                self.assertNotIn(self.vault, Path(os.path.abspath(link / "KEYPATHMARK.bin")).parents)
+                self.assert_key_refused(["--vault", self.vault, "--goldset", self.goldset,
+                                         "--min-recall-at-3", "0", "--min-mrr", "0",
+                                         "--redact-key-file", link / "KEYPATHMARK.bin"])
+
     def test_key_next_to_the_report_warns_without_blocking(self):
         warning = ("recall evaluation warning (non-blocking): the redaction key file is in the report's "
                    "output directory or the working directory; keep the key away from the report")
@@ -1185,7 +1238,7 @@ class KeyedRedactionTests(GoldSetVaultCase):
     def test_help_text_carries_the_linkability_warning(self):
         flat = " ".join(evaluator._parser().format_help().split())
         for phrase in ("--redact-key-file", "--redact-ephemeral", "repeats and frequencies",
-                       "without the key", "not hashed one by one"):
+                       "without the key", "not hashed one by one", "rows keep the gold-set order"):
             self.assertIn(phrase, flat)
 
 
@@ -1221,6 +1274,34 @@ class KeyedRedactReportTests(unittest.TestCase):
         self.assertEqual((plain["redaction_mode"], plain["redaction_algorithm"]), ("unkeyed", "sha256"))
         self.assertEqual(plain["per_query"][0]["expected_paths"], ["a.md"])
 
+    def test_temporal_links_and_non_date_values_are_keyed(self):
+        source = self.report()
+        source["per_query"][0]["diagnostics"] = {"status": "ok", "temporal": [
+            {"path": "people/Kim/Old.md", "status": "invalid", "currentness": "unknown",
+             "valid_from": "2026-01-01", "valid_until": "until Kim leaves", "checked_at": "2026-02-03T04:05:06Z",
+             "superseded_by": "[[people/Kim/Note]]", "errors": ["invalid_valid_until"]},
+            {"path": "a.md", "status": "superseded", "currentness": "unknown", "valid_from": "2026-01-01",
+             "checked_at": "Kim said so", "superseded_by": "[[Note]]", "superseded_at": "2026-05-01",
+             "supersession_source": {"path": "people/Kim/Note.md", "sha256": "ab" * 32}, "errors": []}]}
+        redacted = evaluator.redact_report(source, key=KEY_A)
+        text = json.dumps(redacted, ensure_ascii=False)
+        self.assertNotIn("Kim", text)
+        self.assertNotIn("Note", text)
+        first, second = redacted["per_query"][0]["diagnostics"]["temporal"]
+        self.assertEqual(first["superseded_by"], hmac_hex(KEY_A, "[[people/Kim/Note]]"))
+        self.assertEqual(first["valid_until"], hmac_hex(KEY_A, "until Kim leaves"))
+        self.assertEqual((first["valid_from"], first["checked_at"]), ("2026-01-01", "2026-02-03T04:05:06Z"))
+        self.assertEqual((first["status"], first["currentness"], first["errors"]),
+                         ("invalid", "unknown", ["invalid_valid_until"]))
+        self.assertEqual(second["superseded_by"], hmac_hex(KEY_A, "[[Note]]"))
+        self.assertEqual(second["checked_at"], hmac_hex(KEY_A, "Kim said so"))
+        self.assertEqual((second["valid_from"], second["superseded_at"]), ("2026-01-01", "2026-05-01"))
+        self.assertEqual(second["supersession_source"], {"path": hmac_hex(KEY_A, "people/Kim/Note.md"),
+                                                         "sha256": hmac_hex(KEY_A, "ab" * 32)})
+        # Plain --redact keeps vault-side values, as before.
+        plain = evaluator.redact_report(source)["per_query"][0]["diagnostics"]["temporal"]
+        self.assertEqual(plain, source["per_query"][0]["diagnostics"]["temporal"])
+
     def test_short_or_non_bytes_keys_are_rejected(self):
         for key in (KEY_A[:31], b"", "x" * 40, bytearray(KEY_A)):
             with self.subTest(key=type(key).__name__), self.assertRaises(ValueError) as raised:
@@ -1228,6 +1309,53 @@ class KeyedRedactReportTests(unittest.TestCase):
             self.assertNotIn("KEYMARK", str(raised.exception))
         with self.assertRaises(ValueError):
             evaluator.redact_report(self.report(), ephemeral=True)
+
+
+class KeyedFixtureLeakTests(unittest.TestCase):
+    """Keyed reports of a fixture name no note: no stem, folder or wikilink target."""
+
+    FIXTURE = FIXTURES / "recall_advanced"
+    CASES = (["--advanced"], ["--advanced", "--as-of", "2026-10-01"], ["--compare", "--render-matched"])
+    # Retrieval enums such as status "unknown" may equal a fixture stem.
+    ENUM_FIELDS = frozenset({"status", "currentness"})
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.key = Path(temporary.name) / "k.bin"
+        self.key.write_bytes(KEY_A)
+        vault = self.FIXTURE / "vault"
+        names = set()
+        for path in vault.rglob("*.md"):
+            names.update(part for part in (path.stem, *path.relative_to(vault).parts[:-1]) if len(part) > 1)
+        self.names = sorted(name.casefold() for name in names)
+        self.assertIn("phoenix-current", self.names)
+
+    def leaks(self, value, field=None) -> list[str]:
+        if isinstance(value, dict):
+            # The fixed redaction description is compared exactly elsewhere.
+            return [leak for key, item in value.items() if key != "redaction" for leak in self.leaks(item, key)]
+        if isinstance(value, list):
+            return [leak for item in value for leak in self.leaks(item, field)]
+        if not isinstance(value, str) or (field in self.ENUM_FIELDS and value.isidentifier()):
+            return []
+        return [f"{field}={value}" for name in self.names if name in value.casefold()]
+
+    def test_unkeyed_redaction_leaves_the_successor_link_readable(self):
+        # The scan works: plain --redact keeps vault-side paths and links by design.
+        code, stdout, stderr = run_main(evaluator, ["--fixture", self.FIXTURE, "--advanced", "--redact"])
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("superseded_by=[[phoenix-current]]", self.leaks(json.loads(stdout)))
+
+    def test_keyed_and_ephemeral_reports_name_no_fixture_note(self):
+        for mode in (["--redact-key-file", self.key], ["--redact-ephemeral"]):
+            for args in self.CASES:
+                with self.subTest(mode=mode[0], args=args):
+                    code, stdout, stderr = run_main(evaluator, ["--fixture", self.FIXTURE, *args, *mode])
+                    self.assertEqual(code, 0, stderr)
+                    self.assertEqual(self.leaks(json.loads(stdout)), [])
+                    self.assertNotIn(".md", stdout)
+                    self.assertEqual([name for name in self.names if name in stderr.casefold()], [])
 
 
 if __name__ == "__main__":
