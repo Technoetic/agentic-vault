@@ -122,9 +122,13 @@ from hash-pinned wheels. Without the new options, the 38 recorded default-output
 v0.24.0 apart from version stamps; they ran before the version bump, on runtime code otherwise identical
 to this release.
 Evaluation tools that embed code fingerprints (source SHA-256) and elapsed times differ in those values.
-Warning-promotion certificates made with v0.24.0 stay valid only when the new installation's corpus bytes,
-including line endings, match those of the installation that made them; a mismatch fails closed. See the
+On the upgrade to v0.25.0, warning-promotion certificates made with v0.24.0 stayed valid only when the new
+installation's corpus bytes, including line endings, matched; a mismatch fails closed. See the
 [release notes](docs/releases/v0.25.0.md), including their [upgrade section](docs/releases/v0.25.0.md#하위호환업그레이드).
+v0.26.0 changes `vault_provenance.py` for the `via_bot` capture origin, so `checker_sha256` changes and
+certificates made with v0.25.0 or earlier no longer validate: revert promoted stages to `warning` before
+upgrading, then run `vault_warning_policy.py --certificate` on the new installation. Engines older than
+v0.26.0 report `via_bot` captures as `provenance-invalid`, so update the Claude Code and Codex installations together.
 The existing v0.20.0 [reliability tools](docs/tower-reliability.md) remain available for fixed-condition
 lesson comparisons, execution receipts, conflict-aware proposal undo, uncertain-operation
 records and stage-separated connector diagnostics. They add no default model/network

@@ -3,10 +3,13 @@
 v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택)를
 기본값이 꺼진 경고 전용 검사로 더한다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
 실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
-기존 설치 캐시와 볼트의 갱신은 별도 작업이다. 경고를 fatal로 승격한 볼트는
-[v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)를 확인한다. v0.24.0에서 만든 인증서는 새 설치본의
-corpus 바이트(줄바꿈 포함)가 인증서를 만든 설치본과 같을 때만 그대로 맞고 다르면 fatal 승격이 설정 오류로 멈추며,
-v0.23.0 이하의 인증서는 v0.24.0의 경로 검사 코드 변경 때문에 다시 만들어야 한다.
+기존 설치 캐시와 볼트의 갱신은 별도 작업이다. v0.26.0은 [via_bot 수집 출처](#수집과-경고)를 위해
+`checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는
+새 설치본에서 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`). 경고를 fatal로 승격한 볼트는
+갱신 전에 승격 단계를 `warning`으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로 인증서를
+다시 만든 뒤 승격한다. 되돌리지 않으면 `promotion certificate checker_sha256 differs from current harmless replay`와
+함께 설정 오류(종료 코드 1)로 멈추고 SessionStart 훅이 주입하지 않는다. 이전 버전 사이의 조건은
+[v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 
 기존 Markdown/Git 노트를 유지하면서 필요한 helper를 명시적으로 선택한다.
 모든 결과는 자료이며 실행 권한·사실 확정·검증자 신원을 자동으로 만들지 않는다.
@@ -150,6 +153,9 @@ Jarvis 수집은 `captured_via`, `content_origin`, `captured_at`, `body_sha256`�
 via_bot은 허용된 사용자가 보냈더라도 본문을 제3자 봇이 만들었다는 뜻이라 forwarded·url처럼 신뢰하지 않는다. 사용자가 일부러 인라인 봇으로 보낸 메모도 같다.
 privileged 노트가 via_bot 수집을 참조하면 `provenance-unresolved`가 붙는다. 브리지는 `getUpdates`에 `message`만 요청한다. `guest_message` 등 다른 업데이트는 받지 않고, 와도 무시한다.
 Jarvis를 인증된 채널로 옮기는 작업은 아직 남아 있다.
+이미 저장한 수집은 다시 분류하지 않는다. v0.26.0 이전 브리지가 인라인 봇 메시지를 받았다면 own(링크가 있으면 url)으로 남아 있다. 인라인 봇을 썼다면 `10-inbox/jarvis/`의 이전 수집과 그것으로 만든 노트를 직접 검토한다.
+v0.26.0 이전 엔진은 via_bot을 모른다. 그런 엔진은 via_bot 수집을 `provenance-invalid`(`invalid_origin`)로 보고하고, 이 코드를 fatal로 승격했으면 검사가 멈춘다.
+볼트를 읽는 Claude Code와 Codex 설치본을 함께 갱신한 뒤 새 브리지를 쓴다. 이전 버전으로 되돌리기 전에는 남은 via_bot 수집을 정제·격리하거나 `provenance-invalid`를 warning으로 둔다.
 파생 노트의 manifest 참조는 `provenance_manifest: "00-meta/provenance/<ID>.json"`으로 둘 수 있다.
 기본 frontmatter 상한을 넘기지 않도록 긴 manifest는 별도 JSON으로 보존한다. `verified_by` 문자열은 증명이 아니다.
 Git staged 검사는 index 원문만 사용한다. JSON 근거를 직접 확인할 수 없는 privileged 파생 자료는

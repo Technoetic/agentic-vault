@@ -61,11 +61,12 @@ codex plugin add agentic-vault@agentic-vault-local
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
-경고를 `fatal`로 승격한 볼트는 갱신 전에 [경고 인증서 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)를 확인한다.
-v0.25.0은 `checker_sha256`가 묶는 파일을 바꾸지 않아, 새 설치본의 corpus 바이트(줄바꿈 포함)가 인증서를 만든
-설치본과 같으면 v0.24.0에서 만든 인증서가 그대로 맞는다(2026-10-19 측정). 다르면 fatal 승격이 설정 오류로 멈춘다.
-v0.23.0 이하에서 만든 인증서는 v0.24.0의 경로 검사 코드 변경으로 맞지 않아 fatal 승격이 설정 오류로 멈춘다.
-이 경우 warning으로 되돌리고 새 설치본에서 `vault_warning_policy.py --certificate`로 다시 생성한다.
+경고를 `fatal`로 승격한 볼트는 갱신 전에 인증서를 다시 만들 준비를 한다.
+v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다. 그래서 v0.25.0 이하에서
+만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이 설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고,
+새 설치본에서 `vault_warning_policy.py --certificate`로 다시 생성한 뒤 승격한다. 이전 버전 사이의 조건은
+[경고 인증서 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
+v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 Claude Code와 Codex 설치본을 함께 갱신한다.
 게시만으로 활성 캐시나 볼트 엔진이 갱신되지는 않는다.
 
 로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤

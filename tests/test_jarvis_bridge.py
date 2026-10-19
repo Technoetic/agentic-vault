@@ -2194,7 +2194,10 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
             "_briefing_slots": [(7, 30)],
             "butler_interval_hours": 24,
         }
-        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}),                 patch.object(_BRIDGE, "tg_call", side_effect=KeyboardInterrupt) as caller,                 patch.object(_BRIDGE, "log"),                 self.assertRaises(KeyboardInterrupt):
+        with patch.dict(os.environ, {"JARVIS_TELEGRAM_TOKEN": token}), \
+                patch.object(_BRIDGE, "tg_call", side_effect=KeyboardInterrupt) as caller, \
+                patch.object(_BRIDGE, "log"), \
+                self.assertRaises(KeyboardInterrupt):
             _BRIDGE.serve(self.vault, cfg)
 
         caller.assert_called_once()
