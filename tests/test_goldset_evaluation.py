@@ -20,6 +20,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 RECALL_HARD = FIXTURES / "recall_hard"
@@ -1181,12 +1186,11 @@ class KeyedRedactionTests(GoldSetVaultCase):
 
     @unittest.skipUnless(sys.platform == "win32", "directory junctions are a Windows feature")
     def test_key_reached_through_a_link_into_the_vault_is_refused(self):
-        import _winapi
         target = self.vault / "00-meta"
         self.write_key("KEYPATHMARK.bin", KEY_A, target)
         links = []
         junction = self.keys / "junction"
-        _winapi.CreateJunction(str(target), str(junction))
+        make_junction(junction, target)
         self.addCleanup(os.rmdir, junction)  # removes the junction only; cleanups run before the tree removal
         links.append(junction)
         symlink = self.keys / "symlink"
