@@ -39,8 +39,9 @@ python scripts/evaluate_tool_matrix.py --backend local-model --model <local-mode
 ## 측정 조건 기록: 프롬프트 캐시·슬롯 부하·반복 일치
 
 로컬 모델의 도구 호출 결과를 해석할 수 있도록 실행 조건을 남기는 선택형 옵션이다. 모델 동작이나 기본 요청은
-바꾸지 않는다. 옵션을 주지 않으면 요청 바이트·출력 JSON·종료 코드가 v0.24.0과 같다.
-테스트는 v0.24.0(`d2b9315`)에서 만든 행렬 기본 출력과 기본 요청 바이트의 SHA-256을 고정해 비교한다.
+바꾸지 않는다. 옵션을 주지 않으면 요청 바이트와 종료 코드는 v0.24.0과 같고, 출력 JSON은 경과 시간과
+`evaluate_tool_matrix.py`가 넣는 실행 코드 지문(소스 SHA-256) 값만 다르다. 테스트는 v0.24.0(`d2b9315`)에서 만든
+행렬 기본 출력을 이 값들만 정규화해 비교하고, 기본 요청 바이트는 SHA-256을 고정해 비교한다.
 
 ```text
 python scripts/evaluate_tool_safety.py --backend local-model --model <local-model-id> --api-key-env <environment-variable-name> --no-prompt-cache --slot-snapshots --receipt-out <new-file>

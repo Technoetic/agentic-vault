@@ -118,8 +118,13 @@ of a real vault with redaction, a stratified dev/held-out split and `inspected` 
 p-values and one-sided rate upper bounds; llama-server prompt-cache, slot and repeat-agreement records
 for [tool-call runs](docs/evaluation-stability.md); `vault_doctor.py --host-version`; and warning-only
 [sync-conflict and checkpoint-drift checks](docs/hardening.md). The advisory CI audit installs pip-audit
-from hash-pinned wheels. Default outputs matched v0.24.0 in all 38 recorded comparisons, and
-warning-promotion certificates made with v0.24.0 stay valid; see the [release notes](docs/releases/v0.25.0.md).
+from hash-pinned wheels. Without the new options, the 38 recorded default-output comparisons matched
+v0.24.0 apart from version stamps; they ran before the version bump, on runtime code otherwise identical
+to this release.
+Evaluation tools that embed code fingerprints (source SHA-256) and elapsed times differ in those values.
+Warning-promotion certificates made with v0.24.0 stay valid only when the new installation's corpus bytes,
+including line endings, match those of the installation that made them; a mismatch fails closed. See the
+[release notes](docs/releases/v0.25.0.md), including their [upgrade section](docs/releases/v0.25.0.md#하위호환업그레이드).
 The existing v0.20.0 [reliability tools](docs/tower-reliability.md) remain available for fixed-condition
 lesson comparisons, execution receipts, conflict-aware proposal undo, uncertain-operation
 records and stage-separated connector diagnostics. They add no default model/network
@@ -489,7 +494,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.25.0**이며 **Claude Code, Codex 겸용**이다. Claude Code 2.1.295 이상을 권장하고([요구사항](#요구사항)), 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md)을 기본값이 꺼진 선택형으로 더한다. CI의 경고 전용 pip-audit 설치는 해시로 고정했다. 기본 세션 훅·검색 설정·네트워크/모델 호출·런타임 의존성은 추가하지 않는다. [이번 변경·검증 범위](docs/releases/v0.25.0.md)와 [출처·공유 상태 보강](docs/hardening.md)을 함께 본다. v0.24.0에서 만든 경고 승격 인증서는 그대로 쓸 수 있고, v0.23.0 이하에서 올라오는 볼트는 갱신 전에 릴리스 노트의 업그레이드 안내를 확인한다.
+현재 버전은 **v0.25.0**이며 **Claude Code, Codex 겸용**이다. Claude Code 2.1.295 이상을 권장하고([요구사항](#요구사항)), 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md)을 기본값이 꺼진 선택형으로 더한다. CI의 경고 전용 pip-audit 설치는 해시로 고정했다. 기본 세션 훅·검색 설정·네트워크/모델 호출·런타임 의존성은 추가하지 않는다. [이번 변경·검증 범위](docs/releases/v0.25.0.md)와 [출처·공유 상태 보강](docs/hardening.md)을 함께 본다. v0.24.0에서 만든 경고 승격 인증서는 새 설치본의 corpus 바이트(줄바꿈 포함)가 그 인증서를 만든 설치본과 같을 때만 그대로 쓸 수 있고, 다르면 fatal 승격이 설정 오류로 멈춘다. v0.23.0 이하에서 올라오는 볼트는 갱신 전에 [릴리스 노트의 업그레이드 안내](docs/releases/v0.25.0.md#하위호환업그레이드)를 확인한다.
 
 v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
