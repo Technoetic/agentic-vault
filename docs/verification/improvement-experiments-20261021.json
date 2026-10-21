@@ -1,0 +1,69 @@
+{
+  "task_id": "av-harness2-implementation-20261021",
+  "status": "PASS",
+  "base_commit": "1ccf845680fd6cd29aef09da81294789fa58a36c",
+  "platform_scope": "Windows / Python 3.12; no new remote CI or cross-platform runtime claim",
+  "scope": "Opt-in four-arm lineage, native comparison and evidence-aware reflection. No model runner, patch apply, global promotion, hook/default/version changes.",
+  "full_suite": {
+    "tests": 1846,
+    "skipped": 33,
+    "seconds": 770.11,
+    "returncode": 0,
+    "checked_at_utc": "2026-10-21T00:00:13.692041+00:00"
+  },
+  "scoped_new_tests": 26,
+  "independently_repeated_tests": 26,
+  "offline_example": {
+    "scenarios": 5,
+    "native_runs": 20,
+    "prepared_receipts": 20,
+    "completed_receipts": 20,
+    "comparisons": 15
+  },
+  "required_offline_regressions": [
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_memory_workflows.py --backend deterministic",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_korean_memory.py",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_tool_safety.py --backend scripted-control",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+      "returncode": 0
+    },
+    {
+      "command": "python -X utf8 scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0",
+      "returncode": 0
+    }
+  ],
+  "verified_by": {
+    "actor": "Codex /root/improvements_contract_review, independent read-only reviewer",
+    "timestamp": "2026-10-21T08:48:12+09:00",
+    "result": "No blocking code findings; frozen scoped suite and deterministic offline example passed."
+  },
+  "artifact_sha256": {
+    "skills/agentic-vault/scripts/vault_improvements.py": "bf1047a3dc5af8700ea30a46ff82b730f155dbef419dd8406537dfa13b4f6997",
+    "tests/test_vault_improvements.py": "b01548a9776fd32f3cdfa593969a803a2e1753dd4b97fe46cf96402ddbb6960e",
+    "scripts/evaluate_improvement_experiments.py": "18b194ff8a84ae84b028d0236092a2e1f5f9492003d7f97f2b92bc0fae26f6ac"
+  },
+  "limitations": [
+    "Host-authored synthetic outcomes are not measured model gains or Harness2 benchmark results.",
+    "Isolation/confidence labels do not independently establish causality.",
+    "Source/evidence/receipt checksums bind current bytes, not identity or truth.",
+    "No release, push, active installation or real-vault upgrade performed."
+  ]
+}

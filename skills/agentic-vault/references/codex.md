@@ -41,6 +41,7 @@
 | `memory <인자>` | [구조화 기억](../../../docs/memory-patterns.md), `scripts/vault_memory.py` (`--vault`·vault-relative `--input`·예산 명시, 읽기 전용) |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |
 | `runs <하위 명령과 인자>` | [교훈 검증·복구](../../../docs/tower-reliability.md), `scripts/vault_runs.py`; 명시한 실행 조건과 관찰 결과의 준비·기록·조회·비교 |
+| `improvements <하위 명령과 인자>` | [개선 실험](../../../docs/improvement-experiments.md), `scripts/vault_improvements.py --vault PATH`; 네 조건 후보 계보·비교·수정별 관찰과 교훈 후보 기록. 모델 실행·자동 적용 없음 |
 | `operations <하위 명령과 인자>` | [작업 영수증](../../../docs/tower-reliability.md), `scripts/vault_operations.py`; 호출자가 소유한 의도의 시작·완료·불확실 상태 기록 |
 | `connectors <인자>` | [단계별 연결 진단](../../../docs/tower-reliability.md), `scripts/vault_connectors.py`; 기본 오프라인·명시적 지원 probe만 선택 |
 | `judge <고정 선택지 의미 질문>` | [vault-judge.md](../../../commands/vault-judge.md), [Jev 판단 안내](../../../docs/jev-judgments.md) |
