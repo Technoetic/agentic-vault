@@ -39,6 +39,8 @@ jobs:
         run: python scripts/evaluate_korean_memory.py
       - name: Synthetic tool-call safety controls (no model calls)
         run: python scripts/evaluate_tool_safety.py --backend scripted-control
+      - name: Source-bound improvement experiment contracts (no model calls)
+        run: python scripts/evaluate_improvement_experiments.py
       - name: Hard bilingual recall at top3 (explicit query expansion)
         run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
       - name: Hard bilingual recall at top5 (same token budget)

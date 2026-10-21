@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.26.0: Jarvis records messages sent through an inline bot as the untrusted via_bot capture origin, a default change that also changes the warning-promotion checker hash, so promoted warnings need new certificates. Opt-in query expansion and instruction-budget checks also compare each marked directory's name listing, so a listing-only change counts as a change. Gold-set recall reports can be pseudonymised with a key file or a one-run key. Maintainer tools build the release ZIP reproducibly with TZ=UTC0, check a ZIP against its tag at byte and blob level, and repeat one test N times with an exact failure-rate upper bound. Existing memory, diagnostics, budgets and the Jarvis API-auth boundary remain. No default network/model call, new runtime dependency or automatic vault migration.",
+    "longDescription": "Release v0.27.0: opt-in Harness2-inspired improvement experiments bind baseline, general, specialized and composed candidate lineage to compatible native execution receipts. Comparisons preserve keep-base and abstain decisions, hard-failure vetoes and pending runs. Edit-level reflection cites completed paired observations; lesson:null records NO_ENTRY. Results remain advisory and require review. The deterministic example tests the data workflow, not model performance or cost savings. Existing memory, diagnostics, budgets, 15 slash commands, Jarvis API authentication and v0.26.0 upgrade requirements remain. No model or command runner, automatic application or promotion, default hook/search change, network call, new runtime dependency or automatic vault migration.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

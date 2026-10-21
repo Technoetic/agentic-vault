@@ -1,13 +1,15 @@
 # Claude Code · Codex 겸용 사용
 
+v0.27.0은 선택형 [Harness² 기반 개선 실험](improvement-experiments.md)을 더한다. 기본안·공통 개선안·작업 특화안·합성안을 기존 실행 영수증과 연결하고, 현행 유지·판단 보류·수정별 근거·NO_ENTRY를 기록한다. 결과는 검토 전용이며 모델·명령 실행이나 자동 적용·승격을 하지 않는다. 기존 slash command 15종, 기본 훅·검색, Python 3.10+ 표준 라이브러리를 유지한다. 합성 예제는 데이터 흐름 확인이며 실제 모델 성능·비용 절감의 근거가 아니다.
+
 v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `via_bot` 출처로 수집하도록 기본 동작을 바꾸고([수집과 경고](hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단이 디렉터리 이름 목록도 대조하게 한다. [골드셋 보고서 키 가명화](memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 반복 측정](evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)은 명시적으로 실행하는 선택형 도구다. 평가·진단 도구는 기본 모델·네트워크 호출이나 의존성을 추가하지 않는다. v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가·소표본 통계](memory-evaluation.md), [llama-server 측정 조건 기록](evaluation-stability.md)과 해시로 고정한 CI 경고 전용 pip-audit 설치를 유지한다. v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·공개 fixture Kiwi/qmd 비교](evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](memory-evaluation.md), [한글 음절 bigram BM25](memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](hardening.md)와 [GitHub 불변 릴리스](release-integrity.md)를 유지한다. v0.22.1의 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md), 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)과 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
-아래 GitHub 설치 ref는 v0.26.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
+아래 GitHub 설치 ref는 v0.27.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
 기존 캐시·설정·활성 범위는 갱신 전에 확인하고 보존한다.
 
-`v0.26.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.26.0 검증 기록](verification/v0.26.0.md)에 있다.
+`v0.27.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.27.0 검증 기록](verification/v0.27.0.md)에 있다.
 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다.
-이전 [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
+이전 [v0.26.0 검증 기록](verification/v0.26.0.md), [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
@@ -38,7 +40,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.26.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.27.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -46,19 +48,19 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.26.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.27.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.26.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.27.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.26.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.27.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
@@ -70,6 +72,7 @@ v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_pro
 이전 버전 사이의 조건은 [v0.25.0 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 Claude Code와 Codex 설치본을 함께 갱신한다.
 게시만으로 활성 캐시나 볼트 엔진이 갱신되지는 않는다.
+v0.27.0은 검사기 일곱 파일과 corpus를 바꾸지 않는다. 다만 인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등 차이까지 자동 호환을 보장하지 않는다. [v0.27.0 업그레이드 안내](releases/v0.27.0.md#하위호환업그레이드)를 함께 확인한다.
 
 로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤
 `.codex-plugin/plugin.json`과 README가 있는 디렉터리를 지정한다:

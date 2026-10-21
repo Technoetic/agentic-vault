@@ -19,7 +19,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+) |
 | [moai-diagnostics.md](moai-diagnostics.md) | 전체 지침량·원문 보존 인덱스 정리 미리보기·요구별 검증 누락 진단, 디렉터리 이름 목록 대조(v0.26.0) |
 | [tower-reliability.md](tower-reliability.md) | 교훈 반복 비교·실행 조건 기록·충돌 복구·외부 작업 영수증·단계별 연결 진단 (선택형 소스 추가) |
-| [improvement-experiments.md](improvement-experiments.md) | Harness²에서 흡수한 선택형 네 조건 후보 계보·기본안 유지/보류·수정별 근거와 NO_ENTRY, 기존 실행 비교와 연결 |
+| [improvement-experiments.md](improvement-experiments.md) | v0.27.0의 선택형 네 조건 후보 계보·기본안 유지/보류·수정별 근거와 NO_ENTRY, 기존 실행 비교와 연결 |
 | [link-proposals.md](link-proposals.md) | 관련 노트 후보·해시·검토용 diff를 반환하는 읽기 전용 연결 제안 |
 | [memory-patterns.md](memory-patterns.md) | 아홉 논문/공식 코드의 적용 범위, 시간·연결·BM25/RRF·qmd·기억 단위·교훈 관측·연속 작업 평가, 선택형 한글 음절 bigram BM25 |
 | [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가와 실패 진단, 시간 유효성 render-matched 대조군, 선택형 소표본 정확 부호 검정·비율 상한, 선택형 실제 볼트 골드셋 제자리 평가·dev/held-out 분할·키 기반 가명화(v0.26.0) |
@@ -27,7 +27,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.26.0](releases/v0.26.0.md); [검증 기록](verification/v0.26.0.md) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.27.0](releases/v0.27.0.md); [검증 기록](verification/v0.27.0.md) |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
 
 ## 내부 작업 기록 / Internal work records
