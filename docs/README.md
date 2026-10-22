@@ -30,7 +30,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.27.0](releases/v0.27.0.md); [검증 기록](verification/v0.27.0.md) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.28.0](releases/v0.28.0.md); [검증 기록](verification/v0.28.0.md) |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
 
 ## 내부 작업 기록 / Internal work records

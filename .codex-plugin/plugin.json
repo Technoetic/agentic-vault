@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.27.0: opt-in Harness2-inspired improvement experiments bind baseline, general, specialized and composed candidate lineage to compatible native execution receipts. Comparisons preserve keep-base and abstain decisions, hard-failure vetoes and pending runs. Edit-level reflection cites completed paired observations; lesson:null records NO_ENTRY. Results remain advisory and require review. The deterministic example tests the data workflow, not model performance or cost savings. Existing memory, diagnostics, budgets, 15 slash commands, Jarvis API authentication and v0.26.0 upgrade requirements remain. No model or command runner, automatic application or promotion, default hook/search change, network call, new runtime dependency or automatic vault migration.",
+    "longDescription": "Release v0.28.0: three opt-in memory reliability tools. Paired memory formation controls separate clean task success, final and intermediate contamination, and later failures in synthetic workflows. Current-value assembly extracts selected ledger rows and applies separately host-authorized source, scope and validity policies, abstaining on conflicts or missing metadata. Read-only procedural recall binds source steps and a dependency DAG to current completed native receipts under exact reuse conditions. Outputs require review; receipt binding does not prove procedure execution. Synthetic controls are not model robustness results. Existing memory, improvement experiments, 15 slash commands, Jarvis API authentication and v0.26.0 upgrade requirements remain. No automatic execution, promotion, default hook/search change, model/network call, new runtime dependency or automatic vault migration.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [
