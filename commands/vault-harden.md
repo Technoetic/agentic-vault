@@ -1,6 +1,6 @@
 ---
 description: 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정 helper를 명시적으로 실행
-argument-hint: [provenance|state|ssot|delta|rules|quality|calibration] [작업과 인자]
+argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration] [작업과 인자]"
 ---
 
 # /vault-harden — 명시적 보강 도구
