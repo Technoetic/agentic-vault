@@ -141,6 +141,13 @@ certificates made with v0.25.0 or earlier no longer validate: revert promoted st
 upgrading, then run `vault_warning_policy.py --certificate` on the new installation. Engines older than
 v0.26.0 report `via_bot` captures as `provenance-invalid`, so update the Claude Code and Codex installations together.
 See the [release notes](docs/releases/v0.26.0.md), including their [upgrade section](docs/releases/v0.26.0.md#하위호환업그레이드).
+The local source also adds three opt-in memory-reliability tools:
+[paired formation controls](docs/memory-formation.md),
+[source-bound current-value assembly](docs/memory-assembly.md), and
+[receipt-bound procedural recall](docs/procedural-recall.md).
+They do not change default hooks/search or run models, promote lessons or execute returned steps.
+These additions are source changes pending a separate release; the published version remains v0.27.0.
+
 v0.27.0 adds opt-in [improvement experiments](docs/improvement-experiments.md): baseline, general,
 specialized and composed candidate lineage bound to compatible native execution receipts, keep-base or
 abstain decisions, edit-level paired evidence and explicit NO_ENTRY when no lesson is warranted.
@@ -518,6 +525,8 @@ agentic-vault/
 </div>
 
 현재 버전은 **v0.27.0**이며 **Claude Code, Codex 겸용**이다. 선택형 [Harness² 기반 개선 실험](docs/improvement-experiments.md)은 기본안·공통 개선안·작업 특화안·합성안의 계보를 기존 실행 영수증에 연결하고, 현행 유지·판단 보류와 수정별 근거·NO_ENTRY를 지원한다. `python scripts/evaluate_improvement_experiments.py`로 외부 호출 없이 데이터 흐름을 확인할 수 있다. 이 합성 예제는 실제 모델 성능·업무 개선·비용 절감을 측정하지 않는다. 결과는 검토 전용이며 모델·명령 실행, 자동 적용·승격, 기본 세션 훅·검색 변경, 네트워크 호출·런타임 의존성을 추가하지 않는다. Python 3.10+ 표준 라이브러리와 기존 slash command 15종을 유지한다. [이번 변경·검증 범위](docs/releases/v0.27.0.md)를 함께 본다.
+
+로컬 소스에는 [기억 형성 오염 대조군](docs/memory-formation.md), [현재 값 근거 조립](docs/memory-assembly.md), [실행 근거가 있는 절차 검색](docs/procedural-recall.md)이 추가됐다. 세 기능은 명시적으로 실행하는 선택형 도구다. 기본 훅·회상·모델 호출·자동 적용·승격·절차 실행을 추가하지 않는다. 공개판은 위 v0.27.0이며 이 소스 변경의 게시·활성 설치·운영 볼트 반영은 별도다. [검증 기록](docs/verification/memory-reliability-20261022.md)에서 실제 시험 범위와 한계를 확인한다.
 
 v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단의 디렉터리 이름 목록 대조, [골드셋 보고서 키 가명화](docs/memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](docs/release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 분류와 반복 측정](docs/evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)을 유지한다. v0.26.0에서 `checker_sha256`가 묶는 `vault_provenance.py`가 바뀌었으므로 v0.25.0 이하에서 만든 경고 승격 인증서는 맞지 않는다. 해당 볼트는 갱신 전에 [v0.26.0 업그레이드 안내](docs/releases/v0.26.0.md#하위호환업그레이드)를 따른다. v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 볼트를 읽는 Claude Code·Codex 설치본을 함께 갱신한다. v0.27.0은 검사기 일곱 파일과 corpus를 바꾸지 않지만 설치본의 줄바꿈 등 실제 바이트가 다르면 인증서가 맞지 않을 수 있다.
 

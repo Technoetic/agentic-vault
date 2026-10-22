@@ -37,6 +37,13 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_runs.py",
             "skills/agentic-vault/scripts/vault_improvements.py",
             "docs/improvement-experiments.md",
+            "skills/agentic-vault/scripts/vault_assembly.py",
+            "skills/agentic-vault/scripts/vault_procedures.py",
+            "docs/memory-formation.md",
+            "docs/memory-assembly.md",
+            "docs/procedural-recall.md",
+            "scripts/evaluate_memory_formation.py",
+            "scripts/evaluate_memory_reliability.py",
             "skills/agentic-vault/scripts/vault_query_expansion.py",
             "skills/agentic-vault/scripts/vault_lint_extensions.py",
             "skills/agentic-vault/scripts/vault_warning_policy.py",
@@ -175,6 +182,24 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text('Changed memory resource\n', encoding='utf-8')
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_memory_reliability_resources_must_exist_and_match(self) -> None:
+        for relative in ('skills/agentic-vault/scripts/vault_assembly.py',
+                         'skills/agentic-vault/scripts/vault_procedures.py',
+                         'docs/memory-formation.md', 'docs/memory-assembly.md',
+                         'docs/procedural-recall.md', 'scripts/evaluate_memory_formation.py',
+                         'scripts/evaluate_memory_reliability.py'):
+            for mutation in ('changed', 'missing'):
+                with self.subTest(resource=relative, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == 'missing':
+                            resource.unlink()
+                        else:
+                            resource.write_text('Changed reliability resource\n', encoding='utf-8')
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 

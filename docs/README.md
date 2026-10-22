@@ -20,6 +20,9 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [moai-diagnostics.md](moai-diagnostics.md) | 전체 지침량·원문 보존 인덱스 정리 미리보기·요구별 검증 누락 진단, 디렉터리 이름 목록 대조(v0.26.0) |
 | [tower-reliability.md](tower-reliability.md) | 교훈 반복 비교·실행 조건 기록·충돌 복구·외부 작업 영수증·단계별 연결 진단 (선택형 소스 추가) |
 | [improvement-experiments.md](improvement-experiments.md) | v0.27.0의 선택형 네 조건 후보 계보·기본안 유지/보류·수정별 근거와 NO_ENTRY, 기존 실행 비교와 연결 |
+| [memory-formation.md](memory-formation.md) | 선택형 기억 형성의 다섯 오염 경로와 정상 업무·저장·후속 행동을 분리하는 오프라인 합성 대조군 평가 |
+| [memory-assembly.md](memory-assembly.md) | 원문 대장 후보 추출과 별도 호스트 권한·범위·유효기간 정책에 따른 현재 값 선택, 충돌·근거 부족 보류 |
+| [procedural-recall.md](procedural-recall.md) | 현재 native 실행 근거·재사용 조건과 명시적 단계 의존성을 검증하는 읽기 전용 절차 후보 검색 |
 | [link-proposals.md](link-proposals.md) | 관련 노트 후보·해시·검토용 diff를 반환하는 읽기 전용 연결 제안 |
 | [memory-patterns.md](memory-patterns.md) | 아홉 논문/공식 코드의 적용 범위, 시간·연결·BM25/RRF·qmd·기억 단위·교훈 관측·연속 작업 평가, 선택형 한글 음절 bigram BM25 |
 | [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가와 실패 진단, 시간 유효성 render-matched 대조군, 선택형 소표본 정확 부호 검정·비율 상한, 선택형 실제 볼트 골드셋 제자리 평가·dev/held-out 분할·키 기반 가명화(v0.26.0) |
