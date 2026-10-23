@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.29.0: three opt-in, read-only measurements. Korean memory evaluation --answer-rates reports response rate, silent error rate among answered cases with one-sided upper bounds, and accuracy on answerable and should-abstain cases, so a mixed accuracy no longer hides wrong answers. Recall evaluation --success-bounds adds one-sided lower bounds to all-expected-found headline rates. Lesson proposals gain preserve-check, which compares a stored original and candidate by occurrence counts of numbers, dates, names and declared phrases. Results are review material; nothing gates, applies or approves. Without the new flags and subcommand, report outputs and exit codes are unchanged. Existing memory reliability tools, 15 slash commands, Jarvis API authentication and v0.26.0 upgrade requirements remain. No default hook/search change, model/network call, new runtime dependency or automatic vault migration.",
+    "longDescription": "Release v0.30.0: opt-in evaluator identity and improvement-cost evidence. Native runs can bind selected evaluator code and JSON configuration snapshots; changed or incompatible bindings are refused. A separate cost tool records source-bound, caller-reported generation, evaluation, selection and recording resources, including failed and discarded attempts. Unknown values remain null with known subtotals shown separately. Cost comparisons retain native performance eligibility and do not establish efficiency or authorize application. Hashes, recorder labels and scope-completeness declarations do not authenticate execution or metering. Without evaluator options legacy run manifests and IDs remain unchanged. Existing 15 slash commands, default hooks/search, Python 3.10+ standard-library runtime, Jarvis API authentication and v0.26.0 upgrade requirements remain. No model/network/command execution, new runtime dependency or automatic vault migration is added.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [
