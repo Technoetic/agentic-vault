@@ -35,6 +35,9 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_memory.py",
             "skills/agentic-vault/scripts/vault_lesson_metrics.py",
             "skills/agentic-vault/scripts/vault_runs.py",
+            "skills/agentic-vault/scripts/vault_run_costs.py",
+            "docs/improvement-accounting.md",
+            "scripts/evaluate_improvement_accounting.py",
             "skills/agentic-vault/scripts/vault_improvements.py",
             "docs/improvement-experiments.md",
             "skills/agentic-vault/scripts/vault_assembly.py",
@@ -187,6 +190,8 @@ class CodexVerificationTests(unittest.TestCase):
 
     def test_installed_memory_reliability_resources_must_exist_and_match(self) -> None:
         for relative in ('skills/agentic-vault/scripts/vault_assembly.py',
+                         'skills/agentic-vault/scripts/vault_run_costs.py',
+                         'docs/improvement-accounting.md', 'scripts/evaluate_improvement_accounting.py',
                          'skills/agentic-vault/scripts/vault_procedures.py',
                          'docs/memory-formation.md', 'docs/memory-assembly.md',
                          'docs/procedural-recall.md', 'scripts/evaluate_memory_formation.py',

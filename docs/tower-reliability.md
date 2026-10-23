@@ -62,6 +62,11 @@ tools 최상위는 `version: 1`, `tools`이며 각 도구에는 `name`, 객체 `
 JSON/영수증은 64KiB, 일반 source는 256KiB, 근거 하나는 1MiB, source/근거 묶음은
 2MiB까지다. 최대 16사례·사례당 8assertion·64파일이며 `.env`와 비밀 형태는 거절한다.
 
+미릴리스 선택형 `--evaluator-source`·`--evaluator-config`는 채점기 스냅샷도 비교 조건에
+묶는다. 별도 `vault_run_costs.py`는 호출자가 보고한 개선 전체 과정의 비용과 미확인 항목을
+구별한다. 기존 실행에는 자동으로 추가되지 않는다. JSON·CLI·신뢰 한계는
+[평가기와 비용 근거](improvement-accounting.md)를 따른다.
+
 ## 적용한 교훈을 되돌릴 때
 
 기존 `vault_proposals.py`의 원문과 적용 기록을 재사용한다. 적용 이후의 내용이 그대로

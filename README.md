@@ -85,6 +85,11 @@ Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/
 
 **Core commands** (all 15 are in [commands/](commands/)):
 
+**Unreleased, opt-in:** [evaluator and improvement-cost evidence](docs/improvement-accounting.md)
+binds selected grader code/configuration to native runs and records source-bound resource reports,
+including discarded attempts and unknown values. Reports do not authenticate metering or establish
+cost-effectiveness; no model/command execution or automatic application is added.
+
 v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).

@@ -41,6 +41,8 @@ jobs:
         run: python scripts/evaluate_tool_safety.py --backend scripted-control
       - name: Source-bound improvement experiment contracts (no model calls)
         run: python scripts/evaluate_improvement_experiments.py
+      - name: Evaluator and improvement-cost evidence (no model calls)
+        run: python scripts/evaluate_improvement_accounting.py
       - name: Paired memory formation controls (no model calls)
         run: python scripts/evaluate_memory_formation.py
       - name: Source-bound assembly and procedure examples (no model calls)

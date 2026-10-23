@@ -263,14 +263,63 @@ def _current_files(store, files, *, limit=MAX_SOURCE_BYTES):
 def _compatibility(manifest):
     # Candidate and selected instruction/prompt sources are the treatment.
     # They remain bound in each manifest but deliberately differ across arms.
-    return {key: manifest[key] for key in ('fixture', 'tools', 'model', 'provider',
-                                           'token_budget', 'config_sha256')}
+    result = {key: manifest[key] for key in ('fixture', 'tools', 'model', 'provider',
+                                            'token_budget', 'config_sha256')}
+    if 'evaluator' in manifest:
+        result['evaluator'] = manifest['evaluator']
+    return result
+
+
+def _input_files(manifest):
+    """Explicit run inputs, including optional evaluator snapshots."""
+    files = [manifest['candidate'], *manifest['sources'],
+             manifest['fixture_source'], manifest['tools_source']]
+    if 'evaluator' in manifest:
+        files.extend(manifest['evaluator']['sources'])
+        if manifest['evaluator']['config'] is not None:
+            files.append(manifest['evaluator']['config'])
+    return files
+
+
+def _evaluator_binding(store, manifest):
+    binding = manifest['evaluator']
+    _fields(binding, {'sources', 'config'}, 'invalid_evaluator_binding')
+    sources, config = binding['sources'], binding['config']
+    if (not isinstance(sources, list) or not sources
+            or len(sources) + (config is not None) > MAX_FILES):
+        raise RunError('invalid_evaluator_sources')
+    for source in sources:
+        _fingerprint_record(store, source)
+    if sources != sorted(sources, key=lambda item: item['path']):
+        raise RunError('noncanonical_evaluator_sources')
+    files = list(sources)
+    if config is not None:
+        _fingerprint_record(store, config, limit=MAX_JSON_BYTES)
+        files.append(config)
+    paths = [item['path'].casefold() for item in files]
+    if len(paths) != len(set(paths)):
+        raise RunError('duplicate_evaluator_binding')
+    inputs = [manifest['candidate'], *manifest['sources'],
+              manifest['fixture_source'], manifest['tools_source']]
+    if set(paths) & {item['path'].casefold() for item in inputs}:
+        raise RunError('evaluator_overlaps_input')
+    if sum(item['size'] for item in inputs + files) > MAX_TOTAL_BYTES:
+        raise RunError('file_set_too_large')
+    _current_files(store, sources)
+    if config is not None:
+        _current_files(store, [config], limit=MAX_JSON_BYTES)
+        _, config_value = store.json_file(config['path'])
+        if not isinstance(config_value, dict):
+            raise RunError('invalid_evaluator_config')
 
 
 def _manifest(store, value):
-    _fields(value, {'candidate', 'candidate_version', 'sources', 'fixture_source',
-                   'tools_source', 'fixture', 'tools', 'model', 'provider',
-                   'token_budget', 'config_sha256'}, 'invalid_manifest')
+    fields = {'candidate', 'candidate_version', 'sources', 'fixture_source',
+              'tools_source', 'fixture', 'tools', 'model', 'provider',
+              'token_budget', 'config_sha256'}
+    if isinstance(value, dict) and 'evaluator' in value:
+        fields.add('evaluator')
+    _fields(value, fields, 'invalid_manifest')
     _text(value['candidate_version'], label=True)
     _text(value['model'], label=True)
     _text(value['provider'], label=True)
@@ -295,6 +344,8 @@ def _manifest(store, value):
     _, tools = store.json_file(value['tools_source']['path'])
     if _fixture(fixture) != value['fixture'] or _tools(tools) != value['tools']:
         raise RunError('definition_binding_mismatch')
+    if 'evaluator' in value:
+        _evaluator_binding(store, value)
     store.policy.fresh()
 
 
@@ -378,10 +429,17 @@ def _load_completion(store, prepared):
     _current_files(store, [payload['report_source']], limit=MAX_JSON_BYTES)
     _, report = store.json_file(payload['report_source']['path'])
     outcomes, refs = _outcomes(store, report, prepared['payload'], run_id)
-    if outcomes != payload['outcomes'] or not isinstance(payload['evidence'], list):
+    if (evidence.encode(outcomes) != evidence.encode(payload['outcomes'])
+            or not isinstance(payload['evidence'], list)):
         raise RunError('completion_binding_mismatch')
     if sorted(e['path'] for e in payload['evidence'] if isinstance(e, dict) and 'path' in e) != refs:
         raise RunError('evidence_binding_mismatch')
+    inputs = {item['path'].casefold() for item in _input_files(prepared['payload'])}
+    report_path = payload['report_source']['path'].casefold()
+    if report_path in inputs:
+        raise RunError('report_overlaps_input')
+    if any(path.casefold() in inputs | {report_path} for path in refs):
+        raise RunError('evidence_overlaps_input')
     _current_files(store, payload['evidence'], limit=MAX_EVIDENCE_BYTES)
     store.policy.fresh()
     return receipt
@@ -389,7 +447,8 @@ def _load_completion(store, prepared):
 
 @_public
 def prepare(vault, candidate, sources, fixture, tools, *, model, provider,
-            token_budget, candidate_version='unspecified'):
+            token_budget, candidate_version='unspecified', evaluator_sources=None,
+            evaluator_config=None):
     """Capture one execution contract; identical inputs reuse the prepared ID.
 
 Candidate and sources are selected Markdown treatment files. Fixture/tools are
@@ -407,6 +466,20 @@ vault-relative JSON files with the strict v1 schema. No source text executes.
         tools_source=tools_info, fixture=_fixture(fixture_value), tools=_tools(tools_value),
         model=model, provider=provider, token_budget=token_budget,
         config_sha256=store.policy.config_sha256)
+    if evaluator_sources is not None or evaluator_config is not None:
+        if (not isinstance(evaluator_sources, list) or not evaluator_sources
+                or len(evaluator_sources) + (evaluator_config is not None) > MAX_FILES):
+            raise RunError('invalid_evaluator_sources')
+        config_info = None
+        if evaluator_config is not None:
+            config_info, config_value = store.json_file(evaluator_config)
+            if not isinstance(config_value, dict):
+                raise RunError('invalid_evaluator_config')
+        used = sum(item['size'] for item in _input_files(manifest))
+        used += config_info['size'] if config_info is not None else 0
+        evaluator_info = store.capture(evaluator_sources, used_bytes=used)
+        manifest['evaluator'] = dict(sources=sorted(evaluator_info, key=lambda item: item['path']),
+                                     config=config_info)
     _manifest(store, manifest)
     run_id = evidence.digest(evidence.encode(manifest))
     name, _ = _names(run_id)
@@ -431,12 +504,13 @@ def record(vault, run_id, report):
         if store.record_path(name).exists():
             raise RunError('immutable_receipt_exists')
         report_info, report_value = store.json_file(report)
+        input_paths = {item['path'].casefold() for item in _input_files(prepared['payload'])}
+        if report_info['path'].casefold() in input_paths:
+            raise RunError('report_overlaps_input')
         outcomes, refs = _outcomes(store, report_value, prepared['payload'], run_id)
         files = store.capture(refs, limit=MAX_EVIDENCE_BYTES)
         # Evidence must be distinct from the report and execution inputs.
-        inputs = {p['path'].casefold() for p in [prepared['payload']['candidate'],
-            *prepared['payload']['sources'], prepared['payload']['fixture_source'],
-            prepared['payload']['tools_source'], report_info]}
+        inputs = input_paths | {report_info['path'].casefold()}
         if any(f['path'].casefold() in inputs for f in files):
             raise RunError('evidence_overlaps_input')
         _current_files(store, files, limit=MAX_EVIDENCE_BYTES)
@@ -539,6 +613,9 @@ def main(argv=None):
     prep.add_argument('--source', action='append', required=True)
     prep.add_argument('--candidate-version', default='unspecified')
     prep.add_argument('--token-budget', required=True, type=int)
+    prep.add_argument('--evaluator-source', action='append',
+                      help='opt-in allowed evaluator code/support snapshot; never executed')
+    prep.add_argument('--evaluator-config', help='opt-in evaluator JSON configuration snapshot')
     rec = commands.add_parser('record', help='record host observations without running any tool/model')
     rec.add_argument('id')
     rec.add_argument('--report', required=True)
@@ -551,7 +628,8 @@ def main(argv=None):
         if args.command == 'prepare':
             result = prepare(args.vault, args.candidate, args.source, args.fixture, args.tools,
                 model=args.model, provider=args.provider, token_budget=args.token_budget,
-                candidate_version=args.candidate_version)
+                candidate_version=args.candidate_version, evaluator_sources=args.evaluator_source,
+                evaluator_config=args.evaluator_config)
         elif args.command == 'record':
             result = record(args.vault, args.id, args.report)
         elif args.command == 'inspect':
