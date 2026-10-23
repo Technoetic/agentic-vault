@@ -258,6 +258,7 @@ class JarvisTelegramBoundaryTests(unittest.TestCase):
         http_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{self.token}/getUpdates", 502,
             "CONTENT-SENTINEL", {}, None)
+        self.addCleanup(http_error.close)
         failures = (
             ("getUpdates", http_error, None, 502),
             ("getUpdates", _BRIDGE.urllib.error.URLError("CONTENT-SENTINEL"), None, None),
@@ -2129,6 +2130,7 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         html_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{token}/sendMessage", 400,
             "bad html", {}, None)
+        self.addCleanup(html_error.close)
         plain_error = _BRIDGE.urllib.error.URLError(
             f"https://api.telegram.org/bot{token}/sendMessage")
 
@@ -2146,6 +2148,7 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         get_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{token}/getUpdates", 502,
             "bad gateway", {}, None)
+        self.addCleanup(get_error.close)
         cfg = {
             "telegram_user_ids": [],
             "_briefing_slots": [(7, 30)],
