@@ -175,6 +175,14 @@ class PreservationCheckTests(unittest.TestCase):
         code, negated = self.run_cli("preserve-check", proposal_id, "--claim", "관리자 승인 필요")
         self.assertEqual((code, negated["review_reasons"]), (1, ["unexpected_removals"]))
 
+    def test_a_spaced_negation_needs_the_clause_end_in_the_claim(self):
+        proposal_id = self.propose("# 규칙\n규칙: 관리자 승인 필요.\n", "# 규칙\n규칙: 관리자 승인 필요 없음.\n")
+        code, spaced = self.run_cli("preserve-check", proposal_id, "--claim", "관리자 승인 필요")
+        self.assertEqual((code, spaced["status"]), (0, "complete"), "a separate negation word keeps the phrase")
+        code, clause = self.run_cli("preserve-check", proposal_id, "--claim", "관리자 승인 필요.")
+        self.assertEqual((code, clause["review_reasons"]), (1, ["unexpected_removals"]))
+        self.assertEqual(pairs(clause["unexpected_removals"]), {("claim", "관리자 승인 필요.")})
+
     def test_conflicting_and_invalid_declarations_are_errors(self):
         proposal_id = self.propose()
         for args, error in ((("--claim", "원문에 없는 문장"), "claim_not_in_original"),

@@ -257,7 +257,7 @@ class JarvisTelegramBoundaryTests(unittest.TestCase):
     def test_tg_call_normalizes_transport_url_json_and_unicode_failures(self):
         http_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{self.token}/getUpdates", 502,
-            "CONTENT-SENTINEL", {}, None)
+            "CONTENT-SENTINEL", {}, io.BytesIO())
         self.addCleanup(http_error.close)
         failures = (
             ("getUpdates", http_error, None, 502),
@@ -2129,7 +2129,7 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         token = "12345:secret-value"
         html_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{token}/sendMessage", 400,
-            "bad html", {}, None)
+            "bad html", {}, io.BytesIO())
         self.addCleanup(html_error.close)
         plain_error = _BRIDGE.urllib.error.URLError(
             f"https://api.telegram.org/bot{token}/sendMessage")
@@ -2147,7 +2147,7 @@ class JarvisUpdateDurabilityTests(unittest.TestCase):
         token = "12345:secret-value"
         get_error = _BRIDGE.urllib.error.HTTPError(
             f"https://api.telegram.org/bot{token}/getUpdates", 502,
-            "bad gateway", {}, None)
+            "bad gateway", {}, io.BytesIO())
         self.addCleanup(get_error.close)
         cfg = {
             "telegram_user_ids": [],

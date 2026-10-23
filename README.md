@@ -154,7 +154,7 @@ separately ([memory evaluation](docs/memory-evaluation.md)); `evaluate_recall.py
 adds one-sided lower bounds to all-expected-found headline rates; and `vault_proposals.py preserve-check`
 compares a stored proposal's original and candidate by occurrence counts of numbers, dates, names and
 declared phrases ([lesson proposals](docs/lesson-proposals.md)). Without the new flags and subcommand,
-outputs and exit codes are unchanged. They never gate, apply or approve anything, and literal
+report outputs and exit codes are unchanged; `--help` lists the new options. They never gate, apply or approve anything, and literal
 preservation is not semantic preservation.
 
 v0.27.0 adds opt-in [improvement experiments](docs/improvement-experiments.md): baseline, general,
@@ -533,9 +533,9 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.29.0**이며 **Claude Code, Codex 겸용**이다. 한국어 기억 평가의 응답률·조용한 오류율(`--answer-rates`)과 회상 평가의 회수 성공률 하한(`--success-bounds`)([평가 사용법](docs/memory-evaluation.md)), 교훈 수정안의 읽기 전용 유지 문구 확인(`preserve-check`, [제안 사용법](docs/lesson-proposals.md))을 선택형으로 더한다. 혼합 정확도에 가려지던 오답을 '답한 것 중 틀린 비율'로 드러내고, 100% 같은 헤드라인에 단측 하한을 붙이며, 수정안에서 사라지면 안 되는 숫자·날짜·링크·문구와 의도한 정정을 등장 횟수로 대조한다. 세 기능은 검토 자료이며 게이트·자동 적용·승인을 하지 않는다. 새 플래그·하위 명령 없이는 출력과 종료 코드가 이전과 같다. Python 3.10+ 표준 라이브러리와 기존 slash command 15종을 유지한다. [이번 변경·검증 범위](docs/releases/v0.29.0.md)를 함께 본다.
+현재 버전은 **v0.29.0**이며 **Claude Code, Codex 겸용**이다. 한국어 기억 평가의 응답률·조용한 오류율(`--answer-rates`)과 회상 평가의 회수 성공률 하한(`--success-bounds`)([평가 사용법](docs/memory-evaluation.md)), 교훈 수정안의 읽기 전용 유지 문구 확인(`preserve-check`, [제안 사용법](docs/lesson-proposals.md))을 선택형으로 더한다. 혼합 정확도에 가려지던 오답을 '답한 것 중 틀린 비율'로 드러내고, 100% 같은 헤드라인에 단측 하한을 붙이며, 수정안에서 사라지면 안 되는 숫자·날짜·링크·문구와 의도한 정정을 등장 횟수로 대조한다. 세 기능은 검토 자료이며 게이트·자동 적용·승인을 하지 않는다. 새 플래그·하위 명령 없이는 보고서 출력과 종료 코드가 이전과 같다(`--help`에는 새 옵션이 보인다). Python 3.10+ 표준 라이브러리와 기존 slash command 15종을 유지한다. [이번 변경·검증 범위](docs/releases/v0.29.0.md)를 함께 본다.
 
-응답률·하한은 고른 평가 결과의 서술 값이며 실제 모델·업무 성능을 측정하지 않는다. `preserve-check`는 위치를 보지 않고 등장 횟수만 세므로 맞바꾸거나 같은 값을 다른 곳에 더해 가린 변경은 잡지 못하고, 리터럴 일치는 의미 보존이 아니다. AgentOnto(arXiv 2610.23317)에서는 설계 원리만 가져왔고 논문 수치는 근거로 쓰지 않는다. v0.28.0의 [기억 형성 오염 대조시험](docs/memory-formation.md)·[현재 값 근거 조립](docs/memory-assembly.md)·[실행 근거에 연결된 절차 검색](docs/procedural-recall.md)을 유지한다. 형성 대조시험은 고정 합성 자료이며 실제 모델 내성을 측정하지 않는다. 현재 값 조립은 명시 scope/polarity가 없는 대장을 보류하고 자동 이행하지 않는다. 절차 검색의 원문·영수증 연결은 전체 절차 실행이나 권한의 인증이 아니다. 기존 [Harness² 기반 개선 실험](docs/improvement-experiments.md)의 후보 계보·현행 유지/보류·수정별 근거·NO_ENTRY를 유지한다. v0.28.0 [구현 검증 기록](docs/verification/memory-reliability-20261022.md)에 최초 문서 오류와 수정 후 재검증을 보존한다. 공개 배포·활성 설치·운영 볼트 반영은 별도다.
+응답률·하한은 고른 평가 결과의 서술 값이며 실제 모델·업무 성능을 측정하지 않는다. `preserve-check`는 위치를 보지 않고 등장 횟수만 세므로 맞바꾸거나 같은 값을 다른 곳에 더해 가린 변경은 잡지 못하고, 선언한 문구 뒤에 띄어 쓴 부정(`필요 없음`)도 문구가 그대로 남아 잡히지 않으며, 리터럴 일치는 의미 보존이 아니다. AgentOnto(arXiv 2610.23317)에서는 설계 원리만 가져왔고 논문 수치는 근거로 쓰지 않는다. v0.28.0의 [기억 형성 오염 대조시험](docs/memory-formation.md)·[현재 값 근거 조립](docs/memory-assembly.md)·[실행 근거에 연결된 절차 검색](docs/procedural-recall.md)을 유지한다. 형성 대조시험은 고정 합성 자료이며 실제 모델 내성을 측정하지 않는다. 현재 값 조립은 명시 scope/polarity가 없는 대장을 보류하고 자동 이행하지 않는다. 절차 검색의 원문·영수증 연결은 전체 절차 실행이나 권한의 인증이 아니다. 기존 [Harness² 기반 개선 실험](docs/improvement-experiments.md)의 후보 계보·현행 유지/보류·수정별 근거·NO_ENTRY를 유지한다. v0.28.0 [구현 검증 기록](docs/verification/memory-reliability-20261022.md)에 최초 문서 오류와 수정 후 재검증을 보존한다. 공개 배포·활성 설치·운영 볼트 반영은 별도다.
 
 v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단의 디렉터리 이름 목록 대조, [골드셋 보고서 키 가명화](docs/memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](docs/release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 분류와 반복 측정](docs/evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)을 유지한다. v0.26.0에서 `checker_sha256`가 묶는 `vault_provenance.py`가 바뀌었으므로 v0.25.0 이하에서 만든 경고 승격 인증서는 맞지 않는다. 해당 볼트는 갱신 전에 [v0.26.0 업그레이드 안내](docs/releases/v0.26.0.md#하위호환업그레이드)를 따른다. v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 볼트를 읽는 Claude Code·Codex 설치본을 함께 갱신한다. v0.29.0은 검사기 일곱 파일과 corpus를 바꾸지 않지만 설치본의 줄바꿈 등 실제 바이트가 다르면 인증서가 맞지 않을 수 있다.
 
