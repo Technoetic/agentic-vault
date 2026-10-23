@@ -1,12 +1,13 @@
 # 기억 답변·상태 변경·도구 호출 평가
 
-v0.26.0은 골드셋 보고서의 [키 기반 가명화](#개인정보와-보관)(`--redact-key-file`·`--redact-ephemeral`)를
-선택형으로 더한다. v0.25.0은 [소표본 정확 검정·비율 상한](#소표본-통계-정확-부호-검정과-비율-상한)과
+v0.29.0은 한국어 평가의 응답률·조용한 오류율(`--answer-rates`)과 회상 평가의 회수 성공률 하한(`--success-bounds`)을
+선택형으로 더한다(아래 각 절). v0.26.0은 골드셋 보고서의 [키 기반 가명화](#개인정보와-보관)(`--redact-key-file`·`--redact-ephemeral`)를
+선택형으로 더했다. v0.25.0은 [소표본 정확 검정·비율 상한](#소표본-통계-정확-부호-검정과-비율-상한)과
 [실제 볼트 골드셋 평가](#실제-볼트-골드셋-평가)를 선택형으로 더했다. v0.24.0의
 [언어 매트릭스·Kiwi/qmd 비교·Windows 편집 보강](evaluation-stability.md)은
 기존 평가를 선택해서 확장한다. 요청·설명 언어와 문자열 보존 지시를 비교하며, 선택한 모델
 응답의 실패 진단과 알려진 인증값 정제를 함께 기록한다. 실제 관측과 최종 릴리스 검증은
-[v0.26.0 검증 기록](verification/v0.26.0.md), [v0.25.0 검증 기록](verification/v0.25.0.md)과
+[v0.29.0 검증 기록](verification/v0.29.0.md), [v0.26.0 검증 기록](verification/v0.26.0.md), [v0.25.0 검증 기록](verification/v0.25.0.md)과
 [v0.24.0 검증 기록](verification/v0.24.0.md)에서 구분한다.
 기존 설치 캐시 갱신은 별도 작업이다.
 
@@ -18,7 +19,7 @@ v0.26.0은 골드셋 보고서의 [키 기반 가명화](#개인정보와-보관
 유형별로 분류해 전체 영수증으로 남긴다. v0.25.0의 `evaluate_recall.py --exact-paired`·`--rate-bounds`는
 작은 표본의 쌍 비교 p값을 정확값으로 바꾸고 0건·소수 건 비율에 단측 상한을 붙인다(아래 소표본 통계).
 
-이 문서는 v0.26.0의 선택형 개발·평가 도구를 설명한다. `--render-matched`와 `--receipt-out` 두 옵션은 v0.23.0에서 더했다. 기본 세션 훅·검색·주입·설치 동작에
+이 문서는 v0.29.0까지의 선택형 개발·평가 도구를 설명한다. `--render-matched`와 `--receipt-out` 두 옵션은 v0.23.0에서 더했다. 기본 세션 훅·검색·주입·설치 동작에
 모델 호출이나 새 런타임 의존성을 추가하지 않는다. 기본 실행은 실제 사용자 볼트나 업무 자료를
 평가 입력으로 받지 않으며, 가상의 조직·사실·메시지함만 사용한다. 예외는 v0.25.0에서 더한
 선택형 `--vault --goldset`([실제 볼트 골드셋 평가](#실제-볼트-골드셋-평가))뿐이다. 사용자가 지정한
@@ -52,7 +53,7 @@ python scripts/evaluate_korean_memory.py --control wrong --answer-rates
 ```
 
 혼합 정확도 하나는 두 실패를 섞는다. 답할 문항 30건을 모두 틀리고 답하지 말 문항 20건(답 없음·철회)만
-보류해도 `answer_accuracy_all_cases`는 0.4다. 소스에 더한 선택형 `--answer-rates`는 `summary` 바로 뒤에
+보류해도 `answer_accuracy_all_cases`는 0.4다. v0.29.0에 더한 선택형 `--answer-rates`는 `summary` 바로 뒤에
 `answer_rates`를 더한다. 플래그가 없으면 보고서는 이전과 같다.
 
 - `response_rate`: 답한 문항 / 전체 문항. 보류와 실행 오류는 답이 아니다. 나머지는 `abstention_count`와
@@ -223,7 +224,7 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
 - 게이트와 종료 코드는 계속 관측 비율만 읽는다. 게이트를 통과했지만 정확 상한이 그 최댓값보다
   크면 stderr에 `rate-bounds note (non-blocking)`를 남긴다. 실패한 게이트에는 알림을 더하지 않는다.
 
-**`--success-bounds`** (소스에 추가)
+**`--success-bounds`** (v0.29.0)
 
 - 100% 헤드라인(예: 56/56)에도 하한을 붙인다. 헤드라인 요약(전체·언어별·시나리오별, 비교 모드의 각 팔)에
   `success_lower_bounds`를 더하고, 보고서 맨 위에 `success_lower_bound_definitions`를 한 번 적는다.

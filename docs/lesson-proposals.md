@@ -36,8 +36,9 @@ python skills/agentic-vault/scripts/vault_proposals.py --vault PATH check ID
 
 ## 유지 문구 확인 (선택)
 
-소스에 추가한 읽기 전용 `preserve-check`는 제안 기록에 저장된 원문과 후보를 비교해, 바뀌면 안 되는
-문구가 후보에 남았는지 보여 준다. 볼트 파일과 제안 기록은 바꾸지 않는다.
+v0.29.0에 추가한 읽기 전용 `preserve-check`는 제안 기록에 저장된 원문과 후보를 비교해, 바뀌면 안 되는
+문구가 후보에 남았는지 보여 준다. 볼트 파일과 제안 기록은 바꾸지 않는다. v0.28.0 이하 설치본에는 이 하위
+명령이 없으므로 `inspect`의 diff로 직접 확인한다.
 
 ```text
 python skills/agentic-vault/scripts/vault_proposals.py --vault PATH preserve-check ID --claim "로그인 기록은" --expect-removed "90" --expect-added "30일"
