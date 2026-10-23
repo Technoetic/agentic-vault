@@ -95,7 +95,8 @@ timed-out/unavailable를 통과로 보고하지 않는다. 아래의 기존 승�
 기존 사용자 소유 Markdown 한 파일을 고치는 승격은
 [교훈 제안 절차](../docs/lesson-proposals.md)의 `vault_proposals.py`를 사용한다.
 현재 원문을 보존한 후보를 만들고 `propose` → `inspect` → `check`로 실제 diff와
-기준 해시를 확인한다. 정확한 수정안에 대한 사용자 승인이 있으면 `apply ID --approve`로
+기준 해시를 확인한다. 바뀌어야 할 문구와 그대로여야 할 문구가 있으면 선택형 `preserve-check ID
+--claim … --expect-removed … --expect-added …`로 등장 횟수를 대조한다(읽기 전용 검토 자료이며 승인을 대신하지 않는다). 정확한 수정안에 대한 사용자 승인이 있으면 `apply ID --approve`로
 적용하고, 제안 ID를 교훈 대장의 근거에 연결한다. 이미 같은 안을 승인받았다면
 재승인을 반복해서 묻지 않는다. 대상 해시가 달라졌다면 옛 승인안은 적용하지 않고
 최신 원문으로 새 제안을 준비해 변경된 diff를 검토한다.

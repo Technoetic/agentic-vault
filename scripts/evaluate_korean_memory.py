@@ -300,6 +300,103 @@ RENDER_MATCHED_EVIDENCE_METRICS = (
 )
 
 
+ANSWER_RATE_DEFINITIONS = {
+    "populations": "Labelled populations: answerable = cases whose pack labels expect assertions; should_abstain = "
+                   "cases whose labels expect none. They partition the cases; in the default fixture they are "
+                   "current/historical/conditional and no_answer/withdrawn. --withdraw-source does not move a case "
+                   "between populations.",
+    "response_rate": "answered cases / all cases; abstentions and execution errors are not answers",
+    "silent_error_rate": "answered cases whose decision or assertions are wrong / answered cases, i.e. 1 - accuracy "
+                         "among answered. A named alarm next to response_rate, not a new measurement; answering a "
+                         "should-abstain case is a silent error.",
+    "accuracy": "answerable_accuracy, should_abstain_accuracy and scenario_rates accuracy divide correct cases by all "
+                "cases of the population; unassessed abstentions (incomplete evidence) and execution errors count "
+                "as not correct, as in answer_accuracy_all_cases.",
+    "decomposition": "answer_accuracy_all_cases = always_answer_ceiling * answerable_accuracy + (1 - "
+                     "always_answer_ceiling) * should_abstain_accuracy, exactly in the integer counts and undefined "
+                     "when a population is empty. A method that always answers cannot exceed always_answer_ceiling, "
+                     "so compare methods on both accuracies, not on the mixed accuracy alone. The gap between two "
+                     "runs splits the same way only when both use the same pack and populations.",
+    "upper_bounds": "one-sided 95% upper bounds (Wilson, Clopper-Pearson) of the silent error rate with its "
+                    "numerator and denominator; null when nothing was answered",
+    "interpretation": "Descriptive inputs for human judgement, never gates or exit-code inputs. The default "
+                      "synthetic controls only exercise the scoring; a model is described only by --observations "
+                      "replay of its own outputs.",
+}
+
+
+def _eval_stats():
+    """Load the small-sample statistics by path; only answer_rates uses them."""
+    spec = importlib.util.spec_from_file_location("agentic_vault_answer_rate_stats",
+                                                  REPO_ROOT / "scripts" / "eval_stats.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _rate(numerator: int, denominator: int) -> dict:
+    return {"numerator": numerator, "denominator": denominator, "rate": _ratio(numerator, denominator)}
+
+
+def _answered(rows: list[dict]) -> list[dict]:
+    return [row for row in rows if row["response"] is not None and row["response"]["status"] == "answer"]
+
+
+def _silent_errors(answered: list[dict], stats) -> dict:
+    wrong = sum(row["answer"]["correct"] is False for row in answered)
+    record = _rate(wrong, len(answered))
+    record["upper_bounds"] = stats.rate_upper_bounds(wrong, len(answered)) if answered else None
+    return record
+
+
+def _answer_rates(rows: list[dict]) -> dict:
+    """Response and silent error rates per population; the mixed accuracy decomposes into these exactly."""
+    stats = _eval_stats()
+    answerable = [row for row in rows if row["evidence"]["expected_paths"]]
+    should_abstain = [row for row in rows if not row["evidence"]["expected_paths"]]
+    abstained = [row for row in rows if row["response"] is not None and row["response"]["status"] == "abstain"]
+
+    def correct(group):
+        return sum(row["answer"]["correct"] is True for row in group)
+
+    scenarios = {}
+    for scenario in sorted({row["scenario"] for row in rows}):
+        group = [row for row in rows if row["scenario"] == scenario]
+        scenarios[scenario] = {"case_count": len(group), "accuracy": _rate(correct(group), len(group)),
+                               "response_rate": _rate(len(_answered(group)), len(group)),
+                               "silent_error_rate": _silent_errors(_answered(group), stats)}
+    return {"case_count": len(rows),
+            "response_rate": _rate(len(_answered(rows)), len(rows)),
+            "abstention_count": len(abstained),
+            "unassessed_abstention_count": sum(row["answer"]["status"] == "unassessed" for row in abstained),
+            "execution_error_count": sum(row["execution"]["status"] == "error" for row in rows),
+            "silent_error_rate": _silent_errors(_answered(rows), stats),
+            "silent_error_breakdown": {
+                "answered_should_abstain_count": sum(row["answer"]["correct"] is False
+                                                     for row in _answered(should_abstain)),
+                "answered_wrong_on_answerable_count": sum(row["answer"]["correct"] is False
+                                                          for row in _answered(answerable))},
+            "answerable_accuracy": _rate(correct(answerable), len(answerable)),
+            "should_abstain_accuracy": _rate(correct(should_abstain), len(should_abstain)),
+            "always_answer_ceiling": _rate(len(answerable), len(rows)),
+            "scenario_rates": scenarios,
+            "definitions": ANSWER_RATE_DEFINITIONS}
+
+
+def _with_key_after(mapping: dict, anchor: str, key: str, value) -> dict:
+    """Copy mapping with key placed right after anchor (appended if anchor is absent)."""
+    copied = {}
+    for name, item in mapping.items():
+        if name == key:
+            continue
+        copied[name] = item
+        if name == anchor:
+            copied[key] = value
+    if key not in copied:
+        copied[key] = value
+    return copied
+
+
 def _paired_randomization():
     """Reuse the recall evaluator's stdlib paired test; loaded only for the opt-in arm."""
     spec = importlib.util.spec_from_file_location("agentic_vault_paired_statistics",
@@ -356,7 +453,8 @@ def _render_matched_evidence(pairs: list[tuple[str, dict, dict]]) -> dict:
 
 def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer: Callable | None = None,
              observations: dict | None = None, max_tokens: int = 1500, top_k: int = 3,
-             backend: str = "bm25", withdrawn_sources: Sequence[str] = (), render_matched: bool = False) -> dict:
+             backend: str = "bm25", withdrawn_sources: Sequence[str] = (), render_matched: bool = False,
+             answer_rates: bool = False) -> dict:
     """Run synthetic controls or replay observations against fresh synthetic retrieval.
 
     Optional callbacks receive only a copied question/options/evidence payload and
@@ -364,11 +462,15 @@ def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer
     implicit actual-model backend. Replay usage is caller-attested, not verified
     billing. Fresh CLI runs make zero model requests. render_matched adds an
     evidence-only annotate-only retrieval arm (RENDER_MATCHED_ANSWER_REASON).
+    answer_rates adds response/silent-error rates and per-population accuracy
+    right after the summary (ANSWER_RATE_DEFINITIONS); other keys are unchanged.
     """
     if control not in CONTROLS or type(max_tokens) is not int or not 0 <= max_tokens <= 20_000:
         raise ValueError("invalid control/context budget")
     if type(render_matched) is not bool:
         raise ValueError("render_matched must be boolean")
+    if type(answer_rates) is not bool:
+        raise ValueError("answer_rates must be boolean")
     if type(top_k) is not int or not 1 <= top_k <= 10 or backend not in ("lexical", "bm25", "hybrid"):
         raise ValueError("invalid retrieval configuration")
     if observations is not None and (not isinstance(observations, dict) or answerer is not None):
@@ -474,6 +576,8 @@ def evaluate(fixture: Path = DEFAULT_FIXTURE, *, control: str = "good", answerer
         "per_case": rows}
     if render_matched:
         report["render_matched"] = _render_matched_evidence(pairs)
+    if answer_rates:
+        report = _with_key_after(report, "summary", "answer_rates", _answer_rates(rows))
     return report
 
 
@@ -488,11 +592,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--withdraw-source", action="append", default=[], help="additional synthetic source withdrawal")
     parser.add_argument("--render-matched", action="store_true",
                         help="add an evidence-only annotate-only retrieval arm (observational; answers are not re-scored)")
+    parser.add_argument("--answer-rates", action="store_true",
+                        help="add response rate, silent error rate (wrong among answered) with one-sided upper "
+                             "bounds, accuracy on answerable and should-abstain cases, per-scenario rates and the "
+                             "always-answer ceiling (descriptive; exit code unchanged)")
     args = parser.parse_args(argv)
     try:
         report = evaluate(control=args.control, max_tokens=args.max_tokens, top_k=args.top_k, backend=args.backend,
                           observations=_read_json(args.observations) if args.observations else None,
-                          withdrawn_sources=args.withdraw_source, render_matched=args.render_matched)
+                          withdrawn_sources=args.withdraw_source, render_matched=args.render_matched,
+                          answer_rates=args.answer_rates)
         if args.write_observations:
             args.write_observations.write_text(json.dumps({row["id"]: row["observation"] for row in report["per_case"]},
                                                          ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -45,6 +45,37 @@ python scripts/evaluate_korean_memory.py
 인증하지 않는다. 실제 사용량이 없으면 null로 남기고, 컨텍스트 문자 기반 토큰
 추정이나 가격을 가정한 비용 추정과 실제 청구 금액을 섞지 않는다.
 
+### 응답률과 조용한 오류율 (`--answer-rates`)
+
+```text
+python scripts/evaluate_korean_memory.py --control wrong --answer-rates
+```
+
+혼합 정확도 하나는 두 실패를 섞는다. 답할 문항 30건을 모두 틀리고 답하지 말 문항 20건(답 없음·철회)만
+보류해도 `answer_accuracy_all_cases`는 0.4다. 소스에 더한 선택형 `--answer-rates`는 `summary` 바로 뒤에
+`answer_rates`를 더한다. 플래그가 없으면 보고서는 이전과 같다.
+
+- `response_rate`: 답한 문항 / 전체 문항. 보류와 실행 오류는 답이 아니다. 나머지는 `abstention_count`와
+  `execution_error_count`로 나뉘고, `unassessed_abstention_count`(근거 불완전 보류)는 보류 가운데 일부다.
+- `silent_error_rate`: 답한 것 중 틀린 비율(= 1 − 답한 것 중 정확도). 새 계측이 아니라 응답률 옆에 붙이는
+  이름 붙은 경보다. 답하지 말 문항에 답한 것도 여기에 들어가며 `silent_error_breakdown`이 두 경우를 나눈다.
+  단측 95% 상한(Wilson·Clopper-Pearson)을 분자·분모와 함께 싣고, 답한 문항이 없으면 null이다.
+- `answerable_accuracy`·`should_abstain_accuracy`: 팩 라벨이 주장을 기대하는 문항과 기대하지 않는 문항의
+  정확도(기본 픽스처에서는 현재·과거·조건과 답 없음·철회). 두 모집단은 전체 문항을 겹치지 않게 나누며
+  `--withdraw-source`로 문항이 모집단을 옮기지 않는다. 분모는 모집단 전체라서 근거 불완전 보류와 실행 오류는
+  `answer_accuracy_all_cases`처럼 정답이 아닌 것으로 센다.
+- `always_answer_ceiling`: 답할 문항 / 전체 문항. 항상 답하는 방법이 넘을 수 없는 정확도 상한이다.
+- 항등식: `answer_accuracy_all_cases` = 상한 × 답할 문항 정확도 + (1 − 상한) × 답하지 말 문항 정확도.
+  정수 개수(분자·분모)로 정확히 성립하고, 한 모집단이 비면 정의되지 않는다. 같은 팩·같은 모집단으로 돌린 두
+  실행의 격차도 같은 가중치로 두 몫(상한 × Δ답할 문항 정확도, (1 − 상한) × Δ답하지 말 문항 정확도)으로 나뉜다.
+  방법을 비교할 때는 혼합 정확도만 보지 말고 두 정확도를 함께 본다.
+- `scenario_rates`: 시나리오별 문항 수·정확도·응답률·조용한 오류율. 보고서 맨 위 `by_scenario`(시나리오별
+  문항 수)와는 다른 키다.
+- 게이트와 종료 코드에 쓰지 않는 서술 값이다. 기본 실행은 합성 대조군이라 채점 규칙만 확인한다. 어떤 모델에
+  관한 값은 그 모델의 출력을 `--observations`로 재생했을 때만 의미가 있다.
+- 설계 원리는 AgentOnto(arXiv 2610.23317)의 '조용한 의미 오류' 지표와 응답률 병기에서 가져왔다. 그 논문의
+  수치는 근거로 쓰지 않는다.
+
 ## 시간 유효성: 표시 효과와 기전 잔차
 
 `--as-of` 기준으로 만료·미시작·대체된 출처를 빼는 시간 유효성 처리의 이득 중 얼마가
@@ -191,6 +222,25 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
   뜻이 아니다.
 - 게이트와 종료 코드는 계속 관측 비율만 읽는다. 게이트를 통과했지만 정확 상한이 그 최댓값보다
   크면 stderr에 `rate-bounds note (non-blocking)`를 남긴다. 실패한 게이트에는 알림을 더하지 않는다.
+
+**`--success-bounds`** (소스에 추가)
+
+- 100% 헤드라인(예: 56/56)에도 하한을 붙인다. 헤드라인 요약(전체·언어별·시나리오별, 비교 모드의 각 팔)에
+  `success_lower_bounds`를 더하고, 보고서 맨 위에 `success_lower_bound_definitions`를 한 번 적는다.
+  `inspected_queries.summary`에는 붙이지 않는다. `--rate-bounds`의 세 상한은 그대로다.
+- 대상은 `all_expected_found_rate` = 기대 출처를 모두 top_k 안에 찾은 답할 질의 / 답할 질의다. 분자·분모는
+  그 요약과 같은 행(inspected 제외, 언어·시나리오 필터)에서 다시 세며, 요약의 `answerable_query_count`와
+  다르면 오류로 멈춘다. 답할 질의가 없는 요약에는 항목이 없다.
+- 하한은 놓침률의 단측 95% 상한을 1에서 뺀 값이다. 놓침은 inspected를 뺀 `failed_queries[].reasons`의
+  `expected_source_missed`(기대 출처를 하나라도 놓침)이며, 같은 이름의 per_query `outcome`(하나도 못 찾음)과
+  다르다. 모두 찾았으면 Clopper-Pearson 하한은 0.05^(1/n)이고, 하나도 못 찾았으면 두 하한 모두 정확히 0이다.
+  56건 중 56건이면 Clopper-Pearson 0.9479, Wilson 0.9539(계산값)로, "56/56"은 단측 95% 신뢰로 약 94.8%
+  이상이라는 데까지만 말할 수 있다는 뜻이다. `miss_rate_method`는 놓침률 쪽 이름이라 '모두 찾음'이
+  `zero_event_closed_form`, '하나도 못 찾음'이 `all_events`로 표시된다.
+- recall@k의 하한이 아니다. recall@k는 기대 출처가 여럿인 질의의 부분 회수를 평균하지만, 이 비율은 질의마다
+  '전부 찾았는가'를 센다.
+- 게이트와 종료 코드는 바뀌지 않는다. 하한마다 따로 계산한 값이라 여러 하한을 함께 볼 때의 동시 포함은 보장하지
+  않는다. 그 밖의 해석과 한계는 아래 내용과 같다(상한을 하한으로 바꿔 읽는다).
 
 **해석과 한계**
 

@@ -238,6 +238,148 @@ def check_compile(vault, sources, targets, required_claims, *, report_unsupporte
     return result
 
 
+def _strip_bom(text):
+    return text[1:] if text.startswith('\ufeff') else text
+
+
+def _token_counts(body):
+    """Occurrences of date and number tokens, extracted with the rules of _fact_rows."""
+    counts = {}
+    spans = []
+    for match in DATE_RE.finditer(body):
+        spans.append((match.start(), match.end()))
+        key = ('date', _normalize(match.group()))
+        counts[key] = counts.get(key, 0) + 1
+    index = 0
+    for match in NUMBER_RE.finditer(body):
+        position = match.start()
+        while index < len(spans) and spans[index][1] <= position:
+            index += 1
+        if index < len(spans) and spans[index][0] <= position < spans[index][1]:
+            continue
+        key = ('number', _normalize(match.group()).rstrip('.'))
+        if len(key[1]) > 1024:
+            raise QualityError('fact_literal_limit')
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _phrase_count(phrase, normalized_body):
+    """Occurrences of a normalized phrase with conservative Unicode word boundaries on both ends."""
+    return len(re.findall(r'(?<!\w)' + re.escape(phrase) + r'(?!\w)', normalized_body))
+
+
+def _declared(values, name):
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_CLAIMS:
+        raise QualityError('invalid_' + name)
+    if any(not isinstance(item, str) or not item.strip() or len(item) > 1024 for item in values):
+        raise QualityError('invalid_' + name)
+    return [_normalize(item) for item in values]
+
+
+def check_preservation(original, candidate, *, required_claims=(), expected_removals=(), expected_additions=()):
+    """Occurrence-counted literal preservation from one note's original to its candidate, both given as text.
+
+    Only the two texts are read and nothing is written. Bodies are compared
+    without frontmatter or a leading BOM. Dates and numbers are counted as
+    tokens with the check_compile extraction; name labels, literal wiki
+    targets, declared claims and declared phrases are counted with conservative
+    Unicode word boundaries. A fact whose count drops is an unexpected removal
+    unless a declared removal names it. A declared removal must lower every
+    count it names and a declared addition must raise every count it names; a
+    declaration that contains date or number tokens is judged by those tokens
+    (for example 90일 names the number 90). The result is advisory review
+    material: it never permits or blocks an edit, and a literal is not truth.
+    """
+    claims = _declared(required_claims, 'required_claims')
+    removals = _declared(expected_removals, 'expected_removals')
+    additions = _declared(expected_additions, 'expected_additions')
+    if set(claims) & set(removals) or set(additions) & set(removals):
+        raise QualityError('conflicting_declarations')
+    if not isinstance(original, str) or not isinstance(candidate, str):
+        raise QualityError('invalid_text')
+    if max(len(original.encode('utf-8')), len(candidate.encode('utf-8'))) > MAX_FILE_BYTES:
+        raise QualityError('input_byte_limit')
+    original_raw, candidate_raw = _body(_strip_bom(original)), _body(_strip_bom(candidate))
+    bodies = {'original': _normalize(original_raw), 'candidate': _normalize(candidate_raw)}
+    tokens = {'original': _token_counts(original_raw), 'candidate': _token_counts(candidate_raw)}
+
+    def count(key, side):
+        kind, literal = key
+        if kind in ('date', 'number'):
+            return tokens[side].get(key, 0)
+        return _phrase_count(literal, bodies[side])
+
+    facts = set(tokens['original'])
+    facts.update(key for key in _fact_rows([{'path': 'original', 'text': _strip_bom(original)}]) if key[0] == 'name')
+    for claim in claims:
+        if not _phrase_count(claim, bodies['original']):
+            raise QualityError('claim_not_in_original')
+        facts.add(('claim', claim))
+    if len(facts) > MAX_FACTS:
+        raise QualityError('fact_limit')
+
+    def declared_rows(declared):
+        keys = sorted(_token_counts(declared)) or [('phrase', declared)]
+        return [{'kind': kind, 'literal': literal, 'original_count': count((kind, literal), 'original'),
+                 'candidate_count': count((kind, literal), 'candidate')} for kind, literal in keys]
+
+    excused_tokens, excused_phrases, removal_rows = set(), set(removals), []
+    for declared in removals:
+        detail = declared_rows(declared)
+        excused_tokens.update((row['kind'], row['literal']) for row in detail if row['kind'] in ('date', 'number'))
+        in_original = all(row['original_count'] > 0 for row in detail)
+        removal_rows.append({'literal': declared, 'in_original': in_original,
+                             'removed': in_original and all(row['candidate_count'] < row['original_count']
+                                                            for row in detail),
+                             'counts': detail})
+    addition_rows = []
+    for declared in additions:
+        detail = declared_rows(declared)
+        addition_rows.append({'literal': declared,
+                              'in_original': any(row['original_count'] > 0 for row in detail),
+                              'in_candidate': all(row['candidate_count'] > 0 for row in detail),
+                              'added': all(row['candidate_count'] > row['original_count'] for row in detail),
+                              'counts': detail})
+    rows = []
+    for key in sorted(facts):
+        before, after = count(key, 'original'), count(key, 'candidate')
+        rows.append({'kind': key[0], 'literal': key[1], 'original_count': before, 'candidate_count': after,
+                     'preserved': after >= before})
+
+    def excused(row):
+        if row['kind'] in ('date', 'number') and (row['kind'], row['literal']) in excused_tokens:
+            return True
+        return row['literal'] in excused_phrases
+
+    unexpected = [{key: row[key] for key in ('kind', 'literal', 'original_count', 'candidate_count')}
+                  for row in rows if not row['preserved'] and not excused(row)]
+    reasons = []
+    if unexpected:
+        reasons.append('unexpected_removals')
+    if any(not row['removed'] for row in removal_rows):
+        reasons.append('declared_removal_not_observed')
+    if any(not row['added'] for row in addition_rows):
+        reasons.append('expected_addition_missing')
+    if not rows and not removal_rows and not addition_rows:
+        reasons.append('no_selected_literal_facts')
+    return {'status': 'needs_review' if reasons else 'complete', 'review_reasons': reasons,
+            'original_sha256': hashlib.sha256(original.encode('utf-8')).hexdigest(),
+            'candidate_sha256': hashlib.sha256(candidate.encode('utf-8')).hexdigest(),
+            'facts_checked': len(rows), 'facts_preserved': sum(row['preserved'] for row in rows),
+            'unexpected_removals': unexpected, 'declared_removals': removal_rows,
+            'expected_additions': addition_rows,
+            'semantic_authority': 'advisory_unverified',
+            'name_scope': 'structured labels and literal wiki targets with conservative Unicode word boundaries; attached Korean particles may require separate labels or explicit host claims; no linguistic NER',
+            'authority': 'preservation_observation_only_not_permission_or_truth',
+            'scope': ('stored original against stored candidate, body only (frontmatter and a leading BOM are '
+                      'excluded); occurrence counts of date/number tokens (check_compile extraction) and of name '
+                      'labels, literal wiki targets, declared claims and declared phrases (word boundaries); '
+                      'declarations with date/number tokens are judged by those tokens; paraphrases and attached '
+                      'particles show as missing, and a sentence rewritten with the same numbers and links is '
+                      'caught only when it is declared as a claim')}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vault', required=True, type=Path)

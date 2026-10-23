@@ -331,6 +331,18 @@ def propose(store: Store, args) -> dict:
     return {'id': receipt['id'], 'status': 'proposed'}
 
 
+def preserve_check(receipt: dict, claims, removals, additions) -> dict:
+    """Read-only literal preservation between the receipt's stored original and candidate (advisory)."""
+    # vault_compile_quality imports this module, so it is loaded only for this read-only command.
+    from vault_compile_quality import QualityError, check_preservation
+    try:
+        observed = check_preservation(receipt['original'], receipt['candidate'], required_claims=list(claims),
+                                      expected_removals=list(removals), expected_additions=list(additions))
+    except QualityError as exc:
+        raise ProposalError(str(exc)) from None
+    return {'id': receipt['id'], 'target': receipt['target'], 'proposal_status': receipt['status'], **observed}
+
+
 def apply(store: Store, receipt: dict) -> dict:
     result = check(store, receipt)
     if not result['valid']:
@@ -559,12 +571,16 @@ def main(argv=None) -> int:
             command.add_argument('--preview-hash', required=True)
         if name == 'reject':
             command.add_argument('--reason', required=True)
+    preserve = commands.add_parser('preserve-check')
+    preserve.add_argument('id')
+    for flag in ('claim', 'expect-removed', 'expect-added'):
+        preserve.add_argument('--' + flag, action='append', default=[])
     args = parser.parse_args(argv)
     try:
         if args.command in ('apply', 'rollback') and not args.approve:
             raise ProposalError('explicit_approval_required')
         store = Store(args.vault)
-        if args.command in ('inspect', 'check', 'rollback-preview'):
+        if args.command in ('inspect', 'check', 'rollback-preview', 'preserve-check'):
             receipt = store.load(args.id)
             if args.command == 'inspect':
                 validate_change(store, receipt['target'], receipt['original'], receipt['candidate'])
@@ -574,6 +590,9 @@ def main(argv=None) -> int:
                     fromfile=receipt['target'] + ' (original)', tofile=receipt['target'] + ' (candidate)'))
             elif args.command == 'rollback-preview':
                 result = rollback_preview(store, receipt)
+            elif args.command == 'preserve-check':
+                validate_change(store, receipt['target'], receipt['original'], receipt['candidate'])
+                result = preserve_check(receipt, args.claim, args.expect_removed, args.expect_added)
             else:
                 result = check(store, receipt)
         else:
@@ -596,6 +615,8 @@ def main(argv=None) -> int:
                         store.save(receipt)
                         result = {'id': args.id, 'status': 'rejected'}
         print(json.dumps(result, ensure_ascii=True))
+        if args.command == 'preserve-check':
+            return 0 if result['status'] == 'complete' else 1
         return 0 if result.get('valid', True) else 1
     except ProposalError as exc:
         print(json.dumps({'error': str(exc)}))

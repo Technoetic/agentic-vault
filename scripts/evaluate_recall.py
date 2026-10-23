@@ -689,6 +689,79 @@ def with_rate_bounds(report: dict, *, confidence: float = RATE_BOUND_CONFIDENCE)
                            {'confidence': confidence, 'side': 'one-sided upper', **RATE_BOUND_DEFINITIONS})
 
 
+SUCCESS_BOUND_DEFINITIONS = {
+    'scope': 'Every headline summary (overall, by_language, by_scenario; each compare arm) gains '
+             'success_lower_bounds for the share of its answerable headline queries whose every expected source '
+             'was retrieved within top_k; inspected_queries.summary is left as is. A summary without an answerable '
+             'query has no entry.',
+    'definition': 'all_expected_found_rate = answerable queries with source_recall_at_k == 1 / answerable queries. '
+                  'Among headline (non-inspected) rows its complement is the expected_source_missed reason in '
+                  'failed_queries[].reasons, not the per_query outcome of the same name (which means that no '
+                  'expected source was found). This is not a lower bound of recall_at_k, which averages fractional '
+                  'recall over multi-source queries.',
+    'wilson_lower': '1 - the one-sided Wilson score upper bound of the miss rate; exactly 0 when none is found',
+    'clopper_pearson_lower': '1 - the one-sided exact Clopper-Pearson upper bound of the miss rate; when every '
+                             'query is found this is (1 - confidence)^(1/denominator)',
+    'miss_rate_method': 'the Clopper-Pearson method of the miss-rate bound: zero_event_closed_form = every query '
+                        'found, all_events = none found (lower bound 0), binomial_cdf_bisection otherwise',
+    'interpretation': 'Descriptive inputs for human judgement, never gates or exit-code inputs. They assume '
+                      'independent queries that share one rate, but fixture queries are designed cases, not a '
+                      'sample of real use. Each bound holds on its own, with no multiplicity adjustment.',
+}
+
+
+def with_success_bounds(report: dict, *, confidence: float = RATE_BOUND_CONFIDENCE) -> dict:
+    """Return an evaluate() or compare() report whose summaries carry one-sided success lower bounds.
+
+    Opt-in (--success-bounds). Each count comes from the same headline per_query
+    rows as its summary (inspected rows excluded, then filtered by language or
+    scenario); a count that disagrees with the summary's answerable_query_count
+    raises ValueError. Existing keys and values are unchanged, the input is not
+    mutated, and gates never read the bounds.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('success bounds require an evaluate() or compare() report')
+    stats = _load_eval_stats()
+    stats.confidence_alpha(confidence)
+
+    def summary(section: dict, rows: list) -> dict:
+        answerable = [row for row in rows if row['expectation'] == 'answerable']
+        if len(answerable) != section['answerable_query_count']:
+            raise ValueError('success bounds need the rows of each summary')
+        bounds = {}
+        if answerable:
+            found = sum(row['source_recall_at_k'] == 1.0 for row in answerable)
+            miss = stats.rate_upper_bounds(len(answerable) - found, len(answerable), confidence=confidence)
+            # With nothing found both lower bounds are exactly 0; float rounding of the Wilson
+            # upper bound would otherwise leave a misleading positive residue such as 2.2e-16.
+            bounds['all_expected_found_rate'] = {
+                'numerator': found, 'denominator': len(answerable), 'observed_rate': found / len(answerable),
+                'confidence': confidence, 'wilson_lower': 1 - miss['wilson_upper'] if found else 0.0,
+                'clopper_pearson_lower': 1 - miss['clopper_pearson_upper'] if found else 0.0,
+                'miss_rate_method': miss['clopper_pearson_method']}
+        anchor = 'rate_upper_bounds' if 'rate_upper_bounds' in section else 'stale_sources'
+        return _with_key_after(section, anchor, 'success_lower_bounds', bounds)
+
+    def arm(result: dict) -> dict:
+        rows = [row for row in result['per_query'] if row.get('inspected') is not True]
+        extended = summary(result, rows)
+        extended['by_language'] = {key: summary(value, [row for row in rows if row['language'] == key])
+                                   for key, value in result['by_language'].items()}
+        extended['by_scenario'] = {key: summary(value, [row for row in rows if row['scenario'] == key])
+                                   for key, value in result['by_scenario'].items()}
+        return extended
+
+    if 'per_query' in report:
+        extended = arm(report)
+    elif 'baseline' in report and 'improved' in report:
+        extended = {**report, **{name: arm(report[name]) for name in REPORT_ARMS if name in report}}
+    else:
+        raise ValueError('success bounds require an evaluate() or compare() report')
+    anchor = 'rate_upper_bound_definitions' if 'rate_upper_bound_definitions' in extended else 'interpretation'
+    return _with_key_after(extended, anchor, 'success_lower_bound_definitions',
+                           {'confidence': confidence, 'side': 'one-sided lower', **SUCCESS_BOUND_DEFINITIONS})
+
+
 def rate_bound_gate_notes(gated: dict) -> list[str]:
     """Optional gates that passed although the exact upper bound still exceeds their maximum."""
     bounds = gated.get('rate_upper_bounds', {})
@@ -1469,6 +1542,10 @@ def _parser() -> argparse.ArgumentParser:
                         help='add one-sided 95%% upper bounds (Wilson, Clopper-Pearson) with numerator and '
                              'denominator for the no-answer false-positive, forbidden exposure and stale top-1 '
                              'rates (descriptive; gates and exit code are unchanged)')
+    parser.add_argument('--success-bounds', action='store_true',
+                        help='add one-sided 95%% lower bounds (Wilson, Clopper-Pearson) with numerator and '
+                             'denominator for the share of answerable queries whose every expected source was '
+                             'retrieved; not a bound of recall@k (descriptive; gates and exit code are unchanged)')
     goldset = parser.add_argument_group('in-place gold set (opt-in, local output only)')
     goldset.add_argument('--vault', type=Path,
                          help='real vault evaluated in place with --goldset; read through its '
@@ -1597,6 +1674,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                          exact_paired=args.exact_paired, **options)
         if args.rate_bounds:
             report = with_rate_bounds(report)
+        if args.success_bounds:
+            report = with_success_bounds(report)
     except GoldSetError as exc:
         # Opt-in modes only; the message names indices, fields and paths.
         print(f"recall evaluation unavailable: {exc}", file=sys.stderr)

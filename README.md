@@ -791,6 +791,7 @@ full 모드는 개별 노트의 읽기 실패(클라우드 하이드레이션·�
 | [hermes-agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | 에이전트 **선별** 메모리 사상(캡처→인박스→사람 있는 세션 정제)과 **자기개선 스킬 루프** — 후자는 `lessons.md` 대장 + 반복 3회 승격 제안으로 파일 기반 흡수(자동 승격 없음, v0.4.0) |
 | [WikiSkill](https://arxiv.org/abs/2608.27454) (Google Research) | 스킬 진화의 **영속 위키 계층**과 승격 게이팅 — v0.8.3이 3건 흡수: index 서술 규격("설명만 읽고 열지 말지 결정") · 기각 초안 전문 보존 · 승격 후 관찰 검증→확정/롤백("스킬은 가역, 위키는 영속" 비대칭) |
 | [MoAI-ADK](https://github.com/modu-ai/moai-adk/tree/2aab5f797b75983e132af451da68f69e3426557b) | v0.21.0: 전체 지침의 정적 분량 진단·완료 인덱스 원문 보존 미리보기·명시한 요구별 검증 누락 확인. 기존 Doctor/기억/근거 도구에 맞춰 Python 표준 라이브러리로 구현했으며 upstream Go 코드는 복사하지 않았다. MoAI main의 설계 참고이며 공개 v3.1.2의 전체 기능·성능 재현은 아니다 ([근거·사용법·한계](docs/moai-diagnostics.md)) |
+| [AgentOnto](https://arxiv.org/abs/2610.23317) | 갱신 관문(정정·유지 검사)과 '조용한 의미 오류' 지표의 **설계 원리만** — 소스에 더한 선택형 제안 유지 문구 확인(`preserve-check`, 등장 횟수 대조), 한국어 평가의 응답률·조용한 오류율(`--answer-rates`), 회수 성공률 하한(`--success-bounds`). 모두 읽기 전용·서술 값이며 게이트·자동 적용이 아니다. 논문 수치는 근거로 쓰지 않는다 ([평가 지표](docs/memory-evaluation.md)·[제안 확인](docs/lesson-proposals.md)) |
 | [Jev / TypeSafe AI — 공식 API](https://docs.typesafe.ai/api) | **실제 연동 서비스** — Noul·Choice·Score를 통한 직접 질문·선택 원문 판단. Jev-first는 이 평가 API를 우선 호출하는 호스트 지침이며, 근거 수집·생성·실행·설명은 호스트가 담당 ([사용법](docs/jev-judgments.md)) |
 | [Obsidian](https://obsidian.md) | 위키링크 그래프 · 프런트매터 · 로컬 평문 소유권 |
 
