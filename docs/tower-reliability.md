@@ -42,8 +42,9 @@ python skills/agentic-vault/scripts/vault_runs.py --vault PATH compare BASELINE_
 fixture 최상위는 `version: 1`, `repetitions: 2..10`, `cases`다. 최소 5개 사례가
 `representative`, `authority`, `ambiguity`, `tool_failure`, `injection` 범주를 모두
 포함해야 한다. 사례에는 `id`, `category`, `prompt`, `assertions`를 넣고, 각 assertion은
-`id`, `description`, boolean `hard`다. 선택 키 `role`은 아래 '사례별 뒤집힘 표와 정정·유지
-역할'에서 설명한다. 사례마다 hard assertion이 최소 하나 있어야 한다.
+`id`, `description`, boolean `hard`다. v0.31.0의 선택 키 `role`은 아래
+[사례별 뒤집힘 표와 정정·유지 역할](#사례별-뒤집힘-표와-정정유지-역할-선택)에서 설명한다.
+사례마다 hard assertion이 최소 하나 있어야 한다.
 tools 최상위는 `version: 1`, `tools`이며 각 도구에는 `name`, 객체 `input_schema`,
 객체 `output_schema`를 넣는다. 이름뿐 아니라 계약 전체가 비교 조건으로 묶인다.
 
@@ -70,10 +71,10 @@ v0.30.0의 선택형 `--evaluator-source`·`--evaluator-config`는 채점기 스
 
 ### 사례별 뒤집힘 표와 정정·유지 역할 (선택)
 
-`compare` 점수는 모든 assertion을 같은 무게로 평균한다. 그래서 다른 사례가 좋아진 몫이
-soft assertion 하나의 퇴행을 가릴 수 있다(양의 `score_delta`, `eligible: true`). 선택형
-`flips`는 두 완료 실행을 (사례, assertion)마다 맞대어, 개선 전에 통과하던 검사가 개선
-뒤에 실패한 경우를 따로 센다.
+`flips` 명령과 assertion의 `role` 키는 v0.31.0의 선택 기능이다. `compare` 점수는 모든
+assertion을 같은 무게로 평균한다. 그래서 다른 사례가 좋아진 몫이 soft assertion 하나의
+퇴행을 가릴 수 있다(양의 `score_delta`, `eligible: true`). `flips`는 두 완료 실행을
+(사례, assertion)마다 맞대어, 개선 전에 통과하던 검사가 개선 뒤에 실패한 경우를 따로 센다.
 
 ```text
 python skills/agentic-vault/scripts/vault_runs.py --vault PATH flips BASELINE_ID CANDIDATE_ID
@@ -120,7 +121,11 @@ fixture의 assertion에 선택 키 `role`을 넣을 수 있다.
 - `retention`: 개선 전후 모두 통과해야 하는 검사다(PASS_TO_PASS에 해당). hard·soft 모두 된다.
 - 다른 값·`null`·빈 문자열은 `invalid_assertion_role`이다. 키가 없는 fixture는 이전과 바이트가
   같아 manifest 해시와 run ID가 그대로다. `role`을 더하거나 바꾸면 다른 fixture가 되어 이전
-  실행과 비교할 수 없다. `role`이 있는 fixture는 v0.30.0 이하 플러그인이 거절한다.
+  실행과 비교할 수 없다. `role`이 있는 fixture는 v0.30.0 이하 플러그인이 거절한다. 그 fixture로
+  준비한 실행도 v0.30.0 이하가 읽지 못한다. `vault_runs.py`의 `inspect`·`record`·`compare`와 그
+  실행을 쓰는 `vault_improvements.py`·`vault_run_costs.py`가 `invalid_assertion`(종료 코드 2)으로
+  거절한다. Claude Code와 Codex에 설치한 플러그인이 같은 볼트의 그런 실행을 읽는다면 두 설치본을
+  함께 v0.31.0 이상으로 갱신한다.
 - `role`은 `compare`의 점수·`eligible`·개선 결정에 쓰이지 않는다.
 
 `role`이 하나라도 있으면 `flips` 결과의 `roles`에 다음을 담는다(없으면 `null`).

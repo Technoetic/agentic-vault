@@ -386,7 +386,7 @@ class RunFlipsTests(unittest.TestCase):
         def cli(*args):
             return subprocess.run([sys.executable, '-X', 'utf8', str(native.SCRIPTS / 'vault_runs.py'),
                                    '--vault', str(self.vault), *args],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, encoding='utf-8', timeout=60)
         completed = cli('flips', baseline, candidate)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertEqual(completed.stderr, '')

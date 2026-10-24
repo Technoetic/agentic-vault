@@ -71,11 +71,13 @@ v0.30.0의 [평가기·비용 근거](improvement-accounting.md)를 선택하면
 버린 후보·실패·재시도도 보고서 항목으로 남긴다. 계측과 범위 완결성은 호스트가 제출한
 근거/선언이며, 기존 개선 실험이 비용을 자동 수집하거나 효율 승자를 고르는 것은 아니다.
 
-평균 상승은 다른 사례의 soft 퇴행을 가릴 수 있다. 기본안과 후보의 run ID로
-`vault_runs.py flips`를 실행하면 사례·assertion별 통과→실패 뒤집힘을 따로 본다. fixture에
-선택 키 `role`(correction·retention)을 두면 정정·유지 등급도 함께 낸다. 읽기 전용이며 위
-결정에는 더해지지 않는다. 사용법은 [교훈 검증·복구](tower-reliability.md)의 '사례별 뒤집힘
-표와 정정·유지 역할'을 따른다.
+v0.31.0의 선택형 `vault_runs.py flips`는 평균 상승이 가릴 수 있는 다른 사례의 soft 퇴행을
+따로 본다. 기본안과 후보의 run ID로 실행하면 사례·assertion별 통과→실패 뒤집힘을 센다.
+fixture의 assertion에 선택 키 `role`(correction·retention)을 넣으면 정정·유지 등급도 함께
+낸다. 위 계획 JSON 노드의 `role`과는 다른 키다. 읽기 전용이며 위 결정에는 더해지지 않는다.
+assertion에 `role`을 넣어 준비한 실행은 v0.30.0 이하가 읽지 못한다. 사용법과 설치본 갱신은
+[교훈 검증·복구의 '사례별 뒤집힘 표와 정정·유지 역할'](tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)을
+따른다.
 
 ## 수정별 관찰과 NO_ENTRY
 

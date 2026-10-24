@@ -254,8 +254,8 @@ python scripts/flaky_repeat.py <module.Class.test_name> -n 30 --fresh-process --
 
 ### 요청 본문을 읽지 않는 시험 서버
 
-`tests/test_tool_safety_evaluation.py`의 루프백 전송 시험 두 개가 Windows에서 가끔 기대한 오류 대신
-`transport_error`로 실패했다. 원인을 측정으로 확인했고 시험 코드만 고쳤다. 엔진과 전송 코드는 그대로다.
+v0.31.0의 시험·문서 변경이다. `tests/test_tool_safety_evaluation.py`의 루프백 전송 시험 두 개가 Windows에서
+가끔 기대한 오류 대신 `transport_error`로 실패했다. 원인을 측정으로 확인했고 시험 코드만 고쳤다. 엔진과 전송 코드는 그대로다.
 
 **원인.** 두 시험의 HTTP 처리기는 POST 본문을 읽지 않고 응답한 뒤 연결을 닫았다.
 [RFC 1122](https://www.rfc-editor.org/rfc/rfc1122) §4.2.2.13은 half-duplex 종료를 구현한 호스트가 받은 데이터가
@@ -281,11 +281,12 @@ CPython 3.12의 `http.client`는 헤더를 보낸 뒤 본문을 따로 `send()`�
 
 **측정.** 2026-10-24 22:33–22:46 KST, Windows 11 빌드 26300, Python 3.12.10, `flaky_repeat.py` 같은 프로세스
 반복 N=300, 단측 95% Clopper–Pearson이다. 수정 전은 `452c5c0`의 사본, 수정 후는 이 변경이다. 같은 기계에 다른 작업
-세션의 프로세스가 떠 있었다(시작 직전 CPU 부하 4%).
+세션의 프로세스가 떠 있었다. 기록은 아래 명령의 `--json` 출력으로 남겼고, 원본 기록과 아래 탐침의 소스는 릴리스 검증 자료와
+함께 보관한다.
 
 ```text
-python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_redirect_is_not_followed_or_retried_and_body_is_not_logged -n 300
-python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_response_bytes_are_bounded_before_json_parsing -n 300
+python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_redirect_is_not_followed_or_retried_and_body_is_not_logged -n 300 --json
+python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_response_bytes_are_bounded_before_json_parsing -n 300 --json
 ```
 
 | 시험 | 수정 전 | 수정 후 |
