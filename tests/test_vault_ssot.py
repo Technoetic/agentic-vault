@@ -27,7 +27,10 @@ except ModuleNotFoundError:
 
 FIELDS = ['subject', 'relation', 'value', 'valid_from', 'valid_until', 'recorded', 'source', 'superseded_by', 'status']
 GOLDEN = Path(__file__).resolve().parent / 'fixtures' / 'v0221_default_outputs.json'
+SUPPORT_GOLDEN = Path(__file__).resolve().parent / 'fixtures' / 'v0300_check_support_default.json'
 SUPPORT_CODES = {'ssot-source-unsupported', 'ssot-source-unresolved'}
+TABLE_ONLY_KEYS = ('rows_supported_ledger_table_only', 'ledger_table_only')
+PERIOD_KEYS = ('normalized_periods', 'period_convention')
 
 
 def ledger(rows, fields=FIELDS, newline='\n'):
@@ -705,6 +708,429 @@ class SourceSupportTests(unittest.TestCase):
                                     '--path', 'notes/facts.md'], capture_output=True)
         self.assertEqual(completed.returncode, 0, completed.stderr.decode())
         self.assertEqual(json.loads(completed.stdout)['rows_unsupported'], 1)
+
+
+class LedgerTableOnlySupportTests(unittest.TestCase):
+    """check-support support found only inside other cited ledgers' fact tables."""
+
+    def setUp(self):
+        self.assertIsNotNone(ssot, 'temporal ledger implementation is missing')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name) / 'vault'
+        self.write('00-meta/vault-config.json', '{"deny_zones": ["private"], "exclude_dirs": ["excluded"]}')
+
+    def write(self, relative, text, bom=False):
+        target = self.vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
+        return target
+
+    @staticmethod
+    def rows(*pairs):
+        """A v2 ledger of (value, source) rows; without a preamble the first row is line 3."""
+        return ledger([['Atlas', 'retention', value, '2025-01-01', '', '2026-10-07', source, '', 'confirmed']
+                       for value, source in pairs])
+
+    def check(self, path='notes/facts.md', **options):
+        return ssot.check_support(self.vault, path, **options)
+
+    def test_mutual_ledgers_without_prose_mark_each_other_table_only(self):
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]')))
+        self.write('notes/Other.md', self.rows(('24개월', '[[facts]]')))
+        for path, via in (('notes/facts.md', 'notes/Other.md'), ('notes/Other.md', 'notes/facts.md')):
+            with self.subTest(path=path):
+                result = self.check(path)
+                self.assertEqual((result['warnings'], result['rows_supported'], result['rows_unsupported']), ([], 1, 0))
+                self.assertEqual(result['rows_supported_ledger_table_only'], 1)
+                self.assertEqual(result['ledger_table_only'], [{'line': 3, 'via': [via]}])
+
+    def test_prose_outside_the_table_and_plain_notes_are_ordinary_support(self):
+        self.write('notes/Other.md', '# Other\n\n' + self.rows(('24개월', ''), ('36개월', '')) + '\n메모: 24개월 기준.\n')
+        self.write('notes/Plain.md', '기준은 36개월이다.\n')
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]'), ('36개월', '[[Other]]'),
+                                               ('36개월', '[[Other]], [[Plain]]'), ('36개월', '[[Plain]]')))
+        result = self.check()
+        self.assertEqual((result['warnings'], result['rows_supported']), ([], 4))
+        self.assertEqual(result['ledger_table_only'], [{'line': 4, 'via': ['notes/Other.md']}])
+        self.assertEqual(result['rows_supported_ledger_table_only'], 1)
+
+    def test_via_names_only_the_ledgers_whose_tables_hold_the_value(self):
+        self.write('notes/Other.md', self.rows(('24개월', '[[facts]]')))
+        self.write('notes/Third.md', self.rows(('36개월', '[[facts]]')))
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]], [[Third]]'), ('36개월', '[[Third]], [[Other]]')))
+        result = self.check()
+        self.assertEqual(result['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']},
+                                                       {'line': 4, 'via': ['notes/Third.md']}])
+
+    def test_self_citation_is_never_listed_and_other_ledgers_still_are(self):
+        self.write('notes/Other.md', self.rows(('88일', '[[facts]]')))
+        self.write('notes/facts.md', '## 근거\n세부 값 77일.\n\n' + self.rows(('77일', '[[#근거]]'), ('88일', '[[#근거]], [[Other]]')))
+        result = self.check()
+        self.assertEqual((result['warnings'], result['rows_supported']), ([], 2))
+        self.assertEqual(result['ledger_table_only'], [{'line': 7, 'via': ['notes/Other.md']}])
+
+    def test_bom_prefixed_cited_ledger_is_sliced_on_the_decoded_text(self):
+        # No blank line around the table: slicing the raw bytes (BOM included)
+        # with parse_ledger offsets would cut the heading and keep table bytes.
+        lines = ['---', 'title: Bom', '---', '# 근거 대장', '| 주체 | 항목 | 값 | 출처 |', '| --- | --- | --- | --- |',
+                 '| Atlas | retention | 60개월 | [[facts]] |', '기간 메모: 84개월', '']
+        self.write('notes/facts.md', self.rows(('60개월', '[[Bom]]'), ('84개월', '[[Bom]]'), ('근거 대장', '[[Bom]]')))
+        for newline in ('\n', '\r\n'):
+            with self.subTest(newline=newline):
+                cited = self.write('notes/Bom.md', newline.join(lines), bom=True)
+                result = self.check()
+                self.assertEqual((result['warnings'], result['rows_supported']), ([], 3))
+                self.assertEqual(result['ledger_table_only'], [{'line': 3, 'via': ['notes/Bom.md']}])
+                data = cited.read_bytes()
+                self.assertEqual(result['cited_notes'], [{'path': 'notes/Bom.md', 'sha256': sha(data), 'bytes': len(data)}])
+
+    def test_unrelated_or_fenced_tables_do_not_make_a_ledger(self):
+        self.write('notes/Table.md', '| 이름 | 수량 |\n| --- | --- |\n| 부품 | 72개월 |\n')
+        self.write('notes/Example.md', '```\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 72개월 |\n```\n')
+        self.write('notes/facts.md', self.rows(('72개월', '[[Table]]'), ('72개월', '[[Example]]')))
+        result = self.check()
+        self.assertEqual((result['warnings'], result['rows_supported']), ([], 2))
+        self.assertEqual((result['rows_supported_ledger_table_only'], result['ledger_table_only']), (0, []))
+
+    def test_unparseable_cited_ledger_counts_as_having_no_tables(self):
+        table = '| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n'
+        notes = {'Many': '\n'.join([table] * (ssot.MAX_TABLES + 1)), 'Binary': table + 'x\x00y\n'}
+        for name, text in notes.items():
+            self.write(f'notes/{name}.md', text)
+        for text, code in ((notes['Many'], 'table_limit'), (notes['Binary'], 'invalid_text')):
+            with self.subTest(code=code), self.assertRaisesRegex(ssot.SSOTError, code):
+                ssot.parse_ledger(text)
+        self.write('notes/facts.md', self.rows(('108개월', '[[Many]]'), ('108개월', '[[Binary]]')))
+        for options in ({}, {'primary_text_only': True}):
+            with self.subTest(options=options):
+                result = self.check(**options)
+                self.assertEqual((result['warnings'], result['rows_supported']), ([], 2))
+                self.assertEqual((result['rows_supported_ledger_table_only'], result['ledger_table_only']), (0, []))
+
+    def test_each_cited_note_is_read_once_within_unchanged_budgets(self):
+        self.write('notes/Other.md', self.rows(('24개월', '[[facts]]'), ('36개월', '[[facts]]')))
+        self.write('notes/Evidence.md', '보존 기간은 12개월이다.\n')
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]'), ('36개월', '[[Other]]'),
+                                               ('12개월', '[[Other]], [[Evidence]]')))
+        real, reads = ssot.stable_read, []
+
+        def counting(resolver, size, contents=False):
+            reads.append(resolver().name)
+            return real(resolver, size, contents=contents)
+        for limit in (ssot.MAX_SUPPORT_NOTES, 1):
+            results = []
+            for options in ({}, {'primary_text_only': True}):
+                reads.clear()
+                with self.subTest(limit=limit, options=options), \
+                        mock.patch.object(ssot, 'stable_read', counting), \
+                        mock.patch.object(ssot, 'MAX_SUPPORT_NOTES', limit):
+                    results.append(self.check(**options))
+                    self.assertEqual(sorted(reads), ['Evidence.md', 'Other.md'] if limit > 1 else ['Other.md'])
+            default, flagged = results
+            for key in ('cited_notes', 'incomplete', 'rows_checked', 'rows_unresolved', *TABLE_ONLY_KEYS):
+                with self.subTest(limit=limit, key=key):
+                    self.assertEqual(flagged[key], default[key])
+            self.assertEqual(default['incomplete'], [] if limit > 1 else ['source_limit'])
+            self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']},
+                                                            {'line': 4, 'via': ['notes/Other.md']}])
+
+    def test_primary_text_only_moves_only_table_only_rows_to_unsupported(self):
+        self.write('notes/Other.md', self.rows(('24개월', '[[facts]]')) + '\n메모: 36개월.\n')
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]'), ('36개월', '[[Other]]'),
+                                               ('48개월', '[[Other]]'), ('24개월', '[[Missing]], [[Other]]')))
+        default, flagged = self.check(), self.check(primary_text_only=True)
+        self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']},
+                                                        {'line': 6, 'via': ['notes/Other.md']}])
+        self.assertEqual((default['rows_supported'], default['rows_unsupported']), (3, 1))
+        self.assertEqual((flagged['rows_supported'], flagged['rows_unsupported']), (1, 3))
+        for key in ('path', 'source_sha256', 'rows_checked', 'rows_unresolved', 'rows_skipped', 'cited_notes',
+                    'incomplete', 'method', 'authority', *TABLE_ONLY_KEYS):
+            with self.subTest(key=key):
+                self.assertEqual(flagged[key], default[key])
+        # Existing warnings keep their ids; the flag only adds the moved rows.
+        self.assertEqual([w for w in flagged['warnings'] if w in default['warnings']], default['warnings'])
+        added = [(w['line'], w['code'], w['details']) for w in flagged['warnings'] if w not in default['warnings']]
+        self.assertEqual(added, [(3, 'ssot-source-unsupported', {'cited': ['notes/Other.md'], 'reason': 'ledger_table_only'}),
+                                 (6, 'ssot-source-unsupported', {'cited': ['notes/Other.md'], 'reason': 'ledger_table_only'})])
+
+    def test_annotation_and_warnings_carry_lines_and_paths_only(self):
+        self.write('notes/Other.md', self.rows(('비밀값 24개월', '[[facts]]')))
+        self.write('notes/facts.md', self.rows(('비밀값 24개월', '[[Other]]')))
+        for options in ({}, {'primary_text_only': True}):
+            with self.subTest(options=options):
+                result = self.check(**options)
+                self.assertEqual([set(entry) for entry in result['ledger_table_only']], [{'line', 'via'}])
+                dumped = json.dumps(result, ensure_ascii=False)
+                for literal in ('비밀값', '24개월', 'Atlas', 'retention'):
+                    self.assertNotIn(literal, dumped)
+
+    def test_primary_text_only_requires_a_boolean(self):
+        for value in (1, 'yes', None):
+            with self.subTest(value=value), self.assertRaisesRegex(ssot.SSOTError, 'invalid_opt_in'):
+                self.check(primary_text_only=value)
+
+    def test_cli_flag_is_opt_in_and_exit_codes_are_unchanged(self):
+        self.write('notes/Other.md', self.rows(('24개월', '[[facts]]')))
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]')))
+        outputs = {}
+        for extra in ([], ['--primary-text-only']):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(extra=extra), mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', 'notes/facts.md', *extra])
+                self.assertEqual((code, stderr.getvalue()), (0, ''))
+            outputs[bool(extra)] = json.loads(stdout.getvalue())
+        self.assertEqual((outputs[False]['rows_supported'], outputs[False]['warnings']), (1, []))
+        self.assertEqual(outputs[True]['rows_unsupported'], 1)
+        self.assertEqual(outputs[True]['warnings'][0]['details'], {'cited': ['notes/Other.md'], 'reason': 'ledger_table_only'})
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+            code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', 'notes/absent.md', '--primary-text-only'])
+        self.assertEqual((code, stdout.getvalue(), json.loads(stderr.getvalue())),
+                         (1, '', {'error': 'ssot_operation_unavailable'}))
+        script = str(SCRIPTS / 'vault_ssot.py')
+        completed = subprocess.run([sys.executable, script, '--vault', str(self.vault), 'check-support',
+                                    '--path', 'notes/facts.md', '--primary-text-only'], capture_output=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+        self.assertEqual(json.loads(completed.stdout)['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']}])
+
+    def test_default_output_equals_v0300_golden_plus_the_annotation(self):
+        """Default CLI output captured from v0.30.0 (452c5c0) before the annotation existed."""
+        golden = json.loads(SUPPORT_GOLDEN.read_text(encoding='utf-8'))
+        expected = {'A': [(8, ['ledgers/B.md']), (12, ['ledgers/C.md']), (15, ['ledgers/Legacy.md']),
+                          (18, ['ledgers/B.md']), (19, ['ledgers/B.md']), (20, ['ledgers/B.md', 'ledgers/Legacy.md'])],
+                    'B': [(line, ['ledgers/A.md']) for line in range(8, 13)],
+                    'C': [(7, ['ledgers/A.md'])]}
+        self.assertEqual(sorted(golden['cases']), sorted(expected))
+        for relative, text in golden['files'].items():
+            self.write(relative, text, bom=relative in golden['bom'])
+        for name, case in sorted(golden['cases'].items()):
+            outputs = {}
+            for extra in ([], ['--primary-text-only']):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                    code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', case['path'], *extra])
+                with self.subTest(case=name, extra=extra):
+                    self.assertEqual((code, stderr.getvalue()), (case['exit'], case['stderr']))
+                outputs[bool(extra)] = json.loads(stdout.getvalue())
+            default, flagged = outputs[False], outputs[True]
+            listed = [{'line': line, 'via': via} for line, via in expected[name]]
+            with self.subTest(case=name):
+                self.assertEqual({key: default.pop(key) for key in TABLE_ONLY_KEYS},
+                                 {'rows_supported_ledger_table_only': len(listed), 'ledger_table_only': listed})
+                # Byte-for-byte the v0.30.0 stdout once the two additive fields are removed.
+                self.assertEqual(ssot._encode(default).decode() + '\n', case['stdout'])
+                self.assertEqual({key: flagged.pop(key) for key in TABLE_ONLY_KEYS},
+                                 {'rows_supported_ledger_table_only': len(listed), 'ledger_table_only': listed})
+                self.assertEqual((flagged['rows_supported'], flagged['rows_unsupported']),
+                                 (default['rows_supported'] - len(listed), default['rows_unsupported'] + len(listed)))
+                kept = [w for w in flagged['warnings'] if w in default['warnings']]
+                added = [(w['line'], w['code'], w['details'].get('reason')) for w in flagged['warnings']
+                         if w not in default['warnings']]
+                self.assertEqual(kept, default['warnings'])
+                self.assertEqual(added, [(line, 'ssot-source-unsupported', 'ledger_table_only') for line, _ in expected[name]])
+
+
+class PeriodNormalizationSupportTests(unittest.TestCase):
+    """check-support --normalize-periods: a separate per-row normalized_match from period intervals."""
+
+    MEETING = ('---\ntitle: Meeting\n---\n회의는 2026. 10. 7.에 열렸다. 3Q26 출하, 출시는 2026.08.15.\n'
+               '점검 2026.10.01. 당기 실적과 올해 3분기 계획.\n')
+    VIA = ['notes/Meeting.md']
+
+    def setUp(self):
+        self.assertIsNotNone(ssot, 'temporal ledger implementation is missing')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name) / 'vault'
+        self.write('00-meta/vault-config.json', '{"deny_zones": ["private"], "exclude_dirs": ["excluded"]}')
+        self.write('notes/Meeting.md', self.MEETING)
+
+    def write(self, relative, text, bom=False):
+        target = self.vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
+        return target
+
+    @staticmethod
+    def rows(*pairs):
+        """A v2 ledger of (value, source) rows; without a preamble the first row is line 3."""
+        return ledger([['Atlas', 'launch', value, '2025-01-01', '', '2026-10-07', source, '', 'confirmed']
+                       for value, source in pairs])
+
+    def check(self, path='notes/facts.md', **options):
+        return ssot.check_support(self.vault, path, **options)
+
+    def run_cli(self, *extra, path='notes/facts.md'):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+            code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', path, *extra])
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    @staticmethod
+    def without_periods(result):
+        return {key: value for key, value in result.items() if key not in PERIOD_KEYS}
+
+    def test_each_compared_row_gets_a_separate_normalized_match(self):
+        self.write('notes/facts.md', self.rows(
+            ('2026-10-07', '[[Meeting]]'), ('2026년 3분기', '[[Meeting]]'), ('2026년 4분기', '[[Meeting]]'),
+            ('2026년 2분기', '[[Meeting]]'), ('FY2026', '[[Meeting]]'), ('당기 출하', '[[Meeting]]'),
+            ('24개월', '[[Meeting]]'), ('3Q26', '[[Meeting]]'), ('2026년 3분기', '[[Missing]]'), ('2026년 3분기', '')))
+        default, flagged = self.check(), self.check(normalize_periods=True)
+        self.assertEqual(flagged['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'equal', 'via': self.VIA},
+            {'line': 4, 'normalized_match': 'equal', 'via': self.VIA},
+            {'line': 5, 'normalized_match': 'contained', 'via': self.VIA},
+            {'line': 6, 'normalized_match': 'none'},
+            {'line': 7, 'normalized_match': 'abstain', 'reason': 'fiscal_start_undeclared'},
+            {'line': 8, 'normalized_match': 'abstain', 'reason': 'relative_needs_anchor'},
+            {'line': 10, 'normalized_match': 'equal', 'via': self.VIA}])
+        self.assertEqual(flagged['period_convention'],
+                         {'fiscal_start': None, 'scope': importlib.import_module('vault_period').SCOPE})
+        # Literal support is unchanged: only 3Q26 is present as written.
+        self.assertEqual((default['rows_checked'], default['rows_supported'], default['rows_unsupported'],
+                          default['rows_unresolved'], default['rows_skipped']), (9, 1, 7, 1, 1))
+        self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(default))
+
+    def test_flag_adds_only_its_two_fields_under_every_option(self):
+        self.write('notes/Other.md', self.rows(('2026.03.05', '[[facts]]')) + '\n메모: 2026년 3분기 출하.\n')
+        self.write('notes/facts.md', self.rows(('2026-03-05', '[[Other]]'), ('2026년 3분기', '[[Other]], [[Meeting]]'),
+                                               ('2026년 1분기', '[[Missing]], [[Meeting]]'), ('FY2026', '[[Meeting]]')))
+        for base in ({}, {'primary_text_only': True}):
+            default = self.check(**base)
+            self.assertFalse(set(PERIOD_KEYS) & set(default))
+            for extra in ({'normalize_periods': True}, {'normalize_periods': True, 'fiscal_start': 1},
+                          {'normalize_periods': True, 'fiscal_start': 4}):
+                with self.subTest(base=base, extra=extra):
+                    flagged = self.check(**base, **extra)
+                    self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(default))
+                    self.assertEqual([row['line'] for row in flagged['normalized_periods']], [3, 4, 5, 6])
+
+    def test_fiscal_start_resolves_fiscal_years_and_holds_calendar_quarters(self):
+        self.write('notes/facts.md', self.rows(('FY2026', '[[Meeting]]'), ('2026년 3분기', '[[Meeting]]'),
+                                               ('2026-10-07', '[[Meeting]]')))
+        april = self.check(normalize_periods=True, fiscal_start=4)
+        self.assertEqual(april['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'contained', 'via': self.VIA},
+            {'line': 4, 'normalized_match': 'abstain', 'reason': 'quarter_basis_ambiguous'},
+            {'line': 5, 'normalized_match': 'equal', 'via': self.VIA}])
+        self.assertEqual(april['period_convention']['fiscal_start'], 4)
+        january = self.check(normalize_periods=True, fiscal_start=1)
+        self.assertEqual([row['normalized_match'] for row in january['normalized_periods']],
+                         ['contained', 'equal', 'equal'])
+        december = self.check(normalize_periods=True, fiscal_start=12)
+        self.assertEqual(december['normalized_periods'][0], {'line': 3, 'normalized_match': 'none'})
+
+    def test_primary_text_only_keeps_other_ledgers_fact_tables_out(self):
+        self.write('notes/Other.md', self.rows(('2026.03.05', '[[facts]]')) + '\n메모: 2026년 3분기 출하.\n')
+        self.write('notes/facts.md', self.rows(('2026-03-05', '[[Other]]'), ('2026년 3분기', '[[Other]]')))
+        via = ['notes/Other.md']
+        self.assertEqual(self.check(normalize_periods=True)['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'equal', 'via': via},
+            {'line': 4, 'normalized_match': 'equal', 'via': via}])
+        self.assertEqual(self.check(normalize_periods=True, primary_text_only=True)['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none'},
+            {'line': 4, 'normalized_match': 'equal', 'via': via}])
+
+    def test_validity_cells_stay_strict_dates(self):
+        rows = [['Atlas', 'launch', '2026년 3분기', start, until, '2026-10-07', '[[Meeting]]', '', 'confirmed']
+                for start, until in (('2026.07.01', ''), ('2026년 3분기', ''), ('2026-07-01', '2026년 4분기'))]
+        text = ledger(rows)
+        self.write('notes/facts.md', text)
+        invalid = [(w['line'], w['details']) for w in ssot.check_ledger(text) if w['code'] == 'ssot-invalid-date']
+        self.assertEqual(invalid, [(3, {'field': 'valid_from'}), (4, {'field': 'valid_from'}),
+                                   (5, {'field': 'valid_until'})])
+        flagged = self.check(normalize_periods=True, fiscal_start=1)
+        self.assertEqual(flagged['warnings'], self.check()['warnings'])
+        self.assertEqual([row['normalized_match'] for row in flagged['normalized_periods']], ['equal'] * 3)
+
+    def test_entries_carry_lines_paths_and_reasons_only(self):
+        self.write('notes/Secret.md', '비밀값 2026. 10. 7. 회의, 3Q26 출하\n')
+        self.write('notes/facts.md', self.rows(('비밀값 2026-10-07', '[[Secret]]'), ('비밀값 2026년 3분기', '[[Secret]]'),
+                                               ('비밀값 당기', '[[Secret]]')))
+        for fiscal_start in (None, 4):
+            with self.subTest(fiscal_start=fiscal_start):
+                result = self.check(normalize_periods=True, fiscal_start=fiscal_start)
+                self.assertEqual(len(result['normalized_periods']), 3)
+                self.assertLessEqual({key for entry in result['normalized_periods'] for key in entry},
+                                     {'line', 'normalized_match', 'via', 'reason'})
+                dumped = json.dumps(result, ensure_ascii=False)
+                for literal in ('비밀값', '2026-10-07', '2026.10.07', '2026-35', '2026-07-01', '분기', '당기', 'Atlas'):
+                    self.assertNotIn(literal, dumped)
+
+    def test_opt_in_arguments_are_validated_before_reading(self):
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Meeting]]')))
+        invalid = [dict(normalize_periods=value) for value in (1, 'yes', None)]
+        invalid += [dict(fiscal_start=4), dict(fiscal_start=4, normalize_periods=False)]
+        invalid += [dict(normalize_periods=True, fiscal_start=value) for value in (0, 13, '04', True, 4.0)]
+        for options in invalid:
+            with self.subTest(options=options), \
+                    mock.patch.object(ssot.state, '_Policy', side_effect=AssertionError('read before validation')), \
+                    self.assertRaisesRegex(ssot.SSOTError, '^invalid_opt_in$'):
+                self.check(**options)
+
+    def test_cli_flags_are_opt_in_and_exit_codes_are_unchanged(self):
+        self.write('notes/facts.md', self.rows(('2026-10-07', '[[Meeting]]'), ('FY2026', '[[Meeting]]')))
+        code, stdout, stderr = self.run_cli()
+        self.assertEqual((code, stderr), (0, ''))
+        self.assertFalse(set(PERIOD_KEYS) & set(json.loads(stdout)))
+        fiscal = {None: {'line': 4, 'normalized_match': 'abstain', 'reason': 'fiscal_start_undeclared'},
+                  4: {'line': 4, 'normalized_match': 'contained', 'via': self.VIA},
+                  12: {'line': 4, 'normalized_match': 'none'}}
+        for extra, fiscal_start in ((['--normalize-periods'], None), (['--normalize-periods', '--fiscal-start', '04'], 4),
+                                    (['--fiscal-start', '4', '--normalize-periods'], 4),
+                                    (['--normalize-periods', '--fiscal-start', '12'], 12)):
+            with self.subTest(extra=extra):
+                code, out, err = self.run_cli(*extra)
+                self.assertEqual((code, err), (0, ''))
+                result = json.loads(out)
+                self.assertEqual(result['period_convention']['fiscal_start'], fiscal_start)
+                self.assertEqual(result['normalized_periods'],
+                                 [{'line': 3, 'normalized_match': 'equal', 'via': self.VIA}, fiscal[fiscal_start]])
+                self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', stdout)
+        for extra in (['--fiscal-start', '04'], ['--normalize-periods', '--fiscal-start', '13'],
+                      ['--normalize-periods', '--fiscal-start', '00'], ['--normalize-periods', '--fiscal-start', 'April']):
+            with self.subTest(extra=extra):
+                self.assertEqual(self.run_cli(*extra)[:2], (1, ''))
+                self.assertEqual(json.loads(self.run_cli(*extra)[2]), {'error': 'ssot_operation_unavailable'})
+        completed = subprocess.run([sys.executable, str(SCRIPTS / 'vault_ssot.py'), '--vault', str(self.vault),
+                                    'check-support', '--path', 'notes/facts.md', '--normalize-periods',
+                                    '--fiscal-start', '04'], capture_output=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+        self.assertEqual(json.loads(completed.stdout)['normalized_periods'][1], fiscal[4])
+
+    def test_the_period_module_is_loaded_only_on_request(self):
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Meeting]]')))
+        script = ('import sys\nsys.path.insert(0, sys.argv[1])\nimport vault_ssot\n'
+                  "vault_ssot.check_support(sys.argv[2], 'notes/facts.md', primary_text_only=True)\n"
+                  "print('vault_period' in sys.modules)\n"
+                  "vault_ssot.check_support(sys.argv[2], 'notes/facts.md', normalize_periods=True)\n"
+                  "print('vault_period' in sys.modules)\n")
+        completed = subprocess.run([sys.executable, '-c', script, str(SCRIPTS), str(self.vault)],
+                                   capture_output=True, text=True)
+        self.assertEqual((completed.returncode, completed.stdout.split()), (0, ['False', 'True']), completed.stderr)
+
+    def test_v0300_golden_cases_keep_their_output_with_the_flag(self):
+        """Durations only: no row names a period, and every other field stays byte-identical."""
+        golden = json.loads(SUPPORT_GOLDEN.read_text(encoding='utf-8'))
+        for relative, text in golden['files'].items():
+            self.write(relative, text, bom=relative in golden['bom'])
+        for name, case in sorted(golden['cases'].items()):
+            for base in ([], ['--primary-text-only']):
+                code, default, stderr = self.run_cli(*base, path=case['path'])
+                self.assertEqual((code, stderr), (case['exit'], case['stderr']))
+                if not base:
+                    plain = json.loads(default)
+                    for key in TABLE_ONLY_KEYS:
+                        plain.pop(key)
+                    self.assertEqual(ssot._encode(plain).decode() + '\n', case['stdout'])
+                for extra in (['--normalize-periods'], ['--normalize-periods', '--fiscal-start', '04']):
+                    with self.subTest(case=name, base=base, extra=extra):
+                        code, flagged, stderr = self.run_cli(*base, *extra, path=case['path'])
+                        self.assertEqual((code, stderr), (case['exit'], case['stderr']))
+                        result = json.loads(flagged)
+                        self.assertEqual(result['normalized_periods'], [])
+                        self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
 
 
 class DefaultCliRegressionTests(unittest.TestCase):

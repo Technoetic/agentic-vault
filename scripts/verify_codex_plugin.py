@@ -217,6 +217,7 @@ def verify(codex: str) -> dict:
                          "skills/agentic-vault/scripts/vault_egress.py",
                          "skills/agentic-vault/scripts/vault_state.py",
                          "skills/agentic-vault/scripts/vault_ssot.py",
+                         "skills/agentic-vault/scripts/vault_period.py",
                          "skills/agentic-vault/scripts/vault_lesson_delta.py",
                          "skills/agentic-vault/scripts/vault_declarative_rules.py",
                          "skills/agentic-vault/scripts/vault_compile_quality.py",

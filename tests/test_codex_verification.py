@@ -54,6 +54,7 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_egress.py",
             "skills/agentic-vault/scripts/vault_state.py",
             "skills/agentic-vault/scripts/vault_ssot.py",
+            "skills/agentic-vault/scripts/vault_period.py",
             "skills/agentic-vault/scripts/vault_lesson_delta.py",
             "skills/agentic-vault/scripts/vault_declarative_rules.py",
             "skills/agentic-vault/scripts/vault_compile_quality.py",
@@ -80,6 +81,7 @@ class CodexVerificationTests(unittest.TestCase):
 
     def test_installed_hardening_resources_must_exist_and_match(self) -> None:
         for relative in ('hooks/session_checkpoint.py', 'skills/agentic-vault/scripts/vault_ssot.py',
+                         'skills/agentic-vault/scripts/vault_period.py',
                          'skills/agentic-vault/scripts/resources/lint-benign-v1.json'):
             for mutation in ('changed', 'missing'):
                 with self.subTest(resource=relative, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
