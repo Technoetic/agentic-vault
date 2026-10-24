@@ -4,7 +4,8 @@
 ``vault_doctor.py --session-evidence PATH`` reads only the named JSONL file: no
 directory scan, no write, no network or model call, and the doctor exit code
 never changes. The transcript is a host-internal, undocumented format, so only
-the record shapes observed on Claude Code 2.1.252 to 2.1.309 are read, whatever
+the record shapes observed on Claude Code 2.1.252 to 2.1.309, or written by the
+2.1.309 executable (hook failures and oversize notices), are read, whatever
 version wrote them; a record of another shape is counted, never guessed.
 
 A transcript holds every prompt, answer, tool result and hook output. Only fixed
@@ -40,30 +41,60 @@ MAX_INTEGER = 2 ** 53 - 1  # the largest integer a JavaScript host writes exactl
 # Observed on one Windows PC on 2026-10-24 from key names, lengths and numbers
 # only: no SessionStart hook_success record in the 173 sessions written by
 # 2.1.252, records in the sessions written by 2.1.278 to 2.1.309 (synchronous
-# hooks only) and no session from the versions in between. These are observed
-# ranges, not thresholds: a transcript without a record is
-# unsupported_host_version only when its newest version is at or below the
-# version seen without records, and not_recorded otherwise, including the
-# unobserved versions in between.
+# hooks only) and no session from the versions in between. Both ranges are
+# reported as observed, and one bound decides a status: a transcript without a
+# hook record is unsupported_host_version when its newest version is at or below
+# the highest version seen without records (versions never observed below it
+# included), and not_recorded above it, including the unobserved versions in
+# between and versions newer than 2.1.309.
 HOOK_RECORDS_ABSENT = ((2, 1, 252), (2, 1, 252))
 HOOK_RECORDS_PRESENT = ((2, 1, 278), (2, 1, 309))
 
 # Claude Code 2.1.309 replaces hook stdout longer than 10,000 UTF-16 units with
-# "<persisted-output>\nOutput too large (<size>). Full output saved to: <path>
-# \n\nPreview (first 2KB):\n<preview>..." ("Output exceeded the ... persist
-# limit ..." when even the saved copy is cut). The saved-file path sits between
-# the two markers, so only the first one is held to the first 200 characters.
+# one of three notices, read here as booleans only:
+# - saved to a file: "<persisted-output>\nOutput too large (<size>). Full output
+#   saved to: <path>\n\nPreview (first 2KB):\n<preview>..." ("Output exceeded the
+#   ... persist limit ..." when even the saved copy is cut). The saved-file path
+#   sits between the two markers, so only the first one is held to the first 200
+#   characters;
+# - not saved: "<truncated-output>\nOutput too large (<size>). It could not be
+#   saved, so only the first <size> are shown; ..." and then that first part;
+# - saving failed: the first 10,000 units and then, at the very end,
+#   "\n\n[Hook stdout truncated at 10000 chars <dash> persist-to-disk failed:
+#   <error>]". Only a one-line notice that ends the content counts.
 OVERSIZE_MARKERS = ("Output too large (", "Output exceeded the ")
 PREVIEW_MARKER = "Preview (first"
+NOT_SAVED_TAG = "<truncated-output>"
+NOT_SAVED_MARKER = "Output too large ("
+PERSIST_FAILED_START = "\n\n[Hook "
+_PERSIST_FAILED = re.compile(
+    r"\[Hook [A-Za-z]{1,32} truncated at [0-9]{1,12} chars \S{1,3} persist-to-disk failed: [^\n]*\]"
+)
 NOTICE_HEAD_CHARS = 200
 NOTICE_CHARS = 4096
 
+# SessionStart attachment types that record a hook that did not succeed, with
+# the fixed outcome word reported for each (Claude Code 2.1.309 executable): a
+# non-zero exit is hook_non_blocking_error (a SessionStart blocking error, exit
+# 2, is rewritten to it), a hook stopped by its timeout or a cancellation is
+# hook_cancelled, and a host-side error before or while running the hook is
+# hook_error_during_execution. Their stdout, stderr, command and content are
+# never read.
+_FAILURE_OUTCOMES = {
+    "hook_non_blocking_error": "non_blocking_error",
+    "hook_blocking_error": "blocking_error",
+    "hook_cancelled": "cancelled",
+    "hook_error_during_execution": "error_during_execution",
+}
+
 STATUSES = (
-    "observed_ran", "observed_truncated", "not_recorded", "unparsed", "unsupported_host_version",
+    "observed_ran", "observed_truncated", "observed_error", "not_recorded", "unparsed",
+    "unsupported_host_version",
 )
 _NEXT_ACTIONS = {
     "observed_ran": "none",
     "observed_truncated": "reduce_the_session_start_output_below_the_host_cap",
+    "observed_error": "check_the_failed_session_start_hook",
     "not_recorded": "measure_with_the_debug_log_if_needed",
     "unsupported_host_version": "measure_with_the_debug_log_or_update_claude_code",
     "unparsed": "check_the_named_transcript_file",
@@ -73,6 +104,7 @@ HOOK_FIELDS = (
     "source", "exit_code", "duration_ms", "emitted_chars", "injected_chars", "truncated",
     "command_mentions_session_start_py",
 )
+FAILURE_FIELDS = ("source", "outcome", "exit_code", "duration_ms")
 _RECORD_TYPES = frozenset(("attachment", "assistant", "system"))
 # Lines without this marker are skipped without JSON parsing (user input,
 # request blobs, file history). Quotes inside JSON strings are escaped, so
@@ -120,10 +152,17 @@ def _version_text(parts: tuple[int, int, int] | None) -> str | None:
 
 
 def _truncated(content: str) -> bool:
-    """True when content carries the host's oversize notice, not hook text."""
+    """True when content carries one of the host's oversize notices, not hook text."""
     head = content[:NOTICE_HEAD_CHARS]
-    return (any(marker in head for marker in OVERSIZE_MARKERS)
-            and PREVIEW_MARKER in content[:NOTICE_CHARS])
+    if (any(marker in head for marker in OVERSIZE_MARKERS)
+            and PREVIEW_MARKER in content[:NOTICE_CHARS]):
+        return True  # saved to a file; a preview was injected
+    if head.startswith(NOT_SAVED_TAG) and NOT_SAVED_MARKER in head:
+        return True  # not saved; only the first part was injected
+    tail = content[-NOTICE_CHARS:]
+    start = tail.rfind(PERSIST_FAILED_START)
+    # Saving failed: the first part, then the notice as the last line.
+    return start >= 0 and _PERSIST_FAILED.fullmatch(tail, start + len("\n\n")) is not None
 
 
 def _source(hook_name: str) -> str:
@@ -218,7 +257,8 @@ def _empty_report(status: str, reason_code: str, include_paths: bool) -> dict:
             },
         },
         "session_start_hooks": {
-            "records": 0, "truncated": 0, "unrecognized": 0, "other_records": 0, "entries": [],
+            "records": 0, "truncated": 0, "failed": 0, "unrecognized": 0, "other_records": 0,
+            "entries": [], "failed_entries": [],
         },
         "instructions": {
             "records": 0, "files": 0, "removed_files": 0, "unrecognized": 0,
@@ -254,8 +294,11 @@ class _Scan:
         self.highest: tuple[int, int, int] | None = None
         self.without_version = 0
         self.unparsed_version = 0
-        self.hooks = {"records": 0, "truncated": 0, "unrecognized": 0, "other_records": 0}
+        self.hooks = {
+            "records": 0, "truncated": 0, "failed": 0, "unrecognized": 0, "other_records": 0,
+        }
         self.hook_entries: list[dict] = []
+        self.failed_entries: list[dict] = []
         self.instructions = {"records": 0, "files": 0, "removed_files": 0, "unrecognized": 0}
         self.instruction_entries: list[dict] = []
         self.first_key: tuple[str, str | None] | None = None
@@ -350,13 +393,18 @@ class _Scan:
         if not isinstance(attachment, dict):
             return
         kind = attachment.get("type")
-        session_start = attachment.get("hookEvent") == "SessionStart"
-        if kind == "hook_success" and session_start:
-            self._hook(attachment)
-        elif kind == "instructions":
+        if kind == "instructions":
             self._instructions(attachment)
-        elif session_start:
-            # Other SessionStart outcomes (errors, cancellations) are not interpreted.
+            return
+        if attachment.get("hookEvent") != "SessionStart":
+            return
+        if kind == "hook_success":
+            self._hook(attachment)
+        elif isinstance(kind, str) and kind in _FAILURE_OUTCOMES:
+            self._failure(attachment, _FAILURE_OUTCOMES[kind])
+        else:
+            # Other SessionStart attachment types (the additional context of JSON
+            # hooks, system messages and types not seen before) are not interpreted.
             self.hooks["other_records"] += 1
 
     def _hook(self, attachment: dict) -> None:
@@ -384,6 +432,22 @@ class _Scan:
             "injected_chars": _utf16_len(content),
             "truncated": truncated,
             "command_mentions_session_start_py": mentions,
+        })
+
+    def _failure(self, attachment: dict, outcome: str) -> None:
+        """A hook that did not succeed: source, outcome, exit code and duration only."""
+        name = attachment.get("hookName")
+        if not isinstance(name, str):
+            self.hooks["unrecognized"] += 1
+            return
+        self.hooks["failed"] += 1
+        if len(self.failed_entries) >= MAX_LISTED_RECORDS:
+            return
+        self.failed_entries.append({
+            "source": _source(name),
+            "outcome": outcome,
+            "exit_code": _integer(attachment.get("exitCode"), -MAX_INTEGER),
+            "duration_ms": _duration(attachment.get("durationMs")),
         })
 
     def _instructions(self, attachment: dict) -> None:
@@ -456,6 +520,9 @@ class _Scan:
         if self.highest is None:
             reason = "version_unparsed" if self.unparsed_version else "version_missing"
             return "unparsed", reason, False
+        # A failed hook comes first: it needs attention even when another one ran.
+        if self.hooks["failed"]:
+            return "observed_error", "session_start_hook_failed", True
         if self.hooks["records"]:
             if self.hooks["truncated"]:
                 return "observed_truncated", "session_start_output_truncated", True
@@ -484,7 +551,9 @@ class _Scan:
         if not interpreted:
             # No usable version: the shapes are unknown, so nothing is guessed.
             return report
-        report["session_start_hooks"] = {**self.hooks, "entries": self.hook_entries}
+        report["session_start_hooks"] = {
+            **self.hooks, "entries": self.hook_entries, "failed_entries": self.failed_entries,
+        }
         report["instructions"] = {
             **self.instructions, "paths_included": self.include_paths,
             "entries": self.instruction_entries,
@@ -528,7 +597,8 @@ def diagnose_session_evidence(path: str | os.PathLike, *, include_paths: bool = 
     Opt-in and fail-soft: never raises for an ordinary error and never puts an
     exception message or the path in the report. A SessionStart record shows
     that the host ran a hook, not that the model used what it injected; a
-    missing record is ``not_recorded``, never "not run".
+    failure record is ``observed_error``, and a missing record is
+    ``not_recorded``, never "not run".
     """
     try:
         handle, reason_code = _open_regular(Path(path))
@@ -563,11 +633,17 @@ def text_lines(report: dict) -> list[str]:
         f"session_complete: {_text(report['complete'])}",
         f"session_host_versions: min={_text(versions['min'])}; max={_text(versions['max'])}",
         f"session_start_hook_records: {hooks['records']}; truncated={hooks['truncated']}; "
-        f"unrecognized={hooks['unrecognized']}; other_records={hooks['other_records']}",
+        f"failed={hooks['failed']}; unrecognized={hooks['unrecognized']}; "
+        f"other_records={hooks['other_records']}",
     ]
     for entry in hooks["entries"]:
         lines.append(
             "session_start_hook: " + "; ".join(f"{key}={_text(entry[key])}" for key in HOOK_FIELDS)
+        )
+    for entry in hooks["failed_entries"]:
+        lines.append(
+            "session_start_hook_failed: "
+            + "; ".join(f"{key}={_text(entry[key])}" for key in FAILURE_FIELDS)
         )
     lines.append(
         f"session_instruction_records: {instructions['records']}; files={instructions['files']}; "
