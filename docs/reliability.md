@@ -79,7 +79,8 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --format 
 종료 코드 0은 사용 가능하거나 의도적으로 꺼진 상태, 1은 일부 기억이 빠지는 경고,
 2는 잘못되거나 사용할 수 없는 설정이다. 비볼트 여부도 JSON 상태로 확인한다.
 이 결과는 **파일과 설정의 진단**이다. 호스트가 훅을 신뢰했는지·실제로 실행했는지,
-모델이 기억을 제대로 사용했는지까지 검증하지 않는다. 정상적인 기존 세션 훅의
+모델이 기억을 제대로 사용했는지까지 검증하지 않는다. 실행 기록은 아래의 선택형
+`--session-evidence`(세션 기록으로 SessionStart 실행 확인)로 따로 본다. 정상적인 기존 세션 훅의
 출력과 fail-soft 종료 정책은 유지한다.
 
 기존 사용자 소유 문서의 교훈 적용 기록은 [교훈 제안 절차](lesson-proposals.md)를 따른다.
@@ -114,6 +115,71 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --host-ve
 - 결과는 PATH에서 찾은 실행 파일의 버전이다. 지금 훅을 실행하는 호스트(IDE 확장, 다른 설치본)와
   같다는 보장은 없다(`trust_boundary`). Codex 버전은 확인하지 않는다.
 
+### 세션 기록으로 SessionStart 실행 확인 (선택)
+
+```text
+python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --session-evidence "<세션 기록 .jsonl 파일>" --format json
+```
+
+Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 폴더 이름>/<세션 ID>.jsonl`에 쓴다. 이 형식은
+호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
+있으므로 관측한 기록 모양만 해석하고, 모양이 다른 기록은 추측하지 않고 센다.
+
+`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 폴더를 훑어 기록을 고르지 않고, 아무것도 쓰지
+않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트 진단의 값 그대로다.
+옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
+
+- **읽는 범위:** 한 줄씩 읽고 한 줄 16 MiB, 파일 512 MiB까지 본다. 종류 표지(`"type":"attachment"`·
+  `"assistant"`·`"system"`)가 있는 줄만 JSON으로 풀고, 사용자 입력·요청 원문·파일 이력 줄은 풀지 않는다(그 안의
+  객체에 같은 표지가 있으면 풀었다가 최상위 종류를 보고 버린다).
+  한 줄 상한을 넘은 줄은 세기만 한다(`lines.oversized`). 그 줄에 종류 표지가 있었거나, 깨진 줄이 있거나, 파일
+  상한에서 멈추면 `complete`는 `false`다. 진행 중인 세션의 마지막 줄은 아직 쓰는 중일 수 있다.
+- **남기는 값(허용 목록):**
+  - SessionStart `hook_success` 기록마다 `source`(`startup`·`resume`·`clear`·`compact`·`fork`·`other`),
+    `exit_code`, `duration_ms`, `emitted_chars`(훅 stdout 길이), `injected_chars`(호스트가 대화에 넣은
+    `content` 길이), `truncated`, `command_mentions_session_start_py`(명령에 이 플러그인의 `session_start.py`
+    파일 이름이 있는지). 길이는 `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록은 50건까지 싣고 수는 모두 센다.
+  - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
+    `compaction`·`other`, 없으면 `none`), `changed`.
+  - `first_turn_usage`: 파일의 첫 API 응답의 `input_tokens`·`cache_read_input_tokens`·
+    `cache_creation_input_tokens`와 그 합(`prompt_tokens_total`). 시스템 프롬프트·도구·지침·훅 출력을 모두 더한
+    프롬프트 전체라 훅의 몫이 아니다(`label`: `whole_prompt_not_attributable_to_hooks`). 한 응답이 내용
+    블록마다 한 줄씩 기록되므로 (`message.id`, `requestId`)가 같은 줄은 한 번만 센다(`duplicate_lines`).
+    서브에이전트·합성 메시지·오류 메시지 줄은 건너뛴다.
+  - `api_errors`: `api_error` 기록 수와 HTTP 상태 코드별 수. `host_versions`: 기록의 `version` 최솟값·최댓값.
+- **상태(`status`):**
+  - `observed_ran`: SessionStart 훅이 실행된 기록이 있다.
+  - `observed_truncated`: 그 가운데 하나 이상이 호스트 상한(10,000자)을 넘어 미리보기로 바뀌었다. 그 훅의 출력을
+    줄이는 것이 다음 조치다. 이 플러그인의 훅은 9,500자로 묶으므로 `command_mentions_session_start_py`로 어느
+    훅인지 구별한다.
+  - `not_recorded`: 기록이 없다. **실행되지 않았다는 뜻이 아니다.** 비동기 훅, SDK 세션, 기록을 남기지 않는
+    판에서는 기록이 없다.
+  - `unsupported_host_version`: 기록이 없고, 파일의 가장 높은 `version`이 기록 없이 관측된 판(2.1.252) 이하다.
+  - `unparsed`: 파일을 열 수 없거나(`file_not_found`·`not_a_regular_file`·`file_unreadable`), 기록 줄이
+    없거나(`no_transcript_records`), `version`이 없거나 읽을 수 없거나(`version_missing`·`version_unparsed`,
+    이때는 다른 값도 해석하지 않는다), 훅 기록 모양이 다르다(`hook_record_shape_unrecognized`).
+- **판 범위는 관측값이다:** 2026-10-24에 Windows PC 한 대의 기록에서 키 이름·길이·숫자만 보았다. 2.1.252 세션
+  173개에는 훅 기록이 없었고, 2.1.278~2.1.309에서는 동기 훅만 기록됐으며, 2.1.253~2.1.277은 관측하지 않았다.
+  고정 문턱으로 쓰지 않고 `observed_ranges`로 함께 보고하며, 관측하지 않은 판에서 기록이 없으면 `not_recorded`다.
+- **잘림 판정:** Claude Code 2.1.309 실행 파일의 안내는 `<persisted-output>`,
+  `Output too large (<크기>). Full output saved to: <경로>`, 빈 줄, `Preview (first 2KB):` 순서다(아주 큰
+  출력은 `Output exceeded the …`).
+  저장 경로가 두 표지 사이에 있어 경로가 길면 둘째 표지가 200자 뒤로 밀린다. 그래서 첫 표지는 `content`의
+  첫 200자에서, `Preview (first`는 첫 4,096자에서 찾는다. 저장에 실패했을 때의 다른 안내는 판정하지 않으므로
+  `emitted_chars`와 `injected_chars`의 차이로 본다.
+- **보이지 않는 것:** 기록은 훅이 실행됐다는 증거이지 모델이 기억을 사용했다는 증거가 아니다. 비동기
+  `vault_healthcheck.py`의 출력과 resume 때 다시 붙는지(아래 절차 5)는 이 기록에 나오지 않는다. 실패·취소된
+  훅(`hook_non_blocking_error` 등)은 해석하지 않고 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가
+  상태 문구라 `injected_chars`가 주입량이 아니다(이 플러그인의 `session_start.py`는 일반 텍스트로 출력한다).
+  Codex 기록은 읽지 않는다.
+- **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령·사용자
+  입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는 계정 이름이 들어갈 수 있어
+  `--session-instruction-paths`를 함께 줄 때만 보인다(제어 문자가 있거나 1,024자를 넘는 경로는 빼고 센다).
+- **출처:** 사용량 필드와 (`message.id`, `requestId`) 중복 제거 규칙은
+  [ccusage](https://github.com/ryoppippi/ccusage)(MIT)의 Claude 사용량 파서에서 방식만 빌렸다. 코드와 의존성은
+  가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 잘림 안내 문구는 2.1.309 실행 파일의
+  문자열에서 확인했다.
+
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 
 > 이 절차는 작성만 했고 아직 실행하지 않았다. 이 문서에 측정값은 없다. 실행하면 결과를
@@ -129,7 +195,9 @@ identifiable". `--debug-file <path>`는 지정한 경로에 디버그 로그를 
 2. 볼트 디렉터리에서 `claude --debug-file <로그1>`로 새 세션을 열고, 짧은 메시지 하나에 답을
    받은 뒤 종료한다(resume할 대화를 남기기 위해서다).
 3. 로그에서 `session_start.py`와 `vault_healthcheck.py`가 든 훅 완료 줄을 찾아 결과(outcome)와
-   소요 시간을 옮긴다. 줄 형식은 확인하지 않았으므로 로그의 단위 그대로 기록한다.
+   소요 시간을 옮긴다. 줄 형식은 확인하지 않았으므로 로그의 단위 그대로 기록한다. 동기 훅
+   `session_start.py`는 같은 세션의 기록 파일에 `--session-evidence`를 써서 `exit_code`·`duration_ms`로도
+   옮길 수 있다(호스트가 기록을 남기는 판에서만).
 4. 같은 세션을 `claude --resume <세션 ID> --debug-file <로그2>`(ID 없이 쓰면 선택 화면)로 다시
    열어 3을 반복한다. resume은 두 번 이상 한다. `--fork-session`은 쓰지 않는다. 2.1.214부터 fork로
    시작한 세션의 SessionStart source는 `fork`이며(변경 기록) 이 플러그인의 matcher에 없다.
@@ -145,7 +213,7 @@ identifiable". `--debug-file <path>`는 지정한 경로에 디버그 로그를 
 | 호스트 | `claude --version`, 설치 방식(네이티브·npm 등), `--host-version` 결과 |
 | 환경 | OS·버전, Python 버전, Windows의 Git Bash 버전, 플러그인 버전·커밋 |
 | 볼트 규모 | 건강 검사 요약의 검사 노트 수, handoff/hot 예산 |
-| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간 |
+| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간. 동기 `session_start.py`는 세션 기록(`--session-evidence`, 기록을 남기는 판 — 이 PC 관측 2.1.278~2.1.309)이나 디버그 로그에서, 비동기 `vault_healthcheck.py`는 디버그 로그에서만 |
 | resume 재주입 | resume 횟수 N, 그 뒤 `[vault-healthcheck]` 요약이 다시 보인 횟수 |
 
 디버그 로그에는 경로·명령·설정이 남을 수 있다. 원문 로그는 저장소에 올리지 않고, 공유할 값만
