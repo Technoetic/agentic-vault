@@ -1,7 +1,7 @@
 """Opt-in Korean period expressions as half-open date intervals (vault_period)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import importlib
 from pathlib import Path
 import sys
@@ -46,7 +46,7 @@ class PeriodParsingTests(unittest.TestCase):
             '2026년 4분기말': ('period_end', '2026-12-31', D(2026, 12, 31), D(2027, 1, 1), None),
             '2026년 상반기말': ('period_end', '2026-06-30', D(2026, 6, 30), D(2026, 7, 1), None),
             '2026 하반기 말 기준': ('period_end', '2026-12-31', D(2026, 12, 31), D(2027, 1, 1), None),
-            '2026년 3분기 말레이시아': q3,
+            '2026년 3분기 중': q3,
             '2026-10-07': day, '2026.10.07': day, '2026. 10. 7.': day, '2026년 10월 7일': day,
         })
 
@@ -132,6 +132,101 @@ class PeriodParsingTests(unittest.TestCase):
         self.assertEqual([record['label_edtf'] for record in records], ['2025-36', '2026-33', '2026-01-01', '2026-03-31'])
         self.assertEqual(set(records[0]), {'span', 'kind', 'label_edtf', 'start', 'end', 'reason'})
 
+    def test_period_end_takes_a_listed_particle_after_every_period_form(self):
+        q3_end = ('period_end', '2026-09-30', D(2026, 9, 30), D(2026, 10, 1), None)
+        self.assertTable({text: q3_end for text in (
+            '2026년 3분기 말에', '2026년 3분기말에', '2026년 3분기 말까지', '2026년 3분기 말부터', '2026년 3분기 말일',
+            '2026년 3분기 말경', '2026년 3분기 말 기준', '2026년 3분기 말기준', '2026년 3분기 말 현재', '2026년 3분기 말의',
+            '2026년 3분기 말로', '2026년 3분기 말쯤', '2026년 3분기 말께', '2026년 3분기 말은', '2026년 3분기 말는',
+            '2026년 3분기 말이', '2026년 3분기 말가', '2026년 3분기 말도', '2026년 3분기 말엔', '2026년 3분기 말.',
+            '2026년 3분기  말에', '2026년 3Q 말', '3Q26말', '3Q26 말에', '2026Q3 말', '2026-Q3말까지')})
+        self.assertTable({'2026년 상반기 말에': ('period_end', '2026-06-30', D(2026, 6, 30), D(2026, 7, 1), None)})
+        fiscal_end = ('period_end', '2027-03-31', D(2027, 3, 31), D(2027, 4, 1), None)
+        self.assertTable({'FY2026말': fiscal_end, 'FY2026 말에': fiscal_end, '2026 회계연도 말': fiscal_end,
+                          '2026 사업연도말까지': fiscal_end, 'FY2026 하반기 말': fiscal_end,
+                          'FY2026 Q3 말': ('period_end', '2026-12-31', D(2026, 12, 31), D(2027, 1, 1), None)},
+                         fiscal_start=4)
+        self.assertEqual(self.records('FY2026 말'), [('fiscal_year', None, None, None, 'fiscal_start_undeclared')])
+
+    def test_qualifiers_the_table_does_not_compute_abstain_instead_of_the_whole_period(self):
+        qualified = {
+            '2026년 3분기 말레이시아': 'quarter', '2026년 3분기말레이시아': 'quarter', '2026년 3분기 말씀': 'quarter',
+            '2026년 3분기 말2': 'quarter', '2026년 3분기 초': 'quarter', '2026년 3분기초': 'quarter',
+            '2026년 3분기 초에': 'quarter', '2026년 3분기  초': 'quarter', '2026년 상반기 초': 'half',
+            '3Q26 초': 'quarter', '2026Q3 초': 'quarter', '2026년 3Q 초': 'quarter',
+            '2026년 4분기 연속 흑자': 'quarter', '2026년 4분기연속': 'quarter', '2026년 3분기째': 'quarter',
+            '2026년 3분기 만에': 'quarter', '2026년 3분기만에': 'quarter', '4분기 연속': 'quarter', '3분기째': 'quarter',
+        }
+        for fiscal_start in (None, 4):
+            self.assertTable({text: (kind, None, None, None, 'period_qualifier') for text, kind in qualified.items()},
+                             fiscal_start=fiscal_start)
+        self.assertTable({'FY2026 초': ('fiscal_year', None, None, None, 'period_qualifier'),
+                          'FY2026 말레이시아': ('fiscal_year', None, None, None, 'period_qualifier'),
+                          '2026 회계연도 하반기 초': ('fiscal_half', None, None, None, 'period_qualifier'),
+                          'FY2026 3분기 연속': ('fiscal_quarter', None, None, None, 'period_qualifier')}, fiscal_start=4)
+
+    def test_q_or_h_marks_around_a_fiscal_year_abstain_except_fy_then_q(self):
+        marks = {'Q3 FY2026': 'fiscal_quarter', 'Q3 FY26': 'fiscal_quarter', 'q3 fy2026': 'fiscal_quarter',
+                 '3Q FY2026': 'fiscal_quarter', 'H1 FY2026': 'fiscal_half', '1H FY2026': 'fiscal_half',
+                 'H1 2026 회계연도': 'fiscal_half', 'FY2026 H1': 'fiscal_half', 'FY2026 1H': 'fiscal_half',
+                 'FY26 2H': 'fiscal_half', 'FY2026 3Q': 'fiscal_quarter'}
+        for fiscal_start in (None, 1, 4):
+            self.assertTable({text: (kind, None, None, None, 'period_qualifier') for text, kind in marks.items()},
+                             fiscal_start=fiscal_start)
+        fiscal_q3 = ('fiscal_quarter', '2026-10/2026-12', D(2026, 10, 1), D(2027, 1, 1), None)
+        self.assertTable({'FY2026 Q3': fiscal_q3, 'FY2026Q3': fiscal_q3}, fiscal_start=4)
+        self.assertTable({'FY2026 Q3': ('fiscal_quarter', '2026-07/2026-09', D(2026, 7, 1), D(2026, 10, 1), None)},
+                         fiscal_start=1)
+
+    def test_a_range_end_no_row_reads_adds_a_partial_range_record(self):
+        partial = ('range', None, None, None, 'partial_range')
+        q3 = ('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None)
+
+        def day(month, number):
+            start = D(2026, month, number)
+            return ('day', start.isoformat(), start, start + timedelta(days=1), None)
+        cases = {
+            '2026.10.07~10.09': [day(10, 7), partial], '2026.01.01~03.31': [day(1, 1), partial],
+            '2026. 1. 1.~3. 31.': [day(1, 1), partial], '2026년 1월 1일~3월 31일': [day(1, 1), partial],
+            '2026년 1월 1일부터 3월 31일까지': [day(1, 1), partial], '2026-10-07~09': [day(10, 7), partial],
+            '2026.10.07~09': [day(10, 7), partial], '2026.10.07 ~ 10.09': [day(10, 7), partial],
+            '2026.10.07(수)~10.09(금)': [day(10, 7), partial], '2026-10-07—09': [day(10, 7), partial],
+            '2026.10.07–10.09': [day(10, 7), partial], '2026.10.07〜10.09': [day(10, 7), partial],
+            '2026.10.07∼10.09': [day(10, 7), partial], '10.07~2026.10.09': [partial, day(10, 9)],
+            '10.07(수)~2026.10.09(금)': [partial, day(10, 9)], '10월 7일부터 2026년 10월 9일까지': [partial, day(10, 9)],
+            '2026년 3분기~2027.03': [q3, partial], '2026Q3~Q4': [q3, partial],
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text), expected)
+        # One fiscal year written as a span has the same shape and abstains too.
+        self.assertEqual(self.records('FY2026-27', 4),
+                         [('fiscal_year', '2026-04/2027-03', D(2026, 4, 1), D(2027, 4, 1), None), partial])
+        # Both ends written: two periods and no partial record.
+        for text in ('2026.10.07~2026.10.09', '2026.10.07(수) ~ 2026.10.09(금)', '2026-10-07–2026-10-09',
+                     '2026년 10월 7일부터 2026년 10월 9일까지'):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text), [day(10, 7), day(10, 9)])
+        text = '2026.10.07~10.09 출장'
+        self.assertEqual([text[slice(*record['span'])] for record in period.parse(text)], ['2026.10.07', '~10'])
+
+    def test_short_years_need_a_non_zero_first_digit_and_bare_years_are_1900_to_2099(self):
+        for text in ('FY0026', 'FY0000', '3Q0026'):
+            with self.subTest(text=text):
+                self.assertEqual(period.parse(text, fiscal_start=4), [])
+        no_year = ('quarter', None, None, None, 'no_year')
+        self.assertTable({'매출 1500 3분기 대비': no_year, '1234 2분기': no_year, '2100 3분기': no_year,
+                          '1899 3분기': no_year,
+                          '1999 3분기': ('quarter', '1999-35', D(1999, 7, 1), D(1999, 10, 1), None),
+                          '2099 하반기': ('half', '2099-41', D(2099, 7, 1), D(2100, 1, 1), None),
+                          '1500년 3분기': ('quarter', '1500-35', D(1500, 7, 1), D(1500, 10, 1), None)})
+
+    def test_index_of_is_none_past_the_text_limit(self):
+        self.assertEqual(period.index_of(('2026년 3분기', '2026.10.07')),
+                         period.index(period.parse('2026년 3분기 2026.10.07')))
+        self.assertIsNone(period.index_of(('2026년 3분기', 'x' * (period.MAX_TEXT_CHARS + 1))))
+        self.assertEqual(period.index_of((), fiscal_start=4), ())
+
     def test_invalid_arguments_raise_a_content_free_error(self):
         for text in (None, b'2026-10-07', 'x' * (period.MAX_TEXT_CHARS + 1)):
             with self.subTest(text=type(text)), self.assertRaisesRegex(period.PeriodError, '^invalid_text$'):
@@ -142,7 +237,8 @@ class PeriodParsingTests(unittest.TestCase):
         self.assertTrue(issubclass(period.PeriodError, ValueError))
 
     def test_docstring_declares_the_calendar_convention_and_its_source(self):
-        for phrase in ('calendar year', 'Library of Congress EDTF', 'durations', 'report labels'):
+        for phrase in ('calendar year', 'Library of Congress EDTF', 'durations', 'report labels',
+                       'never resolves to a wider interval', 'period_qualifier', 'partial_range'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, ' '.join(period.__doc__.split()))
 
@@ -196,6 +292,44 @@ class PeriodMatchTests(unittest.TestCase):
         self.assertEqual(self.classify('2026년 3분기', '올해 3분기', '당기'), {'normalized_match': 'none'})
         self.assertIsNone(self.classify('24개월', '2026년 3분기'))
         self.assertEqual(period.index(period.parse('3분기 FY2026 2026.02.30')), ())
+
+    def test_period_ends_qualifiers_and_partial_ranges_never_compare_as_a_wider_period(self):
+        cases = (
+            ('2026년 3분기 말에', '2026년 3분기 실적', {'normalized_match': 'none'}),
+            ('2026년 3분기 말에 완공', '2026.09.30 준공', {'normalized_match': 'equal', 'via': ['note0']}),
+            ('2026년 3분기 말까지', '2026.08.01 착수', {'normalized_match': 'none'}),
+            ('3Q26말', '2026년 3분기 실적', {'normalized_match': 'none'}),
+            ('2026Q3 말', '2026.08.01', {'normalized_match': 'none'}),
+            ('2026년 3분기 초', '2026년 3분기 실적', {'normalized_match': 'abstain', 'reason': 'period_qualifier'}),
+            ('2026.10.07~10.09 출장', '2026.10.07 출발', {'normalized_match': 'abstain', 'reason': 'partial_range'}),
+            ('2026.01.01~03.31', '2026.01.01 시작', {'normalized_match': 'abstain', 'reason': 'partial_range'}),
+            ('2026-10-07~09', '2026.10.07 출발', {'normalized_match': 'abstain', 'reason': 'partial_range'}),
+            # A body keeps the end it writes; its partial record is ignored like other body abstentions.
+            ('2026.10.07', '2026.10.07~10.09 출장', {'normalized_match': 'equal', 'via': ['note0']}),
+            ('2026년 3분기', '2026년 3분기 말에 완공', {'normalized_match': 'contained', 'via': ['note0']}),
+        )
+        for value, body, expected in cases:
+            with self.subTest(value=value, body=body):
+                self.assertEqual(self.classify(value, body), expected)
+        for value, body, expected in (('Q3 FY2026', 'FY2026 실적', 'abstain'), ('H1 FY2026', '2026.12.01', 'abstain'),
+                                      ('FY2026말', '2026.05.01', 'none'), ('2026 회계연도 말', 'FY2026', 'none'),
+                                      ('FY2026말', '2027.03.31 결산', 'equal')):
+            for fiscal_start in (1, 4) if value[0] in 'QH' else (4,):
+                with self.subTest(value=value, body=body, fiscal_start=fiscal_start):
+                    self.assertEqual(self.classify(value, body, fiscal_start=fiscal_start)['normalized_match'], expected)
+
+    def test_reaches_is_via_membership_for_one_index(self):
+        bodies = {'note0': '2025년 4분기', 'note1': '2026.02.10', 'note2': '무관', 'note3': '2026년 1분기'}
+        indexes = {key: period.index(period.parse(text)) for key, text in bodies.items()}
+        results = []
+        for value in ('2025년 4분기, 2026년 1분기', '2026년 1분기', '2026.02.10', '2026년 상반기'):
+            records = period.parse(value)
+            result = period.match(records, indexes)
+            results.append(result['normalized_match'])
+            with self.subTest(value=value):
+                self.assertEqual(result['via'], [key for key in sorted(indexes)
+                                                 if period.reaches(records, indexes[key], result['normalized_match'])])
+        self.assertEqual(results, ['equal', 'equal', 'equal', 'contained'])
 
 
 if __name__ == '__main__':
