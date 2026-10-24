@@ -81,8 +81,9 @@ class RunFlipsTests(unittest.TestCase):
         return fixture
 
     def files(self):
-        return {path.relative_to(self.vault).as_posix(): path.read_bytes()
-                for path in self.vault.rglob('*') if path.is_file()}
+        # Directories map to None so a new lock, cache or temporary directory is not missed.
+        return {path.relative_to(self.vault).as_posix(): path.read_bytes() if path.is_file() else None
+                for path in self.vault.rglob('*')}
 
     def refused(self, code, function, *args):
         with self.assertRaises(runs.RunError) as caught:
@@ -218,7 +219,8 @@ class RunFlipsTests(unittest.TestCase):
                           if (item['case_id'], item['assertion_id']) == ('representative', 'boundary'))
         self.assertEqual((unobserved['candidate_passes'], unobserved['candidate_complete'],
                           unobserved['flip']), (0, 0, 'incomplete'))
-        # One observed failure beside an error is still a lower pass share.
+        # One observed failure beside an error is still a lower pass share. An item without a
+        # complete candidate repetition has nothing to compare and is never listed as a drop.
         self.assertEqual([(item['case_id'], item['assertion_id'], item['candidate_passes'],
                            item['candidate_complete'], item['flip']) for item in result['pass_count_drops']],
                          [('authority', 'answer', 0, 1, 'incomplete')])
@@ -302,7 +304,7 @@ class RunFlipsTests(unittest.TestCase):
             ('retention-break', lambda case, repetition, check:
              (case, repetition, check) != ('injection', 2, 'answer'), (), 'NO', 1.0, 0.9, 1),
             ('unfixed', lambda case, repetition, check: check != 'fix', (), 'NO', 0.0, 1.0, 0),
-            # Error repetitions are not passes, so the resolution cannot be FULL.
+            # Candidate error repetitions are not passes, so the resolution cannot be FULL.
             ('error', None, {('representative', 1)}, 'NO', 0.8, 0.8, 0),
         )
         for version, passed, errors, resolution, correction, retention, breaks in scenarios:
@@ -318,6 +320,31 @@ class RunFlipsTests(unittest.TestCase):
                 self.assertEqual((roles['correction_count'], roles['retention_count'],
                                   roles['unlabelled_count']), (5, 10, 0))
                 self.assertEqual(roles['grading'], 'swe_bench_fail_to_pass_pass_to_pass_analogue')
+
+    def test_baseline_errors_never_rule_out_full_or_list_unobserved_items(self):
+        fixture = self.labelled({'boundary': 'retention', 'answer': 'retention', 'fix': 'correction'})
+        # Every baseline repetition of 'representative' errors. Those error outcomes record a
+        # passing correction on purpose: read, it would be listed as an invalid correction test.
+        baseline = self.arm('base', lambda case, repetition, check:
+                            check != 'fix' or case == 'representative',
+                            errors={('representative', 1), ('representative', 2)},
+                            fixture=fixture, fixture_path='input/role-fixture.json')
+        candidate = self.arm('cand', fixture=fixture, fixture_path='input/role-fixture.json')
+        result = runs.flips(self.vault, baseline, candidate)
+        roles = result['roles']
+        # resolution grades the candidate run only, so baseline errors do not rule out FULL.
+        self.assertEqual(roles['resolution'], 'FULL')
+        self.assertEqual(result['error_outcomes'], {'baseline': 2, 'candidate': 0})
+        self.assertEqual(roles['baseline'], {'correction_pass_rate': 0.0, 'retention_pass_rate': 0.8})
+        self.assertEqual(roles['candidate'], {'correction_pass_rate': 1.0, 'retention_pass_rate': 1.0})
+        self.assertEqual({item['assertion_id']: (item['baseline_complete'], item['flip'])
+                          for item in result['items'] if item['case_id'] == 'representative'},
+                         dict.fromkeys(('boundary', 'answer', 'fix'), (0, 'incomplete')))
+        self.assertEqual(result['flip_counts'], {'pass_to_pass': 8, 'pass_to_fail': 0, 'fail_to_pass': 4,
+                                                 'fail_to_fail': 0, 'mixed': 0, 'incomplete': 3})
+        # Never observed on the baseline: neither an invalid correction test nor a drop.
+        self.assertEqual(roles['invalid_correction_tests'], [])
+        self.assertEqual((result['pass_count_drops'], roles['retention_break_count']), ([], 0))
 
     def test_empty_correction_list_counts_as_passing_and_unlabelled_checks_are_not_graded(self):
         fixture = self.labelled({'boundary': 'retention'}, fix=False)
@@ -346,9 +373,11 @@ class RunFlipsTests(unittest.TestCase):
         self.refused('run_not_complete', runs.flips, self.vault, plain, pending)
         self.refused('invalid_hash_or_id', runs.flips, self.vault, plain, '../' + labelled)
         self.assertEqual(self.files(), before)
+        # Evidence edited after recording makes the run stale: refused, again without writes.
         self.base.write('output/evidence.txt', 'Evidence edited after recording.\n')
-        with self.assertRaises(runs.RunError):
-            runs.flips(self.vault, plain, plain)
+        before = self.files()
+        self.refused('stale_source', runs.flips, self.vault, plain, plain)
+        self.assertEqual(self.files(), before)
 
     def test_cli_flips_prints_the_api_result_and_refuses_without_echo(self):
         baseline = self.arm('v1', lambda case, repetition, check: check != 'answer')
