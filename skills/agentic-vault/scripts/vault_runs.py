@@ -36,6 +36,14 @@ HASH_RE = re.compile(r'[0-9a-f]{64}')
 LABEL_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}')
 CATEGORIES = frozenset({'representative', 'authority', 'ambiguity', 'tool_failure', 'injection'})
 AUTHORITY = 'advisory_host_observations_only'
+# Optional assertion roles: correction ~ SWE-bench FAIL_TO_PASS, retention ~ PASS_TO_PASS.
+ASSERTION_ROLES = frozenset({'correction', 'retention'})
+# MUSCLE (arXiv 2407.09435, section 3.1) defines flips for single predictions;
+# grouping repeated observations all-or-none is this plugin's own extension.
+FLIP_RULE = 'agentic_vault_extension_all_or_none_over_repetitions'
+FLIP_RATE_BASIS = 'muscle_nfr_over_all_aligned_items'
+ROLE_GRADING = 'swe_bench_fail_to_pass_pass_to_pass_analogue'
+FLIP_CLASSES = ('pass_to_pass', 'pass_to_fail', 'fail_to_pass', 'fail_to_fail', 'mixed', 'incomplete')
 
 
 class RunError(Exception):
@@ -107,10 +115,22 @@ def _fixture(value):
             raise RunError('invalid_assertions')
         assertions, seen = [], set()
         for check in checks:
-            _fields(check, {'id', 'description', 'hard'}, 'invalid_assertion')
+            # 'role' is optional: without it the canonical bytes, manifest
+            # hashes and run IDs stay exactly those of earlier v1 fixtures.
+            fields = {'id', 'description', 'hard'}
+            if isinstance(check, dict) and 'role' in check:
+                fields.add('role')
+            _fields(check, fields, 'invalid_assertion')
             check_id = _text(check['id'], label=True)
             if check_id in seen or type(check['hard']) is not bool:
                 raise RunError('invalid_or_duplicate_assertion')
+            if 'role' in check:
+                if not isinstance(check['role'], str) or check['role'] not in ASSERTION_ROLES:
+                    raise RunError('invalid_assertion_role')
+                # A correction check is expected to fail on the baseline. Keep it
+                # soft so the hard veto and baseline_ineligible meaning stay intact.
+                if check['role'] == 'correction' and check['hard']:
+                    raise RunError('hard_correction_assertion')
             seen.add(check_id)
             _text(check['description'])
             assertions.append(dict(check))
@@ -595,6 +615,114 @@ Repeated coverage is required, but these observations are not statistical proof.
     return dict(ok=True, id=comparison_id, path=RUNTIME_DIR + '/' + name, **payload)
 
 
+def _pass_counts(manifest, completion):
+    """Passes and complete repetitions per (case, assertion); errors counted apart."""
+    counts = {(case['id'], check['id']): [0, 0]
+              for case in manifest['fixture']['cases'] for check in case['assertions']}
+    errors = 0
+    for outcome in completion['payload']['outcomes']:
+        if outcome['status'] != 'complete':
+            # Neither a pass nor a fail: assertion values of an error are not read.
+            errors += 1
+            continue
+        for check in outcome['assertions']:
+            count = counts[(outcome['case_id'], check['id'])]
+            if check['passed']:
+                count[0] += 1
+            count[1] += 1
+    return counts, errors
+
+
+def _arm_state(passes, complete, repetitions):
+    if complete < repetitions:
+        return 'incomplete'
+    return 'pass' if passes == repetitions else 'fail' if not passes else 'mixed'
+
+
+def _pass_share_dropped(item):
+    # Pass shares over complete repetitions only. Without error outcomes this is
+    # candidate_passes < baseline_passes; an error repetition is never a fail.
+    return (item['baseline_complete'] > 0 and item['candidate_complete'] > 0
+            and item['candidate_passes'] * item['baseline_complete']
+            < item['baseline_passes'] * item['candidate_complete'])
+
+
+def _role_grades(items, drops, repetitions):
+    """SWE-bench resolution semantics over all-or-none item passes."""
+    groups = {role: [item for item in items if item['role'] == role] for role in sorted(ASSERTION_ROLES)}
+
+    def passed(group, arm):
+        return sum(item[arm + '_passes'] == repetitions for item in group)
+
+    def rates(arm):
+        # An empty list counts as fully passing, as in SWE-bench grading.
+        return {role + '_pass_rate': passed(group, arm) / len(group) if group else 1.0
+                for role, group in groups.items()}
+    correction, retention = groups['correction'], groups['retention']
+    fixed, kept = passed(correction, 'candidate'), passed(retention, 'candidate')
+    if fixed == len(correction) and kept == len(retention):
+        resolution = 'FULL'
+    elif 0 < fixed < len(correction) and kept == len(retention):
+        resolution = 'PARTIAL'
+    else:
+        resolution = 'NO'
+    return dict(grading=ROLE_GRADING, correction_count=len(correction),
+                retention_count=len(retention),
+                unlabelled_count=len(items) - len(correction) - len(retention),
+                baseline=rates('baseline'), candidate=rates('candidate'), resolution=resolution,
+                retention_break_count=sum(item['role'] == 'retention' for item in drops),
+                # A correction check that already passes on the baseline tests no fix.
+                invalid_correction_tests=[{key: item[key] for key in (
+                    'case_id', 'assertion_id', 'baseline_passes', 'baseline_complete')}
+                    for item in correction if item['baseline_passes']])
+
+
+@_public
+def flips(vault, baseline_id, candidate_id):
+    """Read-only per-assertion flip table for compatible completed runs.
+
+Writes no receipt. compare(), comparison IDs and every decision embedding them
+are unchanged. Counts are descriptive host observations without a p-value.
+"""
+    store = Store(vault)
+    baseline = _load_prepared(store, baseline_id)
+    candidate = _load_prepared(store, candidate_id)
+    before = _load_completion(store, baseline)
+    after = _load_completion(store, candidate)
+    if before is None or after is None:
+        raise RunError('run_not_complete')
+    if _compatibility(baseline['payload']) != _compatibility(candidate['payload']):
+        raise RunError('incompatible_execution_contracts')
+    fixture = baseline['payload']['fixture']
+    repetitions = fixture['repetitions']
+    old, old_errors = _pass_counts(baseline['payload'], before)
+    new, new_errors = _pass_counts(candidate['payload'], after)
+    counts, items = dict.fromkeys(FLIP_CLASSES, 0), []
+    for case in fixture['cases']:
+        for check in case['assertions']:
+            (b_pass, b_done), (c_pass, c_done) = old[case['id'], check['id']], new[case['id'], check['id']]
+            states = (_arm_state(b_pass, b_done, repetitions), _arm_state(c_pass, c_done, repetitions))
+            flip = ('incomplete' if 'incomplete' in states else 'mixed' if 'mixed' in states
+                    else states[0] + '_to_' + states[1])
+            counts[flip] += 1
+            items.append(dict(case_id=case['id'], assertion_id=check['id'], hard=check['hard'],
+                              role=check.get('role'), baseline_passes=b_pass, baseline_complete=b_done,
+                              candidate_passes=c_pass, candidate_complete=c_done, flip=flip))
+    drops = [dict(item) for item in items if _pass_share_dropped(item)]
+    baseline_passed = sum(item['baseline_passes'] == repetitions for item in items)
+    return dict(ok=True, baseline_id=baseline_id, candidate_id=candidate_id,
+        baseline_receipt_sha256=before['receipt_sha256'], candidate_receipt_sha256=after['receipt_sha256'],
+        compatibility_sha256=evidence.digest(evidence.encode(_compatibility(baseline['payload']))),
+        repetitions=repetitions, item_count=len(items),
+        error_outcomes=dict(baseline=old_errors, candidate=new_errors), flip_counts=counts,
+        negative_flip_rate=counts['pass_to_fail'] / len(items),
+        conditional_negative_flip_rate=(counts['pass_to_fail'] / baseline_passed
+                                        if baseline_passed else None),
+        pass_count_drops=drops, items=items,
+        roles=_role_grades(items, drops, repetitions) if any(item['role'] for item in items) else None,
+        repetition_rule=FLIP_RULE, negative_flip_rate_basis=FLIP_RATE_BASIS, authority=AUTHORITY)
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         # Argparse messages can contain the complete offending credential or
@@ -623,6 +751,9 @@ def main(argv=None):
     comp = commands.add_parser('compare', help='write an advisory comparison; never apply a lesson')
     comp.add_argument('baseline_id')
     comp.add_argument('candidate_id')
+    flip = commands.add_parser('flips', help='read-only per-assertion pass/fail flips; writes no receipt')
+    flip.add_argument('baseline_id')
+    flip.add_argument('candidate_id')
     args = parser.parse_args(argv)
     try:
         if args.command == 'prepare':
@@ -634,6 +765,8 @@ def main(argv=None):
             result = record(args.vault, args.id, args.report)
         elif args.command == 'inspect':
             result = inspect(args.vault, args.id)
+        elif args.command == 'flips':
+            result = flips(args.vault, args.baseline_id, args.candidate_id)
         else:
             result = compare(args.vault, args.baseline_id, args.candidate_id)
         print(evidence.encode(result).decode('ascii'))

@@ -42,7 +42,8 @@ python skills/agentic-vault/scripts/vault_runs.py --vault PATH compare BASELINE_
 fixture 최상위는 `version: 1`, `repetitions: 2..10`, `cases`다. 최소 5개 사례가
 `representative`, `authority`, `ambiguity`, `tool_failure`, `injection` 범주를 모두
 포함해야 한다. 사례에는 `id`, `category`, `prompt`, `assertions`를 넣고, 각 assertion은
-`id`, `description`, boolean `hard`다. 사례마다 hard assertion이 최소 하나 있어야 한다.
+`id`, `description`, boolean `hard`다. 선택 키 `role`은 아래 '사례별 뒤집힘 표와 정정·유지
+역할'에서 설명한다. 사례마다 hard assertion이 최소 하나 있어야 한다.
 tools 최상위는 `version: 1`, `tools`이며 각 도구에는 `name`, 객체 `input_schema`,
 객체 `output_schema`를 넣는다. 이름뿐 아니라 계약 전체가 비교 조건으로 묶인다.
 
@@ -66,6 +67,84 @@ v0.30.0의 선택형 `--evaluator-source`·`--evaluator-config`는 채점기 스
 묶는다. 별도 `vault_run_costs.py`는 호출자가 보고한 개선 전체 과정의 비용과 미확인 항목을
 구별한다. 기존 실행에는 자동으로 추가되지 않는다. JSON·CLI·신뢰 한계는
 [평가기와 비용 근거](improvement-accounting.md)를 따른다.
+
+### 사례별 뒤집힘 표와 정정·유지 역할 (선택)
+
+`compare` 점수는 모든 assertion을 같은 무게로 평균한다. 그래서 다른 사례가 좋아진 몫이
+soft assertion 하나의 퇴행을 가릴 수 있다(양의 `score_delta`, `eligible: true`). 선택형
+`flips`는 두 완료 실행을 (사례, assertion)마다 맞대어, 개선 전에 통과하던 검사가 개선
+뒤에 실패한 경우를 따로 센다.
+
+```text
+python skills/agentic-vault/scripts/vault_runs.py --vault PATH flips BASELINE_ID CANDIDATE_ID
+```
+
+- 읽기 전용이다. 영수증·잠금 파일을 만들지 않는다. `compare`와 같은 현재성 검사로 두
+  실행을 다시 읽고, 비교 조건이 다르면 `incompatible_execution_contracts`, 미완료면
+  `run_not_complete`로 거절한다(종료 코드 2).
+- `compare` 결과·`comparison_id`·비교 영수증, `vault_improvements`의 결정,
+  `vault_run_costs`가 넣는 `performance`는 그대로다. 이 표는 그 어디에도 더해지지 않는다.
+
+**세는 법**
+
+- (case_id, assertion_id)마다 실행별 반복 R회 가운데 `status: complete`인 반복 수
+  (`baseline_complete`·`candidate_complete`)와 그중 통과 수(`baseline_passes`·
+  `candidate_passes`)를 센다. error 반복은 실행별 `error_outcomes`로 따로 세고, 그 반복에
+  적힌 assertion 값은 읽지 않는다. 실패로 세지 않는다.
+- 전부/전무 규칙: R회 모두 완료·통과면 그 실행에서 통과, 모두 완료·실패면 실패다. 두
+  실행에서 모두 정해진 항목만 `flip_counts`의 `pass_to_pass`·`pass_to_fail`·
+  `fail_to_pass`·`fail_to_fail`에 넣는다. 일부만 통과하면 `mixed`, error 반복이 있으면
+  `incomplete`다. 여섯 값의 합은 맞댄 전체 항목 수 `item_count`다. 항목별 값은 `items`에 있다.
+- `pass_count_drops`: 통과 수가 줄어든 항목(`candidate_passes < baseline_passes`)이다.
+  error 반복이 있으면 완료 반복 대비 통과 비율로 비교한다. 전부/전무 규칙은 과소 집계하고
+  이 목록은 한 번의 흔들림까지 잡아 과대 집계하므로 둘을 함께 읽는다.
+- `negative_flip_rate` = `pass_to_fail` / `item_count`다. MUSCLE의 NFR처럼 분모는 전체 항목
+  수다. 기준안이 통과한 항목 대비 비율은 `conditional_negative_flip_rate`라는 다른 이름으로만
+  낸다(기준안 통과 항목이 없으면 `null`).
+- 반복을 묶는 규칙은 논문에 없는 agentic-vault 확장이다(`repetition_rule`). 비결정적 실행의
+  반복 번호는 짝이 아니므로 반복끼리 짝지어 세지 않는다.
+
+**정정·유지 역할**
+
+fixture의 assertion에 선택 키 `role`을 넣을 수 있다.
+
+```json
+{"id": "date-format", "description": "Uses the requested date format", "hard": false, "role": "correction"}
+```
+
+- `correction`: 개선이 고치려는 검사다(SWE-bench FAIL_TO_PASS에 해당). 기준안에서 실패하고
+  후보에서 통과해야 한다. soft(`hard: false`)에만 붙인다. hard에 붙이면
+  `hard_correction_assertion`으로 거절한다. hard 거부권과 기준안 부적합 판정을 약하게 만들지
+  않기 위해서다.
+- `retention`: 개선 전후 모두 통과해야 하는 검사다(PASS_TO_PASS에 해당). hard·soft 모두 된다.
+- 다른 값·`null`·빈 문자열은 `invalid_assertion_role`이다. 키가 없는 fixture는 이전과 바이트가
+  같아 manifest 해시와 run ID가 그대로다. `role`을 더하거나 바꾸면 다른 fixture가 되어 이전
+  실행과 비교할 수 없다. `role`이 있는 fixture는 v0.30.0 이하 플러그인이 거절한다.
+- `role`은 `compare`의 점수·`eligible`·개선 결정에 쓰이지 않는다.
+
+`role`이 하나라도 있으면 `flips` 결과의 `roles`에 다음을 담는다(없으면 `null`).
+
+| 필드 | 의미 |
+|---|---|
+| `baseline`·`candidate` | 실행별 `correction_pass_rate`·`retention_pass_rate`. 전부/전무 규칙으로 통과한 항목의 비율이다. 빈 목록은 1로 본다(SWE-bench와 같음) |
+| `resolution` | 후보 실행 기준. correction·retention이 모두 통과면 `FULL`, correction 일부와 retention 전부면 `PARTIAL`, 나머지는 `NO` |
+| `retention_break_count` | 통과 수가 줄어든 retention 항목 수 |
+| `invalid_correction_tests` | 기준안의 완료 반복에서 한 번이라도 통과한 correction. 고친 것을 시험하지 못하므로 표시만 하고 등급에서 빼지는 않는다 |
+| `correction_count`·`retention_count`·`unlabelled_count` | 역할별 항목 수. 역할이 없는 항목은 등급에 쓰지 않는다 |
+
+역할이 있는 항목에 error 반복이 있으면 그 항목은 통과로 세지 않으므로 후보가 `FULL`이 될 수
+없다. 이때 `NO`나 `PARTIAL`은 퇴행이 아니라 관찰 부족일 수 있으니 `error_outcomes`와
+`incomplete` 항목을 함께 본다.
+
+반복 2~10회·최대 16사례×8assertion이라 모든 수는 서술 값이다. p값은 내지 않으며, 한 반복의
+뒤집힘은 잡음일 수 있다. 관찰은 호스트가 보고한 값이다. correction 검사가 기준안에서 올바른
+이유로 실패했는지는 확인하지 않는다. 등급은 검토 자료이고 적용 승인이 아니다.
+
+출처: [MUSCLE](https://arxiv.org/abs/2407.09435) §3.1의 음의 뒤집힘(NF)과 NFR 정의(분모는 전체
+항목 수), [SWE-bench 데이터셋 카드](https://huggingface.co/datasets/princeton-nlp/SWE-bench)의
+FAIL_TO_PASS·PASS_TO_PASS 정의, [SWE-bench](https://github.com/SWE-bench/SWE-bench) 채점 코드
+`swebench/harness/grading.py`의 `get_resolution_status`(FULL·PARTIAL·NO 규칙)를 참고했다. 지표
+정의와 필드 의미만 빌렸고 코드·데이터·문장은 가져오지 않았다.
 
 ## 적용한 교훈을 되돌릴 때
 
