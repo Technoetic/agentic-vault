@@ -110,17 +110,45 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 
 | 경고 코드 | 뜻 | `details` |
 |---|---|---|
-| `ssot-source-unsupported` | 해석된 출처 노트 어디에도 값이 없다 | `cited`: 비교한 노트 경로 |
+| `ssot-source-unsupported` | 해석된 출처 노트 어디에도 값이 없다. `--primary-text-only`면 다른 대장의 사실 표에만 있는 값도 포함 | `cited`: 비교한 노트 경로. 사실 표에만 있으면 `reason: ledger_table_only`도 |
 | `ssot-source-unresolved` | 참조를 허용된 노트 하나로 해석하거나 읽지 못했다 | `reference`(대장에 쓴 그대로), `reason`, 모호하면 `candidate_count`·`candidates`(최대 16개) |
 
-`reason`은 `not_found`, `ambiguous`, `policy`(deny/exclude/runtime 구역·symlink 경로), `size_limit`, `unsafe_file`(hardlink 등 단일 정규 파일 아님),
+`ssot-source-unresolved`의 `reason`은 `not_found`, `ambiguous`, `policy`(deny/exclude/runtime 구역·symlink 경로), `size_limit`, `unsafe_file`(hardlink 등 단일 정규 파일 아님),
 `unreadable`(UTF-8 아님·읽는 중 변경), `invalid_reference`, `inventory_incomplete`, `source_limit` 중 하나다.
 나머지 출력 필드는 `path`, `source_sha256`(대장), `rows_checked`·`rows_supported`·`rows_unsupported`·`rows_unresolved`·`rows_skipped`,
+`rows_supported_ledger_table_only`·`ledger_table_only`([아래](#다른-대장의-사실-표에만-있는-값)),
 `cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
 상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.
 앞의 넷을 넘으면 `incomplete`에 이유를 남기고, 경고 수 상한은 기존 `check`처럼 오류로 끝낸다.
+
+#### 다른 대장의 사실 표에만 있는 값
+
+인용한 노트가 다른 대장이면 그 사실 표는 2차 자료다. 대장이 자기 자신을 인용할 때 사실 표를 빼고 비교하는 것과 같은 이유다.
+인용 노트에서 `parse_ledger`가 알아보는 사실 표(v1·v2 모두)가 있으면 같은 읽기에서 그 표를 뺀 본문도 만든다.
+노트를 더 읽지 않고(인용 노트마다 표를 인식하고, 표가 있으면 본문 정규화를 한 번 더 한다) 출처 노트 수·읽기 합계 상한과 끝의 재확인도 그대로다.
+값이 뒷받침됐는데 표를 뺀 본문 어디에도 없으면 그 행을 따로 표시한다. 사실 표가 없는 노트는 본문 전체가, 자기 인용은 사실 표를 뺀 대장 본문이 표를 뺀 본문이다.
+
+| 필드 | 뜻 |
+|---|---|
+| `rows_supported_ledger_table_only` | 값이 다른 대장의 사실 표에만 있던 행 수 |
+| `ledger_table_only` | 그 행 목록. 항목마다 `line`(대장의 행 번호)과 `via`(값이 사실 표에 있던 대장 경로, 정렬). 값·셀 내용은 넣지 않는다 |
+
+기본값에서는 이 두 필드만 더한다. 그 행도 지금처럼 `rows_supported`로 세고, 나머지 필드·경고·`issue_id`·exit code는 v0.30.0과 같다.
+테스트가 v0.30.0(`452c5c0`)에서 캡처한 출력과 비교한다. `--primary-text-only`(API는 `check_support(vault, path, primary_text_only=True)`, 기본 꺼짐)를 켜면
+그 행을 `rows_unsupported`로 세고 `ssot-source-unsupported` 경고를 낸다. `details`는 `cited`에 `reason: "ledger_table_only"`를 더한 것이다.
+두 필드의 값은 켜도 같고, 다른 행의 결과와 경고는 바뀌지 않는다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md> --primary-text-only
+```
+
+원칙은 [W3C PROV-DM](https://www.w3.org/TR/prov-dm/) §5.2.4(Primary Source)에서 빌렸다. 2차 자료는 신뢰성을 따질 수 있게 자신이 나온 1차 출처를 가리켜야 하고,
+무엇이 1차 출처인지는 응용 분야에서 받아들인 관례로 정한다. 여기서는 "다른 대장의 사실 표는 1차 근거가 아니다"를 관례로 정했다. PROV 어휘나 인용 유형 열은 쓰지 않는다.
+PROV-DM에는 순환 규칙이 없다. [PROV-CONSTRAINTS](https://www.w3.org/TR/prov-constraints/)의 비순환 제약은 생성 사건의 순서에 기대는데,
+노트는 고쳐지므로 A(v2)←B←A(v1)은 PROV에서 정상 연쇄다. 그래서 인용 그래프를 따라가거나 순환을 찾지 않는다.
+사실 표를 근거로 치지 않으므로 서로 인용(A↔B)과 표를 거치는 더 긴 연쇄가 한 번에 드러난다.
 
 ### 경고 우선 원칙
 
@@ -136,8 +164,12 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
   정제본의 개념 위키링크도 원문에 없는 이름으로 잡히기 쉽다.
 - `check-support`는 값이 출처 본문 어딘가에 있는지만 본다. 같은 주체·관계·기간에 대한 서술인지, 부정문인지는 판단하지 않는다.
   행의 상태(확정·기각 등)와 관계없이 모든 행을 같은 방식으로 본다.
-- 사실 표를 빼는 것은 대장이 자기 자신을 인용할 때뿐이다. 인용한 노트가 다른 대장이면 그 대장의 사실 표도 본문으로
-  비교하므로, 두 대장이 서로를 출처로 인용하면 원문 근거 없이 서로의 행을 뒷받침하는 순환이 생길 수 있다.
+- 기본값은 다른 대장의 사실 표에 있는 값도 뒷받침으로 센다. 두 대장이 서로를 출처로 인용하면 원문 근거 없이 서로의 행을
+  뒷받침할 수 있고, 기본값에서는 `ledger_table_only`로만 드러난다. 뒷받침되지 않은 것으로 세려면 `--primary-text-only`를 켠다.
+- `ledger_table_only`는 표 구조만 보는 규칙이며 출처 계보(provenance)를 판정하지 않는다. 대장의 산문(사실 표 밖 본문)이나
+  대장 값을 옮겨 적은 일반 요약 노트를 거친 값은 1차 근거로 센다. 사실 표가 아닌 본문이 PROV-DM이 말하는 1차 출처라는 뜻도 아니다.
+- `parse_ledger`가 상한(사실 표 8개, 행 256개, 열 32개, 칸 4 KiB) 초과나 NUL 문자로 거절하는 노트는 사실 표가 없는 노트로 본다.
+  그런 노트의 표, 코드 펜스·들여쓰기 안의 표, `subject`·`relation`·`value`(또는 별칭) 열이 없는 표에 있는 값은 1차 근거로 센다.
 - 경계 규칙은 값의 처음·끝 글자가 ASCII 영숫자일 때만 적용된다. `-5`처럼 부호로 시작하는 값은 앞쪽 경계를 보지 않아
   `10-5` 같은 범위 표기 안에서도 일치로 센다.
 - 경로 없이 쓴 `[[이름]]`이 deny·exclude·runtime 구역에만 있으면 구역을 목록에 넣지 않으므로 `not_found`로 보고한다.
@@ -146,7 +178,7 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
   변경 시각 포함)만 비교한다. 크기와 수정 시각이 그대로인 채 바뀐 인용 노트는 놓칠 수 있다.
 - frontmatter·첨부(PDF 등)·deny 구역 원문과는 비교하지 않는다. 값과 노트가 서로 다른 별칭·표기를 쓰면 놓친다.
 - 해석은 파일명 정확 일치다. Obsidian의 대소문자 무시·별칭 해석과 결과가 다를 수 있다.
-- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-17 기준). 근거는 단위 테스트의 합성 자료뿐이다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-17 기준, `ledger_table_only`는 2026-10-24 기준). 근거는 단위 테스트의 합성 자료뿐이다.
 
 ## 수집과 경고
 

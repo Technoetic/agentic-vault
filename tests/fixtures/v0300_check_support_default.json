@@ -1,0 +1,36 @@
+{
+ "bom": [
+  "ledgers/C.md"
+ ],
+ "captured_from": "agentic-vault v0.30.0 (452c5c0) vault_ssot.py check-support default CLI, captured 2026-10-24",
+ "cases": {
+  "A": {
+   "exit": 0,
+   "path": "ledgers/A.md",
+   "stderr": "",
+   "stdout": "{\"authority\":\"warning_only_not_fact_verification\",\"cited_notes\":[{\"bytes\":1407,\"path\":\"ledgers/A.md\",\"sha256\":\"a687d70f1891df0c41fe1ad40e8181fd3e628ab5093a0cd67afbf40f13d9a174\"},{\"bytes\":754,\"path\":\"ledgers/B.md\",\"sha256\":\"492b493902eec3d770bcca3db26766ea4fd07bf14f70a653671a8b5f2a0c20b2\"},{\"bytes\":162,\"path\":\"ledgers/C.md\",\"sha256\":\"39f5db577e4f651ff10419e9fee6a810b633e77f781fbc932343f84e3790ac03\"},{\"bytes\":118,\"path\":\"ledgers/Legacy.md\",\"sha256\":\"d1804e74712be2e62863ba3ff8b90ab7278ee97546c6dfc0297462848061e962\"},{\"bytes\":773,\"path\":\"ledgers/Many.md\",\"sha256\":\"53c28eba3762f8fe9f2973dfe5a2d4427e2b5d4a2ea57c8c779573d8df90dbe3\"},{\"bytes\":57,\"path\":\"notes/Evidence.md\",\"sha256\":\"1febc718c3ee1ef732516c16d442211a5b1793a609bca9feebf748c00d1c7373\"},{\"bytes\":56,\"path\":\"notes/Table.md\",\"sha256\":\"6d4b7a0fbc617905c6838ed49a140d260d94225b0e689fe0bbe4c1c8ae743ea6\"}],\"incomplete\":[],\"method\":\"normalized_literal_presence_in_cited_note_body\",\"path\":\"ledgers/A.md\",\"rows_checked\":13,\"rows_skipped\":0,\"rows_supported\":12,\"rows_unresolved\":0,\"rows_unsupported\":1,\"source_sha256\":\"a687d70f1891df0c41fe1ad40e8181fd3e628ab5093a0cd67afbf40f13d9a174\",\"warnings\":[{\"code\":\"ssot-source-unsupported\",\"details\":{\"cited\":[\"ledgers/B.md\"]},\"issue_id\":\"ssot-b7a5551e15645609836a\",\"line\":11,\"message\":\"source unsupported\",\"path\":\"ledgers/A.md\",\"severity\":\"warning\"},{\"code\":\"ssot-source-unresolved\",\"details\":{\"reason\":\"not_found\",\"reference\":\"Missing\"},\"issue_id\":\"ssot-3882a477f943bf49456c\",\"line\":19,\"message\":\"source unresolved\",\"path\":\"ledgers/A.md\",\"severity\":\"warning\"}]}\n"
+  },
+  "B": {
+   "exit": 0,
+   "path": "ledgers/B.md",
+   "stderr": "",
+   "stdout": "{\"authority\":\"warning_only_not_fact_verification\",\"cited_notes\":[{\"bytes\":1407,\"path\":\"ledgers/A.md\",\"sha256\":\"a687d70f1891df0c41fe1ad40e8181fd3e628ab5093a0cd67afbf40f13d9a174\"}],\"incomplete\":[],\"method\":\"normalized_literal_presence_in_cited_note_body\",\"path\":\"ledgers/B.md\",\"rows_checked\":6,\"rows_skipped\":0,\"rows_supported\":6,\"rows_unresolved\":0,\"rows_unsupported\":0,\"source_sha256\":\"492b493902eec3d770bcca3db26766ea4fd07bf14f70a653671a8b5f2a0c20b2\",\"warnings\":[]}\n"
+  },
+  "C": {
+   "exit": 0,
+   "path": "ledgers/C.md",
+   "stderr": "",
+   "stdout": "{\"authority\":\"warning_only_not_fact_verification\",\"cited_notes\":[{\"bytes\":1407,\"path\":\"ledgers/A.md\",\"sha256\":\"a687d70f1891df0c41fe1ad40e8181fd3e628ab5093a0cd67afbf40f13d9a174\"}],\"incomplete\":[],\"method\":\"normalized_literal_presence_in_cited_note_body\",\"path\":\"ledgers/C.md\",\"rows_checked\":1,\"rows_skipped\":0,\"rows_supported\":1,\"rows_unresolved\":0,\"rows_unsupported\":0,\"source_sha256\":\"39f5db577e4f651ff10419e9fee6a810b633e77f781fbc932343f84e3790ac03\",\"warnings\":[]}\n"
+  }
+ },
+ "files": {
+  "00-meta/vault-config.json": "{\"deny_zones\": [\"private\"], \"exclude_dirs\": [\"excluded\"]}",
+  "ledgers/A.md": "---\ntitle: A\n---\n# A 대장\n\n| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by | status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Atlas | retention | 24개월 | 2025-01-01 |  | 2026-10-07 | [[B]] |  | confirmed |\n| Atlas | retention | 12개월 | 2025-01-01 |  | 2026-10-07 | [[B]], [[Evidence]] |  | confirmed |\n| Atlas | retention | 36개월 | 2025-01-01 |  | 2026-10-07 | [[B]] |  | confirmed |\n| Atlas | retention | 48개월 | 2025-01-01 |  | 2026-10-07 | [[B]] |  | confirmed |\n| Atlas | retention | 60개월 | 2025-01-01 |  | 2026-10-07 | [[C]] |  | confirmed |\n| Atlas | retention | 84개월 | 2025-01-01 |  | 2026-10-07 | [[C]] |  | confirmed |\n| Atlas | retention | 72개월 | 2025-01-01 |  | 2026-10-07 | [[Table]] |  | confirmed |\n| Atlas | retention | 96개월 | 2025-01-01 |  | 2026-10-07 | [[Legacy]] |  | confirmed |\n| Atlas | retention | 108개월 | 2025-01-01 |  | 2026-10-07 | [[Many]] |  | confirmed |\n| Atlas | retention | 120개월 | 2025-01-01 |  | 2026-10-07 | [[#근거]], [[B]] |  | confirmed |\n| Atlas | retention | 132개월 | 2025-01-01 |  | 2026-10-07 | [[#근거]], [[B]] |  | confirmed |\n| Atlas | retention | 24개월 | 2025-01-01 |  | 2026-10-07 | [[Missing]], [[B]] |  | confirmed |\n| Atlas | retention | 144개월 | 2025-01-01 |  | 2026-10-07 | [[B]], [[Legacy]] |  | confirmed |\n\n## 근거\n세부 값 120개월.\n",
+  "ledgers/B.md": "---\ntitle: B\n---\n# B 대장\n\n| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by | status |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| Atlas | retention | 24개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n| Atlas | retention | 12개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n| Atlas | retention | 132개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n| Atlas | retention | 144개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n| Atlas | retention | 36개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n| Atlas | retention | 120개월 | 2025-01-01 |  | 2026-10-07 | [[A]] |  | confirmed |\n\n메모: 36개월 기준은 별도 문서에 있다.\n",
+  "ledgers/C.md": "---\ntitle: C\n---\n# 근거 대장\n| 주체 | 항목 | 값 | 출처 |\n| --- | --- | --- | --- |\n| Atlas | retention | 60개월 | [[A]] |\n기간 메모: 84개월\n",
+  "ledgers/Legacy.md": "| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 96개월 |\n| Atlas | retention | 144개월 |\n",
+  "ledgers/Many.md": "| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n\n| subject | relation | value |\n| --- | --- | --- |\n| Atlas | retention | 108개월 |\n",
+  "notes/Evidence.md": "---\ntitle: Evidence\n---\n보존 기간은 12개월이다.\n",
+  "notes/Table.md": "| 이름 | 수량 |\n| --- | --- |\n| 부품 | 72개월 |\n"
+ }
+}
