@@ -596,6 +596,9 @@ def _format_text(report: dict) -> str:
             f"host_next_action: {host['next_action']}",
             f"host_trust_boundary: {host['trust_boundary']}",
         ])
+    if "session_evidence" in report:
+        from vault_session_evidence import text_lines
+        lines.extend(text_lines(report["session_evidence"]))
     return "\n".join(lines)
 
 
@@ -613,12 +616,36 @@ def main(argv: list[str] | None = None) -> int:
             "Fail-soft; never changes the exit code."
         ),
     )
+    parser.add_argument(
+        "--session-evidence", type=Path, metavar="TRANSCRIPT_JSONL",
+        help=(
+            "Also read this one Claude Code session transcript (.jsonl; no directory scan) for "
+            "SessionStart hook records, instruction loads, first-turn prompt tokens and API error "
+            "codes. Prints counts, lengths and status words only, never content. The format is "
+            "host-internal and undocumented. Fail-soft; never changes the exit code."
+        ),
+    )
+    parser.add_argument(
+        "--session-instruction-paths", action="store_true",
+        help=(
+            "With --session-evidence, also list the instruction file paths the transcript "
+            "records; they can contain account names."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.session_instruction_paths and args.session_evidence is None:
+        parser.error("--session-instruction-paths requires --session-evidence")
 
     report, exit_code = diagnose(args.vault, instructions=args.instructions)
     if args.host_version:
         # Reported beside the vault diagnosis; the exit code stays the vault's.
         report["host_version"] = diagnose_host_version()
+    if args.session_evidence is not None:
+        # Loaded only on request; the exit code stays the vault's here as well.
+        from vault_session_evidence import diagnose_session_evidence
+        report["session_evidence"] = diagnose_session_evidence(
+            args.session_evidence, include_paths=args.session_instruction_paths,
+        )
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

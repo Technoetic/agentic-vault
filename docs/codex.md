@@ -103,7 +103,8 @@ Claude Code는 2.1.295 이상을 권장한다. 그 이전 버전은 비동기 �
 conversation again on every resume"(2026-10-19 원문 확인). `hooks/hooks.json`은 바꾸지 않았다.
 같은 버전의 `onFailure: "block"`은 훅 실패 시 동작을 막도록 바꾸므로 채택하지 않았고,
 Codex 훅에서는 대응 필드가 확인되지 않았다. `vault_doctor.py --host-version`은 PATH의
-`claude --version`만 확인하며 Codex 버전은 보지 않는다. [확인 방법과 실측 절차](reliability.md#호스트-버전과-sessionstart-실측)
+`claude --version`만 확인하며 Codex 버전은 보지 않는다. 선택형 `--session-evidence`도 Claude Code 세션 기록만
+읽고 Codex 기록은 읽지 않는다. [확인 방법과 실측 절차](reliability.md#호스트-버전과-sessionstart-실측)
 
 ## 사용
 
