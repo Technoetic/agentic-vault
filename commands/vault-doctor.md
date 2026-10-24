@@ -45,13 +45,17 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
 10. 사용자가 SessionStart 훅이 실제로 실행됐는지·잘렸는지·실패했는지 확인을 요청하고 Claude Code 세션 기록 파일
    하나를 지정하거나 승인했을 때만 같은 Doctor에 `--session-evidence "<세션 기록 .jsonl>"`을 추가한다. 기록은 보통
    `~/.claude/projects/<프로젝트 경로로 만든 폴더 이름>/<세션 ID>.jsonl`에 있다(폴더 이름은 전체 경로에서
-   영문자·숫자가 아닌 글자를 `-`로 바꾼 것이다. 예: `C:\work\vault` → `C--work-vault`. 맨 앞의 `~`는 Doctor가 홈
-   폴더로 바꿔 읽는다). 기록 파일을 다른 도구로
+   영문자·숫자가 아닌 글자를 `-`로 바꾼 것이다. 예: `C:\work\vault` → `C--work-vault`. 바꾼 이름이 200자를 넘으면
+   앞 200자 뒤에 `-`와 해시가 붙으므로 `~/.claude/projects`에서 그 앞 200자와 `-`로 시작하는 폴더를 고른다. 맨
+   앞의 `~`는 Doctor가 홈 폴더로 바꿔 읽는다). 기록 파일을 다른 도구로
    열어 읽지 않는다(입력·답변·훅 출력이 모두 들어 있다). `session_evidence`의 `status`(`observed_ran`·
    `observed_truncated`·`observed_error`·`not_recorded`·`unsupported_host_version`·`unparsed`), 훅별
-   `emitted_chars`·`injected_chars`·`truncated`, 실패한 훅의 `outcome`·`exit_code`, 판 범위를 보고한다.
+   `emitted_chars`·`injected_chars`·`truncated`, 실패한 훅의 `outcome`·`exit_code`·
+   `command_mentions_session_start_py`, 판 범위를 보고한다.
    `observed_error`는 훅이 실행되지 않았다거나 기록이 없다는 뜻이 아니라 성공하지 못한 훅 기록이 있다는 뜻이므로
-   그 훅을 확인하도록 안내한다. `not_recorded`를 "실행되지 않음"으로, 첫 응답 토큰을 훅의
-   몫으로, 기록을 "모델이 기억을 사용함"으로 해석하지 않는다. 지침 파일 경로는 사용자가 요청할 때만
+   그 훅을 확인하도록 안내한다. 실패한 훅의 `command_mentions_session_start_py`가 `true`이면 보통 이 플러그인의
+   `session_start.py`(같은 이름의 다른 파일일 수도 있다), `false`이면 다른 훅(다른 플러그인이나 볼트 설정의 훅)이고,
+   `none`이면 기록에 명령이 없어 어느 훅인지 알 수 없다고 말한다. `not_recorded`를 "실행되지 않음"으로, 첫 응답
+   토큰을 훅의 몫으로, 기록을 "모델이 기억을 사용함"으로 해석하지 않는다. 지침 파일 경로는 사용자가 요청할 때만
    `--session-instruction-paths`로 보인다. 종료 코드는 바뀌지 않는다.
    [읽는 값과 한계](../docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)

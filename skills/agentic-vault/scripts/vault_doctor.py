@@ -556,6 +556,24 @@ def diagnose_host_version() -> dict:
         return _host_report("unavailable", "probe_failed")
 
 
+# --session-evidence when its reader cannot be loaded or run (a damaged install):
+# the reader's own probe_failed words, no exception text, the same exit code.
+SESSION_EVIDENCE_UNAVAILABLE = {
+    "schema_version": 1,
+    "status": "unparsed",
+    "reason_code": "probe_failed",
+    "next_action": "check_the_named_transcript_file",
+    "trust_boundary": "host_internal_format_undocumented",
+    "complete": False,
+}
+SESSION_EVIDENCE_UNAVAILABLE_LINES = (
+    "session_evidence: unparsed (probe_failed)",
+    "session_trust_boundary: host_internal_format_undocumented",
+    "session_complete: false",
+    "session_next_action: check_the_named_transcript_file",
+)
+
+
 def _format_text(report: dict) -> str:
     hook = report["hook"]
     lines = [
@@ -597,8 +615,12 @@ def _format_text(report: dict) -> str:
             f"host_trust_boundary: {host['trust_boundary']}",
         ])
     if "session_evidence" in report:
-        from vault_session_evidence import text_lines
-        lines.extend(text_lines(report["session_evidence"]))
+        try:
+            from vault_session_evidence import text_lines
+            session_lines = text_lines(report["session_evidence"])
+        except Exception:  # fail-soft by contract: fixed lines, never exception text
+            session_lines = list(SESSION_EVIDENCE_UNAVAILABLE_LINES)
+        lines.extend(session_lines)
     return "\n".join(lines)
 
 
@@ -642,10 +664,14 @@ def main(argv: list[str] | None = None) -> int:
         report["host_version"] = diagnose_host_version()
     if args.session_evidence is not None:
         # Loaded only on request; the exit code stays the vault's here as well.
-        from vault_session_evidence import diagnose_session_evidence
-        report["session_evidence"] = diagnose_session_evidence(
-            args.session_evidence, include_paths=args.session_instruction_paths,
-        )
+        try:
+            from vault_session_evidence import diagnose_session_evidence
+            evidence = diagnose_session_evidence(
+                args.session_evidence, include_paths=args.session_instruction_paths,
+            )
+        except Exception:  # fail-soft by contract: no exception text, which may quote content
+            evidence = dict(SESSION_EVIDENCE_UNAVAILABLE)
+        report["session_evidence"] = evidence
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
