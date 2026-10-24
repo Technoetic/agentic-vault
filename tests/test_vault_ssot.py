@@ -1117,7 +1117,7 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
         self.write('notes/facts.md', self.rows(('2026-03-05', '[[Other]]'), ('2026년 3분기', '[[Other]]')))
         via = ['notes/Other.md']
         self.assertEqual(self.check(normalize_periods=True)['normalized_periods'], [
-            {'line': 3, 'normalized_match': 'equal', 'via': via},
+            {'line': 3, 'normalized_match': 'equal', 'via': via, 'via_ledger_table_only': via},
             {'line': 4, 'normalized_match': 'equal', 'via': via}])
         self.assertEqual(self.check(normalize_periods=True, primary_text_only=True)['normalized_periods'], [
             {'line': 3, 'normalized_match': 'none'},
@@ -1222,6 +1222,90 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
                         result = json.loads(flagged)
                         self.assertEqual(result['normalized_periods'], [])
                         self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
+
+    def test_qualified_periods_and_partial_ranges_abstain_end_to_end(self):
+        """Never the whole period or one end: 말 with a particle, 초, Q before FY, a yearless range end."""
+        self.write('notes/Plan.md', '2026년 3분기 완공 예정. FY2026 실적 요약. 2026.10.07 출발.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2026년 3분기 말에 완공', '[[Plan]]'), ('2026.10.07~10.09 출장', '[[Plan]]'), ('Q3 FY2026', '[[Plan]]'),
+            ('2026년 3분기 초', '[[Plan]]'), ('2026.10.07~2026.10.09 출장', '[[Plan]]'), ('FY2026 Q3', '[[Plan]]')))
+        via = ['notes/Plan.md']
+        none = {'normalized_match': 'none'}
+        partial = {'normalized_match': 'abstain', 'reason': 'partial_range'}
+        qualifier = {'normalized_match': 'abstain', 'reason': 'period_qualifier'}
+        expected = {
+            None: [none, partial, qualifier, qualifier, none,
+                   {'normalized_match': 'abstain', 'reason': 'fiscal_start_undeclared'}],
+            1: [none, partial, qualifier, qualifier, none, {'normalized_match': 'equal', 'via': via}],
+            4: [{'normalized_match': 'abstain', 'reason': 'quarter_basis_ambiguous'}, partial, qualifier, qualifier,
+                none, {'normalized_match': 'contained', 'via': via}],
+        }
+        default = self.check()
+        for fiscal_start, rows in expected.items():
+            with self.subTest(fiscal_start=fiscal_start):
+                flagged = self.check(normalize_periods=True, fiscal_start=fiscal_start)
+                self.assertEqual(flagged['normalized_periods'], [dict(line=line, **row) for line, row in enumerate(rows, 3)])
+                self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(default))
+        code, out, err = self.run_cli('--normalize-periods', '--fiscal-start', '04')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['normalized_periods'][:3], [dict(line=3, **expected[4][0]),
+                                                                     dict(line=4, **partial), dict(line=5, **qualifier)])
+
+    def test_a_period_only_in_another_ledgers_fact_table_is_marked(self):
+        """One fact row (valid_from, valid_until, recorded) and no prose, against a ledger that also has prose."""
+        fact = ledger([['Beta', 'size', '42', '2025-01-01', '2026-01-01', '2026-10-07', '[[X]]', '', 'confirmed']])
+        self.write('notes/Other.md', fact)
+        self.write('notes/Prose.md', fact + '\n착수일은 2026.10.07이다.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2025년 1월 1일', '[[Other]]'), ('2026.10.07', '[[Other]]'), ('2026.01.01', '[[Other]]'),
+            ('2026년 4분기', '[[Other]]'), ('2026.10.07', '[[Prose]]'), ('2026.10.07', '[[Other]], [[Meeting]]'),
+            ('2026.10.07', '[[Other]], [[Prose]]')))
+        other, prose = ['notes/Other.md'], ['notes/Prose.md']
+        flagged = self.check(normalize_periods=True)
+        self.assertEqual(flagged['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 4, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 5, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 6, 'normalized_match': 'contained', 'via': other, 'via_ledger_table_only': other},
+            {'line': 7, 'normalized_match': 'equal', 'via': prose},
+            {'line': 8, 'normalized_match': 'equal', 'via': self.VIA + other, 'via_ledger_table_only': other},
+            {'line': 9, 'normalized_match': 'equal', 'via': other + prose, 'via_ledger_table_only': other}])
+        # ledger_table_only lists none of them: no value is written as in Other's table, and the
+        # two literal supports (lines 7 and 9) come from Prose's prose.
+        self.assertEqual((flagged['ledger_table_only'], flagged['rows_supported']), ([], 2))
+        primary = self.check(normalize_periods=True, primary_text_only=True)
+        self.assertEqual(primary['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none'}, {'line': 4, 'normalized_match': 'none'},
+            {'line': 5, 'normalized_match': 'none'}, {'line': 6, 'normalized_match': 'none'},
+            {'line': 7, 'normalized_match': 'equal', 'via': prose},
+            {'line': 8, 'normalized_match': 'equal', 'via': self.VIA},
+            {'line': 9, 'normalized_match': 'equal', 'via': prose}])
+        for base, result in (({}, flagged), ({'primary_text_only': True}, primary)):
+            with self.subTest(base=base):
+                self.assertEqual(ssot._encode(self.without_periods(result)), ssot._encode(self.check(**base)))
+        code, out, err = self.run_cli('--normalize-periods')
+        self.assertEqual((code, err, json.loads(out)['normalized_periods']), (0, '', flagged['normalized_periods']))
+        dumped = json.dumps(flagged['normalized_periods'], ensure_ascii=False)
+        for literal in ('2025-01-01', '2026-10-07', '2026.10.07', 'Beta', '42'):
+            self.assertNotIn(literal, dumped)
+
+    def test_a_cited_body_past_the_period_text_limit_is_left_out_and_the_exit_code_kept(self):
+        """NFKC expands U+FDFA to 18 characters, so a 256 KiB note passes vault_period.MAX_TEXT_CHARS."""
+        period = importlib.import_module('vault_period')
+        note = '2026년 3분기 ' + 'ﷺ' * 85_333
+        self.assertLessEqual(len(note.encode('utf-8')), ssot.MAX_BYTES)
+        self.assertGreater(len(ssot._literal(note)), period.MAX_TEXT_CHARS)
+        self.write('notes/Long.md', note)
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Long]]'), ('2026년 3분기', '[[Long]], [[Meeting]]')))
+        code, default, stderr = self.run_cli()
+        self.assertEqual((code, stderr, json.loads(default)['rows_supported']), (0, '', 2))
+        code, flagged, stderr = self.run_cli('--normalize-periods')
+        self.assertEqual((code, stderr), (0, ''))
+        result = json.loads(flagged)
+        self.assertEqual(result['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none', 'incomplete': ['period_text_limit']},
+            {'line': 4, 'normalized_match': 'equal', 'via': self.VIA, 'incomplete': ['period_text_limit']}])
+        self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
 
 
 class DefaultCliRegressionTests(unittest.TestCase):

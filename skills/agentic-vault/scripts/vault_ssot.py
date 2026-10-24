@@ -739,11 +739,28 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                 if records:
                     for cited, forms in bodies.items():
                         if cited not in period_index:
+                            # [index of the compared text, index outside its fact tables (on demand)].
+                            # An index is None when a form is longer than vault_period reads;
+                            # that body is left out of the comparison, never failing the run.
                             compared = outside.get(cited, forms) if primary_text_only else forms
-                            period_index[cited] = period.index([record for form in compared for record in
-                                                                period.parse(form, fiscal_start=fiscal_start)])
-                    period_rows.append(dict(line=row['line'], **period.match(
-                        records, {cited: period_index[cited] for cited in bodies})))
+                            period_index[cited] = [period.index_of(compared, fiscal_start=fiscal_start), None]
+                    entry = dict(line=row['line'], **period.match(records, {
+                        cited: period_index[cited][0] for cited in bodies if period_index[cited][0] is not None}))
+                    # As for ledger_table_only: a via path that would leave via
+                    # without that ledger's fact tables holds only through them.
+                    tables = []
+                    for cited in entry.get('via', []) if not primary_text_only else []:
+                        if cited in outside:
+                            cached = period_index[cited]
+                            if cached[1] is None:
+                                cached[1] = period.index_of(outside[cited], fiscal_start=fiscal_start) or ()
+                            if not period.reaches(records, cached[1], entry['normalized_match']):
+                                tables.append(cited)
+                    if tables:
+                        entry['via_ledger_table_only'] = tables
+                    if any(period_index[cited][0] is None for cited in bodies):
+                        entry['incomplete'] = ['period_text_limit']
+                    period_rows.append(entry)
         if len(warnings) > 1024:
             raise SSOTError('warning_limit')
         # Point-in-time recheck like check: same policy, ledger and cited revisions.
