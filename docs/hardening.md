@@ -245,7 +245,7 @@ CLI는 traceback 없이 같은 stderr 오류와 exit 1로 끝난다. 끄면 이 
 | 필드(켤 때만) | 뜻 |
 |---|---|
 | `normalized_periods` | 행 목록. 해석된 출처 노트와 비교한 행 가운데 값에 기간 표현이 있는 행만 넣는다. 항목마다 `line`, `normalized_match`, `equal`·`contained`이면 `via`(그 구간이 있던 노트 경로, 정렬), `abstain`이면 `reason`. 아래 두 표시는 해당할 때만 붙는다. 값·구간·이름표는 넣지 않는다 |
-| `normalized_periods[].via_ledger_table_only` | `via` 가운데 사실 표를 가려낼 수 있는 다른 대장의 경로로서, 그 행이 인용한 다른 대장의 사실 표를 모두 빼고(`--primary-text-only`와 같은 비교) 다시 비교하면 `via`에서 빠지거나 `normalized_match`가 약해지는 경로(정렬). 그 대장의 사실 표만 빼도 그렇게 되는 경로도 포함한다. 결과가 그 표(`valid_from`·`valid_until`·`recorded` 칸 포함)에 기댄다는 뜻이다. 값의 구간이 여럿이면 한 구간만 표에 있어도 붙는다(값 `2026.01.01~2026.03.31`에서 `2026-01-01`은 그 대장의 `valid_from` 칸에만, `2026.03.31`은 그 대장의 산문에 있을 때). `parse_ledger`가 본문을 거절한 대장(`ledger_tables_unseparated`)은 사실 표를 뺄 수 없어 붙지 않는다. 리터럴 결과와 관계없이 붙는다 |
+| `normalized_periods[].via_ledger_table_only` | `via` 가운데 사실 표를 가려낼 수 있는 다른 대장의 경로로서, 그 행이 인용한 다른 대장의 사실 표를 모두 빼고(`--primary-text-only`와 같은 비교) 다시 비교하면 `via`에서 빠지거나 `normalized_match`가 약해지는 경로(정렬). 그 대장의 사실 표만 빼도 그렇게 되는 경로도 포함한다. 그 경로의 결과가 다른 대장의 사실 표(`valid_from`·`valid_until`·`recorded` 칸 포함)에 기댄다는 뜻이다. 값의 구간이 여럿이면 그중 한 구간만 사실 표 밖 어디에도 없어도 붙는다(값 `2026.01.01~2026.03.31`에서 `2026-01-01`은 그 대장의 `valid_from` 칸에만, `2026.03.31`은 그 대장의 산문에 있을 때). `parse_ledger`가 본문을 거절한 대장(`ledger_tables_unseparated`)은 사실 표를 뺄 수 없어 붙지 않는다. 리터럴 결과와 관계없이 붙는다 |
 | `normalized_periods[].incomplete` | `["period_text_limit"]`. 인용 노트의 정규화 형태가 `vault_period`가 읽는 길이(1,048,576자)를 넘어 그 노트를 이 행의 기간 비교에서 뺐다(`--primary-text-only`를 켜도 같다). 결과는 나머지 노트만으로 낸 것이다 |
 | `period_convention` | `fiscal_start`(없으면 `null`)와 비교 범위·한계를 적은 고정 문자열 `scope` |
 
