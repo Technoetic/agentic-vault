@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,10 @@ QUOTED_NOTICE = (
 )
 # Unicode categories that can end, split or reorder a printed line.
 UNSAFE_CATEGORIES = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp"))
+# Hook stdout the 2.1.309 host replaces: over 10,000 UTF-16 units once trimmed.
+OVER_CAP_STDOUT = "SECRET-STDOUT " + "s" * 20_000 + "\n"
+# Another SessionStart hook, as a vault's own settings can add one.
+VAULT_HOOK_COMMAND = 'powershell -NoProfile -File "D:/SECRET-VAULT/00-meta/scripts/local-llm-up.ps1"'
 
 
 def utf16_units(text: str) -> int:
@@ -406,7 +411,8 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         )
         for content, expected in cases:
             with self.subTest(content=content[:60]):
-                self.assertIs(self.evidence._truncated(content), expected)
+                # A stdout the host would replace, so only the shape of the content decides.
+                self.assertIs(self.evidence._truncated(content, OVER_CAP_STDOUT), expected)
 
     def test_notices_of_unsaved_output_are_observed_truncated(self) -> None:
         stdout = "SECRET-STDOUT " + "z" * 18_000 + "\n"
@@ -438,6 +444,70 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         saved = self.diagnose(hook_record(stdout=long_stdout, content=persisted_notice(long_stdout)))
         self.assert_status(saved, "observed_truncated", "session_start_output_truncated")
         self.assertIs(saved["session_start_hooks"]["entries"][0]["truncated"], True)
+
+    def test_a_notice_counts_only_when_the_host_could_have_written_it(self) -> None:
+        failed_line = ("\n\n[Hook stdout truncated at 10000 chars " + chr(0x2014)
+                       + " persist-to-disk failed: EACCES]")
+        # Hook text that quotes or carries a notice: the host keeps it as the content.
+        unchanged = (
+            ("quoted persist-failed line",
+             "=== HOT CONTEXT ===\nM-0xx: when saving failed the host left only this line:"
+             + failed_line + "\n"),
+            ("quoted not-saved notice",
+             "<truncated-output>\nOutput too large (18.0KB). It could not be saved, so only the first "
+             "9.8KB are shown.\n</truncated-output>\n"),
+            ("short output that is a whole saved notice",
+             persisted_notice("SECRET-STDOUT " + "y" * 2000) + "\n"),
+            # Over the cap, yet the content equals the trimmed stdout: not replaced.
+            ("long output that is a whole saved notice",
+             "<persisted-output>\nOutput too large (1MB). Full output saved to: p\n\nPreview (first 2KB):\n"
+             + "y" * 12_000 + "\n...\n</persisted-output>\n"),
+            ("long output that ends with a persist-failed line", "y" * 20_000 + failed_line),
+        )
+        for name, stdout in unchanged:
+            with self.subTest(case=name):
+                content = stdout.strip()
+                self.assertIs(self.evidence._truncated(content, stdout), False)
+                report = self.diagnose(hook_record(stdout=stdout, content=content))
+                self.assert_status(report, "observed_ran", "session_start_hook_recorded")
+                self.assertEqual(report["next_action"], "none")
+                self.assertEqual(report["session_start_hooks"]["truncated"], 0)
+        # Replaced by the host: every form still counts.
+        for name, content in (("saved", persisted_notice(OVER_CAP_STDOUT)),
+                              ("not saved", not_saved_notice(OVER_CAP_STDOUT)),
+                              ("persist failed", persist_failed_notice(OVER_CAP_STDOUT))):
+            with self.subTest(case=name):
+                self.assertIs(self.evidence._truncated(content, OVER_CAP_STDOUT), True)
+                report = self.diagnose(hook_record(stdout=OVER_CAP_STDOUT, content=content))
+                self.assert_status(report, "observed_truncated", "session_start_output_truncated")
+
+    def test_the_cap_applies_to_the_trimmed_stdout_in_utf16_units(self) -> None:
+        notice = persist_failed_notice("x" * 10_000)
+        emoji = chr(0x1F600)  # two UTF-16 units
+        cases = (
+            ("x" * 10_000, False),
+            ("x" * 10_001, True),
+            ("x" * 10_000 + "\n", False),
+            (" " + chr(9) + "x" * 10_000 + chr(13) + chr(10), False),
+            # JavaScript trim removes U+FEFF and keeps U+001C and U+0085; Python's strip() differs.
+            (chr(0xFEFF) + "x" * 10_000, False),
+            (chr(0x1C) + "x" * 10_000, True),
+            (chr(0x85) + "x" * 10_000, True),
+            (emoji * 5_000, False),
+            (emoji * 5_000 + "x", True),
+        )
+        for stdout, expected in cases:
+            with self.subTest(head=hex(ord(stdout[0])), length=len(stdout)):
+                self.assertIs(self.evidence._truncated(notice, stdout), expected)
+
+    def test_the_trim_is_javascript_trim(self) -> None:
+        space_separators = {chr(code) for code in range(0x110000)
+                            if unicodedata.category(chr(code)) == "Zs"}
+        # ECMAScript WhiteSpace (TAB, VT, FF, ZWNBSP, Zs) and LineTerminator (LF, CR, LS, PS).
+        expected = ({chr(9), chr(11), chr(12), chr(0xFEFF)} | space_separators
+                    | {chr(10), chr(13), chr(0x2028), chr(0x2029)})
+        self.assertEqual(set(self.evidence._JS_TRIM), expected)
+        self.assertEqual(len(self.evidence._JS_TRIM), len(expected))
 
     def test_sources_other_records_and_other_events(self) -> None:
         sources = ("startup", "resume", "clear", "compact", "fork", "SECRET-SOURCE")
@@ -471,17 +541,19 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         cases = (
             (failure_record("hook_non_blocking_error"),
              {"source": "startup", "outcome": "non_blocking_error", "exit_code": 127,
-              "duration_ms": 40}),
+              "duration_ms": 40, "command_mentions_session_start_py": True}),
             (blocking_exit_record(),
              {"source": "startup", "outcome": "non_blocking_error", "exit_code": 2,
-              "duration_ms": None}),
+              "duration_ms": None, "command_mentions_session_start_py": False}),
             (failure_record("hook_blocking_error", source="clear"),
-             {"source": "clear", "outcome": "blocking_error", "exit_code": None, "duration_ms": None}),
+             {"source": "clear", "outcome": "blocking_error", "exit_code": None, "duration_ms": None,
+              "command_mentions_session_start_py": True}),
             (failure_record("hook_cancelled", source="resume"),
-             {"source": "resume", "outcome": "cancelled", "exit_code": None, "duration_ms": 60_000}),
+             {"source": "resume", "outcome": "cancelled", "exit_code": None, "duration_ms": 60_000,
+              "command_mentions_session_start_py": True}),
             (failure_record("hook_error_during_execution", source="compact"),
              {"source": "compact", "outcome": "error_during_execution", "exit_code": None,
-              "duration_ms": 3}),
+              "duration_ms": 3, "command_mentions_session_start_py": True}),
         )
         for record, entry in cases:
             with self.subTest(outcome=entry["outcome"], exit_code=entry["exit_code"]):
@@ -525,12 +597,56 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         self.assertEqual((hooks["failed"], hooks["unrecognized"]), (2, 1))
         self.assertEqual(hooks["failed_entries"], [
             {"source": "startup", "outcome": "non_blocking_error", "exit_code": None,
-             "duration_ms": None},
-            {"source": "other", "outcome": "non_blocking_error", "exit_code": 127, "duration_ms": 40},
+             "duration_ms": None, "command_mentions_session_start_py": True},
+            {"source": "other", "outcome": "non_blocking_error", "exit_code": 127, "duration_ms": 40,
+             "command_mentions_session_start_py": True},
         ])
         # Without a usable name the record is counted, never guessed.
         alone = self.diagnose(nameless)
         self.assert_status(alone, "unparsed", "hook_record_shape_unrecognized")
+
+    def test_failure_exit_codes_outside_the_allowlist_become_none(self) -> None:
+        cases = (
+            (True, None), (False, None), (2 ** 53, None), (-(2 ** 53), None), (1.0, None),
+            (2 ** 53 - 1, 2 ** 53 - 1), (-(2 ** 53 - 1), -(2 ** 53 - 1)), (0, 0), (-1, -1),
+        )
+        for exit_code, expected in cases:
+            with self.subTest(exit_code=exit_code):
+                record = failure_record()
+                record["attachment"]["exitCode"] = exit_code
+                entry = self.diagnose(record)["session_start_hooks"]["failed_entries"][0]
+                self.assertEqual((entry["exit_code"], type(entry["exit_code"])),
+                                 (expected, type(expected)))
+
+    def test_a_failed_entry_says_whether_its_command_names_session_start_py(self) -> None:
+        # This plugin's hook ran and another SessionStart hook failed.
+        vault_hook = failure_record()
+        vault_hook["attachment"]["command"] = VAULT_HOOK_COMMAND
+        no_command = failure_record("hook_cancelled")
+        del no_command["attachment"]["command"]
+        odd_command = failure_record("hook_error_during_execution")
+        odd_command["attachment"]["command"] = ["SECRET-COMMAND", "session_start.py"]
+        blocking_other = failure_record("hook_blocking_error")
+        blocking_other["attachment"]["blockingError"]["command"] = OTHER_COMMAND
+        blocking_odd = failure_record("hook_blocking_error")
+        blocking_odd["attachment"]["blockingError"] = "SECRET-BLOCKING session_start.py"
+        late = failure_record()
+        late["attachment"]["command"] = "sh " + "x" * 8192 + " session_start.py"
+        report = self.diagnose(
+            hook_record(), vault_hook, no_command, odd_command, failure_record("hook_blocking_error"),
+            blocking_other, blocking_odd, blocking_exit_record(), late,
+        )
+
+        self.assert_status(report, "observed_error", "session_start_hook_failed")
+        hooks = report["session_start_hooks"]
+        self.assertIs(hooks["entries"][0]["command_mentions_session_start_py"], True)
+        self.assertEqual(
+            [(entry["outcome"], entry["command_mentions_session_start_py"])
+             for entry in hooks["failed_entries"]],
+            [("non_blocking_error", False), ("cancelled", None), ("error_during_execution", None),
+             ("blocking_error", True), ("blocking_error", False), ("blocking_error", None),
+             ("non_blocking_error", False), ("non_blocking_error", False)],
+        )
 
     def test_unrecognized_hook_shapes_are_counted_not_guessed(self) -> None:
         broken = hook_record()
@@ -547,6 +663,14 @@ class SessionStartHookTests(SessionEvidenceTestCase):
             (mixed["session_start_hooks"]["records"], mixed["session_start_hooks"]["unrecognized"]),
             (1, 1),
         )
+
+        # Without a stdout the host's own test cannot be applied: never judged truncated.
+        no_stdout = hook_record(stdout=OVER_CAP_STDOUT, content=persisted_notice(OVER_CAP_STDOUT))
+        del no_stdout["attachment"]["stdout"]
+        alone = self.diagnose(no_stdout)
+        self.assert_status(alone, "unparsed", "hook_record_shape_unrecognized")
+        hooks = alone["session_start_hooks"]
+        self.assertEqual((hooks["unrecognized"], hooks["records"], hooks["truncated"]), (1, 0, 0))
 
     def test_numbers_outside_the_allowlist_become_none(self) -> None:
         cases = (
@@ -569,8 +693,8 @@ class SessionStartHookTests(SessionEvidenceTestCase):
                                  None if command is None else True)
 
     def test_listing_is_bounded_but_counts_are_whole(self) -> None:
-        notice = persisted_notice("SECRET-STDOUT " + "z" * 20_000)
-        records = [hook_record(content=notice) for _ in range(60)]
+        notice = persisted_notice(OVER_CAP_STDOUT)
+        records = [hook_record(stdout=OVER_CAP_STDOUT, content=notice) for _ in range(60)]
         records += [failure_record() for _ in range(60)]
         records += [instructions_record() for _ in range(60)]
         report = self.diagnose(*records)
@@ -716,6 +840,18 @@ class InstructionUsageAndErrorTests(SessionEvidenceTestCase):
         # Two unsafe paths, 11 over the per-record bound and one non-string removal.
         self.assertEqual(entry["paths_omitted"], 14)
         self.assertNotIn(SECRET, json.dumps(shown))
+
+    def test_a_path_of_1024_characters_is_kept_and_one_of_1025_is_counted(self) -> None:
+        kept = "PATHMARK-" + "p" * (1024 - len("PATHMARK-"))
+        omitted = kept + "q"
+        self.assertEqual((len(kept), len(omitted)), (1024, 1025))
+        record = instructions_record((omitted, kept), removed=[kept, omitted])
+        shown = self.evidence.diagnose_session_evidence(self.transcript(record), include_paths=True)
+
+        entry = shown["instructions"]["entries"][0]
+        self.assertEqual((entry["paths"], entry["removed_paths"], entry["paths_omitted"]),
+                         ([kept], [kept], 2))
+        self.assertEqual(shown["limits"]["path_chars"], 1024)
 
     def test_paths_that_could_split_or_reorder_a_printed_line_are_omitted(self) -> None:
         # chr() keeps this file free of invisible characters.
@@ -1233,12 +1369,29 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
             "session_host_versions: min=2.1.300; max=2.1.300",
             "session_start_hook_records: 0; truncated=0; failed=1; unrecognized=0; other_records=0",
             "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "
-            "duration_ms=40",
+            "duration_ms=40; command_mentions_session_start_py=true",
             "session_instruction_records: 0; files=0; removed_files=0; unrecognized=0",
             "session_first_turn_prompt_tokens: none",
             "session_api_errors: 1; 529=1; without_status=0",
             "session_next_action: check_the_failed_session_start_hook",
         ])
+        self.assertNotIn(SECRET, text)
+
+    def test_text_lines_tell_this_plugins_hook_from_a_failed_vault_hook(self) -> None:
+        ready = self.make_vault("ready")
+        vault_hook = failure_record()
+        vault_hook["attachment"].update(command=VAULT_HOOK_COMMAND, exitCode=1, durationMs=3000)
+        transcript = self.transcript(hook_record(stdout="=== HOT ===\nnotes\n"), vault_hook)
+        code, text = self.run_main(ready, "--session-evidence", str(transcript))
+
+        self.assertEqual(code, 0)
+        lines = text[len(READY_TEXT):].splitlines()
+        self.assertEqual(lines[0], "session_evidence: observed_error (session_start_hook_failed)")
+        self.assertIn("session_start_hook: source=startup; exit_code=0; duration_ms=812; emitted_chars=18; "
+                      "injected_chars=17; truncated=false; command_mentions_session_start_py=true", lines)
+        self.assertIn("session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=1; "
+                      "duration_ms=3000; command_mentions_session_start_py=false", lines)
+        self.assertEqual(lines[-1], "session_next_action: check_the_failed_session_start_hook")
         self.assertNotIn(SECRET, text)
 
     def test_a_path_cannot_forge_a_status_line_in_the_text_output(self) -> None:
@@ -1312,7 +1465,8 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
                             self.assertNotIn(PATH_MARK, printed)
                         if output == "text":
                             self.assertIn("session_start_hook_failed: source=clear; "
-                                          "outcome=blocking_error; exit_code=none; duration_ms=none",
+                                          "outcome=blocking_error; exit_code=none; duration_ms=none; "
+                                          "command_mentions_session_start_py=true",
                                           printed.splitlines())
                         if output == "json":
                             block = json.loads(printed)["session_evidence"]
@@ -1326,17 +1480,23 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
                             )
                             self.assertEqual(hooks["failed_entries"], [
                                 {"source": "startup", "outcome": "non_blocking_error",
-                                 "exit_code": 0, "duration_ms": 812},
+                                 "exit_code": 0, "duration_ms": 812,
+                                 "command_mentions_session_start_py": True},
                                 {"source": "startup", "outcome": "non_blocking_error",
-                                 "exit_code": 127, "duration_ms": 40},
+                                 "exit_code": 127, "duration_ms": 40,
+                                 "command_mentions_session_start_py": True},
                                 {"source": "clear", "outcome": "blocking_error",
-                                 "exit_code": None, "duration_ms": None},
+                                 "exit_code": None, "duration_ms": None,
+                                 "command_mentions_session_start_py": True},
                                 {"source": "resume", "outcome": "cancelled",
-                                 "exit_code": None, "duration_ms": 60_000},
+                                 "exit_code": None, "duration_ms": 60_000,
+                                 "command_mentions_session_start_py": True},
                                 {"source": "compact", "outcome": "error_during_execution",
-                                 "exit_code": None, "duration_ms": 3},
+                                 "exit_code": None, "duration_ms": 3,
+                                 "command_mentions_session_start_py": True},
                                 {"source": "startup", "outcome": "non_blocking_error",
-                                 "exit_code": 2, "duration_ms": None},
+                                 "exit_code": 2, "duration_ms": None,
+                                 "command_mentions_session_start_py": False},
                             ])
                             self.assertEqual(block["instructions"]["records"], 1)
                             if paths:
@@ -1367,6 +1527,60 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
         self.assertEqual(code, 1)
         self.assertEqual(report["host_version"], block)
         self.assertEqual(report["session_evidence"]["status"], "observed_ran")
+
+    def test_the_fallback_block_uses_the_readers_own_words(self) -> None:
+        own = self.evidence._empty_report("unparsed", "probe_failed", False)
+        block = self.doctor.SESSION_EVIDENCE_UNAVAILABLE
+        self.assertEqual(block, {key: own[key] for key in block})
+        prefixes = ("session_evidence:", "session_trust_boundary:", "session_complete:",
+                    "session_next_action:")
+        self.assertEqual(list(self.doctor.SESSION_EVIDENCE_UNAVAILABLE_LINES),
+                         [line for line in self.evidence.text_lines(own) if line.startswith(prefixes)])
+
+    def test_a_reader_that_cannot_be_loaded_gives_a_fixed_unparsed_block(self) -> None:
+        ready = self.make_vault("ready")
+        degraded = self.make_vault("degraded", hot_max_tokens=1)
+        degraded_code, degraded_json = self.run_main(degraded, "--format", "json")
+        self.assertEqual(degraded_code, 1)
+        transcript = self.transcript(hook_record())
+        # A copy of the plugin with a damaged reader; the doctor finds its hook from its own path.
+        copy = self.root / "SECRET-COPY"
+        ignore = shutil.ignore_patterns("__pycache__")
+        shutil.copytree(REPO_ROOT / "hooks", copy / "hooks", ignore=ignore)
+        scripts = copy / "skills" / "agentic-vault" / "scripts"
+        shutil.copytree(SCRIPTS, scripts, ignore=ignore)
+        environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        fallback_text = "".join(line + "\n" for line in self.doctor.SESSION_EVIDENCE_UNAVAILABLE_LINES)
+        damages = {
+            "syntax_error": "def SECRET_BROKEN(:\n",
+            "error_at_import": 'raise RuntimeError("SECRET-IMPORT-ERROR")\n',
+        }
+        runs = (
+            (ready, "text", 0, None),
+            (ready, "json", 0, READY_REPORT),
+            (degraded, "json", 1, json.loads(degraded_json)),
+        )
+        for damage, source in damages.items():
+            (scripts / "vault_session_evidence.py").write_text(source, encoding="utf-8")
+            for vault, output, expected_code, expected_report in runs:
+                with self.subTest(damage=damage, vault=vault.name, output=output):
+                    result = subprocess.run(
+                        [sys.executable, str(scripts / "vault_doctor.py"), "--vault", str(vault),
+                         "--format", output, "--session-evidence", str(transcript)],
+                        cwd=self.root, env=environment, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, check=False, timeout=60,
+                    )
+                    # The vault's exit code and output, no traceback and no exception text.
+                    self.assertEqual(result.returncode, expected_code, result.stderr[-2000:])
+                    self.assertEqual(result.stderr, b"")
+                    self.assertNotIn(SECRET.encode("ascii"), result.stdout)
+                    if output == "json":
+                        report = json.loads(result.stdout)
+                        self.assertEqual(report.pop("session_evidence"),
+                                         self.doctor.SESSION_EVIDENCE_UNAVAILABLE)
+                        self.assertEqual(report, expected_report)
+                    else:
+                        self.assertEqual(result.stdout, platform_bytes(READY_TEXT + fallback_text))
 
 
 if __name__ == "__main__":

@@ -117,14 +117,18 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --host-ve
 
 ### 세션 기록으로 SessionStart 실행 확인 (선택)
 
+v0.31.0의 선택형 기능이다. 지정한 Claude Code 세션 기록 파일 하나에서 SessionStart 훅이 실행·잘림·실패로
+기록됐는지 본다.
+
 ```text
 python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --session-evidence "<세션 기록 .jsonl 파일>" --format json
 ```
 
 Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로로 만든 폴더 이름>/<세션 ID>.jsonl`에 쓴다.
 폴더 이름은 프로젝트 폴더 이름이 아니라 전체 경로에서 영문자·숫자가 아닌 글자를 모두 `-`로 바꾼 것이다(예:
-`C:\work\vault` → `C--work-vault`, 2.1.309 실행 파일 기준). 이 형식은
-호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
+`C:\work\vault` → `C--work-vault`, 2.1.309 실행 파일 기준). 바꾼 이름이 200자를 넘으면 앞 200자 뒤에 `-`와
+해시가 붙으므로, 그때는 `~/.claude/projects`의 폴더 가운데 바꾼 이름의 앞 200자와 `-`로 시작하는 폴더를 고른다.
+이 형식은 호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
 있으므로 관측한 기록 모양만 해석하고, 모양이 다른 기록은 추측하지 않고 센다.
 
 `--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 경로가 `~`로 시작하면 셸이 바꾸지 않고 넘겨도
@@ -145,10 +149,12 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두 센다.
   - 성공하지 못한 SessionStart 훅 기록(`hook_non_blocking_error`·`hook_blocking_error`·`hook_cancelled`·
     `hook_error_during_execution`)마다 `source`, `outcome`(`non_blocking_error`·`blocking_error`·`cancelled`·
-    `error_during_execution` 가운데 하나), `exit_code`, `duration_ms`만 남긴다. stdout·stderr·명령·내용은 출력하지
-    않는다. 수는 `failed`, 목록은 `failed_entries`(50건까지)다. 2.1.309 실행 파일에서는 0이 아닌 종료 코드가
-    `hook_non_blocking_error`이고(종료 코드 2의 차단 오류도 이 모양으로 바뀐다), 시간 초과·취소가
-    `hook_cancelled`(종료 코드 없음), 훅을 실행하기 전이나 실행하는 중의 호스트 오류가
+    `error_during_execution` 가운데 하나), `exit_code`, `duration_ms`, `command_mentions_session_start_py`만
+    남긴다. 마지막 값은 성공 기록과 같은 방식으로 정하고(`hook_blocking_error`는 `blockingError` 안의 명령을 본다),
+    명령 문자열이 없으면 `none`이다. 다른 훅의 실패도 같은 목록에 오므로 이 값으로 이 플러그인의 훅인지 가린다.
+    stdout·stderr·명령·내용은 출력하지 않는다. 수는 `failed`, 목록은 `failed_entries`(50건까지)다. 2.1.309
+    실행 파일에서는 0이 아닌 종료 코드가 `hook_non_blocking_error`이고(종료 코드 2의 차단 오류도 이 모양으로
+    바뀐다), 시간 초과·취소가 `hook_cancelled`(종료 코드 없음), 훅을 실행하기 전이나 실행하는 중의 호스트 오류가
     `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제 세션 기록에서 관측한 것은 아니다.
   - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
     `compaction`·`other`, 없으면 `none`), `changed`. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두
@@ -163,9 +169,11 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   보고하고, 수는 `failed`·`truncated`·`records`에 모두 센다.
   - `observed_error`: 성공하지 못한 SessionStart 훅 기록(위 네 종류)이 하나 이상 있다. 호스트가 그 훅을 실행하려
     했다는 기록이며 "실행되지 않음"도 "기록 없음"도 아니다. 다음 조치는 실패한 훅을 확인하는 것이다
-    (`check_the_failed_session_start_hook`). 오류 문구는 출력하지 않으므로 원인은 그 훅 명령을 직접 실행하거나
-    디버그 로그(아래 절차)로 확인한다. 예를 들어 이 플러그인의 `run_python_hook.sh`는 Python 3.10 이상을 찾지
-    못하면 종료 코드 127로 끝난다.
+    (`check_the_failed_session_start_hook`). 이 플러그인의 훅이 실행됐어도 다른 플러그인이나 볼트 설정의 훅이
+    실패하면 이 상태이므로, 실패 기록의 `command_mentions_session_start_py`(`true`는 보통 이 플러그인의 훅,
+    `false`는 다른 훅, `none`은 알 수 없음)로 어느 훅인지 가린다. 오류 문구는 출력하지 않으므로 원인은 그 훅
+    명령을 직접 실행하거나 디버그 로그(아래 절차)로 확인한다. 예를 들어 이 플러그인의 `run_python_hook.sh`는
+    Python 3.10 이상을 찾지 못하면 종료 코드 127로 끝난다.
   - `observed_ran`: SessionStart 훅이 실행된 기록(`hook_success`)이 있다.
   - `observed_truncated`: 그 가운데 하나 이상이 호스트 상한(10,000자)을 넘어 잘렸다. 그 훅의 출력을 줄이는 것이
     다음 조치다. 이 플러그인의 훅은 9,500자로 묶으므로 `command_mentions_session_start_py`가 `false`인 기록은
@@ -176,15 +184,22 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   - `unparsed`: 파일을 열 수 없거나(`file_not_found`·`not_a_regular_file`·`file_unreadable`), 기록 줄이
     없거나(`no_transcript_records`), `version`이 없거나 읽을 수 없거나(`version_missing`·`version_unparsed`,
     이때는 다른 값도 해석하지 않는다), 훅 기록 모양이 다르거나(`hook_record_shape_unrecognized`), 읽는 중 예상하지
-    못한 오류가 났다(`probe_failed`).
+    못한 오류가 났다(`probe_failed`). 읽기 모듈을 불러오지 못한 경우(설치 손상)도 `probe_failed`이며, 이때
+    `session_evidence`에는 `schema_version`·`status`·`reason_code`·`next_action`·`trust_boundary`·`complete`만
+    있고, 텍스트 출력은 `session_evidence`·`session_trust_boundary`·`session_complete`·`session_next_action` 네
+    줄뿐이다. 예외 문구는 출력하지 않고, 종료 코드는 이때도 볼트 진단의 값 그대로다.
 - **판 범위는 관측값이다:** 2026-10-24에 Windows PC 한 대의 기록에서 키 이름·길이·숫자만 보았다. 2.1.252 세션
   173개에는 훅 기록이 없었고, 2.1.278~2.1.309에서는 동기 훅만 기록됐으며, 2.1.253~2.1.277은 관측하지 않았다.
   두 범위는 `observed_ranges`로 함께 보고한다. 훅 기록이 없을 때 상태를 가르는 경계는 기록 없이 관측된 가장 높은
   판(2.1.252) 하나다. 그 이하는 관측하지 않은 더 낮은 판도 `unsupported_host_version`이고, 그보다 높은 판은
   관측하지 않은 2.1.253~2.1.277과 2.1.309보다 새 판도 `not_recorded`다.
-- **잘림 판정:** Claude Code 2.1.309 실행 파일은 10,000자(UTF-16 단위)를 넘는 훅 출력을 아래 세 안내 가운데
-  하나로 바꾼다. 셋 다 `truncated`(참·거짓)로만 보고하고 안내 문구·크기·오류 문구는 출력하지 않는다. 그 밖의
-  모양은 판정하지 않으므로 `emitted_chars`와 `injected_chars`의 차이로 본다.
+- **잘림 판정:** Claude Code 2.1.309 실행 파일은 훅 stdout 앞뒤의 공백·줄바꿈 문자를 지우고(JavaScript `trim`)
+  그 길이가 10,000자(UTF-16 단위)를 넘을 때만 출력을 아래 세 안내 가운데 하나로 바꾼다. 그래서 세 안내 모두
+  기록의 `stdout`을 같은 방식으로 다듬은 길이가 10,000자를 넘고 `content`가 다듬은 `stdout`과 다를 때만 센다
+  (2.1.309가 저장된 훅 출력을 가려낼 때도 `content`가 다듬은 stdout과 다른지 본다). 상한 이하의 훅 출력은 안내
+  문구를 인용하거나 안내의 틀을 그대로 담아도 잘림으로 보지 않는다. `stdout`이 없거나 문자열이 아닌
+  `hook_success` 기록은 `unrecognized`로 세고 잘림을 판정하지 않는다. 셋 다 `truncated`(참·거짓)로만 보고하고
+  안내 문구·크기·오류 문구는 출력하지 않는다. 그 밖의 모양은 판정하지 않으므로 `emitted_chars`와 `injected_chars`의 차이로 본다.
   - 파일에 저장함: `<persisted-output>`, `Output too large (<크기>). Full output saved to: <경로>`, 빈 줄,
     `Preview (first 2KB):`, 출력의 앞부분, `</persisted-output>` 순서다(저장 한도를 넘어 저장본도 잘리면
     `Output too large (` 대신 `Output exceeded the …`가 오는 같은 틀이다). `content`가

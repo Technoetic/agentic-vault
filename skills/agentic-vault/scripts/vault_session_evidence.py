@@ -31,7 +31,8 @@ SCHEMA_VERSION = 1
 TRUST_BOUNDARY = "host_internal_format_undocumented"
 
 # Bounds on the work. One long session's transcript reached 213 MB, and one
-# SessionStart record carried about 632,000 characters of hook stdout.
+# SessionStart record carried about 632,000 characters of hook stdout (one
+# Windows PC, 2026-10-24).
 MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_LINE_BYTES = 16 * 1024 * 1024
 DISCARD_CHUNK_BYTES = 1024 * 1024
@@ -53,21 +54,36 @@ MAX_INTEGER = 2 ** 53 - 1  # the largest integer a JavaScript host writes exactl
 HOOK_RECORDS_ABSENT = ((2, 1, 252), (2, 1, 252))
 HOOK_RECORDS_PRESENT = ((2, 1, 278), (2, 1, 309))
 
-# Claude Code 2.1.309 replaces hook stdout longer than 10,000 UTF-16 units with
-# one of three notices, read here as booleans only:
+# Claude Code 2.1.309 trims a hook's stdout (JavaScript trim) and replaces it with
+# one of three notices only when the trimmed text is longer than 10,000 UTF-16
+# units (hri=1e4); shorter output is kept as the content. The notices are read
+# here as booleans only:
 # - saved to a file: "<persisted-output>\nOutput too large (<size>). Full output
 #   saved to: <path>\n\nPreview (first 2KB):\n<preview>\n...\n</persisted-output>"
 #   ("Output exceeded the ... persist limit ..." when even the saved copy is
 #   cut). One host function builds both inside this envelope, and the host's own
-#   test for a saved hook output is that the content starts and ends with it, so
-#   hook text that only quotes the notice does not count. The saved-file path
-#   sits between the two markers, so only the first one is held to the first 200
-#   characters;
+#   test for a saved hook output is that the content starts and ends with it and
+#   differs from the trimmed stdout. The saved-file path sits between the two
+#   markers, so only the first one is held to the first 200 characters;
 # - not saved: "<truncated-output>\nOutput too large (<size>). It could not be
 #   saved, so only the first <size> are shown; ..." and then that first part;
 # - saving failed: the first 10,000 units and then, at the very end,
 #   "\n\n[Hook stdout truncated at 10000 chars <dash> persist-to-disk failed:
 #   <error>]". Only a one-line notice that ends the content counts.
+# A notice counts only when the host could have written it: the record's
+# stdout, trimmed as the host trims it, is over the cap, and the content
+# differs from it. Hook text that quotes a notice, or is shaped like one, is
+# therefore not truncated. A hook_success record without a stdout string is
+# counted as unrecognized and never judged.
+HOST_OUTPUT_CAP = 10_000
+# What JavaScript's String.prototype.trim() removes: TAB, VT, FF, the zero-width
+# no-break space, every space separator (Zs) and the four line terminators.
+# Python's str.strip() differs: it also removes U+001C..U+001F and U+0085, and
+# keeps U+FEFF.
+_JS_TRIM = "".join(map(chr, (
+    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xA0, 0x1680, *range(0x2000, 0x200B),
+    0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF,
+)))
 PERSISTED_OPEN = "<persisted-output>"
 PERSISTED_CLOSE = "</persisted-output>"
 OVERSIZE_MARKERS = ("Output too large (", "Output exceeded the ")
@@ -86,8 +102,9 @@ NOTICE_CHARS = 4096
 # non-zero exit is hook_non_blocking_error (a SessionStart blocking error, exit
 # 2, is rewritten to it), a hook stopped by its timeout or a cancellation is
 # hook_cancelled, and a host-side error before or while running the hook is
-# hook_error_during_execution. Their stdout, stderr, command and content are
-# never read.
+# hook_error_during_execution. Their stdout, stderr and content are never read,
+# and the command only for whether it names session_start.py, as for a success
+# (hook_blocking_error keeps the command inside blockingError).
 _FAILURE_OUTCOMES = {
     "hook_non_blocking_error": "non_blocking_error",
     "hook_blocking_error": "blocking_error",
@@ -112,7 +129,9 @@ HOOK_FIELDS = (
     "source", "exit_code", "duration_ms", "emitted_chars", "injected_chars", "truncated",
     "command_mentions_session_start_py",
 )
-FAILURE_FIELDS = ("source", "outcome", "exit_code", "duration_ms")
+FAILURE_FIELDS = (
+    "source", "outcome", "exit_code", "duration_ms", "command_mentions_session_start_py",
+)
 _RECORD_TYPES = frozenset(("attachment", "assistant", "system"))
 # Lines without this marker are skipped without JSON parsing (user input,
 # request blobs, file history). Quotes inside JSON strings are escaped, so
@@ -163,8 +182,18 @@ def _version_text(parts: tuple[int, int, int] | None) -> str | None:
     return None if parts is None else ".".join(str(part) for part in parts)
 
 
-def _truncated(content: str) -> bool:
-    """True when content carries one of the host's oversize notices, not hook text."""
+def _truncated(content: str, stdout: str) -> bool:
+    """True when the host replaced the stdout with one of its notices, never for hook text.
+
+    The host replaces only a trimmed stdout over its cap, and then the content
+    differs from it; only such a content is checked for a notice.
+    """
+    trimmed = stdout.strip(_JS_TRIM)
+    return content != trimmed and _utf16_len(trimmed) > HOST_OUTPUT_CAP and _notice(content)
+
+
+def _notice(content: str) -> bool:
+    """True when content has the shape of one of the host's oversize notices."""
     head = content[:NOTICE_HEAD_CHARS]
     if (content.startswith(PERSISTED_OPEN) and content.endswith(PERSISTED_CLOSE)
             and any(marker in head for marker in OVERSIZE_MARKERS)
@@ -191,6 +220,13 @@ def _reason(value: object) -> str:
     if isinstance(value, str) and value in _INSTRUCTION_REASONS:
         return value
     return "other"
+
+
+def _mentions_session_start(command: object) -> bool | None:
+    """Whether a hook command names session_start.py; None without a command string."""
+    if not isinstance(command, str):
+        return None
+    return _SESSION_START_SCRIPT.search(command[:MAX_COMMAND_CHARS]) is not None
 
 
 @functools.lru_cache(maxsize=1)
@@ -453,16 +489,12 @@ class _Scan:
         if not (isinstance(name, str) and isinstance(stdout, str) and isinstance(content, str)):
             self.hooks["unrecognized"] += 1
             return
-        truncated = _truncated(content)
+        truncated = _truncated(content, stdout)
         self.hooks["records"] += 1
         self.hooks["truncated"] += int(truncated)
         if len(self.hook_entries) >= MAX_LISTED_RECORDS:
             return
         command = attachment.get("command")
-        mentions = (
-            _SESSION_START_SCRIPT.search(command[:MAX_COMMAND_CHARS]) is not None
-            if isinstance(command, str) else None
-        )
         self.hook_entries.append({
             "source": _source(name),
             "exit_code": _integer(attachment.get("exitCode"), -MAX_INTEGER),
@@ -470,11 +502,11 @@ class _Scan:
             "emitted_chars": _utf16_len(stdout),
             "injected_chars": _utf16_len(content),
             "truncated": truncated,
-            "command_mentions_session_start_py": mentions,
+            "command_mentions_session_start_py": _mentions_session_start(command),
         })
 
     def _failure(self, attachment: dict, outcome: str) -> None:
-        """A hook that did not succeed: source, outcome, exit code and duration only."""
+        """A hook that did not succeed: source, outcome, exit code, duration and a boolean."""
         name = attachment.get("hookName")
         if not isinstance(name, str):
             self.hooks["unrecognized"] += 1
@@ -482,11 +514,16 @@ class _Scan:
         self.hooks["failed"] += 1
         if len(self.failed_entries) >= MAX_LISTED_RECORDS:
             return
+        command = attachment.get("command")
+        blocking = attachment.get("blockingError")
+        if outcome == "blocking_error" and command is None and isinstance(blocking, dict):
+            command = blocking.get("command")
         self.failed_entries.append({
             "source": _source(name),
             "outcome": outcome,
             "exit_code": _integer(attachment.get("exitCode"), -MAX_INTEGER),
             "duration_ms": _duration(attachment.get("durationMs")),
+            "command_mentions_session_start_py": _mentions_session_start(command),
         })
 
     def _instructions(self, attachment: dict) -> None:
