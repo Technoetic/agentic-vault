@@ -11,7 +11,8 @@ check_support (CLI check-support) is a separate, warning-only observation: a
 row value absent from its cited note body, or a citation that does not resolve
 to exactly one allowed note, is reported. Literal presence is not truth.
 A value found only inside other cited ledgers' fact tables is listed as
-ledger_table_only; it counts as unsupported only with --primary-text-only.
+ledger_table_only; it counts as unsupported only with --primary-text-only,
+which also names cited notes whose fact tables could not be separated.
 Opt-in --normalize-periods [--fiscal-start MM] adds a separate per-row
 normalized_match from date/quarter/half/fiscal-year intervals (vault_period);
 it never changes the literal result. Validity cells stay strict YYYY-MM-DD.
@@ -615,15 +616,6 @@ def _separate_tables(text):
     return _forms(re.sub(r'\\([\\|])', r'\1', _without_tables(body.encode('utf-8'), parsed)), aliases=True), None
 
 
-def _outside_tables(text):
-    """Body forms of a cited note without its fact tables, or None when it has none.
-
-    Any table parse_ledger recognises (v1 or v2) counts; a note it refuses
-    (limits, NUL) counts as having no tables (_separate_tables gives the code).
-    """
-    return _separate_tables(text)[0]
-
-
 def _matches(patterns, forms):
     return any(pattern.search(body) for pattern in patterns for body in forms)
 
@@ -649,7 +641,10 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     normalize_periods=True adds normalized_periods: for each compared row whose
     value names a period, normalized_match (equal, contained, none or abstain)
     against the periods of the same cited bodies (vault_period), with via or
-    reason, plus period_convention. fiscal_start (1-12, needs
+    reason, plus period_convention. Without primary_text_only an entry also
+    names in via_ledger_table_only the via paths that hold only through those
+    ledgers' fact tables, and a cited body too long for vault_period is left
+    out with incomplete ['period_text_limit']. fiscal_start (1-12, needs
     normalize_periods) declares the first month of a fiscal year. Literal
     support, counts and warnings stay exactly as without it.
     """
@@ -929,7 +924,7 @@ def main(argv=None):
     support.add_argument('--normalize-periods', action='store_true',
                          help='also report normalized_match of date/quarter/half/fiscal-year periods per row')
     support.add_argument('--fiscal-start', metavar='MM',
-                         help='first month (01-12) of the fiscal year; requires --normalize-periods')
+                         help='first month (1-12 or 01-12) of the fiscal year; requires --normalize-periods')
     apply = commands.add_parser('apply')
     apply.add_argument('--approve', action='store_true')
     args = parser.parse_args(argv)

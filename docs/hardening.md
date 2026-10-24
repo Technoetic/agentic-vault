@@ -118,6 +118,7 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 나머지 출력 필드는 `path`, `source_sha256`(대장), `rows_checked`·`rows_supported`·`rows_unsupported`·`rows_unresolved`·`rows_skipped`,
 `rows_supported_ledger_table_only`·`ledger_table_only`([아래](#다른-대장의-사실-표에만-있는-값)),
 `cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
+`--primary-text-only`를 켜면 `ledger_tables_unseparated`([아래](#다른-대장의-사실-표에만-있는-값))가 더해진다.
 `--normalize-periods`를 켜면 `normalized_periods`·`period_convention`([아래](#기간-표현-정규화---normalize-periods))이 더해진다.
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
@@ -275,7 +276,8 @@ EDTF 구간은 끝을 포함하는 정밀도 표기라 반열린 구간과 끝�
 - `ledger_table_only`는 표 구조만 보는 규칙이며 출처 계보(provenance)를 판정하지 않는다. 대장의 산문(사실 표 밖 본문)이나
   대장 값을 옮겨 적은 일반 요약 노트를 거친 값은 1차 근거로 센다. 사실 표가 아닌 본문이 PROV-DM이 말하는 1차 출처라는 뜻도 아니다.
 - `parse_ledger`가 상한(사실 표 8개, 행 256개, 열 32개, 칸 4 KiB) 초과나 NUL 문자로 거절하는 노트는 사실 표가 없는 노트로 본다.
-  그런 노트의 표, 코드 펜스·들여쓰기 안의 표, `subject`·`relation`·`value`(또는 별칭) 열이 없는 표에 있는 값은 1차 근거로 센다.
+  열·칸 상한은 사실 표가 아닌 줄에도 걸린다([위](#다른-대장의-사실-표에만-있는-값)). `--primary-text-only`를 켜면 그런 인용 노트를
+  `ledger_tables_unseparated`에 경로와 이유로 적는다. 그런 노트의 표, 코드 펜스·들여쓰기 안의 표, `subject`·`relation`·`value`(또는 별칭) 열이 없는 표에 있는 값은 1차 근거로 센다.
 - 경계 규칙은 값의 처음·끝 글자가 ASCII 영숫자일 때만 적용된다. `-5`처럼 부호로 시작하는 값은 앞쪽 경계를 보지 않아
   `10-5` 같은 범위 표기 안에서도 일치로 센다.
 - 경로 없이 쓴 `[[이름]]`이 deny·exclude·runtime 구역에만 있으면 구역을 목록에 넣지 않으므로 `not_found`로 보고한다.
