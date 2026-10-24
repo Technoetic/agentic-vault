@@ -96,8 +96,9 @@ python skills/agentic-vault/scripts/vault_runs.py --vault PATH flips BASELINE_ID
   `fail_to_pass`·`fail_to_fail`에 넣는다. 일부만 통과하면 `mixed`, error 반복이 있으면
   `incomplete`다. 여섯 값의 합은 맞댄 전체 항목 수 `item_count`다. 항목별 값은 `items`에 있다.
 - `pass_count_drops`: 통과 수가 줄어든 항목(`candidate_passes < baseline_passes`)이다.
-  error 반복이 있으면 완료 반복 대비 통과 비율로 비교한다. 전부/전무 규칙은 과소 집계하고
-  이 목록은 한 번의 흔들림까지 잡아 과대 집계하므로 둘을 함께 읽는다.
+  error 반복이 있으면 완료 반복 대비 통과 비율로 비교한다. 어느 한쪽 실행에서 완료 반복이
+  0이면 비교할 관찰이 없어 목록에 넣지 않는다(그 항목은 `incomplete`다). 전부/전무 규칙은
+  과소 집계하고 이 목록은 한 번의 흔들림까지 잡아 과대 집계하므로 둘을 함께 읽는다.
 - `negative_flip_rate` = `pass_to_fail` / `item_count`다. MUSCLE의 NFR처럼 분모는 전체 항목
   수다. 기준안이 통과한 항목 대비 비율은 `conditional_negative_flip_rate`라는 다른 이름으로만
   낸다(기준안 통과 항목이 없으면 `null`).
@@ -128,13 +129,16 @@ fixture의 assertion에 선택 키 `role`을 넣을 수 있다.
 |---|---|
 | `baseline`·`candidate` | 실행별 `correction_pass_rate`·`retention_pass_rate`. 전부/전무 규칙으로 통과한 항목의 비율이다. 빈 목록은 1로 본다(SWE-bench와 같음) |
 | `resolution` | 후보 실행 기준. correction·retention이 모두 통과면 `FULL`, correction 일부와 retention 전부면 `PARTIAL`, 나머지는 `NO` |
-| `retention_break_count` | 통과 수가 줄어든 retention 항목 수 |
+| `retention_break_count` | `pass_count_drops`에 오른 retention 항목 수 |
 | `invalid_correction_tests` | 기준안의 완료 반복에서 한 번이라도 통과한 correction. 고친 것을 시험하지 못하므로 표시만 하고 등급에서 빼지는 않는다 |
 | `correction_count`·`retention_count`·`unlabelled_count` | 역할별 항목 수. 역할이 없는 항목은 등급에 쓰지 않는다 |
 
-역할이 있는 항목에 error 반복이 있으면 그 항목은 통과로 세지 않으므로 후보가 `FULL`이 될 수
-없다. 이때 `NO`나 `PARTIAL`은 퇴행이 아니라 관찰 부족일 수 있으니 `error_outcomes`와
-`incomplete` 항목을 함께 본다.
+`resolution`은 후보 실행만 채점한다. 후보 실행에서 역할이 있는 항목에 error 반복이 있으면 그
+항목은 통과로 세지 않으므로 `FULL`이 될 수 없다. 이때 `NO`나 `PARTIAL`은 퇴행이 아니라 관찰
+부족일 수 있으니 `error_outcomes`와 `incomplete` 항목을 함께 본다. 기준안 실행의 error는
+`resolution`을 바꾸지 않는다. 그 항목은 `incomplete`가 되고 기준안의 역할별 통과율에서 통과로
+세지 않는다. 기준안 반복이 모두 error인 correction은 `invalid_correction_tests`에 오르지
+않으므로, 후보가 `FULL`이어도 그 correction이 기준안에서 실패했다는 관찰은 없다.
 
 반복 2~10회·최대 16사례×8assertion이라 모든 수는 서술 값이다. p값은 내지 않으며, 한 반복의
 뒤집힘은 잡음일 수 있다. 관찰은 호스트가 보고한 값이다. correction 검사가 기준안에서 올바른
