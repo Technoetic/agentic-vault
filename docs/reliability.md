@@ -121,13 +121,16 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --host-ve
 python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --session-evidence "<세션 기록 .jsonl 파일>" --format json
 ```
 
-Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 폴더 이름>/<세션 ID>.jsonl`에 쓴다. 이 형식은
+Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로로 만든 폴더 이름>/<세션 ID>.jsonl`에 쓴다.
+폴더 이름은 프로젝트 폴더 이름이 아니라 전체 경로에서 영문자·숫자가 아닌 글자를 모두 `-`로 바꾼 것이다(예:
+`C:\work\vault` → `C--work-vault`, 2.1.309 실행 파일 기준). 이 형식은
 호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
 있으므로 관측한 기록 모양만 해석하고, 모양이 다른 기록은 추측하지 않고 센다.
 
-`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 폴더를 훑어 기록을 고르지 않고, 아무것도 쓰지
-않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트 진단의 값 그대로다.
-옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
+`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 경로가 `~`로 시작하면 셸이 바꾸지 않고 넘겨도
+홈 폴더(Windows는 `USERPROFILE`)로 바꿔 읽으므로 위 위치를 그대로 쓸 수 있다. 폴더를 훑어 기록을 고르지
+않고, 아무것도 쓰지 않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트
+진단의 값 그대로다. 옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
 
 - **읽는 범위:** 한 줄씩 읽고 한 줄 16 MiB, 파일 512 MiB까지 본다. 종류 표지(`"type":"attachment"`·
   `"assistant"`·`"system"`)가 있는 줄만 JSON으로 풀고, 사용자 입력·요청 원문·파일 이력 줄은 풀지 않는다(그 안의
@@ -137,53 +140,87 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 폴더 
 - **남기는 값(허용 목록):**
   - SessionStart `hook_success` 기록마다 `source`(`startup`·`resume`·`clear`·`compact`·`fork`·`other`),
     `exit_code`, `duration_ms`, `emitted_chars`(훅 stdout 길이), `injected_chars`(호스트가 대화에 넣은
-    `content` 길이), `truncated`, `command_mentions_session_start_py`(명령에 이 플러그인의 `session_start.py`
-    파일 이름이 있는지). 길이는 `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록은 50건까지 싣고 수는 모두 센다.
+    `content` 길이), `truncated`, `command_mentions_session_start_py`(명령에 `session_start.py`라는 파일 이름이
+    있는지. 보통 이 플러그인의 훅이지만 다른 플러그인의 같은 이름 파일도 `true`다). 길이는
+    `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두 센다.
+  - 성공하지 못한 SessionStart 훅 기록(`hook_non_blocking_error`·`hook_blocking_error`·`hook_cancelled`·
+    `hook_error_during_execution`)마다 `source`, `outcome`(`non_blocking_error`·`blocking_error`·`cancelled`·
+    `error_during_execution` 가운데 하나), `exit_code`, `duration_ms`만 남긴다. stdout·stderr·명령·내용은 출력하지
+    않는다. 수는 `failed`, 목록은 `failed_entries`(50건까지)다. 2.1.309 실행 파일에서는 0이 아닌 종료 코드가
+    `hook_non_blocking_error`이고(종료 코드 2의 차단 오류도 이 모양으로 바뀐다), 시간 초과·취소가
+    `hook_cancelled`(종료 코드 없음), 훅을 실행하기 전이나 실행하는 중의 호스트 오류가
+    `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제 세션 기록에서 관측한 것은 아니다.
   - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
-    `compaction`·`other`, 없으면 `none`), `changed`.
+    `compaction`·`other`, 없으면 `none`), `changed`. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두
+    센다. 경로 필드는 아래 **개인정보**에 있다.
   - `first_turn_usage`: 파일의 첫 API 응답의 `input_tokens`·`cache_read_input_tokens`·
     `cache_creation_input_tokens`와 그 합(`prompt_tokens_total`). 시스템 프롬프트·도구·지침·훅 출력을 모두 더한
     프롬프트 전체라 훅의 몫이 아니다(`label`: `whole_prompt_not_attributable_to_hooks`). 한 응답이 내용
     블록마다 한 줄씩 기록되므로 (`message.id`, `requestId`)가 같은 줄은 한 번만 센다(`duplicate_lines`).
     서브에이전트·합성 메시지·오류 메시지 줄은 건너뛴다.
   - `api_errors`: `api_error` 기록 수와 HTTP 상태 코드별 수. `host_versions`: 기록의 `version` 최솟값·최댓값.
-- **상태(`status`):**
-  - `observed_ran`: SessionStart 훅이 실행된 기록이 있다.
-  - `observed_truncated`: 그 가운데 하나 이상이 호스트 상한(10,000자)을 넘어 미리보기로 바뀌었다. 그 훅의 출력을
-    줄이는 것이 다음 조치다. 이 플러그인의 훅은 9,500자로 묶으므로 `command_mentions_session_start_py`로 어느
-    훅인지 구별한다.
-  - `not_recorded`: 기록이 없다. **실행되지 않았다는 뜻이 아니다.** 비동기 훅, SDK 세션, 기록을 남기지 않는
-    판에서는 기록이 없다.
-  - `unsupported_host_version`: 기록이 없고, 파일의 가장 높은 `version`이 기록 없이 관측된 판(2.1.252) 이하다.
+- **상태(`status`):** 기록이 섞이면 `observed_error`, `observed_truncated`, `observed_ran` 순으로 앞선 것 하나를
+  보고하고, 수는 `failed`·`truncated`·`records`에 모두 센다.
+  - `observed_error`: 성공하지 못한 SessionStart 훅 기록(위 네 종류)이 하나 이상 있다. 호스트가 그 훅을 실행하려
+    했다는 기록이며 "실행되지 않음"도 "기록 없음"도 아니다. 다음 조치는 실패한 훅을 확인하는 것이다
+    (`check_the_failed_session_start_hook`). 오류 문구는 출력하지 않으므로 원인은 그 훅 명령을 직접 실행하거나
+    디버그 로그(아래 절차)로 확인한다. 예를 들어 이 플러그인의 `run_python_hook.sh`는 Python 3.10 이상을 찾지
+    못하면 종료 코드 127로 끝난다.
+  - `observed_ran`: SessionStart 훅이 실행된 기록(`hook_success`)이 있다.
+  - `observed_truncated`: 그 가운데 하나 이상이 호스트 상한(10,000자)을 넘어 잘렸다. 그 훅의 출력을 줄이는 것이
+    다음 조치다. 이 플러그인의 훅은 9,500자로 묶으므로 `command_mentions_session_start_py`가 `false`인 기록은
+    다른 훅이다(`true`는 보통 이 플러그인의 훅이지만 같은 이름의 다른 파일일 수도 있다).
+  - `not_recorded`: 훅 기록(성공·실패)이 없다. **실행되지 않았다는 뜻이 아니다.** 비동기 훅, SDK 세션, 기록을
+    남기지 않는 판에서는 기록이 없다.
+  - `unsupported_host_version`: 훅 기록이 없고, 파일의 가장 높은 `version`이 기록 없이 관측된 판(2.1.252) 이하다.
   - `unparsed`: 파일을 열 수 없거나(`file_not_found`·`not_a_regular_file`·`file_unreadable`), 기록 줄이
     없거나(`no_transcript_records`), `version`이 없거나 읽을 수 없거나(`version_missing`·`version_unparsed`,
-    이때는 다른 값도 해석하지 않는다), 훅 기록 모양이 다르다(`hook_record_shape_unrecognized`).
+    이때는 다른 값도 해석하지 않는다), 훅 기록 모양이 다르거나(`hook_record_shape_unrecognized`), 읽는 중 예상하지
+    못한 오류가 났다(`probe_failed`).
 - **판 범위는 관측값이다:** 2026-10-24에 Windows PC 한 대의 기록에서 키 이름·길이·숫자만 보았다. 2.1.252 세션
   173개에는 훅 기록이 없었고, 2.1.278~2.1.309에서는 동기 훅만 기록됐으며, 2.1.253~2.1.277은 관측하지 않았다.
-  고정 문턱으로 쓰지 않고 `observed_ranges`로 함께 보고하며, 관측하지 않은 판에서 기록이 없으면 `not_recorded`다.
-- **잘림 판정:** Claude Code 2.1.309 실행 파일의 안내는 `<persisted-output>`,
-  `Output too large (<크기>). Full output saved to: <경로>`, 빈 줄, `Preview (first 2KB):` 순서다(아주 큰
-  출력은 `Output exceeded the …`).
-  저장 경로가 두 표지 사이에 있어 경로가 길면 둘째 표지가 200자 뒤로 밀린다. 그래서 첫 표지는 `content`의
-  첫 200자에서, `Preview (first`는 첫 4,096자에서 찾는다. 저장에 실패했을 때의 다른 안내는 판정하지 않으므로
-  `emitted_chars`와 `injected_chars`의 차이로 본다.
+  두 범위는 `observed_ranges`로 함께 보고한다. 훅 기록이 없을 때 상태를 가르는 경계는 기록 없이 관측된 가장 높은
+  판(2.1.252) 하나다. 그 이하는 관측하지 않은 더 낮은 판도 `unsupported_host_version`이고, 그보다 높은 판은
+  관측하지 않은 2.1.253~2.1.277과 2.1.309보다 새 판도 `not_recorded`다.
+- **잘림 판정:** Claude Code 2.1.309 실행 파일은 10,000자(UTF-16 단위)를 넘는 훅 출력을 아래 세 안내 가운데
+  하나로 바꾼다. 셋 다 `truncated`(참·거짓)로만 보고하고 안내 문구·크기·오류 문구는 출력하지 않는다. 그 밖의
+  모양은 판정하지 않으므로 `emitted_chars`와 `injected_chars`의 차이로 본다.
+  - 파일에 저장함: `<persisted-output>`, `Output too large (<크기>). Full output saved to: <경로>`, 빈 줄,
+    `Preview (first 2KB):`, 출력의 앞부분, `</persisted-output>` 순서다(저장 한도를 넘어 저장본도 잘리면
+    `Output too large (` 대신 `Output exceeded the …`가 오는 같은 틀이다). `content`가
+    `<persisted-output>`으로 시작하고 `</persisted-output>`으로 끝날 때만 본다. 2.1.309 실행 파일은 이 틀을 늘
+    열고 닫으며, 저장된 훅 출력도 이 시작·끝 표지로 가려낸다. 그래서 안내 문구를 인용하기만 한 일반 훅 출력은
+    잘림으로 보지 않는다. 저장 경로가 안내 문구와 `Preview (first` 사이에 있어 경로가 길면 `Preview (first`가
+    200자 뒤로 밀린다. 그래서 안내 문구는 `content`의 첫 200자에서, `Preview (first`는 첫 4,096자에서 찾는다.
+  - 저장하지 않음: `content`가 `<truncated-output>`으로 시작하고 첫 200자에 `Output too large (`가 있다
+    (`It could not be saved, so only the first <크기> are shown` 뒤에 출력의 앞부분만 붙는다).
+  - 저장 실패: 출력의 앞 10,000자 뒤에 빈 줄과
+    `[Hook stdout truncated at 10000 chars — persist-to-disk failed: <오류>]` 한 줄이 이어지고, 그 줄이
+    `content`의 맨 끝이다(마지막 4,096자 안에서 찾는다).
 - **보이지 않는 것:** 기록은 훅이 실행됐다는 증거이지 모델이 기억을 사용했다는 증거가 아니다. 비동기
-  `vault_healthcheck.py`의 출력과 resume 때 다시 붙는지(아래 절차 5)는 이 기록에 나오지 않는다. 실패·취소된
-  훅(`hook_non_blocking_error` 등)은 해석하지 않고 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가
-  상태 문구라 `injected_chars`가 주입량이 아니다(이 플러그인의 `session_start.py`는 일반 텍스트로 출력한다).
-  Codex 기록은 읽지 않는다.
+  `vault_healthcheck.py`의 출력과 resume 때 다시 붙는지(아래 절차 5)는 이 기록에 나오지 않는다. 그 밖의
+  SessionStart 첨부(JSON 훅의 추가 문맥 `hook_additional_context`, 시스템 메시지 `hook_system_message`, 처음 보는
+  종류)는 실패로 보지 않고, 해석하지 않은 채 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가 비어
+  있거나 상태 문구이고 추가 문맥은 그 별도 기록에 들어가므로 `injected_chars`가 주입량이 아니다(이 플러그인의
+  `session_start.py`는 일반 텍스트로 출력한다). Codex 기록은 읽지 않는다.
 - **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령·사용자
   입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는 계정 이름이 들어갈 수 있어
-  `--session-instruction-paths`를 함께 줄 때만 보인다(제어 문자가 있거나 1,024자를 넘는 경로는 빼고 센다).
+  `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와 `removed_paths`(빠진 파일
+  경로)로 보인다. 두 목록은 기록마다 각각 50개까지 싣는다(`limits.paths_per_record`). 50개를 넘는 경로와
+  문자열이 아니거나 비었거나 1,024자를 넘는 경로, 출력한 줄을 끊거나 글자 순서를 바꿔 보이게 할 수 있는 문자가 든
+  경로는 싣지 않고 `paths_omitted`에 센다. 그런 문자는 Unicode 일반 범주가 제어 문자(Cc, C0·C1)·서식 문자(Cf, 양방향 제어·폭
+  없는 문자 등)·서로게이트(Cs)·줄 구분자(Zl, U+2028)·문단 구분자(Zp, U+2029)인 문자이고, 범주는 실행하는 Python의
+  Unicode 데이터를 따른다. `str.splitlines()`가 줄을 나누는 문자는 모두 여기에 든다. 줄 구분자가 든 경로 하나가
+  텍스트 출력에 `session_next_action: none` 같은 가짜 상태 줄을 만들 수 있기 때문이다.
 - **출처:** 사용량 필드와 (`message.id`, `requestId`) 중복 제거 규칙은
   [ccusage](https://github.com/ryoppippi/ccusage)(MIT)의 Claude 사용량 파서에서 방식만 빌렸다. 코드와 의존성은
-  가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 잘림 안내 문구는 2.1.309 실행 파일의
-  문자열에서 확인했다.
+  가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 실패 기록 모양과 잘림 안내 문구는
+  2.1.309 실행 파일의 문자열에서 확인했다.
 
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 
-> 이 절차는 작성만 했고 아직 실행하지 않았다. 이 문서에 측정값은 없다. 실행하면 결과를
-> 날짜·버전과 함께 [검증 기록](verification/)에 따로 남긴다.
+> 이 절차는 작성만 했고 아직 실행하지 않았다. 이 절차의 측정값(훅 소요 시간·resume 재주입)은 아직 없다.
+> 실행하면 결과를 날짜·버전과 함께 [검증 기록](verification/)에 따로 남긴다.
 
 훅별 소요 시간은 Claude Code 2.1.296 이상의 디버그 로그에 남는다. 같은 변경 기록의 2.1.296 항목:
 "Improved `--debug` output for hooks: command hooks on tool calls, prompts, SessionStart and
@@ -213,7 +250,7 @@ identifiable". `--debug-file <path>`는 지정한 경로에 디버그 로그를 
 | 호스트 | `claude --version`, 설치 방식(네이티브·npm 등), `--host-version` 결과 |
 | 환경 | OS·버전, Python 버전, Windows의 Git Bash 버전, 플러그인 버전·커밋 |
 | 볼트 규모 | 건강 검사 요약의 검사 노트 수, handoff/hot 예산 |
-| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간. 동기 `session_start.py`는 세션 기록(`--session-evidence`, 기록을 남기는 판 — 이 PC 관측 2.1.278~2.1.309)이나 디버그 로그에서, 비동기 `vault_healthcheck.py`는 디버그 로그에서만 |
+| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간. 동기 `session_start.py`는 세션 기록(`--session-evidence`, 기록을 남기는 판 — Windows PC 한 대의 관측 2.1.278~2.1.309)이나 디버그 로그에서, 비동기 `vault_healthcheck.py`는 디버그 로그에서만 |
 | resume 재주입 | resume 횟수 N, 그 뒤 `[vault-healthcheck]` 요약이 다시 보인 횟수 |
 
 디버그 로그에는 경로·명령·설정이 남을 수 있다. 원문 로그는 저장소에 올리지 않고, 공유할 값만
