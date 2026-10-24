@@ -23,7 +23,7 @@ Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 
 |---|---|---|
 | 출처 | `vault_provenance.py`: `derive_provenance`, `validate_provenance`, `analyze_notes` | 선택 원본·정제본 해시와 가장 낮은 신뢰를 유지. 별도 근거의 현재성을 조회하며 이름만으로 독립 검증을 인정하지 않음 |
 | 공유 상태 | `vault_state.py`: `advisory_lock`, `patch_note`, `project_handoff`, `detect_removed_blockers` | 원본 UTF-8 바이트 범위의 부분 편집, 기대 파일/config 해시, 소유자 토큰과 TTL. 협조하는 쓰기만 잠금 보호 |
-| 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함 |
+| 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함. 그 안의 선택형 [`--normalize-periods`](#기간-표현-정규화---normalize-periods)는 기간 표현을 날짜 구간으로 따로 대조(`vault_period.py`) |
 | 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존 |
 | 선언 규칙 | `vault_declarative_rules.py`: `evaluate_rules` | literal existence/substitution/occurrence 기본값. regex는 명시적 선택, 별도 프로세스 제한시간·입력 상한 |
 | 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
@@ -118,6 +118,7 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 나머지 출력 필드는 `path`, `source_sha256`(대장), `rows_checked`·`rows_supported`·`rows_unsupported`·`rows_unresolved`·`rows_skipped`,
 `rows_supported_ledger_table_only`·`ledger_table_only`([아래](#다른-대장의-사실-표에만-있는-값)),
 `cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
+`--normalize-periods`를 켜면 `normalized_periods`·`period_convention`([아래](#기간-표현-정규화---normalize-periods))이 더해진다.
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
 상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.
@@ -150,6 +151,76 @@ PROV-DM에는 순환 규칙이 없다. [PROV-CONSTRAINTS](https://www.w3.org/TR/
 노트는 고쳐지므로 A(v2)←B←A(v1)은 PROV에서 정상 연쇄다. 그래서 인용 그래프를 따라가거나 순환을 찾지 않는다.
 사실 표를 근거로 치지 않으므로 서로 인용(A↔B)과 표를 거치는 더 긴 연쇄가 한 번에 드러난다.
 
+#### 기간 표현 정규화 (`--normalize-periods`)
+
+리터럴 비교는 `2026-10-07`과 `2026. 10. 7.`, `2026년 3분기`와 `3Q26`을 다른 값으로 본다. `--normalize-periods`를 켜면
+값과 그 행이 인용한 노트 본문(리터럴 비교와 같은 정규화 형태)에서 기간 표현을 찾아 반열린 날짜 구간 [시작, 끝)으로 바꾸고,
+행마다 `normalized_match`를 따로 낸다. 구간의 뜻은 `check`의 `valid_from`·`valid_until`과 같다. 해석은 표준 라이브러리 모듈
+`vault_period.py`가 하며, 이 선택을 켤 때만 불러온다. 모델·네트워크 호출은 없다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md> --normalize-periods [--fiscal-start 04]
+```
+
+API는 `check_support(vault, path, normalize_periods=True, fiscal_start=4)`다. `--fiscal-start`(`01`~`12`, API는 정수 1~12)는 회계연도의 첫 달이며
+`--normalize-periods`와 함께만 쓴다. 범위를 벗어나거나 혼자 쓰면 다른 입력 오류처럼 stderr의 `{"error":"ssot_operation_unavailable"}`와 exit 1이다.
+
+| 표현(예) | 구간 | `label_edtf` |
+|---|---|---|
+| `2026-10-07`, `2026.10.07`, `2026. 10. 7.`, `2026년 10월 7일` | [2026-10-07, 2026-10-08) | `2026-10-07` |
+| `2026년 3분기`, `2026 3/4분기`, `2026년 제3분기`, `2026년 3Q`, `3Q26`, `2026Q3` | [2026-07-01, 2026-10-01) | `2026-35` |
+| `2026년 상반기` / `2026년 하반기` | [2026-01-01, 2026-07-01) / [2026-07-01, 2027-01-01) | `2026-40` / `2026-41` |
+| `2026년 3분기말`, `2026년 상반기말` | 그 기간의 마지막 하루 | `2026-09-30`, `2026-06-30` |
+| `FY2026`, `FY26`, `2026 회계연도`, `2026 사업연도` (`--fiscal-start 04`) | [2026-04-01, 2027-04-01) | `2026-04/2027-03` |
+| `FY2026 3분기`, `2026 회계연도 하반기` (`--fiscal-start 04`) | 회계연도 첫 달부터 센 분기·반기 | `2026-10/2026-12`, `2026-10/2027-03` |
+
+`label_edtf`는 `vault_period.parse(text, fiscal_start=None)`가 돌려주는 기록(`span`, `kind`, `label_edtf`, `start`, `end`, `reason`)의 보고용 이름표다.
+비교는 이름표가 아니라 날짜 구간으로 한다. 값에 기간 표현이 여럿이면 각각 비교해 가장 약한 결과를 낸다.
+
+| `normalized_match` | 뜻 |
+|---|---|
+| `equal` | 인용 본문에 값과 같은 구간이 있다 |
+| `contained` | 같은 구간은 없고, 값의 구간 안에 드는 본문 구간이 있다(값 `2026년 3분기`, 본문 `2026.08.15`) |
+| `none` | 값의 구간을 해석했지만 같거나 안에 드는 본문 구간이 없다. 본문 구간이 값보다 넓으면(값 `2026.08.15`, 본문 `2026년 3분기`) `none`이다 |
+| `abstain` | 값의 기간 표현 가운데 해석하지 않은 것이 있다. `reason`은 첫 이유 |
+
+| `reason` | 뜻 |
+|---|---|
+| `no_year` | 연도 없는 분기·반기(`3분기`, `상반기`, `3Q`). 앞 문장의 연도를 채우지 않는다(`2025년 1분기와 3분기`의 `3분기`) |
+| `fiscal_start_undeclared` | `--fiscal-start` 없이 쓴 회계연도·사업연도·FY와 그 분기·반기 |
+| `quarter_basis_ambiguous` | 회계연도 첫 달이 1월이 아닐 때 달력 연도에 붙은 분기·반기. 달력 기준인지 회계 기준인지 알 수 없다 |
+| `relative_needs_anchor` | 당기, 전기, 전년 동기, 올해·금년·작년·내년, 이번·지난·다음 분기 같은 상대 표현. 기준 시점을 받지 않으므로 늘 보류한다 |
+| `multiple_periods` | 분기·반기의 목록·범위(`1~3분기`, `1·2분기`, `상·하반기`) |
+| `invalid_date` | 없는 날짜(`2026.02.30`, `2026-13-01`) |
+
+| 필드(켤 때만) | 뜻 |
+|---|---|
+| `normalized_periods` | 행 목록. 해석된 출처 노트와 비교한 행 가운데 값에 기간 표현이 있는 행만 넣는다. 항목마다 `line`, `normalized_match`, `equal`·`contained`이면 `via`(그 구간이 있던 노트 경로, 정렬), `abstain`이면 `reason`. 값·구간·이름표는 넣지 않는다 |
+| `period_convention` | `fiscal_start`(없으면 `null`)와 비교 범위·한계를 적은 고정 문자열 `scope` |
+
+끄면(기본값) 두 필드가 없고 `vault_period.py`를 불러오지도 않는다. 켜도 `rows_*` 수, 경고와 `issue_id`, `ledger_table_only`, exit code는 그대로다.
+테스트가 v0.30.0 캡처와 켠 출력·끈 출력을 비교한다. `--primary-text-only`를 함께 켜면 이 비교도 다른 대장의 사실 표를 뺀 본문만 본다.
+대장의 `valid_from`·`valid_until`·`recorded` 칸은 지금처럼 `YYYY-MM-DD`만 받는다(`2026.10.07`·`2026년 3분기`는 여전히 `ssot-invalid-date`). 정규화 결과는 `check`나 조립(`vault_assembly.py`)의 유효기간 판단에 쓰지 않는다.
+
+이름표는 [Library of Congress EDTF](https://www.loc.gov/standards/datetime/)(ISO 8601-2의 기능을 정리한 사양, 2019-02-04)에서 빌렸다.
+Level 2 하위 연도 묶음의 33~36(분기)·40~41(반기) 코드와 Level 0 구간 표기 `시작/끝`이다.
+EDTF 페이지는 각 코드의 길이(3·6개월)만 적고 어느 달인지는 적지 않으며, 회계연도 코드와 하위 연도 코드를 구간 끝점으로 쓴 예도 없다.
+그래서 분기·반기를 1월부터 세는 것은 이 플러그인이 정한 규칙이고(ISO 8601-2 원문은 읽지 않았다), 회계연도는 월 단위 구간(`2026-04/2027-03`)으로만 적는다.
+EDTF 구간은 끝을 포함하는 정밀도 표기라 반열린 구간과 끝이 한 단위 어긋난다. 비교는 반열린 구간으로만 한다.
+
+한계:
+
+- 분기·반기는 달력 연도 기준이다. 한국 회사 문서의 `3분기`는 회계연도 기준일 때가 많다. 회계연도가 1월에 시작하지 않으면 `--fiscal-start`를 주어 보류하게 한다.
+- `FY2026`은 2026년에 시작하는 회계연도로 본다. 끝나는 해로 이름 붙이는 조직(예: 미국 연방 회계연도)과는 1년 어긋난다. 두 자리 연도(`3Q26`, `FY26`)는 2000년대로 본다.
+- `2026년 10월`·`2026년` 같은 월·연 단위, 연도 없는 날짜(`10월 7일`), 위 표에 없는 영문 표기(`1H26`, `Q3 2026`)는 해석하지 않는다. 값에 그런 표현만 있으면 목록에 없다.
+- 범위(`2026.01.01~2026.03.31`)는 한 구간으로 합치지 않고 양 끝을 각각 비교한다. `12개월`·`1년` 같은 기간 길이는 기간 표현이 아니므로 합치지 않는다.
+- `contained`는 본문 어딘가에 그 구간 안의 날짜가 있다는 뜻일 뿐 같은 사실에 대한 서술이라는 뜻이 아니다. 본문이 길수록 쉽게 나온다. 그래서 `rows_supported`에 넣지 않는다.
+- 본문의 보류 표현(연도 없는 `3분기`, `올해`, `당기` 등)은 비교에 쓰지 않는다. 그런 표현만 있는 본문은 `none`이다.
+- 상대 표현은 고정 낱말 목록으로 찾는다. `당기`·`전기`는 앞뒤에 한글이 붙지 않은 낱말만 보지만, 값의 `전기 설비`처럼 뜻이 다른 낱말도 보류로 잡는다.
+- `3분 지연` 같은 분(分) 단위는 분기가 되지 않는다. 띄어 쓰지 않은 `3분기다렸다`·`3분기록`도 막지만 다른 붙여 쓰기는 분기로 읽을 수 있다.
+- 정제 품질 검사(`check_compile`, `preserve-check`)의 숫자 추출은 바뀌지 않는다. 그쪽에서 `2026년 3분기`는 여전히 `2026`과 `3분`으로 추출된다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-24 기준). 근거는 단위 테스트의 합성 자료뿐이다.
+
 ### 경고 우선 원칙
 
 두 검사는 경고로만 시작한다. 차단(fail-closed) 승격은 실제 무해 자료의 benign replay에서 오탐 0건을 확인하고 사람이 승인한 뒤에만 검토한다.
@@ -160,6 +231,7 @@ PROV-DM에는 순환 규칙이 없다. [PROV-CONSTRAINTS](https://www.w3.org/TR/
 
 - literal은 진실이 아니다. 원본에 있는 값이라도 맞는 사실이라는 보장이 없고, 원본에 없는 값이 곧 틀린 값도 아니다.
 - 바꿔 쓰기, 단위·형식 차이(`125,000`과 `125000`, `2026-10-07`과 `2026.10.07`, `12개월`과 `1년`)는 놓침과 오탐을 모두 만든다.
+  날짜·분기 표기 차이는 `check-support --normalize-periods`가 따로 보여 주지만 리터럴 결과는 바꾸지 않는다.
 - 이름은 구조화 label·위키 대상만 다루는 literal 비교이며 언어학적 NER이 아니다. 조사가 붙은 이름(`홍길동은`)은 다른 literal로 보아 오탐이 되고,
   정제본의 개념 위키링크도 원문에 없는 이름으로 잡히기 쉽다.
 - `check-support`는 값이 출처 본문 어딘가에 있는지만 본다. 같은 주체·관계·기간에 대한 서술인지, 부정문인지는 판단하지 않는다.

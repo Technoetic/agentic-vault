@@ -12,6 +12,9 @@ row value absent from its cited note body, or a citation that does not resolve
 to exactly one allowed note, is reported. Literal presence is not truth.
 A value found only inside other cited ledgers' fact tables is listed as
 ledger_table_only; it counts as unsupported only with --primary-text-only.
+Opt-in --normalize-periods [--fiscal-start MM] adds a separate per-row
+normalized_match from date/quarter/half/fiscal-year intervals (vault_period);
+it never changes the literal result. Validity cells stay strict YYYY-MM-DD.
 """
 from __future__ import annotations
 
@@ -605,7 +608,7 @@ def _matches(patterns, forms):
     return any(pattern.search(body) for pattern in patterns for body in forms)
 
 
-def check_support(vault, path, *, primary_text_only=False):
+def check_support(vault, path, *, primary_text_only=False, normalize_periods=False, fiscal_start=None):
     """Warn when a row value is absent from its cited note or the citation is unresolved.
 
     Warning-only observation, never a truth or authority decision. A value is
@@ -619,9 +622,25 @@ def check_support(vault, path, *, primary_text_only=False):
     supported unless primary_text_only=True, which counts it as unsupported
     with reason 'ledger_table_only'. The rule is structural, not provenance:
     a ledger's prose or a plain note that copies its values still counts.
+
+    normalize_periods=True adds normalized_periods: for each compared row whose
+    value names a period, normalized_match (equal, contained, none or abstain)
+    against the periods of the same cited bodies (vault_period), with via or
+    reason, plus period_convention. fiscal_start (1-12, needs
+    normalize_periods) declares the first month of a fiscal year. Literal
+    support, counts and warnings stay exactly as without it.
     """
-    if type(primary_text_only) is not bool:
+    if type(primary_text_only) is not bool or type(normalize_periods) is not bool:
         raise SSOTError('invalid_opt_in')
+    if fiscal_start is not None and (not normalize_periods or type(fiscal_start) is not int
+                                     or not 1 <= fiscal_start <= 12):
+        raise SSOTError('invalid_opt_in')
+    if normalize_periods:
+        # Loaded only on request: lint and default check-support never import it.
+        try:
+            import vault_period as period
+        except ImportError as exc:
+            raise SSOTError('period_normalizer_unavailable') from exc
     try:
         policy = state._Policy(vault)
         info, _, raw = policy.read_note(path)
@@ -633,6 +652,7 @@ def check_support(vault, path, *, primary_text_only=False):
                       rows_supported_ledger_table_only=0)
         table_only = []
         self_forms = None
+        period_rows, period_index = [], {}
         for table in parsed['tables']:
             for row in table['rows']:
                 value_forms = _forms(row['fields'].get('value', '').strip())
@@ -690,6 +710,17 @@ def check_support(vault, path, *, primary_text_only=False):
                     counts['rows_unsupported'] += 1
                     warnings.append(_warning('ssot-source-unsupported', row['line'], ledger_path,
                                              dict(cited=sorted(bodies), **extra)))
+                # Period intervals are a separate observation after the literal
+                # result; they never change it. value_forms[-1] has markup rendered.
+                records = period.parse(value_forms[-1], fiscal_start=fiscal_start) if normalize_periods else None
+                if records:
+                    for cited, forms in bodies.items():
+                        if cited not in period_index:
+                            compared = outside.get(cited, forms) if primary_text_only else forms
+                            period_index[cited] = period.index([record for form in compared for record in
+                                                                period.parse(form, fiscal_start=fiscal_start)])
+                    period_rows.append(dict(line=row['line'], **period.match(
+                        records, {cited: period_index[cited] for cited in bodies})))
         if len(warnings) > 1024:
             raise SSOTError('warning_limit')
         # Point-in-time recheck like check: same policy, ledger and cited revisions.
@@ -703,12 +734,16 @@ def check_support(vault, path, *, primary_text_only=False):
             if stamp(metadata) != mark:
                 raise SSOTError('stale_source')
         policy.fresh()
-        return dict(path=ledger_path, source_sha256=info['sha256'], warnings=warnings, **counts,
-                    ledger_table_only=table_only,
-                    cited_notes=[run['cited'][key] for key in sorted(run['cited'])],
-                    incomplete=sorted(run['incomplete']),
-                    method='normalized_literal_presence_in_cited_note_body',
-                    authority='warning_only_not_fact_verification')
+        result = dict(path=ledger_path, source_sha256=info['sha256'], warnings=warnings, **counts,
+                      ledger_table_only=table_only,
+                      cited_notes=[run['cited'][key] for key in sorted(run['cited'])],
+                      incomplete=sorted(run['incomplete']),
+                      method='normalized_literal_presence_in_cited_note_body',
+                      authority='warning_only_not_fact_verification')
+        if normalize_periods:
+            result.update(normalized_periods=period_rows,
+                          period_convention=dict(fiscal_start=fiscal_start, scope=period.SCOPE))
+        return result
     except SSOTError:
         raise
     except (state.StateError, EvidenceError, OSError, ValueError, UnicodeError, RuntimeError) as exc:
@@ -846,6 +881,10 @@ def main(argv=None):
     support.add_argument('--path', required=True)
     support.add_argument('--primary-text-only', action='store_true',
                          help="count a value found only in other ledgers' fact tables as unsupported")
+    support.add_argument('--normalize-periods', action='store_true',
+                         help='also report normalized_match of date/quarter/half/fiscal-year periods per row')
+    support.add_argument('--fiscal-start', metavar='MM',
+                         help='first month (01-12) of the fiscal year; requires --normalize-periods')
     apply = commands.add_parser('apply')
     apply.add_argument('--approve', action='store_true')
     args = parser.parse_args(argv)
@@ -864,7 +903,13 @@ def main(argv=None):
                 raise SSOTError('stale_base')
             policy.fresh()
         elif args.command == 'check-support':
-            result = check_support(args.vault, args.path, primary_text_only=args.primary_text_only)
+            fiscal_start = args.fiscal_start
+            if fiscal_start is not None:
+                if not re.fullmatch(r'0?[1-9]|1[0-2]', fiscal_start):
+                    raise SSOTError('invalid_opt_in')
+                fiscal_start = int(fiscal_start)
+            result = check_support(args.vault, args.path, primary_text_only=args.primary_text_only,
+                                   normalize_periods=args.normalize_periods, fiscal_start=fiscal_start)
         else:
             raw = sys.stdin.buffer.read(MAX_PROPOSAL_BYTES + 1)
             if len(raw) > MAX_PROPOSAL_BYTES:
