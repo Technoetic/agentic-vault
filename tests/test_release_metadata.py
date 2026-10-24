@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -18,15 +20,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.30.0"
-EXPECTED_PUBLIC_REF = "0.30.0"
+EXPECTED = "0.31.0"
+EXPECTED_PUBLIC_REF = "0.31.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.30.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.30.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.31.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.31.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.30.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.31.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -334,7 +336,80 @@ REQUIRED_V0230_RELEASE_LITERALS = (
 )
 
 
+# v0.31.0: per-assertion flips and roles, ledger-table marking, period normalization, session
+# evidence and request-body test servers, each new relative to v0.30.0. vault_ssot.py is one of
+# the seven files that warning-promotion certificates bind, so the note must carry both hashes
+# and the upgrade and rollback order. Rule template content did not change.
+RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
+CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
+CHECKER_SHA256_V0310 = "832a86f9dd074bddf92a796913f98769d5e8298e687f569d2067944978803378"
+# checker_sha256 of the seven bound files as shipped now. A change to any of them invalidates
+# promoted vaults' certificates: update this pin together with a release note upgrade section.
+CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0310
+REQUIRED_V0310_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
+REQUIRED_V0310_RELEASE_LITERALS = (
+    # Per-assertion flips and correction/retention roles (vault_runs.py).
+    "vault_runs.py --vault PATH flips BASELINE_ID CANDIDATE_ID", "`flip_counts`", "`pass_to_fail`",
+    "`pass_count_drops`", "`negative_flip_rate`", "`conditional_negative_flip_rate`", "`error_outcomes`",
+    "`role`", "`correction`", "`retention`", "`resolution`", "`FULL`", "`PARTIAL`", "`NO`",
+    "`hard_correction_assertion`", "`invalid_assertion_role`", "`invalid_assertion`",
+    # Rows backed only by another ledger's fact table (check-support).
+    "`rows_supported_ledger_table_only`", "`ledger_table_only`", "`--primary-text-only`",
+    "`ledger_tables_unseparated`", 'reason: "ledger_table_only"',
+    # Opt-in period normalization and its abstain reasons.
+    "`check-support --normalize-periods`", "`--fiscal-start MM`", "`normalized_periods`",
+    "`period_convention`", "`normalized_match`", "`via_ledger_table_only`",
+    'incomplete: ["period_text_limit"]', "`no_year`", "`fiscal_start_undeclared`",
+    "`quarter_basis_ambiguous`", "`relative_needs_anchor`", "`multiple_periods`", "`period_qualifier`",
+    "`partial_range`", "`invalid_date`", '{"error":"ssot_operation_unavailable"}', "`vault_period.py`",
+    # Opt-in SessionStart evidence from one named transcript (vault_doctor.py).
+    "`vault_doctor.py --session-evidence`", "`--session-instruction-paths`", "`observed_ran`",
+    "`observed_truncated`", "`observed_error`", "`not_recorded`", "`unsupported_host_version`",
+    "`unparsed`", "`session_start_hooks`", "`failed_entries`", "`command_mentions_session_start_py`",
+    "`session_start_hook_failed:`", "`session_next_action:`", "`host_internal_format_undocumented`",
+    # Loopback test servers read request bodies; the ast guard and its dated measurements.
+    "`tests/test_http_handlers.py`", "`do_POST`", "`async def`", "4/300", "0/300", "0.0303", "0.0099",
+    "2026-10-24 22:33–22:46 KST",
+    # Upgrade and rollback.
+    "checker_sha256", CHECKER_SHA256_V0260_TO_V0300, CHECKER_SHA256_V0310,
+    "vault_warning_policy.py --certificate", "`invalid_config`", "`vault_healthcheck.py --staged`",
+    "`--p`", "--ref v0.31.0", "engine=0.31.0",
+)
+
+
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_v0310_release_note_covers_the_contract(self) -> None:
+        self.assertTrue(RELEASE_NOTE_V0310.is_file())
+        release = RELEASE_NOTE_V0310.read_text(encoding="utf-8")
+        for section in REQUIRED_V0310_RELEASE_SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in REQUIRED_V0310_RELEASE_LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.31.0.md").is_file())
+        for template in sorted(BROWSER_RULE.parent.glob("vault-*.md")):
+            with self.subTest(rule=template.name):
+                stamp = template.read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn("agentic-vault:rule engine=", stamp)
+                self.assertNotIn("engine=0.31.0", stamp)
+
+    def test_stated_checker_hash_is_the_shipped_checker_hash(self) -> None:
+        # Certificates bind these bytes; a stale stated hash misleads every promoted vault.
+        # A child process computes it from the files next to the shipped script.
+        script = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_warning_policy.py"
+        result = subprocess.run([sys.executable, str(script), "--certificate"], capture_output=True,
+                                text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["checker_sha256"], CURRENT_CHECKER_SHA256)
+        for rel_path in ("docs/releases/v0.31.0.md", "docs/verification/v0.31.0.md"):
+            with self.subTest(path=rel_path):
+                self.assertIn(CURRENT_CHECKER_SHA256, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+        for rel_path in ("README.md", "docs/codex.md", "docs/hardening.md"):
+            with self.subTest(path=rel_path):
+                self.assertIn(f"`{CURRENT_CHECKER_SHA256[:8]}…`",
+                              (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+
     def test_v0230_release_note_covers_the_contract(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0230.is_file())
         release = RELEASE_NOTE_V0230.read_text(encoding="utf-8")

@@ -1,16 +1,23 @@
 # 출처와 공유 상태 보강
 
+v0.31.0은 시간 대장의 [`check-support`](#대장-값의-출처-노트-대조-vault_ssotpy-check-support)에 다른 대장의 사실 표에만
+있는 값을 표시하는 [두 필드](#다른-대장의-사실-표에만-있는-값)(기본 출력)와 선택형 `--primary-text-only`,
+선택형 [기간 표현 정규화](#기간-표현-정규화---normalize-periods)(`--normalize-periods`)를 더한다.
 v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 [via_bot 수집 출처](#수집과-경고)로 기록하게 하고,
 [검색 평가](#검색-평가)의 별칭 inventory 확인에 디렉터리 이름 목록 대조를 더한다.
 v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택)를
 기본값이 꺼진 경고 전용 검사로 더했다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
 실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
-기존 설치 캐시와 볼트의 갱신은 별도 작업이다. v0.26.0은 [via_bot 수집 출처](#수집과-경고)를 위해
-`checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는
-새 설치본에서 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0은 `84cf5235…`). 경고를 fatal로 승격한 볼트는
-갱신 전에 승격 단계를 `warning`으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로 인증서를
-다시 만든 뒤 승격한다. 되돌리지 않으면 `promotion certificate checker_sha256 differs from current harmless replay`와
-함께 설정 오류(종료 코드 1)로 멈추고 SessionStart 훅이 주입하지 않는다. 측정과 되돌리기 조건은
+기존 설치 캐시와 볼트의 갱신은 별도 작업이다. `checker_sha256`가 묶는 일곱 파일 가운데 v0.26.0은
+[via_bot 수집 출처](#수집과-경고)를 위해 `vault_provenance.py`를, v0.31.0은 위 대장 기능을 위해 `vault_ssot.py`를
+바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는 v0.26.0 이후 설치본에서, v0.30.0 이하에서 만든 인증서는
+v0.31.0 설치본에서 맞지 않고, 그 반대 방향도 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0~v0.30.0은 `84cf5235…`,
+v0.31.0은 `832a86f9…`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
+`warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을
+모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다. 그러지 않으면 healthcheck가
+`promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,
+SessionStart 훅이 주입하지 않으며, staged 검사(`--staged`)가 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를
+보고한다. 측정과 순서는 [v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)와
 [v0.26.0 업그레이드 안내](releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
 [v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 

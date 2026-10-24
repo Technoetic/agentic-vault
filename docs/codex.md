@@ -1,15 +1,15 @@
 # Claude Code · Codex 겸용 사용
 
-v0.30.0은 선택형 [평가기 식별·개선 비용 근거](improvement-accounting.md)를 더한다. `runs prepare --evaluator-source`·`--evaluator-config`로 선택한 평가기 스냅샷을 실행과 연결하고, `run-costs`의 기록·조회·합산·비교로 호출자가 보고한 자원과 미확인을 구별한다. 비용 비교는 native 성능 비교 영수증을 쓰며 읽기 전용이 아니다. 계측·진실·전체 보고를 인증하거나 효율/적용을 자동 판정하지 않는다. 평가기 미지정의 기존 manifest/ID, 기본 훅·검색·15명령·Python 3.10+ 표준 라이브러리와 v0.29.0의 측정 기능을 유지한다.
+v0.31.0은 읽기 전용 [사례별 뒤집힘 표와 정정·유지 역할](tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)(`runs`의 `flips`, fixture assertion의 선택 키 `role`), 시간 대장 `check-support`의 [다른 대장 사실 표 표시](hardening.md#다른-대장의-사실-표에만-있는-값)(기본 출력의 두 필드와 선택형 `--primary-text-only`)와 선택형 [기간 표현 정규화](hardening.md#기간-표현-정규화---normalize-periods)(`--normalize-periods`), `doctor`의 선택형 [세션 기록 SessionStart 확인](reliability.md#세션-기록으로-sessionstart-실행-확인-선택)(`--session-evidence`, Claude Code 기록만 읽는다)을 더한다. 기본 출력에서 바뀌는 것은 `check-support`의 두 필드뿐이다. `vault_ssot.py`가 바뀌어 경고 승격 인증서의 `checker_sha256`가 바뀌므로 아래 [설치](#설치)의 인증서 순서를 따른다. 기본 훅·검색·15명령·Python 3.10+ 표준 라이브러리, v0.30.0의 [평가기 식별·개선 비용 근거](improvement-accounting.md)와 v0.29.0의 측정 기능을 유지한다.
 
 v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `via_bot` 출처로 수집하도록 기본 동작을 바꾸고([수집과 경고](hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단이 디렉터리 이름 목록도 대조하게 한다. [골드셋 보고서 키 가명화](memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 반복 측정](evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)은 명시적으로 실행하는 선택형 도구다. 평가·진단 도구는 기본 모델·네트워크 호출이나 의존성을 추가하지 않는다. v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가·소표본 통계](memory-evaluation.md), [llama-server 측정 조건 기록](evaluation-stability.md)과 해시로 고정한 CI 경고 전용 pip-audit 설치를 유지한다. v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·공개 fixture Kiwi/qmd 비교](evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](memory-evaluation.md), [한글 음절 bigram BM25](memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](hardening.md)와 [GitHub 불변 릴리스](release-integrity.md)를 유지한다. v0.22.1의 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md), 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)과 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.
-아래 GitHub 설치 ref는 v0.30.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
+아래 GitHub 설치 ref는 v0.31.0을 가리킨다. 로컬 소스 설치도 계속 지원하며,
 기존 캐시·설정·활성 범위는 갱신 전에 확인하고 보존한다.
 
-`v0.30.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
-사용한다. 이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.30.0 검증 기록](verification/v0.30.0.md)에 있다.
+`v0.31.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
+사용한다. 이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.31.0 검증 기록](verification/v0.31.0.md)에 있다.
 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다.
-이전 [v0.28.0 검증 기록](verification/v0.28.0.md), [v0.27.0 검증 기록](verification/v0.27.0.md), [v0.26.0 검증 기록](verification/v0.26.0.md), [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
+이전 [v0.30.0 검증 기록](verification/v0.30.0.md), [v0.29.0 검증 기록](verification/v0.29.0.md), [v0.28.0 검증 기록](verification/v0.28.0.md), [v0.27.0 검증 기록](verification/v0.27.0.md), [v0.26.0 검증 기록](verification/v0.26.0.md), [v0.25.0 검증 기록](verification/v0.25.0.md), [v0.24.0 검증 기록](verification/v0.24.0.md), [v0.23.0 검증 기록](verification/v0.23.0.md), [v0.22.1 검증 기록](verification/v0.22.1.md), [v0.21.0 검증 기록](verification/v0.21.0.md)과 [v0.20.0 검증 기록](verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](verification/v0.19.0.md)과 [v0.18.0 검증 기록](verification/v0.18.0.md)에 보존한다.
 이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
@@ -40,7 +40,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.30.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.31.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -48,23 +48,31 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.30.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.31.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.30.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.31.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.30.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.31.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
 경고를 `fatal`로 승격한 볼트는 갱신 전에 인증서를 다시 만들 준비를 한다.
+v0.31.0은 `checker_sha256`가 묶는 `vault_ssot.py`를 바꿨다(`84cf5235…`에서 `832a86f9…`로, 저장소 바이트로
+측정. corpus는 같다). 그래서 v0.30.0 이하에서 만든 인증서는 새 설치본에서, 새 설치본에서 만든 인증서는 이전
+설치본에서 맞지 않는다. 맞지 않으면 healthcheck가 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않으며,
+staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종료 코드 2)를 보고한다. 갱신하거나 되돌리기
+전에 승격 단계를 warning으로 되돌리고, Claude Code와 Codex 설치본과 git 볼트의 엔진 사본(`00-meta/scripts/`,
+pre-commit 훅이 실행한다)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로
+다시 생성해 승격한다([v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)). `role`로 준비한 실행은 v0.30.0 이하가
+조회·비교하지 못하므로 그런 실행을 읽는 두 설치본도 함께 갱신한다.
 v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다(`2ef4b9d4…`에서
 `84cf5235…`로, 저장소 바이트로 측정). 그래서 v0.25.0 이하에서 만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이
 설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로
@@ -72,7 +80,7 @@ v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_pro
 이전 버전 사이의 조건은 [v0.25.0 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 Claude Code와 Codex 설치본을 함께 갱신한다.
 게시만으로 활성 캐시나 볼트 엔진이 갱신되지는 않는다.
-v0.30.0은 검사기 일곱 파일과 corpus를 바꾸지 않는다. 다만 인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등 차이까지 자동 호환을 보장하지 않는다. [v0.30.0 업그레이드 안내](releases/v0.30.0.md#하위호환업그레이드)를 함께 확인한다.
+인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등 차이까지 자동 호환을 보장하지 않는다.
 
 로컬 설치도 가능하다. Release ZIP을 풀거나 저장소를 clone한 뒤
 `.codex-plugin/plugin.json`과 README가 있는 디렉터리를 지정한다:

@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.30.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.29.0 and earlier | No. Upgrade to 0.30.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. |
+| 0.31.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.30.0 and earlier | No. Upgrade to 0.31.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -59,6 +59,13 @@ In scope:
 - **External judgment API transmission** (`jev_client.py`, `jev_ask.py`,
   `vault_judge.py`): what can be sent to the Jev API, the approval flag
   (`run --allow-network`), the secret filter and API key handling.
+- **Opt-in session-transcript reader** (`vault_doctor.py --session-evidence`,
+  `vault_session_evidence.py`): it reads one Claude Code transcript that the user
+  names. A transcript holds every prompt, answer, tool result and hook output, and
+  the reader must print only counts, lengths, numbers, booleans and fixed status
+  words and, with `--session-instruction-paths`, instruction file paths. Output
+  that carries transcript content, commands, identifiers or the transcript path is
+  in scope.
 - Backup, recall and other scripts that read or write vault paths
   (`vault_paths.py`, `backup_vault.py`, `vault_recall.py`).
 
@@ -165,10 +172,10 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.30.0 소스다. 0.29.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.30.0으로 갱신한다.
+- 보안 수정 대상은 최신 0.31.0 소스다. 0.30.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.31.0으로 갱신한다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
-- 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 볼트 경로 처리.
+- 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
 - 0.18.0의 Jarvis는 호스트가 허용 경로에서 선택한 제한된 근거만 보내며 모델 도구는 없다.
