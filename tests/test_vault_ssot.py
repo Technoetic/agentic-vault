@@ -745,6 +745,97 @@ class LedgerTableOnlySupportTests(unittest.TestCase):
                 self.assertEqual(result['rows_supported_ledger_table_only'], 1)
                 self.assertEqual(result['ledger_table_only'], [{'line': 3, 'via': [via]}])
 
+    def test_cited_frontmatter_is_decided_before_fact_tables_are_removed(self):
+        # Without frontmatter, cutting the table leaves a '---' line on top; it must
+        # not open a frontmatter block over the prose below it.
+        prose = '메모: 36개월 기준은 내규 3조.\n---\n끝.\n'
+        long_table = self.rows(('24개월', '[[facts]]'), *[(f'{n}일', '') for n in range(70)])
+        layouts = {'table on line 1': self.rows(('24개월', '[[facts]]')) + '---\n' + prose,
+                   'rule above a long table': '---\n' + long_table + prose}
+        self.write('notes/facts.md', self.rows(('36개월', '[[Other]]'), ('24개월', '[[Other]]')))
+        for name, text in layouts.items():
+            with self.subTest(layout=name):
+                self.write('notes/Other.md', text)
+                default, flagged = self.check(), self.check(primary_text_only=True)
+                # 36개월 is only in the prose; the control 24개월 is only in the table.
+                self.assertEqual((default['warnings'], default['rows_supported']), ([], 2))
+                for result in (default, flagged):
+                    self.assertEqual(result['ledger_table_only'], [{'line': 4, 'via': ['notes/Other.md']}])
+                self.assertEqual([(w['line'], w['details']) for w in flagged['warnings']],
+                                 [(4, {'cited': ['notes/Other.md'], 'reason': 'ledger_table_only'})])
+                self.assertEqual((flagged['rows_supported'], flagged['rows_unsupported']), (1, 1))
+                self.assertEqual(flagged['ledger_tables_unseparated'], [])
+        # Documented limit: a self-citation keeps the v0.30.0 order (tables cut first),
+        # so the same layout hides that prose unless a blank line follows the table.
+        for gap, found in (('', [(3, 'ssot-source-unsupported', None)]), ('\n', [])):
+            with self.subTest(self_gap=gap):
+                self.write('notes/Self.md', self.rows(('36개월', '[[#근거]]')) + gap + '---\n' + prose)
+                result = self.check('notes/Self.md')
+                self.assertEqual([(w['line'], w['code'], w['details'].get('reason')) for w in result['warnings']], found)
+
+    def test_cited_notes_parse_ledger_refuses_are_named_only_with_primary_text_only(self):
+        # parse_ledger splits every header-candidate line, prose and other tables
+        # included, so one refusal leaves the whole cited note without tables.
+        table, long = self.rows(('24개월', '[[facts]]')), '가' * 1400
+        wide = ledger([['x'] * 40], fields=[f'c{n}' for n in range(40)])
+        many_rows = self.rows(('24개월', '[[facts]]'), *[(f'{n}일', '') for n in range(ssot.MAX_ROWS)])
+        cases = [  # (case, cited note, the reason parse_ledger refuses its body with, or None)
+            ('long pipe prose line', table + '\n메모: ' + long + ' | 참고\n다음 줄\n', 'cell_limit'),
+            ('40-column auxiliary table', table + '\n' + wide, 'column_limit'),
+            ('33-pipe prose line', table + '\n' + 'a' + ' | a' * 33 + '\n다음 줄\n', 'column_limit'),
+            ('nine fact tables', '\n'.join([table] * (ssot.MAX_TABLES + 1)), 'table_limit'),
+            ('257 fact rows', many_rows, 'row_limit'),
+            ('NUL', table + 'x\x00y\n', 'invalid_text'),
+            ('short pipe prose line', table + '\n메모: 짧은 | 줄\n다음 줄\n', None),
+            ('pipe in a code span', table + '\n메모: `' + long + ' | 참고`\n다음 줄\n', None),
+            ('escaped pipe', table + '\n메모: ' + long + ' \\| 참고\n다음 줄\n', None),
+            ('pipe in a wiki alias', table + '\n메모: [[Target|' + long + ']]\n다음 줄\n', None),
+            ('indented line', table + '\n    메모: ' + long + ' | 참고\n다음 줄\n', None),
+            ('last line', table + '\n메모: ' + long + ' | 참고\n', None),
+            ('fenced line', table + '\n```\n메모: ' + long + ' | 참고\n다음 줄\n```\n', None),
+            ('frontmatter', '---\nnote: ' + long + ' | 참고\nnul: x\x00y\n---\n' + table, None)]
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]')))
+        for case, text, reason in cases:
+            with self.subTest(case=case):
+                self.write('notes/Other.md', text)
+                default, flagged = self.check(), self.check(primary_text_only=True)
+                self.assertNotIn('ledger_tables_unseparated', default)
+                named = flagged.pop('ledger_tables_unseparated')
+                if reason:
+                    self.assertEqual(named, [{'path': 'notes/Other.md', 'reason': reason}])
+                    # The opt-in rule cannot apply, so the value in the table still counts.
+                    self.assertEqual(flagged, default)
+                    self.assertEqual((default['rows_supported'], default['ledger_table_only']), (1, []))
+                else:
+                    self.assertEqual(named, [])
+                    self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']}])
+                    self.assertEqual([(w['line'], w['details'].get('reason')) for w in flagged['warnings']],
+                                     [(3, 'ledger_table_only')])
+        # Read in citation order (Wide first); listed in path order.
+        self.write('notes/Other.md', cases[0][1])
+        self.write('notes/Wide.md', cases[1][1])
+        self.write('notes/facts.md', self.rows(('24개월', '[[Wide]], [[Other]]')))
+        both = [{'path': 'notes/Other.md', 'reason': 'cell_limit'}, {'path': 'notes/Wide.md', 'reason': 'column_limit'}]
+        for extra, named in (([], None), (['--primary-text-only'], both)):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(extra=extra), mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', 'notes/facts.md', *extra])
+                self.assertEqual((code, stderr.getvalue()), (0, ''))
+                self.assertEqual(json.loads(stdout.getvalue()).get('ledger_tables_unseparated'), named)
+
+    def test_each_check_shows_only_its_own_link_of_a_longer_chain(self):
+        # A -> B -> C -> A, each value only in the next ledger's fact table. There is
+        # no graph walk: each check lists its own link and nothing further.
+        links = (('A', '1개월', 'B', '3개월'), ('B', '2개월', 'C', '1개월'), ('C', '3개월', 'A', '2개월'))
+        for name, value, cited, held in links:
+            self.write(f'notes/{name}.md', self.rows((value, f'[[{cited}]]'), (held, '')))
+        for name, _, cited, _ in links:
+            with self.subTest(ledger=name):
+                default = self.check(f'notes/{name}.md')
+                flagged = self.check(f'notes/{name}.md', primary_text_only=True)
+                self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': [f'notes/{cited}.md']}])
+                self.assertEqual((default['rows_supported'], flagged['rows_unsupported']), (1, 1))
+
     def test_prose_outside_the_table_and_plain_notes_are_ordinary_support(self):
         self.write('notes/Other.md', '# Other\n\n' + self.rows(('24개월', ''), ('36개월', '')) + '\n메모: 24개월 기준.\n')
         self.write('notes/Plain.md', '기준은 36개월이다.\n')

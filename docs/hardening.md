@@ -127,7 +127,8 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 #### 다른 대장의 사실 표에만 있는 값
 
 인용한 노트가 다른 대장이면 그 사실 표는 2차 자료다. 대장이 자기 자신을 인용할 때 사실 표를 빼고 비교하는 것과 같은 이유다.
-인용 노트에서 `parse_ledger`가 알아보는 사실 표(v1·v2 모두)가 있으면 같은 읽기에서 그 표를 뺀 본문도 만든다.
+인용 노트는 frontmatter 경계를 노트 전체에서 먼저 정하고, 그 아래 본문에서 `parse_ledger`가 알아보는 사실 표(v1·v2 모두)를 찾는다.
+표가 있으면 같은 읽기에서 그 표를 뺀 본문도 만든다. 표를 뺀 뒤에 frontmatter를 다시 정하지 않으므로, 첫 줄의 표를 빼서 맨 위로 올라온 `---`를 frontmatter 시작으로 보지 않는다.
 노트를 더 읽지 않고(인용 노트마다 표를 인식하고, 표가 있으면 본문 정규화를 한 번 더 한다) 출처 노트 수·읽기 합계 상한과 끝의 재확인도 그대로다.
 값이 뒷받침됐는데 표를 뺀 본문 어디에도 없으면 그 행을 따로 표시한다. 사실 표가 없는 노트는 본문 전체가, 자기 인용은 사실 표를 뺀 대장 본문이 표를 뺀 본문이다.
 
@@ -140,6 +141,9 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 테스트가 v0.30.0(`452c5c0`)에서 캡처한 출력과 비교한다. `--primary-text-only`(API는 `check_support(vault, path, primary_text_only=True)`, 기본 꺼짐)를 켜면
 그 행을 `rows_unsupported`로 세고 `ssot-source-unsupported` 경고를 낸다. `details`는 `cited`에 `reason: "ledger_table_only"`를 더한 것이다.
 두 필드의 값은 켜도 같고, 다른 행의 결과와 경고는 바뀌지 않는다.
+켜면 `ledger_tables_unseparated`도 더한다(끄면 없다). `parse_ledger`가 본문을 거절해 사실 표를 가려내지 못한 인용 노트의 목록이다(아래 한계).
+항목마다 `path`와 `reason`(`column_limit`·`cell_limit`·`table_limit`·`row_limit`·`invalid_text` 가운데 하나)만 넣고 경로순으로 정렬한다.
+그런 노트는 본문 전체와 비교하므로 그 노트의 사실 표에 있는 값도 뒷받침으로 센다. 목록이 비어 있지 않으면 그 노트에는 이 선택이 적용되지 않은 것이다.
 
 ```
 python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md> --primary-text-only
@@ -149,7 +153,21 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 무엇이 1차 출처인지는 응용 분야에서 받아들인 관례로 정한다. 여기서는 "다른 대장의 사실 표는 1차 근거가 아니다"를 관례로 정했다. PROV 어휘나 인용 유형 열은 쓰지 않는다.
 PROV-DM에는 순환 규칙이 없다. [PROV-CONSTRAINTS](https://www.w3.org/TR/prov-constraints/)의 비순환 제약은 생성 사건의 순서에 기대는데,
 노트는 고쳐지므로 A(v2)←B←A(v1)은 PROV에서 정상 연쇄다. 그래서 인용 그래프를 따라가거나 순환을 찾지 않는다.
-사실 표를 근거로 치지 않으므로 서로 인용(A↔B)과 표를 거치는 더 긴 연쇄가 한 번에 드러난다.
+다른 대장의 사실 표를 1차 근거로 치지 않으면(`--primary-text-only`), 각 대장을 검사할 때 서로 인용(A↔B)이나 표를 거치는 연쇄의 고리가
+그래프 탐색 없이 하나씩 드러난다. 기본값에서는 그 고리도 `rows_supported`로 세고 `ledger_table_only`로만 보여 준다.
+
+한계:
+
+- 열 32개·칸 4 KiB 상한은 사실 표에만 걸리지 않는다. `parse_ledger`는 표 머리글을 찾느라, 코드 펜스 밖에서 공백 4칸 미만으로 들여쓰고
+  바로 다음 줄도 그런 줄을 모두 이스케이프하지 않은 `|`로 나눠 본다(인라인 코드·위키링크 안의 `|`는 빼고). 산문 줄과 사실 표가 아닌 표의 줄도 마찬가지다.
+  그런 줄 하나가 32칸을 넘거나(사실 표가 아닌 40열 표, 앞뒤에 글이 있고 `|`가 32개 이상인 산문 줄) 한 칸이 4 KiB(UTF-8 4,096바이트, 한글만이면 1,366자 이상)를
+  넘으면 `parse_ledger`가 본문을 거절하고 노트 전체를 사실 표가 없는 노트로 본다. 사실 표가 8개를 넘거나 사실 표 행이 모두 합쳐 256개를 넘거나
+  본문에 NUL 문자가 있어도 같다. frontmatter 안의 줄은 보지 않는다. 그런 노트의 사실 표에 있는 값은 `--primary-text-only`를 켜도 1차 근거로 세고
+  `ledger_table_only`에도 나오지 않는다. 켜면 `ledger_tables_unseparated`에 그 노트가 나오지만, 기본값에는 아무 표시가 없다.
+- 자기 인용은 v0.30.0 기본 출력을 바꾸지 않도록 그때 순서 그대로 대장의 사실 표를 먼저 빼고 나서 frontmatter를 정한다. frontmatter가 없는 대장의 첫 줄부터
+  사실 표가 있고 표 바로 다음 줄이 `---`이며 그 아래 64줄 안에 `---`가 또 있으면, 두 `---` 사이를 frontmatter로 보고 비교에서 뺀다.
+  그 사이 산문에만 있는 값을 자기 인용한 행은 `ssot-source-unsupported`가 된다. 표와 `---` 사이에 빈 줄을 두면 생기지 않는다.
+  다른 노트를 인용할 때는 frontmatter를 먼저 정하므로 생기지 않는다.
 
 #### 기간 표현 정규화 (`--normalize-periods`)
 
