@@ -27,15 +27,23 @@ Conventions declared here, not taken from a standard:
 - Two-digit years (3Q26, FY26) are 2000-2099, and a four-digit year never
   starts with 0. A year written without 년 before a quarter or half
   (2026 3분기) is read only for 1900-2099.
-- A value never resolves to a wider interval than it writes. 말 after a
-  period, attached or spaced, is its last day when no letter or digit follows
-  it or what follows starts with a listed particle (에, 까지, 부터, 의, 로,
-  경, 쯤, 께, 일, 기준, 현재, 은, 는, 이, 가, 도, 엔). Qualifiers this
-  table does not compute abstain with period_qualifier instead of falling back
-  to the whole period: 초 (start of period), any other 말 word (말레이시아), a
-  quarter count (4분기 연속, 3분기째, 3분기 만에) and a Q or H mark before a
-  fiscal year (Q3 FY2026, H1 FY2026) or after it in any form but Qn
-  (FY2026 H1, FY2026 3Q); FY2026 Q3 is read.
+- Qualifiers are recognised from fixed lists only. 말 right after a period,
+  attached or spaced, is its last day when no letter or digit follows it or
+  what follows starts with a listed particle (에, 까지, 부터, 의, 로, 경,
+  쯤, 께, 일, 기준, 현재, 은, 는, 이, 가, 도, 엔). These abstain with
+  period_qualifier instead of falling back to the whole period: 초 (start of
+  period, so also 초반 and 초순), any other 말 word (말레이시아), a narrowing
+  word (후반, 중후반, 중반, 전반 but not 전반적, 끝, 마지막, 막바지, 막판,
+  상순, 중순, 하순; 시작 as a word of its own; 종료, 마감, 결산, 개시 or 시작
+  before 일, 날, 시 or 월; an ordinal before a day, week or month unit, as in
+  첫 달, 첫날, 첫 2주, 셋째 주, 두 번째 달; a month or week number such as
+  8월 or 2주차), any of these after the period's 의 (2026년 3분기의
+  마지막 날, 2026년 3분기의 말), a quarter count (4분기 연속, 3분기째,
+  3분기 만에) and a Q or H mark before a fiscal year (Q3 FY2026, H1 FY2026)
+  or after it in any form but Qn (FY2026 H1, FY2026 3Q); FY2026 Q3 is read.
+  A word outside these lists is not recognised, so the value is still
+  compared as the whole period (2026년 3분기 늦게, 2026년 3분기 중 마지막
+  달, late 2026Q3); 중, 내 and 동안 keep it whole as well.
 - Relative expressions (당기, 전기, 전년 동기, 올해, 이번 분기, ...) always
   abstain with relative_needs_anchor. A quarter or half without a year
   abstains with no_year; no anchor year is filled in, because a text such as
@@ -50,8 +58,9 @@ Conventions declared here, not taken from a standard:
   year is copied from the other end.
 - The table reads one space or tab where it allows a gap, while the checks
   that make a record abstain (qualifiers, counts, range marks) take any
-  whitespace run; vault_ssot passes forms with every whitespace run collapsed
-  to one space.
+  whitespace run; a Q or H mark beside a fiscal year is read across one space
+  or tab only. vault_ssot passes forms with every whitespace run collapsed to
+  one space.
 """
 from __future__ import annotations
 
@@ -64,10 +73,11 @@ MAX_TEXT_CHARS = 1024 * 1024
 MATCHES = ('equal', 'contained', 'none')
 SCOPE = ('ledger value periods against cited note body periods as half-open date intervals: equal (the same '
          'interval appears somewhere in a cited body), contained (an inner one does) or none, and abstain when '
-         'the value has an unresolved period, a qualifier or a partial range; modifiers and the rest of the '
-         'value are not compared; calendar quarters and halves abstain unless fiscal_start is 1 or absent; '
-         'fiscal years need fiscal_start; relative and yearless expressions abstain; durations and ranges are '
-         'never merged; advisory only, never literal support, counts or warnings')
+         'the value has an unresolved period, a listed qualifier or a partial range; text outside the fixed '
+         'lists, such as an unlisted qualifier, is not read, so a period can still be compared whole; modifiers '
+         'and the rest of the value are not compared; calendar quarters and halves abstain unless fiscal_start '
+         'is 1 or absent; fiscal years need fiscal_start; relative and yearless expressions abstain; durations '
+         'and ranges are never merged; advisory only, never literal support, counts or warnings')
 
 
 class PeriodError(ValueError):
@@ -89,9 +99,30 @@ _QUARTER = (r'(?:제' + _SP + r')?(?P<quarter>[1-4])(?:' + _SP + r'/' + _SP + r'
 _HALF = r'(?P<half>[상하])' + _SP + r'반기'
 # After a period, attached or spaced: 말 is the last day when no letter or
 # digit follows it or a listed particle does. 초 (start of period, not
-# computed) or another 말 word (말레이시아) is a qualifier.
+# computed), another 말 word (말레이시아) and a narrowing word are qualifiers,
+# and so are all of them after the period's 의 (3분기의 말, 3분기의 첫 달).
 _PARTICLE = r'(?:에|까지|부터|의|로|경|쯤|께|일|기준|현재|은|는|이|가|도|엔)'
-_TAIL = r'(?:' + _GAP + r'(?:(?P<end>말)(?:(?![^\W_])|(?=' + _PARTICLE + r'))|(?P<qualifier>[말초])))?'
+# A word of its own: no letter or digit follows it, or a particle does.
+_WORD_END = r'(?:(?![^\W_])|(?=' + _PARTICLE + r'|과|와|을|를|으로|만))'
+# The n-th day, week or month of a period (첫 달, 첫날, 첫째 주, 첫 2주, 셋째
+# 주, 두 번째 달, 첫 영업일); 첫 흑자 or 첫 출하 names an event, not a part.
+_ORDINAL = (r'(?:첫째|첫|[둘셋넷]째|[첫두세네]' + _GAP + r'번째)' + _GAP
+            + r'(?:(?:[0-9]+|[한두세네](?=' + _GAP + r'[달주]))' + _GAP + r')?'
+            r'(?:[날달주일]|개월|영업일|거래일|근무일|평일|이틀|사흘|나흘|열흘|보름|[월화수목금토일]요일)(?:간|차|말)?'
+            + _WORD_END)
+# Fixed words that narrow a period to a part or a day; what follows them is
+# not read (후반에, 끝까지, 마지막 날). A narrower form keeps common neutral uses
+# whole: 시작 only as a word of its own (not 시작하는, 시작된), 종료/마감/결산/
+# 개시/시작 only before 일, 날, 시 or 월 (종료일, 마감 시한, 결산월; not 결산
+# 실적), an ordinal only before a unit and 전반 not as 전반적. A month (8월)
+# or week number (2주차) inside the period narrows it too. 초반 and 초순 are 초.
+# 중, 내 and 동안 do not narrow a period, and 이후 or 까지 are modifiers: none
+# is listed.
+_NARROW = (r'(?:중?후반|중반|전반(?!적)|끝|마지막|막바지|막판|[상중하]순'
+           r'|(?:종료|마감|결산|개시|시작)' + _GAP + r'[일날시월]|시작' + _WORD_END + r'|' + _ORDINAL
+           + r'|(?:1[0-2]|0?[1-9])' + _GAP + r'월|[0-9]+' + _GAP + r'주차)')
+_TAIL = (r'(?:' + _GAP + r'(?:(?P<end>말)(?:(?![^\W_])|(?=' + _PARTICLE + r'))|(?P<qualifier>(?:의' + _GAP
+         + r')?(?:[말초]|' + _NARROW + r'))))?')
 _SEPARATORS = (r'~\N{TILDE OPERATOR}\N{WAVE DASH}\-,\N{MIDDLE DOT}\N{HANGUL LETTER ARAEA}'
                r'\N{HANGUL JUNGSEONG ARAEA}\N{KATAKANA MIDDLE DOT}')
 _NUMBER = r'(?:제' + _SP + r')?[1-4](?:' + _SP + r'/' + _SP + r'4)?'

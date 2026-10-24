@@ -1307,6 +1307,29 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
             {'line': 4, 'normalized_match': 'equal', 'via': self.VIA, 'incomplete': ['period_text_limit']}])
         self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
 
+    def test_narrowing_words_after_a_period_abstain_end_to_end(self):
+        """후반, 마지막 날, 종료일 or 첫 달 narrow the period: the value abstains, and a body using one is not indexed."""
+        self.write('notes/Plan.md', '신제품은 2026년 하반기 양산 목표. 3공장은 2026년 3분기 완공 예정. '
+                                    '2공장은 2026년 4분기 끝까지 점검.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2026년 하반기 후반 양산', '[[Plan]]'), ('2026년 3분기 마지막 날 완공', '[[Plan]]'),
+            ('2026년 3분기 종료일 완공', '[[Plan]]'), ('2026년 3분기의 첫 달 완공', '[[Plan]]'),
+            ('2026년 3분기 중 완공', '[[Plan]]'), ('2026년 3분기 말에 완공', '[[Plan]]'), ('2026년 4분기 점검', '[[Plan]]')))
+        qualifier = {'normalized_match': 'abstain', 'reason': 'period_qualifier'}
+        ambiguous = {'normalized_match': 'abstain', 'reason': 'quarter_basis_ambiguous'}
+        none = {'normalized_match': 'none'}
+        expected = {None: [qualifier] * 4 + [{'normalized_match': 'equal', 'via': ['notes/Plan.md']}, none, none],
+                    4: [qualifier] * 4 + [ambiguous] * 3}
+        default = self.check()
+        for fiscal_start, rows in expected.items():
+            with self.subTest(fiscal_start=fiscal_start):
+                flagged = self.check(normalize_periods=True, fiscal_start=fiscal_start)
+                self.assertEqual(flagged['normalized_periods'], [dict(line=line, **row) for line, row in enumerate(rows, 3)])
+                self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(default))
+        code, out, err = self.run_cli('--normalize-periods')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['normalized_periods'][0], dict(line=3, **qualifier))
+
 
 class DefaultCliRegressionTests(unittest.TestCase):
     """Golden check/prepare outputs captured from v0.22.1 (63b4cc9) before check-support."""
