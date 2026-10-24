@@ -421,6 +421,7 @@ class TransportTests(unittest.TestCase):
         paths = []
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
                 paths.append(self.path)
                 self.send_response(302)
                 self.send_header('Location', '/must-not-follow')
@@ -442,6 +443,7 @@ class TransportTests(unittest.TestCase):
     def test_http_response_bytes_are_bounded_before_json_parsing(self):
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
                 body = b'x' * 2048
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
