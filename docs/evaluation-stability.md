@@ -252,6 +252,70 @@ python scripts/flaky_repeat.py <module.Class.test_name> -n 30 --fresh-process --
   flaky가 아니라고 95% 신뢰로 말하려면 평균 약 170회의 재실행이 필요하다고 추정했다. Linux에서
   실행한 데이터셋의 평균이며 이 테스트 묶음의 고정 기준이 아니다.
 
+### 요청 본문을 읽지 않는 시험 서버
+
+`tests/test_tool_safety_evaluation.py`의 루프백 전송 시험 두 개가 Windows에서 가끔 기대한 오류 대신
+`transport_error`로 실패했다. 원인을 측정으로 확인했고 시험 코드만 고쳤다. 엔진과 전송 코드는 그대로다.
+
+**원인.** 두 시험의 HTTP 처리기는 POST 본문을 읽지 않고 응답한 뒤 연결을 닫았다.
+[RFC 1122](https://www.rfc-editor.org/rfc/rfc1122) §4.2.2.13은 half-duplex 종료를 구현한 호스트가 받은 데이터가
+남은 채로 닫거나 닫은 뒤에 데이터를 받으면, 데이터가 사라졌음을 알리도록 TCP가 RST를 보내야 한다고(SHOULD) 적는다.
+CPython 3.12의 `http.client`는 헤더를 보낸 뒤 본문을 따로 `send()`한다. 서버의 첫 수신에 헤더만 들어오고 처리기가
+본문을 읽지 않은 채 응답하면 본문이 읽히지 않고 남는다. Windows 클라이언트가 응답을 읽기 전에 RST를 받으면
+`ConnectionAbortedError`(WinError 10053)나 `ConnectionResetError`(10054)가 난다. `LocalChatTransport`는
+`HTTPError`가 아닌 `OSError`(`URLError`·시간 초과 포함)를 모두 `transport_error`로 바꾸므로, `http_error`나
+`response_bytes_exceeded`를 기대한 시험이 실패한다. socketserver는 요청을 닫기 전에 이미 `shutdown(SHUT_WR)`을
+부르므로 그 호출을 더해도 막지 못한다.
+
+**수정.** 두 처리기의 `do_POST`는 응답하기 전에 `self.rfile.read(int(self.headers.get('Content-Length') or 0))`로
+본문을 읽는다. 같은 파일의 다른 처리기와 같은 방식이다.
+
+**재발 방지 검사.** `tests/test_http_handlers.py`는 `tests/*.py`(하위 폴더 제외)를 ast로 읽는다. `do_POST`·
+`do_PUT`·`do_PATCH`가 첫 매개변수의 `rfile.read(...)`도, 허용한 도우미(`BODY_READ_HELPERS`, 지금은 없음)도
+부르지 않으면 `파일:정규화 이름 (line N)`으로 실패한다. 일부러 본문을 남기는 처리기는 사유와 함께
+`UNREAD_BODY_ALLOWED`에 둔다(지금은 비어 있다). 더는 해당하지 않는 허용 항목도 실패한다. `tests/test_winfs.py`의
+정션 검사는 파일 전체의 문자열 검사지만, 이 규칙은 메서드 하나로 범위를 좁혀야 해서 ast를 쓴다. 메서드 안에 읽기
+호출이 있는지만 본다. 모든 경로에서 읽는지와 별칭·부모 클래스·목록에 없는 도우미를 거친 읽기는 증명하지 않는다.
+
+**측정.** 2026-10-24 22:33–22:46 KST, Windows 11 빌드 26300, Python 3.12.10, `flaky_repeat.py` 같은 프로세스
+반복 N=300, 단측 95% Clopper–Pearson이다. 수정 전은 `452c5c0`의 사본, 수정 후는 이 변경이다. 같은 기계에 다른 작업
+세션의 프로세스가 떠 있었다(시작 직전 CPU 부하 4%).
+
+```text
+python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_redirect_is_not_followed_or_retried_and_body_is_not_logged -n 300
+python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_http_response_bytes_are_bounded_before_json_parsing -n 300
+```
+
+| 시험 | 수정 전 | 수정 후 |
+|---|---|---|
+| `TransportTests.test_http_redirect_is_not_followed_or_retried_and_body_is_not_logged` | 4/300, 상한 0.0303(4번 모두 `'transport_error' != 'http_error'`) | 0/300, 상한 0.0099 |
+| `TransportTests.test_http_response_bytes_are_bounded_before_json_parsing` | 0/300, 상한 0.0099 | 0/300, 상한 0.0099 |
+
+- 응답 바이트 시험은 2026-10-23 v0.29.0 릴리스 확인 때 같은 호스트에서 수정 전 코드로 8/300(상한 0.0476, 8번
+  모두 `'transport_error' != 'response_bytes_exceeded'`)이었다. 같은 코드에서도 측정 시간대에 따라 실패 수가 달랐다.
+- 시험 반복만으로는 수정 전후의 차이(4/300과 0/300)가 우연이 아니라고 말하기에 부족하다. 원인은 저장소 밖의
+  탐침으로 따로 확인했다. 두 시험과 같은 처리기 네 개(응답 바이트·리다이렉트, 본문을 읽음·안 읽음)를 띄우고
+  `LocalChatTransport`로 요청을 번갈아 300번씩 보냈다(같은 날 22:45). `transport_error` 뒤에 감춰진 원래 예외는
+  `__context__`에서 읽었다.
+
+| 처리기 | 본문을 읽지 않음 | 본문을 읽음 |
+|---|---|---|
+| 응답 바이트(200, 본문 2,048바이트, 상한 128바이트) | 11/300 `transport_error`, 모두 `ConnectionAbortedError` 10053 | 0/300 |
+| 리다이렉트(302) | 7/300 `transport_error`, 모두 `ConnectionAbortedError` 10053 | 0/300 |
+
+2026-10-23 같은 호스트의 이전 탐침에서도 본문을 읽지 않으면 300번 중 9번(10053 8번, 10054 1번) 연결이 끊겼고,
+읽으면 0번이었다.
+
+**한계.**
+
+- 0/300은 실패율이 약 1% 이하라는 뜻이지 없다는 증명이 아니다.
+- Linux·macOS에서는 이 경쟁이 드러나지 않을 수 있어 CI 통과가 수정의 증거가 아니다. 플랫폼과 무관한 방어는 위의
+  정적 검사다.
+- `Content-Length`를 그대로 믿는 읽기는 작은 JSON을 보내는 루프백 시험용이다. 크기 상한 없이 실제 서버로 옮기지 않는다.
+- 본문 길이를 알 수 없는 처리기(chunked, 일부러 큰 본문)는 `finish()`에서 `shutdown(SHUT_WR)` 뒤 시간 제한을 두고
+  EOF까지 읽는 방식(Microsoft Learn의 graceful shutdown 순서)을 쓸 수 있다. 시간 제한이 없으면 클라이언트가 연결을
+  열어 둘 때 `server.shutdown()`이 멈출 수 있어 공용 `server()` 도우미에는 넣지 않았다. 지금 그런 처리기는 없다.
+
 ## 연구와 관측
 
 - [LongMemEval-V2](https://arxiv.org/abs/2605.12493), [MemoryAgentBench](https://arxiv.org/abs/2507.05257): 상태 변화와 실제 기억 사용을 분리하는 평가 설계 참고.
@@ -260,6 +324,7 @@ python scripts/flaky_repeat.py <module.Class.test_name> -n 30 --fresh-process --
 - [Git의 Windows rename 수정](https://github.com/git/git/commit/391bceae4350): 열린 핸들 때문에 교체가 거부되는 원인과 제한된 재시도의 참고.
 - [An Empirical Study of Flaky Tests in Python](https://arxiv.org/abs/2101.09077)(Gruber 등, ICST 2021), [DeleteFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew): 재실행 횟수와 상한으로 간헐 실패를 보고하는 규칙, 삭제 대기 가설의 근거. 논문의 170회는 데이터셋 평균이며 출처의 측정은 재현하지 않았다.
 - [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/), [llama.cpp 서버 README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md): 부하·배치 크기와 프롬프트 캐시가 temperature 0 출력을 바꿀 수 있다는 근거. 출처의 측정은 재현하지 않았다.
+- [RFC 1122](https://www.rfc-editor.org/rfc/rfc1122) §4.2.2.13, [Graceful Shutdown, Linger Options, and Socket Closure](https://learn.microsoft.com/en-us/windows/win32/winsock/graceful-shutdown-linger-options-and-socket-closure-2): 읽지 않은 수신 데이터가 남은 채 닫으면 RST를 보낸다는 규칙과, 명시적 shutdown 뒤 남은 데이터를 받는 종료 순서의 근거. RST 규칙은 RFC에만 있고 Microsoft 문서는 RST나 읽지 않은 수신 데이터를 다루지 않는다.
 
 공식 논문의 데이터·코드를 복사하거나 공식 벤치마크 점수를 재현했다고 주장하지 않는다.
 2026-10-18 개발 브랜치에서 실행한 관측은 [당시 검증 기록](verification/eval-stability-20261018.md)과
