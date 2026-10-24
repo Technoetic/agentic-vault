@@ -268,14 +268,16 @@ CPython 3.12의 `http.client`는 헤더를 보낸 뒤 본문을 따로 `send()`�
 부르므로 그 호출을 더해도 막지 못한다.
 
 **수정.** 두 처리기의 `do_POST`는 응답하기 전에 `self.rfile.read(int(self.headers.get('Content-Length') or 0))`로
-본문을 읽는다. 같은 파일의 다른 처리기와 같은 방식이다.
+본문을 읽는다. `Content-Length`만큼 읽는 점은 같은 파일의 다른 처리기와 같다. 다른 처리기는
+`int(self.headers['Content-Length'])`를 쓰고, 새로 넣은 두 줄은 헤더가 없으면 0바이트를 읽는다.
 
-**재발 방지 검사.** `tests/test_http_handlers.py`는 `tests/*.py`(하위 폴더 제외)를 ast로 읽는다. `do_POST`·
-`do_PUT`·`do_PATCH`가 첫 매개변수의 `rfile.read(...)`도, 허용한 도우미(`BODY_READ_HELPERS`, 지금은 없음)도
-부르지 않으면 `파일:정규화 이름 (line N)`으로 실패한다. 일부러 본문을 남기는 처리기는 사유와 함께
+**재발 방지 검사.** `tests/test_http_handlers.py`는 `tests/*.py`(하위 폴더 제외)를 ast로 읽는다. `def`·`async def`로
+정의한 `do_POST`·`do_PUT`·`do_PATCH`가 첫 매개변수의 `rfile.read(...)`도, 허용한 도우미(`BODY_READ_HELPERS`, 지금은
+없음)도 부르지 않으면 `파일:클래스·함수 경로 (line N)`으로 실패한다. 일부러 본문을 남기는 처리기는 사유와 함께
 `UNREAD_BODY_ALLOWED`에 둔다(지금은 비어 있다). 더는 해당하지 않는 허용 항목도 실패한다. `tests/test_winfs.py`의
 정션 검사는 파일 전체의 문자열 검사지만, 이 규칙은 메서드 하나로 범위를 좁혀야 해서 ast를 쓴다. 메서드 안에 읽기
-호출이 있는지만 본다. 모든 경로에서 읽는지와 별칭·부모 클래스·목록에 없는 도우미를 거친 읽기는 증명하지 않는다.
+호출이 있는지만 본다. 응답보다 먼저 읽는지, 모든 경로에서 읽는지와 별칭·부모 클래스·목록에 없는 도우미를 거친 읽기는
+증명하지 않는다. 대입·lambda·`setattr`로 붙이거나 검사 범위 밖의 부모 클래스에서 물려받은 처리기는 찾지 못한다.
 
 **측정.** 2026-10-24 22:33–22:46 KST, Windows 11 빌드 26300, Python 3.12.10, `flaky_repeat.py` 같은 프로세스
 반복 N=300, 단측 95% Clopper–Pearson이다. 수정 전은 `452c5c0`의 사본, 수정 후는 이 변경이다. 같은 기계에 다른 작업
@@ -308,7 +310,7 @@ python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_h
 
 **한계.**
 
-- 0/300은 실패율이 약 1% 이하라는 뜻이지 없다는 증명이 아니다.
+- 0/300은 단측 95% 신뢰로 실패율이 약 1% 이하라는 뜻이지 없다는 증명이 아니다.
 - Linux·macOS에서는 이 경쟁이 드러나지 않을 수 있어 CI 통과가 수정의 증거가 아니다. 플랫폼과 무관한 방어는 위의
   정적 검사다.
 - `Content-Length`를 그대로 믿는 읽기는 작은 JSON을 보내는 루프백 시험용이다. 크기 상한 없이 실제 서버로 옮기지 않는다.

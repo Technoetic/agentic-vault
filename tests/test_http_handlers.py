@@ -1,4 +1,4 @@
-"""Loopback test servers must read the request body before they answer.
+"""Loopback test servers must read the request body.
 
 An ``http.server`` handler that answers a POST without reading the body can close
 the connection while request bytes are still unread. TCP then sends a reset (RST)
@@ -11,8 +11,12 @@ then. See docs/evaluation-stability.md.
 The scan covers every tests/*.py like the junction check in tests/test_winfs.py,
 but that check is a text-marker scan; this one parses the files with ast because
 the rule is scoped to one method. It guards against a handler that forgets the
-read. It is not a proof: it does not follow reads through aliases, parent classes
-or helpers other than BODY_READ_HELPERS, and it does not check every code path.
+read. It is not a proof: it only looks for a read call somewhere in the method, so
+it does not check that the read comes before the answer or runs on every code path,
+and it does not follow reads through aliases, parent classes or helpers other than
+BODY_READ_HELPERS. It only finds handlers defined with def or async def; one that
+is attached by assignment, lambda or setattr, or inherited from a class outside the
+scan, is not seen.
 """
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 BODY_METHODS = frozenset({"do_POST", "do_PUT", "do_PATCH"})
 # Shared helpers that read the whole request body of the handler they are given;
 # a call to one of these names counts as a read. None exists yet: the handlers
-# read inline with self.rfile.read(int(self.headers.get('Content-Length') or 0)).
+# read inline, e.g. self.rfile.read(int(self.headers.get('Content-Length') or 0)).
 BODY_READ_HELPERS: frozenset[str] = frozenset()
 # "file:qualified.name" -> reason, for a handler that leaves the body unread on
 # purpose. An entry that no longer names an unread handler fails the check.
@@ -209,7 +213,7 @@ class BodyHandlerScanTests(unittest.TestCase):
 
 
 class RequestBodyReadTests(unittest.TestCase):
-    def test_test_servers_read_the_request_body_before_answering(self) -> None:
+    def test_test_server_body_methods_contain_a_body_read(self) -> None:
         handlers = scan(TESTS_DIR)
         # The walk must see handlers at all, or an empty result would pass vacuously.
         self.assertTrue(any(reads for _, reads in handlers.values()))
