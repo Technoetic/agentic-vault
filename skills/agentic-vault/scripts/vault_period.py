@@ -167,8 +167,9 @@ _QH = r'(?:[QqHh]' + _GAP + r'[0-9]{1,2}|[0-9]{1,2}' + _GAP + r'[QqHh])(?![0-9])
 _QUARTER_WORD = (r'(?:제' + _GAP + r')?[0-9]{1,2}(?:' + _GAP + r'/' + _GAP + r'[0-9]{1,2})?' + _GAP + r'분기'
                  + _MINUTES)
 _JOIN = _GAP + r'(?:(?:[/,.:_(\-' + _DOTS + r']|의)' + _GAP + r')?'
-_MARK_BEFORE = (r'(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')|(?<![가-힣])[상하]' + _GAP
-                + r'반기)' + _JOIN)
+# The lookahead names every first character a mark can have, so most positions fail at once.
+_MARK_BEFORE = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')|(?<![가-힣])[상하]'
+                + _GAP + r'반기)' + _JOIN)
 _MARK_AFTER = _JOIN + r'(?P<marker>' + _QH + r'|' + _QUARTER_WORD + r'|[상하]' + _GAP + r'반기)'
 # A range mark between a resolved period and a number that no row reads; a
 # day may carry a weekday in brackets (2026.10.07(수)~10.09(금)), and the near
@@ -182,11 +183,11 @@ _WEEKDAY = (r'(?:' + _GAP + r'[(\[\N{FULLWIDTH LEFT PARENTHESIS}\N{FULLWIDTH LEF
             + r'(?:[월화수목금토일](?:요일)?|[月火水木金土日](?:曜日?)?|(?i:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?))'
             + _GAP + r'[)\]\N{FULLWIDTH RIGHT PARENTHESIS}\N{FULLWIDTH RIGHT SQUARE BRACKET}])?')
 _UNREAD = r'(?:[0-9]+|[QqHh]' + _GAP + r'[0-9])'
-_RANGE_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + _RANGE + _GAP + _UNREAD)
+# After a resolved period: a range mark, or a list separator (2026Q1·Q2,
+# 2026.03.05, 09.05, 2026년 3월 5일과 9월 5일), then a number that no row reads.
+_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + r'(?:(?P<range>' + _RANGE + r')|[,/' + _DOTS + r']|및|과|와)' + _GAP
+                    + _UNREAD)
 _RANGE_BEFORE = re.compile(r'[0-9](?:[.일]|' + _GAP + r'[월년]도?)?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'\Z')
-# A list separator after a resolved period, then a number that no row reads
-# (2026Q1·Q2, 2026.03.05, 09.05, 2026년 3월 5일과 9월 5일).
-_LIST_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + r'(?:[,/' + _DOTS + r']|및|과|와)' + _GAP + _UNREAD)
 
 # Fixed table. Scanning takes the leftmost match; at one position the earlier
 # row wins, so a list, a relative word or a fiscal year is read before the
@@ -321,14 +322,10 @@ def _ranges(text, records):
         if not resolved:
             continue
         limit = records[position + 1]['span'][0] if position + 1 < len(records) else len(text)
-        after = _RANGE_AFTER.match(text, end, limit)
+        after = _AFTER.match(text, end, limit)
         if after:
-            result.append(_unread(after.span(), 'range', 'partial_range'))
-        else:
-            after = _LIST_AFTER.match(text, end, limit)
-            if after:
-                result.append(_unread(after.span(), 'multiple', 'multiple_periods'))
-        if after:
+            kind, reason = ('range', 'partial_range') if after['range'] else ('multiple', 'multiple_periods')
+            result.append(_unread(after.span(), kind, reason))
             cursor = after.end()
     return result
 
