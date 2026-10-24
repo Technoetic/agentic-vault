@@ -544,8 +544,9 @@ def _cited_forms(policy, relative, run):
     """Read one allowed cited note once under the note policy and bounded budgets.
 
     Success is ((body, outside_tables), None): the literal forms of the whole
-    body and, when the note holds fact tables, of the body without them (else
+    body and, when the body holds fact tables, of the body without them (else
     None). Both come from the same cached read, budgets and stable-read mark.
+    A note whose body parse_ledger refuses is recorded in run['unseparated'].
     """
     if relative in run['cache']:
         return run['cache'][relative]
@@ -573,7 +574,10 @@ def _cited_forms(policy, relative, run):
             else:
                 run['marks'][relative] = mark
                 run['cited'][relative] = dict(path=relative, sha256=info['sha256'], bytes=info['size'])
-                outcome = ((_body_forms(text), _outside_tables(text)), None)
+                outside, refusal = _separate_tables(text)
+                if refusal:
+                    run['unseparated'][relative] = refusal
+                outcome = ((_body_forms(text), outside), None)
     run['cache'][relative] = outcome
     return outcome
 
@@ -587,21 +591,37 @@ def _without_tables(raw, parsed):
     return b''.join(pieces).decode('utf-8')
 
 
+def _separate_tables(text):
+    """(outside, refusal): a cited note's body forms without its fact tables.
+
+    The frontmatter boundary is decided on the whole note first, as for the
+    whole-body forms, and fact tables are then removed only inside that body:
+    a '---' line left on top once a table is cut never opens a frontmatter
+    block. outside is None when the body has no table parse_ledger recognises
+    (v1 or v2). A body parse_ledger refuses (column, cell, table or row limit,
+    NUL) also counts as having no tables, and refusal is that fixed error
+    code. The offsets are for body.encode('utf-8'): the read decoded
+    utf-8-sig, so slicing the raw bytes of a BOM-prefixed note would cut three
+    bytes too early. The self-citation path keeps its v0.30.0 order.
+    """
+    body = _note_body(text)
+    try:
+        parsed = parse_ledger(body)
+    except SSOTError as exc:
+        return None, str(exc)
+    if not parsed['tables']:
+        return None, None
+    # The same forms as _body_forms, without deciding the frontmatter again.
+    return _forms(re.sub(r'\\([\\|])', r'\1', _without_tables(body.encode('utf-8'), parsed)), aliases=True), None
+
+
 def _outside_tables(text):
     """Body forms of a cited note without its fact tables, or None when it has none.
 
-    Any table parse_ledger recognises (v1 or v2) counts; a note it rejects
-    (limits, NUL) counts as having no tables. The offsets are for
-    text.encode('utf-8'): the read decoded utf-8-sig, so slicing the raw bytes
-    of a BOM-prefixed note would cut three bytes too early.
+    Any table parse_ledger recognises (v1 or v2) counts; a note it refuses
+    (limits, NUL) counts as having no tables (_separate_tables gives the code).
     """
-    try:
-        parsed = parse_ledger(text)
-    except SSOTError:
-        return None
-    if not parsed['tables']:
-        return None
-    return _body_forms(_without_tables(text.encode('utf-8'), parsed))
+    return _separate_tables(text)[0]
 
 
 def _matches(patterns, forms):
@@ -622,6 +642,9 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     supported unless primary_text_only=True, which counts it as unsupported
     with reason 'ledger_table_only'. The rule is structural, not provenance:
     a ledger's prose or a plain note that copies its values still counts.
+    primary_text_only=True also adds ledger_tables_unseparated: the cited
+    notes whose body parse_ledger refuses (path and fixed reason only), whose
+    fact tables, if any, could not be left out and so still count.
 
     normalize_periods=True adds normalized_periods: for each compared row whose
     value names a period, normalized_match (equal, contained, none or abstain)
@@ -646,7 +669,7 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
         info, _, raw = policy.read_note(path)
         parsed = parse_ledger(raw.decode('utf-8'))
         ledger_path = info['path']
-        run = dict(cache={}, notes=0, bytes=0, marks={}, cited={}, incomplete=set(), inventory=None)
+        run = dict(cache={}, notes=0, bytes=0, marks={}, cited={}, incomplete=set(), inventory=None, unseparated={})
         warnings = []
         counts = dict(rows_checked=0, rows_supported=0, rows_unsupported=0, rows_unresolved=0, rows_skipped=0,
                       rows_supported_ledger_table_only=0)
@@ -716,11 +739,28 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                 if records:
                     for cited, forms in bodies.items():
                         if cited not in period_index:
+                            # [index of the compared text, index outside its fact tables (on demand)].
+                            # An index is None when a form is longer than vault_period reads;
+                            # that body is left out of the comparison, never failing the run.
                             compared = outside.get(cited, forms) if primary_text_only else forms
-                            period_index[cited] = period.index([record for form in compared for record in
-                                                                period.parse(form, fiscal_start=fiscal_start)])
-                    period_rows.append(dict(line=row['line'], **period.match(
-                        records, {cited: period_index[cited] for cited in bodies})))
+                            period_index[cited] = [period.index_of(compared, fiscal_start=fiscal_start), None]
+                    entry = dict(line=row['line'], **period.match(records, {
+                        cited: period_index[cited][0] for cited in bodies if period_index[cited][0] is not None}))
+                    # As for ledger_table_only: a via path that would leave via
+                    # without that ledger's fact tables holds only through them.
+                    tables = []
+                    for cited in entry.get('via', []) if not primary_text_only else []:
+                        if cited in outside:
+                            cached = period_index[cited]
+                            if cached[1] is None:
+                                cached[1] = period.index_of(outside[cited], fiscal_start=fiscal_start) or ()
+                            if not period.reaches(records, cached[1], entry['normalized_match']):
+                                tables.append(cited)
+                    if tables:
+                        entry['via_ledger_table_only'] = tables
+                    if any(period_index[cited][0] is None for cited in bodies):
+                        entry['incomplete'] = ['period_text_limit']
+                    period_rows.append(entry)
         if len(warnings) > 1024:
             raise SSOTError('warning_limit')
         # Point-in-time recheck like check: same policy, ledger and cited revisions.
@@ -740,6 +780,11 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                       incomplete=sorted(run['incomplete']),
                       method='normalized_literal_presence_in_cited_note_body',
                       authority='warning_only_not_fact_verification')
+        if primary_text_only:
+            # The opt-in rule cannot leave out tables it could not find: name
+            # those notes instead of failing open silently. No content.
+            result['ledger_tables_unseparated'] = [dict(path=key, reason=run['unseparated'][key])
+                                                   for key in sorted(run['unseparated'])]
         if normalize_periods:
             result.update(normalized_periods=period_rows,
                           period_convention=dict(fiscal_start=fiscal_start, scope=period.SCOPE))

@@ -745,6 +745,97 @@ class LedgerTableOnlySupportTests(unittest.TestCase):
                 self.assertEqual(result['rows_supported_ledger_table_only'], 1)
                 self.assertEqual(result['ledger_table_only'], [{'line': 3, 'via': [via]}])
 
+    def test_cited_frontmatter_is_decided_before_fact_tables_are_removed(self):
+        # Without frontmatter, cutting the table leaves a '---' line on top; it must
+        # not open a frontmatter block over the prose below it.
+        prose = '메모: 36개월 기준은 내규 3조.\n---\n끝.\n'
+        long_table = self.rows(('24개월', '[[facts]]'), *[(f'{n}일', '') for n in range(70)])
+        layouts = {'table on line 1': self.rows(('24개월', '[[facts]]')) + '---\n' + prose,
+                   'rule above a long table': '---\n' + long_table + prose}
+        self.write('notes/facts.md', self.rows(('36개월', '[[Other]]'), ('24개월', '[[Other]]')))
+        for name, text in layouts.items():
+            with self.subTest(layout=name):
+                self.write('notes/Other.md', text)
+                default, flagged = self.check(), self.check(primary_text_only=True)
+                # 36개월 is only in the prose; the control 24개월 is only in the table.
+                self.assertEqual((default['warnings'], default['rows_supported']), ([], 2))
+                for result in (default, flagged):
+                    self.assertEqual(result['ledger_table_only'], [{'line': 4, 'via': ['notes/Other.md']}])
+                self.assertEqual([(w['line'], w['details']) for w in flagged['warnings']],
+                                 [(4, {'cited': ['notes/Other.md'], 'reason': 'ledger_table_only'})])
+                self.assertEqual((flagged['rows_supported'], flagged['rows_unsupported']), (1, 1))
+                self.assertEqual(flagged['ledger_tables_unseparated'], [])
+        # Documented limit: a self-citation keeps the v0.30.0 order (tables cut first),
+        # so the same layout hides that prose unless a blank line follows the table.
+        for gap, found in (('', [(3, 'ssot-source-unsupported', None)]), ('\n', [])):
+            with self.subTest(self_gap=gap):
+                self.write('notes/Self.md', self.rows(('36개월', '[[#근거]]')) + gap + '---\n' + prose)
+                result = self.check('notes/Self.md')
+                self.assertEqual([(w['line'], w['code'], w['details'].get('reason')) for w in result['warnings']], found)
+
+    def test_cited_notes_parse_ledger_refuses_are_named_only_with_primary_text_only(self):
+        # parse_ledger splits every header-candidate line, prose and other tables
+        # included, so one refusal leaves the whole cited note without tables.
+        table, long = self.rows(('24개월', '[[facts]]')), '가' * 1400
+        wide = ledger([['x'] * 40], fields=[f'c{n}' for n in range(40)])
+        many_rows = self.rows(('24개월', '[[facts]]'), *[(f'{n}일', '') for n in range(ssot.MAX_ROWS)])
+        cases = [  # (case, cited note, the reason parse_ledger refuses its body with, or None)
+            ('long pipe prose line', table + '\n메모: ' + long + ' | 참고\n다음 줄\n', 'cell_limit'),
+            ('40-column auxiliary table', table + '\n' + wide, 'column_limit'),
+            ('33-pipe prose line', table + '\n' + 'a' + ' | a' * 33 + '\n다음 줄\n', 'column_limit'),
+            ('nine fact tables', '\n'.join([table] * (ssot.MAX_TABLES + 1)), 'table_limit'),
+            ('257 fact rows', many_rows, 'row_limit'),
+            ('NUL', table + 'x\x00y\n', 'invalid_text'),
+            ('short pipe prose line', table + '\n메모: 짧은 | 줄\n다음 줄\n', None),
+            ('pipe in a code span', table + '\n메모: `' + long + ' | 참고`\n다음 줄\n', None),
+            ('escaped pipe', table + '\n메모: ' + long + ' \\| 참고\n다음 줄\n', None),
+            ('pipe in a wiki alias', table + '\n메모: [[Target|' + long + ']]\n다음 줄\n', None),
+            ('indented line', table + '\n    메모: ' + long + ' | 참고\n다음 줄\n', None),
+            ('last line', table + '\n메모: ' + long + ' | 참고\n', None),
+            ('fenced line', table + '\n```\n메모: ' + long + ' | 참고\n다음 줄\n```\n', None),
+            ('frontmatter', '---\nnote: ' + long + ' | 참고\nnul: x\x00y\n---\n' + table, None)]
+        self.write('notes/facts.md', self.rows(('24개월', '[[Other]]')))
+        for case, text, reason in cases:
+            with self.subTest(case=case):
+                self.write('notes/Other.md', text)
+                default, flagged = self.check(), self.check(primary_text_only=True)
+                self.assertNotIn('ledger_tables_unseparated', default)
+                named = flagged.pop('ledger_tables_unseparated')
+                if reason:
+                    self.assertEqual(named, [{'path': 'notes/Other.md', 'reason': reason}])
+                    # The opt-in rule cannot apply, so the value in the table still counts.
+                    self.assertEqual(flagged, default)
+                    self.assertEqual((default['rows_supported'], default['ledger_table_only']), (1, []))
+                else:
+                    self.assertEqual(named, [])
+                    self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']}])
+                    self.assertEqual([(w['line'], w['details'].get('reason')) for w in flagged['warnings']],
+                                     [(3, 'ledger_table_only')])
+        # Read in citation order (Wide first); listed in path order.
+        self.write('notes/Other.md', cases[0][1])
+        self.write('notes/Wide.md', cases[1][1])
+        self.write('notes/facts.md', self.rows(('24개월', '[[Wide]], [[Other]]')))
+        both = [{'path': 'notes/Other.md', 'reason': 'cell_limit'}, {'path': 'notes/Wide.md', 'reason': 'column_limit'}]
+        for extra, named in (([], None), (['--primary-text-only'], both)):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(extra=extra), mock.patch('sys.stdout', stdout), mock.patch('sys.stderr', stderr):
+                code = ssot.main(['--vault', str(self.vault), 'check-support', '--path', 'notes/facts.md', *extra])
+                self.assertEqual((code, stderr.getvalue()), (0, ''))
+                self.assertEqual(json.loads(stdout.getvalue()).get('ledger_tables_unseparated'), named)
+
+    def test_each_check_shows_only_its_own_link_of_a_longer_chain(self):
+        # A -> B -> C -> A, each value only in the next ledger's fact table. There is
+        # no graph walk: each check lists its own link and nothing further.
+        links = (('A', '1개월', 'B', '3개월'), ('B', '2개월', 'C', '1개월'), ('C', '3개월', 'A', '2개월'))
+        for name, value, cited, held in links:
+            self.write(f'notes/{name}.md', self.rows((value, f'[[{cited}]]'), (held, '')))
+        for name, _, cited, _ in links:
+            with self.subTest(ledger=name):
+                default = self.check(f'notes/{name}.md')
+                flagged = self.check(f'notes/{name}.md', primary_text_only=True)
+                self.assertEqual(default['ledger_table_only'], [{'line': 3, 'via': [f'notes/{cited}.md']}])
+                self.assertEqual((default['rows_supported'], flagged['rows_unsupported']), (1, 1))
+
     def test_prose_outside_the_table_and_plain_notes_are_ordinary_support(self):
         self.write('notes/Other.md', '# Other\n\n' + self.rows(('24개월', ''), ('36개월', '')) + '\n메모: 24개월 기준.\n')
         self.write('notes/Plain.md', '기준은 36개월이다.\n')
@@ -1026,7 +1117,7 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
         self.write('notes/facts.md', self.rows(('2026-03-05', '[[Other]]'), ('2026년 3분기', '[[Other]]')))
         via = ['notes/Other.md']
         self.assertEqual(self.check(normalize_periods=True)['normalized_periods'], [
-            {'line': 3, 'normalized_match': 'equal', 'via': via},
+            {'line': 3, 'normalized_match': 'equal', 'via': via, 'via_ledger_table_only': via},
             {'line': 4, 'normalized_match': 'equal', 'via': via}])
         self.assertEqual(self.check(normalize_periods=True, primary_text_only=True)['normalized_periods'], [
             {'line': 3, 'normalized_match': 'none'},
@@ -1131,6 +1222,90 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
                         result = json.loads(flagged)
                         self.assertEqual(result['normalized_periods'], [])
                         self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
+
+    def test_qualified_periods_and_partial_ranges_abstain_end_to_end(self):
+        """Never the whole period or one end: 말 with a particle, 초, Q before FY, a yearless range end."""
+        self.write('notes/Plan.md', '2026년 3분기 완공 예정. FY2026 실적 요약. 2026.10.07 출발.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2026년 3분기 말에 완공', '[[Plan]]'), ('2026.10.07~10.09 출장', '[[Plan]]'), ('Q3 FY2026', '[[Plan]]'),
+            ('2026년 3분기 초', '[[Plan]]'), ('2026.10.07~2026.10.09 출장', '[[Plan]]'), ('FY2026 Q3', '[[Plan]]')))
+        via = ['notes/Plan.md']
+        none = {'normalized_match': 'none'}
+        partial = {'normalized_match': 'abstain', 'reason': 'partial_range'}
+        qualifier = {'normalized_match': 'abstain', 'reason': 'period_qualifier'}
+        expected = {
+            None: [none, partial, qualifier, qualifier, none,
+                   {'normalized_match': 'abstain', 'reason': 'fiscal_start_undeclared'}],
+            1: [none, partial, qualifier, qualifier, none, {'normalized_match': 'equal', 'via': via}],
+            4: [{'normalized_match': 'abstain', 'reason': 'quarter_basis_ambiguous'}, partial, qualifier, qualifier,
+                none, {'normalized_match': 'contained', 'via': via}],
+        }
+        default = self.check()
+        for fiscal_start, rows in expected.items():
+            with self.subTest(fiscal_start=fiscal_start):
+                flagged = self.check(normalize_periods=True, fiscal_start=fiscal_start)
+                self.assertEqual(flagged['normalized_periods'], [dict(line=line, **row) for line, row in enumerate(rows, 3)])
+                self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(default))
+        code, out, err = self.run_cli('--normalize-periods', '--fiscal-start', '04')
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out)['normalized_periods'][:3], [dict(line=3, **expected[4][0]),
+                                                                     dict(line=4, **partial), dict(line=5, **qualifier)])
+
+    def test_a_period_only_in_another_ledgers_fact_table_is_marked(self):
+        """One fact row (valid_from, valid_until, recorded) and no prose, against a ledger that also has prose."""
+        fact = ledger([['Beta', 'size', '42', '2025-01-01', '2026-01-01', '2026-10-07', '[[X]]', '', 'confirmed']])
+        self.write('notes/Other.md', fact)
+        self.write('notes/Prose.md', fact + '\n착수일은 2026.10.07이다.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2025년 1월 1일', '[[Other]]'), ('2026.10.07', '[[Other]]'), ('2026.01.01', '[[Other]]'),
+            ('2026년 4분기', '[[Other]]'), ('2026.10.07', '[[Prose]]'), ('2026.10.07', '[[Other]], [[Meeting]]'),
+            ('2026.10.07', '[[Other]], [[Prose]]')))
+        other, prose = ['notes/Other.md'], ['notes/Prose.md']
+        flagged = self.check(normalize_periods=True)
+        self.assertEqual(flagged['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 4, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 5, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 6, 'normalized_match': 'contained', 'via': other, 'via_ledger_table_only': other},
+            {'line': 7, 'normalized_match': 'equal', 'via': prose},
+            {'line': 8, 'normalized_match': 'equal', 'via': self.VIA + other, 'via_ledger_table_only': other},
+            {'line': 9, 'normalized_match': 'equal', 'via': other + prose, 'via_ledger_table_only': other}])
+        # ledger_table_only lists none of them: no value is written as in Other's table, and the
+        # two literal supports (lines 7 and 9) come from Prose's prose.
+        self.assertEqual((flagged['ledger_table_only'], flagged['rows_supported']), ([], 2))
+        primary = self.check(normalize_periods=True, primary_text_only=True)
+        self.assertEqual(primary['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none'}, {'line': 4, 'normalized_match': 'none'},
+            {'line': 5, 'normalized_match': 'none'}, {'line': 6, 'normalized_match': 'none'},
+            {'line': 7, 'normalized_match': 'equal', 'via': prose},
+            {'line': 8, 'normalized_match': 'equal', 'via': self.VIA},
+            {'line': 9, 'normalized_match': 'equal', 'via': prose}])
+        for base, result in (({}, flagged), ({'primary_text_only': True}, primary)):
+            with self.subTest(base=base):
+                self.assertEqual(ssot._encode(self.without_periods(result)), ssot._encode(self.check(**base)))
+        code, out, err = self.run_cli('--normalize-periods')
+        self.assertEqual((code, err, json.loads(out)['normalized_periods']), (0, '', flagged['normalized_periods']))
+        dumped = json.dumps(flagged['normalized_periods'], ensure_ascii=False)
+        for literal in ('2025-01-01', '2026-10-07', '2026.10.07', 'Beta', '42'):
+            self.assertNotIn(literal, dumped)
+
+    def test_a_cited_body_past_the_period_text_limit_is_left_out_and_the_exit_code_kept(self):
+        """NFKC expands U+FDFA to 18 characters, so a 256 KiB note passes vault_period.MAX_TEXT_CHARS."""
+        period = importlib.import_module('vault_period')
+        note = '2026년 3분기 ' + 'ﷺ' * 85_333
+        self.assertLessEqual(len(note.encode('utf-8')), ssot.MAX_BYTES)
+        self.assertGreater(len(ssot._literal(note)), period.MAX_TEXT_CHARS)
+        self.write('notes/Long.md', note)
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Long]]'), ('2026년 3분기', '[[Long]], [[Meeting]]')))
+        code, default, stderr = self.run_cli()
+        self.assertEqual((code, stderr, json.loads(default)['rows_supported']), (0, '', 2))
+        code, flagged, stderr = self.run_cli('--normalize-periods')
+        self.assertEqual((code, stderr), (0, ''))
+        result = json.loads(flagged)
+        self.assertEqual(result['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none', 'incomplete': ['period_text_limit']},
+            {'line': 4, 'normalized_match': 'equal', 'via': self.VIA, 'incomplete': ['period_text_limit']}])
+        self.assertEqual(ssot._encode(self.without_periods(result)).decode() + '\n', default)
 
 
 class DefaultCliRegressionTests(unittest.TestCase):
