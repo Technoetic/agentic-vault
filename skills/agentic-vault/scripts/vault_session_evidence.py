@@ -12,15 +12,18 @@ A transcript holds every prompt, answer, tool result and hook output. Only fixed
 status words, counts, lengths, numbers and booleans leave this module: never
 content, stdout, stderr, commands, user text, identifiers, version strings as
 written, the transcript path or exception text. Instruction file paths appear
-only with ``include_paths``, because they can contain account names.
+only with ``include_paths``, because they can contain account names, and a path
+with a character that can split or reorder a printed line is only counted.
 """
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
 import re
 import stat
+import unicodedata
 from pathlib import Path
 
 
@@ -53,8 +56,11 @@ HOOK_RECORDS_PRESENT = ((2, 1, 278), (2, 1, 309))
 # Claude Code 2.1.309 replaces hook stdout longer than 10,000 UTF-16 units with
 # one of three notices, read here as booleans only:
 # - saved to a file: "<persisted-output>\nOutput too large (<size>). Full output
-#   saved to: <path>\n\nPreview (first 2KB):\n<preview>..." ("Output exceeded the
-#   ... persist limit ..." when even the saved copy is cut). The saved-file path
+#   saved to: <path>\n\nPreview (first 2KB):\n<preview>\n...\n</persisted-output>"
+#   ("Output exceeded the ... persist limit ..." when even the saved copy is
+#   cut). One host function builds both inside this envelope, and the host's own
+#   test for a saved hook output is that the content starts and ends with it, so
+#   hook text that only quotes the notice does not count. The saved-file path
 #   sits between the two markers, so only the first one is held to the first 200
 #   characters;
 # - not saved: "<truncated-output>\nOutput too large (<size>). It could not be
@@ -62,6 +68,8 @@ HOOK_RECORDS_PRESENT = ((2, 1, 278), (2, 1, 309))
 # - saving failed: the first 10,000 units and then, at the very end,
 #   "\n\n[Hook stdout truncated at 10000 chars <dash> persist-to-disk failed:
 #   <error>]". Only a one-line notice that ends the content counts.
+PERSISTED_OPEN = "<persisted-output>"
+PERSISTED_CLOSE = "</persisted-output>"
 OVERSIZE_MARKERS = ("Output too large (", "Output exceeded the ")
 PREVIEW_MARKER = "Preview (first"
 NOT_SAVED_TAG = "<truncated-output>"
@@ -116,7 +124,11 @@ _MAX_VERSION_CHARS = 32
 _SESSION_START_SOURCES = frozenset(("startup", "resume", "clear", "compact", "fork"))
 _INSTRUCTION_REASONS = frozenset(("session_start", "compaction"))
 _SESSION_START_SCRIPT = re.compile(r"(?:^|[\\/\s\"'])session_start\.py(?=$|[\s\"'])")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# A listed path holds no character that can end, split or reorder a printed
+# line: controls (Cc, C0 and C1), format characters such as bidi controls and
+# zero-width marks (Cf), surrogates (Cs) and the line and paragraph separators
+# (Zl, Zp). Every line break str.splitlines() knows is among them.
+_UNSAFE_PATH_CATEGORIES = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp"))
 _MAX_ID_CHARS = 256
 
 
@@ -154,7 +166,8 @@ def _version_text(parts: tuple[int, int, int] | None) -> str | None:
 def _truncated(content: str) -> bool:
     """True when content carries one of the host's oversize notices, not hook text."""
     head = content[:NOTICE_HEAD_CHARS]
-    if (any(marker in head for marker in OVERSIZE_MARKERS)
+    if (content.startswith(PERSISTED_OPEN) and content.endswith(PERSISTED_CLOSE)
+            and any(marker in head for marker in OVERSIZE_MARKERS)
             and PREVIEW_MARKER in content[:NOTICE_CHARS]):
         return True  # saved to a file; a preview was injected
     if head.startswith(NOT_SAVED_TAG) and NOT_SAVED_MARKER in head:
@@ -180,13 +193,39 @@ def _reason(value: object) -> str:
     return "other"
 
 
+@functools.lru_cache(maxsize=1)
+def _unsafe_path_characters() -> re.Pattern:
+    """A class of every code point in _UNSAFE_PATH_CATEGORIES, from this Python's database.
+
+    Built once, and only for a path that str.isprintable() rejects. Runs of code
+    points become ranges, so even a crafted transcript full of such paths is
+    matched at regular-expression speed.
+    """
+    runs: list[list[int]] = []
+    for code in range(0x110000):
+        if unicodedata.category(chr(code)) in _UNSAFE_PATH_CATEGORIES:
+            if runs and runs[-1][1] == code - 1:
+                runs[-1][1] = code
+            else:
+                runs.append([code, code])
+    return re.compile("[" + "".join(
+        re.escape(chr(low)) + "-" + re.escape(chr(high)) for low, high in runs
+    ) + "]")
+
+
+def _unsafe_path(value: str) -> bool:
+    # str.isprintable() is false for every character in _UNSAFE_PATH_CATEGORIES (and
+    # for some safe ones, such as a no-break space), so most paths stop here.
+    return not value.isprintable() and _unsafe_path_characters().search(value) is not None
+
+
 def _paths(values: list) -> tuple[list[str], int]:
     """Keep plain path strings within the bounds; count the rest as omitted."""
     kept: list[str] = []
     omitted = 0
     for value in values:
         if (len(kept) < MAX_PATHS_PER_RECORD and isinstance(value, str)
-                and 0 < len(value) <= MAX_PATH_CHARS and not _CONTROL.search(value)):
+                and 0 < len(value) <= MAX_PATH_CHARS and not _unsafe_path(value)):
             kept.append(value)
         else:
             omitted += 1
@@ -569,6 +608,20 @@ class _Scan:
         return report
 
 
+def _named_file(path: str | os.PathLike) -> Path:
+    """The named path with a leading ~ read as the home folder.
+
+    Windows PowerShell 5.1, cmd and a quoted bash argument pass ~ through
+    unchanged, so a location copied from the docs would otherwise be
+    file_not_found. Still one named file: nothing is listed or searched.
+    """
+    named = Path(path)
+    try:
+        return named.expanduser()
+    except RuntimeError:  # no home folder is known: the path is used as given
+        return named
+
+
 def _open_regular(path: Path):
     """Open the named file for binary reading, or return a reason code."""
     try:
@@ -595,13 +648,13 @@ def diagnose_session_evidence(path: str | os.PathLike, *, include_paths: bool = 
     """Report what one named transcript records about the session's start.
 
     Opt-in and fail-soft: never raises for an ordinary error and never puts an
-    exception message or the path in the report. A SessionStart record shows
-    that the host ran a hook, not that the model used what it injected; a
-    failure record is ``observed_error``, and a missing record is
-    ``not_recorded``, never "not run".
+    exception message or the path in the report. A leading ``~`` in the path is
+    the home folder. A SessionStart record shows that the host ran a hook, not
+    that the model used what it injected; a failure record is
+    ``observed_error``, and a missing record is ``not_recorded``, never "not run".
     """
     try:
-        handle, reason_code = _open_regular(Path(path))
+        handle, reason_code = _open_regular(_named_file(path))
         if handle is None:
             return _empty_report("unparsed", reason_code, include_paths)
         scan = _Scan(include_paths)

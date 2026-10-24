@@ -127,9 +127,10 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
 호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
 있으므로 관측한 기록 모양만 해석하고, 모양이 다른 기록은 추측하지 않고 센다.
 
-`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 폴더를 훑어 기록을 고르지 않고, 아무것도 쓰지
-않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트 진단의 값 그대로다.
-옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
+`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 경로가 `~`로 시작하면 셸이 바꾸지 않고 넘겨도
+홈 폴더(Windows는 `USERPROFILE`)로 바꿔 읽으므로 위 위치를 그대로 쓸 수 있다. 폴더를 훑어 기록을 고르지
+않고, 아무것도 쓰지 않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트
+진단의 값 그대로다. 옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
 
 - **읽는 범위:** 한 줄씩 읽고 한 줄 16 MiB, 파일 512 MiB까지 본다. 종류 표지(`"type":"attachment"`·
   `"assistant"`·`"system"`)가 있는 줄만 JSON으로 풀고, 사용자 입력·요청 원문·파일 이력 줄은 풀지 않는다(그 안의
@@ -150,7 +151,8 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     `hook_cancelled`(종료 코드 없음), 훅을 실행하기 전이나 실행하는 중의 호스트 오류가
     `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제 세션 기록에서 관측한 것은 아니다.
   - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
-    `compaction`·`other`, 없으면 `none`), `changed`.
+    `compaction`·`other`, 없으면 `none`), `changed`. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두
+    센다. 경로 필드는 아래 **개인정보**에 있다.
   - `first_turn_usage`: 파일의 첫 API 응답의 `input_tokens`·`cache_read_input_tokens`·
     `cache_creation_input_tokens`와 그 합(`prompt_tokens_total`). 시스템 프롬프트·도구·지침·훅 출력을 모두 더한
     프롬프트 전체라 훅의 몫이 아니다(`label`: `whole_prompt_not_attributable_to_hooks`). 한 응답이 내용
@@ -184,9 +186,12 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   하나로 바꾼다. 셋 다 `truncated`(참·거짓)로만 보고하고 안내 문구·크기·오류 문구는 출력하지 않는다. 그 밖의
   모양은 판정하지 않으므로 `emitted_chars`와 `injected_chars`의 차이로 본다.
   - 파일에 저장함: `<persisted-output>`, `Output too large (<크기>). Full output saved to: <경로>`, 빈 줄,
-    `Preview (first 2KB):` 순서다(아주 큰 출력은 `Output exceeded the …`). 저장 경로가 두 표지 사이에 있어 경로가
-    길면 둘째 표지가 200자 뒤로 밀린다. 그래서 첫 표지는 `content`의 첫 200자에서, `Preview (first`는 첫
-    4,096자에서 찾는다.
+    `Preview (first 2KB):`, 출력의 앞부분, `</persisted-output>` 순서다(저장 한도를 넘어 저장본도 잘리면
+    `Output too large (` 대신 `Output exceeded the …`가 오는 같은 틀이다). `content`가
+    `<persisted-output>`으로 시작하고 `</persisted-output>`으로 끝날 때만 본다. 2.1.309 실행 파일은 이 틀을 늘
+    열고 닫으며, 저장된 훅 출력도 이 시작·끝 표지로 가려낸다. 그래서 안내 문구를 인용하기만 한 일반 훅 출력은
+    잘림으로 보지 않는다. 저장 경로가 안내 문구와 `Preview (first` 사이에 있어 경로가 길면 `Preview (first`가
+    200자 뒤로 밀린다. 그래서 안내 문구는 `content`의 첫 200자에서, `Preview (first`는 첫 4,096자에서 찾는다.
   - 저장하지 않음: `content`가 `<truncated-output>`으로 시작하고 첫 200자에 `Output too large (`가 있다
     (`It could not be saved, so only the first <크기> are shown` 뒤에 출력의 앞부분만 붙는다).
   - 저장 실패: 출력의 앞 10,000자 뒤에 빈 줄과
@@ -200,7 +205,13 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   `session_start.py`는 일반 텍스트로 출력한다). Codex 기록은 읽지 않는다.
 - **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령·사용자
   입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는 계정 이름이 들어갈 수 있어
-  `--session-instruction-paths`를 함께 줄 때만 보인다(C0·C1 제어 문자가 있거나 1,024자를 넘는 경로는 빼고 센다).
+  `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와 `removed_paths`(빠진 파일
+  경로)로 보인다. 두 목록은 기록마다 각각 50개까지 싣는다(`limits.paths_per_record`). 50개를 넘는 경로와
+  문자열이 아니거나 비었거나 1,024자를 넘는 경로, 출력한 줄을 끊거나 글자 순서를 바꿔 보이게 할 수 있는 문자가 든
+  경로는 싣지 않고 `paths_omitted`에 센다. 그런 문자는 Unicode 일반 범주가 제어 문자(Cc, C0·C1)·서식 문자(Cf, 양방향 제어·폭
+  없는 문자 등)·서로게이트(Cs)·줄 구분자(Zl, U+2028)·문단 구분자(Zp, U+2029)인 문자이고, 범주는 실행하는 Python의
+  Unicode 데이터를 따른다. `str.splitlines()`가 줄을 나누는 문자는 모두 여기에 든다. 줄 구분자가 든 경로 하나가
+  텍스트 출력에 `session_next_action: none` 같은 가짜 상태 줄을 만들 수 있기 때문이다.
 - **출처:** 사용량 필드와 (`message.id`, `requestId`) 중복 제거 규칙은
   [ccusage](https://github.com/ryoppippi/ccusage)(MIT)의 Claude 사용량 파서에서 방식만 빌렸다. 코드와 의존성은
   가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 실패 기록 모양과 잘림 안내 문구는
@@ -239,7 +250,7 @@ identifiable". `--debug-file <path>`는 지정한 경로에 디버그 로그를 
 | 호스트 | `claude --version`, 설치 방식(네이티브·npm 등), `--host-version` 결과 |
 | 환경 | OS·버전, Python 버전, Windows의 Git Bash 버전, 플러그인 버전·커밋 |
 | 볼트 규모 | 건강 검사 요약의 검사 노트 수, handoff/hot 예산 |
-| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간. 동기 `session_start.py`는 세션 기록(`--session-evidence`, 기록을 남기는 판 — 이 PC 관측 2.1.278~2.1.309)이나 디버그 로그에서, 비동기 `vault_healthcheck.py`는 디버그 로그에서만 |
+| 훅 소요 시간 | startup·resume별 `session_start.py`·`vault_healthcheck.py`의 결과와 소요 시간. 동기 `session_start.py`는 세션 기록(`--session-evidence`, 기록을 남기는 판 — Windows PC 한 대의 관측 2.1.278~2.1.309)이나 디버그 로그에서, 비동기 `vault_healthcheck.py`는 디버그 로그에서만 |
 | resume 재주입 | resume 횟수 N, 그 뒤 `[vault-healthcheck]` 요약이 다시 보인 횟수 |
 
 디버그 로그에는 경로·명령·설정이 남을 수 있다. 원문 로그는 저장소에 올리지 않고, 공유할 값만

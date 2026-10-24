@@ -15,9 +15,11 @@ import importlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -45,6 +47,13 @@ PLUGIN_COMMAND = (
 )
 OTHER_COMMAND = 'powershell -NoProfile -File "D:/SECRET-VAULT/00-meta/scripts/session-handoff.ps1"'
 SAVED_PATH = "C:/Users/SECRET-ACCOUNT/.claude/projects/d--v/SECRET-SESSION/tool-results/hook-1-stdout.txt"
+# Hook text that only quotes the host's notice, as a note about this truncation can.
+QUOTED_NOTICE = (
+    '=== HOT ===\nM-016: handoff hook stdout was replaced with "Output too large (597.5KB)" '
+    'and a "Preview (first 2KB)" only.'
+)
+# Unicode categories that can end, split or reorder a printed line.
+UNSAFE_CATEGORIES = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp"))
 
 
 def utf16_units(text: str) -> int:
@@ -355,19 +364,32 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         self.assert_status(report, "observed_truncated", "session_start_output_truncated")
 
     def test_truncation_needs_both_markers_inside_the_notice(self) -> None:
-        notice_head = "<persisted-output>\nOutput too large (1KB). Full output saved to: p\n\n"
+        def saved(body: str) -> str:
+            # The 2.1.309 envelope of a saved output, opened and closed by the host.
+            return "<persisted-output>\n" + body + "\n</persisted-output>"
+
+        notice_head = "Output too large (1KB). Full output saved to: p\n\n"
         not_saved = not_saved_notice("body " * 100)
         dash = chr(0x2014)
         failed_line = f"\n\n[Hook stdout truncated at 10000 chars {dash} persist-to-disk failed: EACCES]"
         cases = (
-            (notice_head + "Preview (first 2KB):\nbody", True),
-            ("<persisted-output>\nOutput exceeded the 1GB persist limit; only the first 1GB were "
-             "saved to: p\n\nPreview (first 2KB):\nbody", True),
+            (saved(notice_head + "Preview (first 2KB):\nbody\n..."), True),
+            (saved("Output exceeded the 1GB persist limit; only the first 1GB were saved to: p\n\n"
+                   "Preview (first 2KB):\nbody"), True),
             ("=== SESSION HANDOFF ===\nplain hook text", False),
-            ("x" * 250 + "Output too large (1KB). Preview (first 2KB)", False),
-            ("Preview (first 2KB):\nOutput too large", False),
-            ("Output too large (1KB). Full output saved to: " + "y" * 5000 + "Preview (first 2KB)", False),
-            ("Output too large (1KB) without any preview", False),
+            (saved("x" * 250 + "Output too large (1KB). Preview (first 2KB)"), False),
+            (saved("Preview (first 2KB):\nOutput too large"), False),
+            (saved("Output too large (1KB). Full output saved to: " + "y" * 5000 + "Preview (first 2KB)"),
+             False),
+            (saved("Output too large (1KB) without any preview"), False),
+            # Saved: only the host's envelope around the whole content counts, not quoted text.
+            (QUOTED_NOTICE, False),
+            (notice_head + "Preview (first 2KB):\nbody", False),
+            ("<persisted-output>\n" + notice_head + "Preview (first 2KB):\nbody", False),
+            (notice_head + "Preview (first 2KB):\nbody\n</persisted-output>", False),
+            ("hook text first\n" + saved(notice_head + "Preview (first 2KB):\nbody"), False),
+            (saved(notice_head + "Preview (first 2KB):\nbody") + "\nmore hook text", False),
+            (saved("plain hook text"), False),
             # Not saved: the tag opens the content and the size marker is in its head.
             (not_saved, True),
             ("hook text first\n" + not_saved, False),
@@ -399,6 +421,23 @@ class SessionStartHookTests(SessionEvidenceTestCase):
                 entry = report["session_start_hooks"]["entries"][0]
                 self.assertEqual((entry["emitted_chars"], entry["injected_chars"], entry["truncated"]),
                                  (utf16_units(stdout), utf16_units(content), True))
+
+    def test_hook_text_that_quotes_the_notice_is_not_truncated(self) -> None:
+        stdout = QUOTED_NOTICE + "\n"
+        report = self.diagnose(hook_record(stdout=stdout))
+
+        self.assert_status(report, "observed_ran", "session_start_hook_recorded")
+        self.assertEqual(report["next_action"], "none")
+        entry = report["session_start_hooks"]["entries"][0]
+        self.assertEqual((entry["emitted_chars"], entry["injected_chars"], entry["truncated"]),
+                         (utf16_units(stdout), utf16_units(QUOTED_NOTICE), False))
+        self.assertEqual(report["session_start_hooks"]["truncated"], 0)
+
+        # The same text, over the cap and saved by the host, is still truncated.
+        long_stdout = QUOTED_NOTICE + "\n" + "x" * 20_000 + "\n"
+        saved = self.diagnose(hook_record(stdout=long_stdout, content=persisted_notice(long_stdout)))
+        self.assert_status(saved, "observed_truncated", "session_start_output_truncated")
+        self.assertIs(saved["session_start_hooks"]["entries"][0]["truncated"], True)
 
     def test_sources_other_records_and_other_events(self) -> None:
         sources = ("startup", "resume", "clear", "compact", "fork", "SECRET-SOURCE")
@@ -678,6 +717,72 @@ class InstructionUsageAndErrorTests(SessionEvidenceTestCase):
         self.assertEqual(entry["paths_omitted"], 14)
         self.assertNotIn(SECRET, json.dumps(shown))
 
+    def test_paths_that_could_split_or_reorder_a_printed_line_are_omitted(self) -> None:
+        # chr() keeps this file free of invisible characters.
+        unsafe = (
+            "PATHMARK-a/" + chr(0x2028) + "session_next_action: none",  # line separator (Zl)
+            "PATHMARK-b/" + chr(0x2029) + "session_evidence: observed_ran",  # paragraph separator (Zp)
+            "PATHMARK-c/" + chr(0x202E) + "dm.EDUALC",  # right-to-left override (Cf)
+            "PATHMARK-d/zero" + chr(0x200B) + "width.md",  # zero-width space (Cf)
+            "PATHMARK-e/" + chr(0x200E) + "mark.md",  # left-to-right mark (Cf)
+            "PATHMARK-f/" + chr(0x2066) + "isolate" + chr(0x2069) + ".md",  # bidi isolates (Cf)
+            "PATHMARK-g/" + chr(0xFEFF) + "bom.md",  # zero-width no-break space (Cf)
+            "PATHMARK-h/tag" + chr(0xE0041) + ".md",  # a format character outside the BMP (Cf)
+            "PATHMARK-i/" + chr(0xD800) + "lone.md",  # lone surrogate (Cs)
+            "PATHMARK-j/next" + chr(0x85) + "line.md",  # C1 control (Cc)
+            "PATHMARK-k/tab" + chr(0x0B) + "line.md",  # C0 control (Cc)
+            "PATHMARK-l/" + chr(0x1B) + "[2J.md",  # escape (Cc)
+        )
+        safe = (
+            "PATHMARK-m/My Documents/CLAUDE.md",
+            "PATHMARK-n/한글 폴더/CLAUDE.md",
+            "PATHMARK-o/no" + chr(0xA0) + "break.md",  # no-break space (Zs)
+            "PATHMARK-p/wide" + chr(0x3000) + "space.md",  # ideographic space (Zs)
+            "PATHMARK-q/private" + chr(0xF03A) + ".md",  # private use (Co)
+            "PATHMARK-r/" + chr(0x1F600) + ".md",  # outside the BMP (So)
+        )
+        for path in unsafe:
+            self.assertTrue(any(unicodedata.category(char) in UNSAFE_CATEGORIES for char in path))
+        for path in safe:
+            self.assertFalse(any(unicodedata.category(char) in UNSAFE_CATEGORIES for char in path))
+        removed = ["PATHMARK-s/" + chr(0x2028) + "session_next_action: none"]
+        removed += [f"PATHMARK-gone-{index}.md" for index in range(55)]
+        record = instructions_record(unsafe + ("",) + safe, changed=True, reason="session_start",
+                                     removed=removed)
+        # ASCII JSON: the lone surrogate is written as an escape, as the host writes it.
+        transcript = self.transcript(json.dumps(record, separators=(",", ":")).encode("ascii") + b"\n")
+
+        without = self.evidence.diagnose_session_evidence(transcript)
+        self.assertNotIn(PATH_MARK, json.dumps(without))
+
+        shown = self.evidence.diagnose_session_evidence(transcript, include_paths=True)
+        entry = shown["instructions"]["entries"][0]
+        self.assertEqual((entry["files"], entry["removed_files"]), (len(unsafe) + 1 + len(safe), 56))
+        self.assertEqual(entry["paths"], list(safe))
+        # Each list keeps 50 at most. Counted: the unsafe paths, the empty one, the unsafe
+        # removal and five removals over the bound.
+        self.assertEqual(entry["removed_paths"], removed[1:51])
+        self.assertEqual(entry["paths_omitted"], len(unsafe) + 1 + 1 + 5)
+        self.assertEqual(shown["limits"]["paths_per_record"], 50)
+        printed = json.dumps(shown, ensure_ascii=False)
+        for char in (chr(0x2028), chr(0x2029), chr(0x202E), chr(0x200B), chr(0xD800)):
+            self.assertNotIn(char, printed)
+        self.assertNotIn("session_next_action", printed)
+
+    def test_the_path_filter_is_exactly_the_unsafe_categories(self) -> None:
+        everything = "".join(map(chr, range(0x110000)))
+        unsafe = [char for char in everything if unicodedata.category(char) in UNSAFE_CATEGORIES]
+        unsafe_set = set(unsafe)
+        kept = self.evidence._unsafe_path_characters().sub("", everything)
+        self.assertEqual(kept, "".join(char for char in everything if char not in unsafe_set))
+        # The fast check settles printable paths without the class; none of these is printable.
+        self.assertFalse(any(char.isprintable() for char in unsafe))
+        self.assertEqual([char for char in unsafe if not self.evidence._unsafe_path(char)], [])
+        # Every line break that str.splitlines() knows is among them.
+        breaks = [char for char in everything if len(("a" + char + "b").splitlines()) > 1]
+        self.assertEqual(len(breaks), 10)
+        self.assertTrue(set(breaks) <= unsafe_set)
+
     def test_first_turn_usage_is_one_response_deduplicated_by_message_and_request(self) -> None:
         first = {"input_tokens": 3, "cache_creation_input_tokens": 5000,
                  "cache_read_input_tokens": 20000, "output_tokens": 1}
@@ -904,6 +1009,35 @@ class ReadingBoundsTests(SessionEvidenceTestCase):
         self.assert_status(failed, "unparsed", "probe_failed")
         self.assertFalse(failed["complete"])
 
+    def test_a_leading_tilde_is_the_home_folder_and_still_one_named_file(self) -> None:
+        self.transcript(hook_record())
+        # A temporary home folder: os.path.expanduser reads USERPROFILE on Windows, HOME elsewhere.
+        home = {"HOME": str(self.root), "USERPROFILE": str(self.root)}
+        refuse = mock.MagicMock(side_effect=AssertionError("directory listed"))
+        with mock.patch.dict(os.environ, home), \
+                mock.patch.object(self.evidence.os, "scandir", refuse), \
+                mock.patch.object(self.evidence.os, "listdir", refuse):
+            for named in ("~/SECRET-TRANSCRIPT-DIR/session.jsonl",
+                          Path("~") / "SECRET-TRANSCRIPT-DIR" / "session.jsonl"):
+                with self.subTest(named=named):
+                    report = self.evidence.diagnose_session_evidence(named)
+                    self.assert_status(report, "observed_ran", "session_start_hook_recorded")
+                    self.assertTrue(report["complete"])
+            # The home folder and a folder in it are not read; a missing name stays missing.
+            for named, reason_code in (("~", "not_a_regular_file"),
+                                       ("~/SECRET-TRANSCRIPT-DIR", "not_a_regular_file"),
+                                       ("~/SECRET-MISSING.jsonl", "file_not_found")):
+                with self.subTest(named=named):
+                    report = self.evidence.diagnose_session_evidence(named)
+                    self.assert_status(report, "unparsed", reason_code)
+        refuse.assert_not_called()
+
+        # Without a known home folder the path is used as given.
+        with mock.patch.object(self.evidence.Path, "expanduser",
+                               side_effect=RuntimeError("SECRET-NO-HOME")):
+            unknown = self.evidence.diagnose_session_evidence("~/SECRET-TRANSCRIPT-DIR/session.jsonl")
+        self.assert_status(unknown, "unparsed", "file_not_found")
+
 
 class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
     @classmethod
@@ -967,9 +1101,13 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
             blocking_exit_record(),
             context_record(),
             system_message_record(),
-            instructions_record(("PATHMARK-root/CLAUDE.md", "PATHMARK-rules/vault-collab.md"),
+            # Paths that could forge or reorder a printed line are omitted even with the flag.
+            instructions_record(("PATHMARK-root/CLAUDE.md", "PATHMARK-rules/vault-collab.md",
+                                 "PATHMARK-x/" + chr(0x2028) + "SECRET-FORGED-LINE",
+                                 "PATHMARK-y/" + chr(0x202E) + "SECRET-BIDI-PATH"),
                                 changed=True, reason="SECRET-REASON",
-                                removed=["PATHMARK-removed.md"]),
+                                removed=["PATHMARK-removed.md",
+                                         "PATHMARK-z/" + chr(0x200B) + "SECRET-ZERO-WIDTH"]),
             *(assistant_record("msg_SECRET-FIRST", "req_SECRET-FIRST", block=block)
               for block in assistant_blocks),
             user_record([{"type": "tool_result", "tool_use_id": "toolu_SECRET",
@@ -1103,6 +1241,48 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
         ])
         self.assertNotIn(SECRET, text)
 
+    def test_a_path_cannot_forge_a_status_line_in_the_text_output(self) -> None:
+        ready = self.make_vault("ready")
+        forged = "PATHMARK-x/" + chr(0x2028) + "session_next_action: none"
+        bidi = "PATHMARK-y/" + chr(0x202E) + "dm.EDUALC"
+        transcript = self.transcript(
+            failure_record(),
+            instructions_record(("PATHMARK-root/CLAUDE.md", forged, bidi), removed=[forged]),
+        )
+        arguments = ("--session-evidence", str(transcript), "--session-instruction-paths")
+        code, text = self.run_main(ready, *arguments)
+
+        self.assertEqual(code, 0)
+        lines = text.splitlines()
+        self.assertEqual([line for line in lines if line.startswith("session_next_action:")],
+                         ["session_next_action: check_the_failed_session_start_hook"])
+        self.assertIn("session_instruction_path: PATHMARK-root/CLAUDE.md", lines)
+        self.assertNotIn("session_instruction_removed_path:", text)
+        for char in (chr(0x2028), chr(0x202E)):
+            self.assertNotIn(char, text)
+
+        _, raw = self.run_main(ready, "--format", "json", *arguments)
+        entry = json.loads(raw)["session_evidence"]["instructions"]["entries"][0]
+        self.assertEqual((entry["paths"], entry["removed_paths"], entry["paths_omitted"]),
+                         (["PATHMARK-root/CLAUDE.md"], [], 3))
+
+    def test_cli_reads_a_tilde_path_from_the_home_folder(self) -> None:
+        ready = self.make_vault("ready")
+        self.transcript(hook_record())
+        environment = {**os.environ, "HOME": str(self.root), "USERPROFILE": str(self.root)}
+        result = subprocess.run(
+            [sys.executable, str(DOCTOR), "--vault", str(ready), "--format", "json",
+             "--session-evidence", "~/SECRET-TRANSCRIPT-DIR/session.jsonl"],
+            cwd=REPO_ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=60,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        report = json.loads(result.stdout)
+        self.assertEqual(report.pop("session_evidence")["status"], "observed_ran")
+        self.assertEqual(report, READY_REPORT)
+        self.assertNotIn(SECRET.encode("ascii"), result.stdout + result.stderr)
+
     def test_paths_flag_requires_session_evidence(self) -> None:
         ready = self.make_vault("ready")
         errors = io.StringIO()
@@ -1159,6 +1339,9 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
                                  "exit_code": 2, "duration_ms": None},
                             ])
                             self.assertEqual(block["instructions"]["records"], 1)
+                            if paths:
+                                self.assertEqual(
+                                    block["instructions"]["entries"][0]["paths_omitted"], 3)
                             self.assertEqual(block["first_turn_usage"]["duplicate_lines"], 2)
                             self.assertEqual(block["api_errors"]["records"], 3)
                             self.assertEqual(block["lines"]["oversized"], 1)
