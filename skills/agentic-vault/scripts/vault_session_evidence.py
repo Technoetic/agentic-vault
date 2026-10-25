@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in, read-only evidence from one Claude Code session transcript.
 
-``vault_doctor.py --session-evidence PATH`` reads only the named JSONL file: no
+``vault_doctor.py --session-evidence PATH`` reads only the named JSONL file and,
+for its SessionStart status labels, this plugin's own ``hooks/hooks.json``: no
 directory scan, no write, no network or model call, and the doctor exit code
 never changes. The transcript is a host-internal, undocumented format, so only
 the record shapes observed on Claude Code 2.1.252 to 2.1.309, or written by the
@@ -10,10 +11,11 @@ version wrote them; a record of another shape is counted, never guessed.
 
 A transcript holds every prompt, answer, tool result and hook output. Only fixed
 status words, counts, lengths, numbers and booleans leave this module: never
-content, stdout, stderr, commands, user text, identifiers, version strings as
-written, the transcript path or exception text. Instruction file paths appear
-only with ``include_paths``, because they can contain account names, and a path
-with a character that can split or reorder a printed line is only counted.
+content, stdout, stderr, commands, status labels, user text, identifiers,
+version strings as written, the transcript path or exception text. Instruction
+file paths appear only with ``include_paths``, because they can contain account
+names, and a path with a character that can split or reorder a printed line is
+only counted.
 """
 from __future__ import annotations
 
@@ -103,8 +105,9 @@ NOTICE_CHARS = 4096
 # 2, is rewritten to it), a hook stopped by its timeout or a cancellation is
 # hook_cancelled, and a host-side error before or while running the hook is
 # hook_error_during_execution. Their stdout, stderr and content are never read,
-# and the command only for whether it names session_start.py, as for a success
-# (hook_blocking_error keeps the command inside blockingError).
+# and the command only for whether it is this plugin's (it names session_start.py
+# or is one of its status labels), as for a success (hook_blocking_error keeps
+# the command inside blockingError).
 _FAILURE_OUTCOMES = {
     "hook_non_blocking_error": "non_blocking_error",
     "hook_blocking_error": "blocking_error",
@@ -143,6 +146,43 @@ _MAX_VERSION_CHARS = 32
 _SESSION_START_SOURCES = frozenset(("startup", "resume", "clear", "compact", "fork"))
 _INSTRUCTION_REASONS = frozenset(("session_start", "compaction"))
 _SESSION_START_SCRIPT = re.compile(r"(?:^|[\\/\s\"'])session_start\.py(?=$|[\s\"'])")
+
+# What the 2.1.309 and 2.1.310 executables record as the `command` of a command
+# hook's hook_success, hook_non_blocking_error, hook_cancelled and
+# hook_error_during_execution records: the hook's display label, which is its
+# statusMessage when one is set and its command otherwise (rI and Hc in 2.1.309,
+# kI and Wc in 2.1.310). Only the SessionStart exit-2 rewrite keeps the command,
+# with ${CLAUDE_PLUGIN_ROOT} expanded. Every SessionStart hook of this plugin has
+# had a statusMessage since v0.1.0, so command_mentions_session_start_py is also
+# true for a recorded command that is one of this plugin's SessionStart status
+# labels (a label another hook also uses counts too). The labels are compared,
+# never printed. These are the labels of every release, v0.1.0 to v0.30.0, read
+# from hooks/hooks.json at each release tag (blob 8d50865 in v0.1.0 to v0.8.4,
+# 45c6794 in v0.9.0 to v0.18.0, 405f9b1 in v0.19.0 to v0.30.0); this install's
+# own hooks/hooks.json adds its labels at run time.
+RELEASED_SESSION_START_LABELS = (
+    # session_start.py on startup and clear, and on resume since v0.9.0
+    "\ubcfc\ud2b8 \uc138\uc158 \uc778\uacc4\u00b7\ud56b \ucee8\ud14d\uc2a4\ud2b8 \uc8fc\uc785 \uc911...",
+    # the asynchronous vault_healthcheck.py on the same sources
+    "\ubcfc\ud2b8 \ubb34\uacb0\uc131\u00b7\uc0ac\uc2e4 \ubaa8\uc21c \uac80\uc0ac \uc911...",
+    # session_start.py on compact, since v0.19.0
+    "\ubcfc\ud2b8 \uace0\uc815 \uc81c\uc57d\u00b7\uc138\uc158 \uae30\uc5b5 \ubcf5\uc6d0 \uc911...",
+)
+MAX_HOOKS_FILE_BYTES = 64 * 1024  # this plugin's hooks/hooks.json holds about 2 KB
+MAX_LABEL_CHARS = 1024
+# The host's normalisation of a label (TD, then Hc; WD and Wc in 2.1.310): it
+# writes control characters (Cc) as visible symbols, LF and TAB included, and
+# format (Cf) and default-ignorable characters, U+2028 and U+2029 as their code
+# in hexadecimal, except some inside an emoji. Only the control characters are
+# rewritten here, as the host does, because their rewrite never depends on the
+# characters around them. A label with any of the others, or with a code point
+# this Python does not know (Cn) or a lone surrogate (Cs), is not used.
+_LABEL_UNSURE_CATEGORIES = frozenset(("Cf", "Cn", "Cs", "Zl", "Zp"))
+# Default_Ignorable_Code_Point outside Cc, Cf and Cn, as Unicode 17 lists it.
+_IGNORABLE_NOT_FORMAT = frozenset((
+    0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F, 0x3164,
+    *range(0xFE00, 0xFE10), 0xFFA0, *range(0xE0100, 0xE01F0),
+))
 # A listed path holds no character that can end, split or reorder a printed
 # line: controls (Cc, C0 and C1), format characters such as bidi controls and
 # zero-width marks (Cf), surrogates (Cs) and the line and paragraph separators
@@ -222,10 +262,115 @@ def _reason(value: object) -> str:
     return "other"
 
 
-def _mentions_session_start(command: object) -> bool | None:
-    """Whether a hook command names session_start.py; None without a command string."""
+def _host_label(text: str) -> str | None:
+    """A status label as the host records it, or None when that is not certain here."""
+    out = []
+    for char in text:
+        code = ord(char)
+        category = unicodedata.category(char)
+        if category == "Cc":
+            if char == "\n":
+                out.append(chr(0x2424))
+            elif char == "\t":
+                out.append(chr(0x2409))
+            elif code < 0x20:
+                out.append(chr(0x2400 + code))  # ESC too: the host's U+241B
+            elif code == 0x7F:
+                out.append(chr(0x2421))
+            else:  # C1: a backslash, "u" and the code in braces
+                out.append(chr(92) + "u{" + format(code, "X") + "}")
+        elif category in _LABEL_UNSURE_CATEGORIES or code in _IGNORABLE_NOT_FORMAT:
+            return None
+        else:
+            out.append(char)
+    label = "".join(out)
+    return label if 0 < len(label) <= MAX_LABEL_CHARS else None
+
+
+_RELEASED_LABELS_AS_RECORDED = frozenset(
+    label for label in map(_host_label, RELEASED_SESSION_START_LABELS) if label is not None
+)
+
+
+def _plugin_hooks_file() -> Path | None:
+    """This plugin's hooks/hooks.json, found from this module's place in the plugin.
+
+    Only a module at skills/agentic-vault/scripts/ of a plugin looks: a copy
+    elsewhere, such as a vault's 00-meta/scripts/, reads no hooks file.
+    """
+    scripts = Path(__file__).resolve().parent
+    if (scripts.name, scripts.parent.name, scripts.parent.parent.name) != (
+            "scripts", "agentic-vault", "skills"):
+        return None
+    return scripts.parents[2] / "hooks" / "hooks.json"
+
+
+def _labels_in(document: object) -> frozenset[str] | None:
+    """The SessionStart status labels of a hooks file as the host records them.
+
+    None when the document does not have the shape of a hooks file. A hook
+    without a statusMessage has no label: the host records its command.
+    """
+    hooks = document.get("hooks") if isinstance(document, dict) else None
+    groups = hooks.get("SessionStart", []) if isinstance(hooks, dict) else None
+    if not isinstance(groups, list):
+        return None
+    labels = set()
+    for group in groups:
+        entries = group.get("hooks") if isinstance(group, dict) else None
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return None
+            message = entry.get("statusMessage")
+            if message is None or message == "":
+                continue
+            if not isinstance(message, str):
+                return None
+            label = _host_label(message)
+            if label is not None:
+                labels.add(label)
+    return frozenset(labels)
+
+
+def _installed_labels() -> frozenset[str]:
+    """This install's SessionStart status labels, read-only and bounded.
+
+    A missing, oversized or malformed hooks file gives none and never raises, so
+    only the released labels and the session_start.py name are recognised.
+    """
+    try:
+        path = _plugin_hooks_file()
+        if path is None:
+            return frozenset()
+        handle, _ = _open_regular(path)
+        if handle is None:
+            return frozenset()
+        with handle:
+            data = handle.read(MAX_HOOKS_FILE_BYTES + 1)
+        if len(data) > MAX_HOOKS_FILE_BYTES:
+            return frozenset()
+        labels = _labels_in(json.loads(data))
+        return frozenset() if labels is None else labels
+    except Exception:  # fail closed: the hooks file never stops the reader
+        return frozenset()
+
+
+def _session_start_labels() -> frozenset[str]:
+    """Every SessionStart status label of this plugin, as the host records it."""
+    return _RELEASED_LABELS_AS_RECORDED | _installed_labels()
+
+
+def _mentions_session_start(command: object, labels: frozenset[str] = frozenset()) -> bool | None:
+    """Whether a recorded hook command is this plugin's; None without a command string.
+
+    True when it names session_start.py or is one of the given status labels.
+    """
     if not isinstance(command, str):
         return None
+    if len(command) <= MAX_LABEL_CHARS and command in labels:
+        return True
     return _SESSION_START_SCRIPT.search(command[:MAX_COMMAND_CHARS]) is not None
 
 
@@ -356,8 +501,9 @@ def _empty_report(status: str, reason_code: str, include_paths: bool) -> dict:
 class _Scan:
     """Allowlisted values from one pass over a transcript; never record content."""
 
-    def __init__(self, include_paths: bool) -> None:
+    def __init__(self, include_paths: bool, labels: frozenset[str] = frozenset()) -> None:
         self.include_paths = include_paths
+        self.labels = labels
         self.bytes_read = 0
         self.file_cap_reached = False
         self.lines = {
@@ -483,6 +629,8 @@ class _Scan:
             self.hooks["other_records"] += 1
 
     def _hook(self, attachment: dict) -> None:
+        # A 2.1.309 held copy of a late plugin's record (content "" and heldContent,
+        # before the original row) is read as an ordinary record: docs/reliability.md.
         name = attachment.get("hookName")
         stdout = attachment.get("stdout")
         content = attachment.get("content")
@@ -502,7 +650,7 @@ class _Scan:
             "emitted_chars": _utf16_len(stdout),
             "injected_chars": _utf16_len(content),
             "truncated": truncated,
-            "command_mentions_session_start_py": _mentions_session_start(command),
+            "command_mentions_session_start_py": _mentions_session_start(command, self.labels),
         })
 
     def _failure(self, attachment: dict, outcome: str) -> None:
@@ -523,7 +671,7 @@ class _Scan:
             "outcome": outcome,
             "exit_code": _integer(attachment.get("exitCode"), -MAX_INTEGER),
             "duration_ms": _duration(attachment.get("durationMs")),
-            "command_mentions_session_start_py": _mentions_session_start(command),
+            "command_mentions_session_start_py": _mentions_session_start(command, self.labels),
         })
 
     def _instructions(self, attachment: dict) -> None:
@@ -694,7 +842,7 @@ def diagnose_session_evidence(path: str | os.PathLike, *, include_paths: bool = 
         handle, reason_code = _open_regular(_named_file(path))
         if handle is None:
             return _empty_report("unparsed", reason_code, include_paths)
-        scan = _Scan(include_paths)
+        scan = _Scan(include_paths, _session_start_labels())
         with handle:
             scan.read(handle)
         return scan.report()

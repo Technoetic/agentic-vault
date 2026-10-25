@@ -131,9 +131,10 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
 이 형식은 호스트 내부 형식이고 문서화되지 않았다(`trust_boundary`: `host_internal_format_undocumented`). 판마다 바뀔 수
 있으므로 관측한 기록 모양만 해석하고, 모양이 다른 기록은 추측하지 않고 센다.
 
-`--session-evidence`를 줄 때만 지정한 파일 **하나**를 읽는다. 경로가 `~`로 시작하면 셸이 바꾸지 않고 넘겨도
-홈 폴더(Windows는 `USERPROFILE`)로 바꿔 읽으므로 위 위치를 그대로 쓸 수 있다. 폴더를 훑어 기록을 고르지
-않고, 아무것도 쓰지 않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트
+`--session-evidence`를 줄 때만 지정한 세션 기록 파일 **하나**를 읽는다. 경로가 `~`로 시작하면 셸이 바꾸지 않고
+넘겨도 홈 폴더(Windows는 `USERPROFILE`)로 바꿔 읽으므로 위 위치를 그대로 쓸 수 있다. 그 밖에 읽는 파일은 이
+플러그인 설치본의 `hooks/hooks.json` 하나뿐이다(상태 문구 확인용, 64 KiB까지, 아래 **훅 명령 값**). 폴더를 훑어
+기록을 고르지 않고, 아무것도 쓰지 않고, 네트워크·모델을 부르지 않는다. 결과는 `session_evidence`에 붙고 종료 코드는 볼트
 진단의 값 그대로다. 옵션이 없으면 읽기 모듈(`vault_session_evidence.py`)을 불러오지도 않으며 출력은 이전과 같다.
 
 - **읽는 범위:** 한 줄씩 읽고 한 줄 16 MiB, 파일 512 MiB까지 본다. 종류 표지(`"type":"attachment"`·
@@ -144,18 +145,17 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
 - **남기는 값(허용 목록):**
   - SessionStart `hook_success` 기록마다 `source`(`startup`·`resume`·`clear`·`compact`·`fork`·`other`),
     `exit_code`, `duration_ms`, `emitted_chars`(훅 stdout 길이), `injected_chars`(호스트가 대화에 넣은
-    `content` 길이), `truncated`, `command_mentions_session_start_py`(명령에 `session_start.py`라는 파일 이름이
-    있는지. 보통 이 플러그인의 훅이지만 다른 플러그인의 같은 이름 파일도 `true`다). 길이는
+    `content` 길이), `truncated`, `command_mentions_session_start_py`(아래 **훅 명령 값**). 길이는
     `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두 센다.
   - 성공하지 못한 SessionStart 훅 기록(`hook_non_blocking_error`·`hook_blocking_error`·`hook_cancelled`·
     `hook_error_during_execution`)마다 `source`, `outcome`(`non_blocking_error`·`blocking_error`·`cancelled`·
     `error_during_execution` 가운데 하나), `exit_code`, `duration_ms`, `command_mentions_session_start_py`만
-    남긴다. 마지막 값은 성공 기록과 같은 방식으로 정하고(`hook_blocking_error`는 `blockingError` 안의 명령을 본다),
-    명령 문자열이 없으면 `none`이다. 다른 훅의 실패도 같은 목록에 오므로 이 값으로 이 플러그인의 훅인지 가린다.
-    stdout·stderr·명령·내용은 출력하지 않는다. 수는 `failed`, 목록은 `failed_entries`(50건까지)다. 2.1.309
-    실행 파일에서는 0이 아닌 종료 코드가 `hook_non_blocking_error`이고(종료 코드 2의 차단 오류도 이 모양으로
-    바뀐다), 시간 초과·취소가 `hook_cancelled`(종료 코드 없음), 훅을 실행하기 전이나 실행하는 중의 호스트 오류가
-    `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제 세션 기록에서 관측한 것은 아니다.
+    남긴다. 마지막 값은 성공 기록과 같은 방식으로 정한다(`hook_blocking_error`는 `blockingError` 안의 명령을 본다).
+    다른 훅의 실패도 같은 목록에 온다. stdout·stderr·명령·내용은 출력하지 않는다. 수는 `failed`, 목록은
+    `failed_entries`(50건까지)다. 2.1.309 실행 파일에서는 0이 아닌 종료 코드가 `hook_non_blocking_error`이고(종료
+    코드 2의 차단 오류도 이 모양으로 바뀐다), 시간 초과·취소가 `hook_cancelled`(종료 코드 없음), 훅을 실행하기
+    전이나 실행하는 중의 호스트 오류가 `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제
+    세션 기록에서 관측한 것은 아니다.
   - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
     `compaction`·`other`, 없으면 `none`), `changed`. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두
     센다. 경로 필드는 아래 **개인정보**에 있다.
@@ -165,27 +165,45 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     블록마다 한 줄씩 기록되므로 (`message.id`, `requestId`)가 같은 줄은 한 번만 센다(`duplicate_lines`).
     서브에이전트·합성 메시지·오류 메시지 줄은 건너뛴다.
   - `api_errors`: `api_error` 기록 수와 HTTP 상태 코드별 수. `host_versions`: 기록의 `version` 최솟값·최댓값.
+- **훅 명령 값(`command_mentions_session_start_py`):** 기록된 `command`가 `session_start.py`라는 파일 이름을
+  가리키거나 이 플러그인의 SessionStart 상태 문구(`statusMessage`) 가운데 하나와 같으면 `true`, 그렇지 않으면
+  `false`, 명령 문자열이 없으면 `none`이다. Claude Code 2.1.309 실행 파일(2.1.310도 같다)은 command 훅의
+  `hook_success`·`hook_non_blocking_error`·`hook_cancelled`·`hook_error_during_execution` 기록의 `command`에 명령
+  대신 훅의 표시 문구를 남긴다. 표시 문구는 `statusMessage`가 있으면 그 문구이고, 없을 때만 명령이다. 차단
+  오류(종료 코드 2)의 기록만 `${CLAUDE_PLUGIN_ROOT}`를 펼친 명령을 남긴다(SessionStart에서는
+  `hook_non_blocking_error`로 바꿔 쓴 기록). 이 플러그인의 SessionStart
+  훅 셋(`session_start.py` 둘과 비동기 `vault_healthcheck.py`)에는 v0.1.0부터 모두 상태 문구가 있어서, 파일 이름만
+  보면 이 플러그인의 훅 기록도 대부분 `false`가 된다. 그래서 설치본 `hooks/hooks.json`의 SessionStart 상태 문구와
+  v0.1.0~v0.30.0 릴리스의 문구(코드에 고정한 세 가지)를, 호스트가 표시 문구를 만들 때처럼 제어 문자를 바꾼 뒤
+  비교한다. `hooks/hooks.json`이 없거나 형식이 다르거나 64 KiB를 넘으면 그 파일의 문구는 쓰지 않고 고정한 문구와
+  파일 이름만 본다. 바꾸는 방식이 앞뒤 글자나 Unicode 판에 따라 달라지는 문자(서식 문자 등)가 든 문구도 쓰지 않는다.
+  문구는 출력하지 않는다. `true`는 보통 이 플러그인의 훅이지만, 같은 이름의 다른 파일이나 같은 문구를 쓰는 다른 훅도
+  `true`다. `false`는 이 플러그인의 훅으로 **알아보지 못했다**는 뜻이다. 다른 훅일 수도 있고 이 읽기 모듈이 모르는
+  기록 모양일 수도 있으므로, `false`만으로 다른 훅이라고 단정하지 않는다.
 - **상태(`status`):** 기록이 섞이면 `observed_error`, `observed_truncated`, `observed_ran` 순으로 앞선 것 하나를
-  보고하고, 수는 `failed`·`truncated`·`records`에 모두 센다.
-  - `observed_error`: 성공하지 못한 SessionStart 훅 기록(위 네 종류)이 하나 이상 있다. 호스트가 그 훅을 실행하려
-    했다는 기록이며 "실행되지 않음"도 "기록 없음"도 아니다. 다음 조치는 실패한 훅을 확인하는 것이다
-    (`check_the_failed_session_start_hook`). 이 플러그인의 훅이 실행됐어도 다른 플러그인이나 볼트 설정의 훅이
-    실패하면 이 상태이므로, 실패 기록의 `command_mentions_session_start_py`(`true`는 보통 이 플러그인의 훅,
-    `false`는 다른 훅, `none`은 알 수 없음)로 어느 훅인지 가린다. 오류 문구는 출력하지 않으므로 원인은 그 훅
-    명령을 직접 실행하거나 디버그 로그(아래 절차)로 확인한다. 예를 들어 이 플러그인의 `run_python_hook.sh`는
-    Python 3.10 이상을 찾지 못하면 종료 코드 127로 끝난다.
-  - `observed_ran`: SessionStart 훅이 실행된 기록(`hook_success`)이 있다.
-  - `observed_truncated`: 그 가운데 하나 이상이 호스트 상한(10,000자)을 넘어 잘렸다. 그 훅의 출력을 줄이는 것이
-    다음 조치다. 이 플러그인의 훅은 9,500자로 묶으므로 `command_mentions_session_start_py`가 `false`인 기록은
-    다른 훅이다(`true`는 보통 이 플러그인의 훅이지만 같은 이름의 다른 파일일 수도 있다).
-  - `not_recorded`: 훅 기록(성공·실패)이 없다. **실행되지 않았다는 뜻이 아니다.** 비동기 훅, SDK 세션, 기록을
-    남기지 않는 판에서는 기록이 없다.
-  - `unsupported_host_version`: 훅 기록이 없고, 파일의 가장 높은 `version`이 기록 없이 관측된 판(2.1.252) 이하다.
-  - `unparsed`: 파일을 열 수 없거나(`file_not_found`·`not_a_regular_file`·`file_unreadable`), 기록 줄이
-    없거나(`no_transcript_records`), `version`이 없거나 읽을 수 없거나(`version_missing`·`version_unparsed`,
-    이때는 다른 값도 해석하지 않는다), 훅 기록 모양이 다르거나(`hook_record_shape_unrecognized`), 읽는 중 예상하지
-    못한 오류가 났다(`probe_failed`). 읽기 모듈을 불러오지 못한 경우(설치 손상)도 `probe_failed`이며, 이때
-    `session_evidence`에는 `schema_version`·`status`·`reason_code`·`next_action`·`trust_boundary`·`complete`만
+  보고하고, 수는 `failed`·`truncated`·`records`에 모두 센다. 괄호 안은 그 상태의 `reason_code`와 `next_action`이다.
+  - `observed_error`(`session_start_hook_failed`, `check_the_failed_session_start_hook`): 성공하지 못한
+    SessionStart 훅 기록(위 네 종류)이 하나 이상 있다. 호스트가 그 훅을 실행하려 했다는 기록이며 "실행되지
+    않음"도 "기록 없음"도 아니다. 다음 조치는 실패한 훅을 확인하는 것이다. 이 플러그인의 훅이 실행됐어도 다른
+    플러그인이나 볼트 설정의 훅이 실패하면 이 상태다. 실패 기록의 `command_mentions_session_start_py`는 `true`면 보통
+    이 플러그인의 훅, `false`면 알아보지 못한 훅, `none`이면 명령이 없어 알 수 없다는 뜻이다(위 **훅 명령 값**).
+    오류 문구는 출력하지 않으므로 원인은 그 훅 명령을 직접 실행하거나 디버그 로그(아래 절차)로 확인한다. 예를 들어
+    이 플러그인의 `run_python_hook.sh`는 Python 3.10 이상을 찾지 못하면 종료 코드 127로 끝난다.
+  - `observed_ran`(`session_start_hook_recorded`, `none`): SessionStart 훅이 실행된 기록(`hook_success`)이 있다.
+  - `observed_truncated`(`session_start_output_truncated`, `reduce_the_session_start_output_below_the_host_cap`): 그
+    가운데 하나 이상이 호스트 상한(10,000자)을 넘어 잘렸다. 그 훅의 출력을 줄이는 것이 다음 조치다. 이 플러그인의
+    `session_start.py`는 출력을 9,500자로 묶는다. 잘린 기록이 어느 훅인지도 `command_mentions_session_start_py`로
+    보되, `false`는 알아보지 못했다는 뜻일 뿐이다.
+  - `not_recorded`(`no_session_start_hook_record`, `measure_with_the_debug_log_if_needed`): 훅 기록(성공·실패)이
+    없다. **실행되지 않았다는 뜻이 아니다.** 비동기 훅, SDK 세션, 기록을 남기지 않는 판에서는 기록이 없다.
+  - `unsupported_host_version`(`host_version_seen_without_hook_records`,
+    `measure_with_the_debug_log_or_update_claude_code`): 훅 기록이 없고, 파일의 가장 높은 `version`이 기록 없이
+    관측된 판(2.1.252) 이하다.
+  - `unparsed`(아래 사유, `check_the_named_transcript_file`): 파일을 열 수 없거나(`file_not_found`·
+    `not_a_regular_file`·`file_unreadable`), 기록 줄이 없거나(`no_transcript_records`), `version`이 없거나 읽을 수
+    없거나(`version_missing`·`version_unparsed`, 이때는 다른 값도 해석하지 않는다), 훅 기록 모양이
+    다르거나(`hook_record_shape_unrecognized`), 읽는 중 예상하지 못한 오류가 났다(`probe_failed`). 읽기 모듈을
+    불러오지 못한 경우(설치 손상)도 `probe_failed`이며, 이때 `session_evidence`에는 `schema_version`·`status`·`reason_code`·`next_action`·`trust_boundary`·`complete`만
     있고, 텍스트 출력은 `session_evidence`·`session_trust_boundary`·`session_complete`·`session_next_action` 네
     줄뿐이다. 예외 문구는 출력하지 않고, 종료 코드는 이때도 볼트 진단의 값 그대로다.
 - **판 범위는 관측값이다:** 2026-10-24에 Windows PC 한 대의 기록에서 키 이름·길이·숫자만 보았다. 2.1.252 세션
@@ -218,9 +236,15 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   종류)는 실패로 보지 않고, 해석하지 않은 채 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가 비어
   있거나 상태 문구이고 추가 문맥은 그 별도 기록에 들어가므로 `injected_chars`가 주입량이 아니다(이 플러그인의
   `session_start.py`는 일반 텍스트로 출력한다). Codex 기록은 읽지 않는다.
-- **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령·사용자
-  입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는 계정 이름이 들어갈 수 있어
-  `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와 `removed_paths`(빠진 파일
+- **늦게 실행된 훅의 사본:** 세션이 시작된 뒤 불러온 플러그인(세션 중 설치·활성화 등)의 SessionStart 훅은 늦게
+  실행된다. 2.1.309 실행 파일은 이때 `hook_success` 기록의 사본(`content`는 빈 문자열이고 원래 내용은
+  `heldContent`에 있다)을 원래 기록보다 먼저 남길 수 있다. 이 읽기 모듈은 사본을 가려내지 않고 보통 기록으로 센다.
+  그래서 한 번의 실행이 `records`에 두 번 셀 수 있고, 사본의 `injected_chars`는 0이다. `heldContent`는 읽지 않으므로
+  사본만 있으면 원래 출력이 잘렸어도 잘림으로 판정하지 않는다. 이 모양은 실행 파일 문자열에서 확인했고 실제 세션
+  기록에서 관측하지 않았다.
+- **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령(명령
+  자리에 기록된 상태 문구 포함)·사용자 입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는
+  계정 이름이 들어갈 수 있어 `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와 `removed_paths`(빠진 파일
   경로)로 보인다. 두 목록은 기록마다 각각 50개까지 싣는다(`limits.paths_per_record`). 50개를 넘는 경로와
   문자열이 아니거나 비었거나 1,024자를 넘는 경로, 출력한 줄을 끊거나 글자 순서를 바꿔 보이게 할 수 있는 문자가 든
   경로는 싣지 않고 `paths_omitted`에 센다. 그런 문자는 Unicode 일반 범주가 제어 문자(Cc, C0·C1)·서식 문자(Cf, 양방향 제어·폭
@@ -229,8 +253,9 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   텍스트 출력에 `session_next_action: none` 같은 가짜 상태 줄을 만들 수 있기 때문이다.
 - **출처:** 사용량 필드와 (`message.id`, `requestId`) 중복 제거 규칙은
   [ccusage](https://github.com/ryoppippi/ccusage)(MIT)의 Claude 사용량 파서에서 방식만 빌렸다. 코드와 의존성은
-  가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 실패 기록 모양과 잘림 안내 문구는
-  2.1.309 실행 파일의 문자열에서 확인했다.
+  가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 실패 기록 모양·잘림 안내 문구·늦게
+  실행된 훅의 사본은 2.1.309 실행 파일의 문자열에서, 기록된 `command`가 표시 문구라는 것과 표시 문구를 만드는
+  방식은 2.1.309·2.1.310 실행 파일의 문자열에서 확인했다.
 
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 

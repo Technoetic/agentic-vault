@@ -59,6 +59,21 @@ UNSAFE_CATEGORIES = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp"))
 OVER_CAP_STDOUT = "SECRET-STDOUT " + "s" * 20_000 + "\n"
 # Another SessionStart hook, as a vault's own settings can add one.
 VAULT_HOOK_COMMAND = 'powershell -NoProfile -File "D:/SECRET-VAULT/00-meta/scripts/local-llm-up.ps1"'
+HOOKS_FILE = REPO_ROOT / "hooks" / "hooks.json"
+# Another plugin's statusMessage, which 2.1.309 records as that hook's command.
+OTHER_PLUGIN_LABEL = "SECRET-OTHER-PLUGIN: loading project memory..."
+
+
+def session_start_hooks() -> list[dict]:
+    """This plugin's SessionStart hook entries, as its hooks/hooks.json lists them."""
+    document = json.loads(HOOKS_FILE.read_text(encoding="utf-8"))
+    return [hook for group in document["hooks"]["SessionStart"] for hook in group["hooks"]]
+
+
+def labelled(record: dict, command: str) -> dict:
+    """The record as the 2.1.309 runner writes it: its command is the hook's display label."""
+    record["attachment"]["command"] = command
+    return record
 
 
 def utf16_units(text: str) -> int:
@@ -647,6 +662,188 @@ class SessionStartHookTests(SessionEvidenceTestCase):
              ("blocking_error", True), ("blocking_error", False), ("blocking_error", None),
              ("non_blocking_error", False), ("non_blocking_error", False)],
         )
+
+    def test_this_plugins_hooks_are_recognised_by_the_label_2_1_309_records(self) -> None:
+        # 2.1.309 records rI(hook) = Hc(statusMessage, or the command without one) as the
+        # command of these four types; only the SessionStart exit-2 rewrite keeps the
+        # expanded command. Every SessionStart hook of this plugin has a statusMessage.
+        hooks = session_start_hooks()
+        self.assertEqual(len(hooks), 3)
+        self.assertTrue(all(isinstance(hook.get("statusMessage"), str) and hook["statusMessage"]
+                            for hook in hooks))
+        startup, healthcheck, compact = (hook["statusMessage"] for hook in hooks)
+        self.assertIn("session_start.py", hooks[0]["command"])
+        self.assertIn("vault_healthcheck.py", hooks[1]["command"])
+        self.assertIn("session_start.py", hooks[2]["command"])
+        exit_2 = blocking_exit_record()
+        exit_2["attachment"]["command"] = PLUGIN_COMMAND  # ${CLAUDE_PLUGIN_ROOT} expanded
+        report = self.diagnose(
+            labelled(hook_record(), startup),
+            labelled(hook_record(source="compact"), compact),
+            labelled(hook_record(), OTHER_PLUGIN_LABEL),
+            labelled(failure_record("hook_non_blocking_error"), startup),  # exit 127
+            labelled(failure_record("hook_cancelled", source="resume"), startup),
+            labelled(failure_record("hook_error_during_execution", source="compact"), compact),
+            labelled(failure_record("hook_error_during_execution"), healthcheck),
+            exit_2,
+            labelled(failure_record("hook_non_blocking_error"), OTHER_PLUGIN_LABEL),
+            labelled(failure_record("hook_cancelled"), OTHER_PLUGIN_LABEL),
+        )
+
+        self.assert_status(report, "observed_error", "session_start_hook_failed")
+        hooks_block = report["session_start_hooks"]
+        self.assertEqual(
+            [(entry["source"], entry["command_mentions_session_start_py"])
+             for entry in hooks_block["entries"]],
+            [("startup", True), ("compact", True), ("startup", False)],
+        )
+        self.assertEqual(
+            [(entry["outcome"], entry["exit_code"], entry["command_mentions_session_start_py"])
+             for entry in hooks_block["failed_entries"]],
+            [("non_blocking_error", 127, True), ("cancelled", None, True),
+             ("error_during_execution", None, True), ("error_during_execution", None, True),
+             ("non_blocking_error", 2, True), ("non_blocking_error", 127, False),
+             ("cancelled", None, False)],
+        )
+        # The labels are compared, never printed.
+        printed = json.dumps(report, ensure_ascii=False)
+        for label in (startup, healthcheck, compact):
+            self.assertNotIn(label, printed)
+        for line in self.evidence.text_lines(report):
+            self.assertNotIn(chr(0xBCFC), line)  # the first letter of every label
+
+    def test_a_label_is_compared_as_the_host_records_it(self) -> None:
+        # Hc writes LF and TAB as U+2424 and U+2409 and other controls as visible symbols.
+        host_label = self.evidence._host_label
+        cases = (
+            ("plain label...", "plain label..."),
+            ("a" + chr(9) + "b" + chr(10) + "c", "a" + chr(0x2409) + "b" + chr(0x2424) + "c"),
+            ("x" + chr(13) + chr(10), "x" + chr(0x240D) + chr(0x2424)),
+            (chr(0x1B) + "[2J", chr(0x241B) + "[2J"),
+            (chr(0) + chr(0x1F), chr(0x2400) + chr(0x241F)),
+            (chr(0x7F), chr(0x2421)),
+            ("a" + chr(0x85) + "b", "a" + chr(92) + "u{85}b"),
+            (chr(0x9F), chr(92) + "u{9F}"),
+            ("x" * 1024, "x" * 1024),
+        )
+        for text, recorded in cases:
+            with self.subTest(text=ascii(text)[:40]):
+                self.assertEqual(host_label(text), recorded)
+        # Characters whose rewrite depends on the grapheme or the Unicode version: not used.
+        # Default_Ignorable_Code_Point outside Cf and Cn, as Unicode 17 lists it, is among them.
+        ignorable = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F,
+                     0x3164, 0xFFA0, *range(0xFE00, 0xFE10), *range(0xE0100, 0xE01F0)}
+        for code in sorted(ignorable | {0x200B, 0x200D, 0x202E, 0xFEFF, 0x00AD, 0x2028, 0x2029,
+                                        0xE0041, 0x0378, 0xD800}):
+            with self.subTest(code=hex(code)):
+                self.assertIsNone(host_label("label" + chr(code)))
+        self.assertIsNone(host_label(""))
+        self.assertIsNone(host_label("x" * 1025))
+        self.assertIsNone(host_label(chr(0x85) * 200))  # 1,200 characters once rewritten
+        # The released labels need no rewrite: the host records them as they are.
+        for label in self.evidence.RELEASED_SESSION_START_LABELS:
+            self.assertEqual(host_label(label), label)
+
+    def test_the_released_labels_hold_this_installs_labels(self) -> None:
+        current = {hook["statusMessage"] for hook in session_start_hooks()}
+        released = set(self.evidence.RELEASED_SESSION_START_LABELS)
+        # A release that changes a statusMessage adds the new label to the constant.
+        self.assertTrue(current)
+        self.assertLessEqual(current, released)
+        self.assertEqual(len(released), len(self.evidence.RELEASED_SESSION_START_LABELS))
+        # This checkout's hooks file is found from the module and read as the host records it.
+        self.assertEqual(self.evidence._plugin_hooks_file(), HOOKS_FILE.resolve())
+        self.assertEqual(self.evidence._installed_labels(), frozenset(current))
+
+    def plugin_copy(self, base: Path, hooks_file: object) -> Path:
+        """A plugin layout whose hooks/hooks.json holds the given document, text or bytes."""
+        module = base / "skills" / "agentic-vault" / "scripts" / "vault_session_evidence.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("# stand-in: only its place is used\n", encoding="utf-8")
+        target = base / "hooks" / "hooks.json"
+        target.parent.mkdir(parents=True)
+        if isinstance(hooks_file, bytes):
+            target.write_bytes(hooks_file)
+        elif isinstance(hooks_file, str):
+            target.write_text(hooks_file, encoding="utf-8")
+        elif hooks_file is not MISSING:
+            target.write_text(json.dumps(hooks_file, ensure_ascii=False), encoding="utf-8")
+        return module
+
+    def mentions(self, module: Path, *commands: str) -> list:
+        records = [labelled(hook_record(), command) for command in commands]
+        with mock.patch.object(self.evidence, "__file__", str(module)):
+            report = self.diagnose(*records)
+        self.assertEqual(report["status"], "observed_ran")  # never probe_failed
+        return [entry["command_mentions_session_start_py"]
+                for entry in report["session_start_hooks"]["entries"]]
+
+    def test_this_installs_hooks_file_adds_its_labels_and_fails_closed(self) -> None:
+        released = self.evidence.RELEASED_SESSION_START_LABELS[0]
+        tab_label = "SECRET-TAB" + chr(9) + "LABEL"
+        document = {"hooks": {
+            "SessionStart": [
+                {"matcher": "startup", "hooks": [
+                    {"type": "command", "statusMessage": "SECRET-CUSTOM-LABEL", "command": "x"},
+                    {"type": "command", "statusMessage": tab_label, "command": "x"},
+                    {"type": "command", "statusMessage": "", "command": "x"},
+                    {"type": "command", "command": "x"},
+                ]},
+            ],
+            "PreCompact": [{"hooks": [{"type": "command", "statusMessage": "SECRET-PRECOMPACT",
+                                       "command": "x"}]}],
+        }}
+        commands = ("SECRET-CUSTOM-LABEL", "SECRET-TAB" + chr(0x2409) + "LABEL", tab_label,
+                    "SECRET-PRECOMPACT", released, "SECRET-UNKNOWN")
+        module = self.plugin_copy(self.root / "plugin", document)
+        self.assertEqual(self.mentions(module, *commands), [True, True, False, False, True, False])
+
+        # Fail closed: only the released labels and the session_start.py name remain. Each
+        # file below names SECRET-CUSTOM-LABEL where a lenient reader could still find it.
+        custom = {"statusMessage": "SECRET-CUSTOM-LABEL", "command": "x"}
+        valid = json.dumps({"hooks": {"SessionStart": [{"hooks": [custom]}]}})
+        invalid = {
+            "missing": MISSING,
+            "not_json": valid[:-1],
+            "not_utf8": valid.encode("utf-8") + b"\xff",
+            "too_deep": valid[:-1] + ', "x": ' + "[" * 100_000 + "]" * 100_000 + "}",
+            "over_the_size_bound": valid + " " * (64 * 1024),
+            "session_start_not_a_list": {"hooks": {"SessionStart": {"hooks": [custom]}}},
+            "group_not_an_object": {"hooks": {"SessionStart": [{"hooks": [custom]}, "SECRET"]}},
+            "entry_not_an_object": {"hooks": {"SessionStart": [{"hooks": [custom, "SECRET"]}]}},
+            "label_not_a_string": {"hooks": {"SessionStart": [{"hooks": [
+                custom, {"statusMessage": 7, "command": "x"}]}]}},
+            "hooks_not_an_object": {"hooks": [{"SessionStart": [{"hooks": [custom]}]}]},
+        }
+        self.assertEqual(self.mentions(self.plugin_copy(self.root / "valid", valid),
+                                       "SECRET-CUSTOM-LABEL"), [True])
+        for name, content in invalid.items():
+            with self.subTest(hooks_file=name):
+                module = self.plugin_copy(self.root / name, content)
+                self.assertEqual(self.mentions(module, "SECRET-CUSTOM-LABEL", released),
+                                 [False, True])
+        self.assertEqual(self.evidence.MAX_HOOKS_FILE_BYTES, 64 * 1024)
+        directory = self.plugin_copy(self.root / "directory", MISSING)
+        (directory.parents[3] / "hooks" / "hooks.json").mkdir()
+        self.assertEqual(self.mentions(directory, "SECRET-CUSTOM-LABEL", released), [False, True])
+
+    def test_a_copy_outside_the_plugin_reads_no_hooks_file(self) -> None:
+        # A vault's engine copy sits at 00-meta/scripts/: a hooks file where the plugin's would
+        # be is not this plugin's and is never read.
+        module = self.root / "vault" / "00-meta" / "scripts" / "vault_session_evidence.py"
+        module.parent.mkdir(parents=True)
+        module.write_text("# stand-in\n", encoding="utf-8")
+        decoy = self.root / "hooks" / "hooks.json"
+        decoy.parent.mkdir()
+        decoy.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
+            {"type": "command", "statusMessage": "SECRET-DECOY-LABEL", "command": "x"}]}]}}),
+            encoding="utf-8")
+        with mock.patch.object(self.evidence, "__file__", str(module)):
+            self.assertIsNone(self.evidence._plugin_hooks_file())
+            self.assertEqual(self.evidence._installed_labels(), frozenset())
+        released = self.evidence.RELEASED_SESSION_START_LABELS[2]
+        self.assertEqual(self.mentions(module, "SECRET-DECOY-LABEL", released, PLUGIN_COMMAND),
+                         [False, True, True])
 
     def test_unrecognized_hook_shapes_are_counted_not_guessed(self) -> None:
         broken = hook_record()
@@ -1394,6 +1591,37 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
         self.assertEqual(lines[-1], "session_next_action: check_the_failed_session_start_hook")
         self.assertNotIn(SECRET, text)
 
+    def test_text_lines_for_this_plugins_failed_hook_recorded_by_its_label(self) -> None:
+        # run_python_hook.sh exits 127 without Python 3.10+; 2.1.309 records the statusMessage.
+        ready = self.make_vault("ready")
+        startup = session_start_hooks()[0]["statusMessage"]
+        ran = labelled(hook_record(source="compact"), session_start_hooks()[2]["statusMessage"])
+        stdout = ran["attachment"]["stdout"]
+        transcript = self.transcript(
+            ran, labelled(failure_record(), startup), labelled(failure_record(), OTHER_PLUGIN_LABEL),
+        )
+        code, text = self.run_main(ready, "--session-evidence", str(transcript))
+        json_code, raw = self.run_main(ready, "--format", "json", "--session-evidence", str(transcript))
+
+        self.assertEqual((code, json_code), (0, 0))
+        lines = text[len(READY_TEXT):].splitlines()
+        self.assertEqual([line for line in lines if line.startswith("session_start_hook")], [
+            "session_start_hook_records: 1; truncated=0; failed=2; unrecognized=0; other_records=0",
+            f"session_start_hook: source=compact; exit_code=0; duration_ms=812; "
+            f"emitted_chars={utf16_units(stdout)}; injected_chars={utf16_units(stdout.strip())}; "
+            "truncated=false; command_mentions_session_start_py=true",
+            "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "
+            "duration_ms=40; command_mentions_session_start_py=true",
+            "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "
+            "duration_ms=40; command_mentions_session_start_py=false",
+        ])
+        for printed in (text, raw):
+            self.assertNotIn(SECRET, printed)
+            for hook in session_start_hooks():
+                self.assertNotIn(hook["statusMessage"], printed)
+        failed = json.loads(raw)["session_evidence"]["session_start_hooks"]["failed_entries"]
+        self.assertEqual([entry["command_mentions_session_start_py"] for entry in failed], [True, False])
+
     def test_a_path_cannot_forge_a_status_line_in_the_text_output(self) -> None:
         ready = self.make_vault("ready")
         forged = "PATHMARK-x/" + chr(0x2028) + "session_next_action: none"
@@ -1531,6 +1759,9 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
     def test_the_fallback_block_uses_the_readers_own_words(self) -> None:
         own = self.evidence._empty_report("unparsed", "probe_failed", False)
         block = self.doctor.SESSION_EVIDENCE_UNAVAILABLE
+        # Exactly the six keys docs/reliability.md names, none lost and none added.
+        self.assertEqual(set(block), {"schema_version", "status", "reason_code", "next_action",
+                                      "trust_boundary", "complete"})
         self.assertEqual(block, {key: own[key] for key in block})
         prefixes = ("session_evidence:", "session_trust_boundary:", "session_complete:",
                     "session_next_action:")
