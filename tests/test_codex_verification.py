@@ -55,6 +55,8 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_state.py",
             "skills/agentic-vault/scripts/vault_ssot.py",
             "skills/agentic-vault/scripts/vault_period.py",
+            "skills/agentic-vault/scripts/vault_doctor.py",
+            "skills/agentic-vault/scripts/vault_session_evidence.py",
             "skills/agentic-vault/scripts/vault_lesson_delta.py",
             "skills/agentic-vault/scripts/vault_declarative_rules.py",
             "skills/agentic-vault/scripts/vault_compile_quality.py",
@@ -116,6 +118,25 @@ class CodexVerificationTests(unittest.TestCase):
              patch.object(verifier, "run_json", side_effect=run_json), \
              patch.object(verifier, "inspect_host", return_value={"host": "fixture"}):
             return verifier.verify("unused-fixture-executable")
+
+    def test_installed_doctor_resources_must_exist_and_match(self) -> None:
+        # The doctor turns a reader it cannot load into a fixed probe_failed block.
+        for relative in ("skills/agentic-vault/scripts/vault_doctor.py",
+                         "skills/agentic-vault/scripts/vault_session_evidence.py"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed doctor resource\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
 
     def test_installed_evidence_resources_must_exist_and_match(self) -> None:
         for relative in ("skills/agentic-vault/scripts/vault_evidence.py", "docs/evidence.md"):
