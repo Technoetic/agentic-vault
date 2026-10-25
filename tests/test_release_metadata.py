@@ -1,6 +1,7 @@
 """Release metadata consistency and historical contract regressions."""
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 import sys
@@ -339,7 +340,8 @@ REQUIRED_V0230_RELEASE_LITERALS = (
 # v0.31.0: per-assertion flips and roles, ledger-table marking, period normalization, session
 # evidence and request-body test servers, each new relative to v0.30.0. vault_ssot.py is one of
 # the seven files that warning-promotion certificates bind, so the note must carry both hashes
-# and the upgrade and rollback order. Rule template content did not change.
+# and the upgrade and rollback order, and every surface that states the hash or the order is
+# pinned below. Rule template content did not change.
 RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
 CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
 CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3fbfcbeb9c"
@@ -375,6 +377,177 @@ REQUIRED_V0310_RELEASE_LITERALS = (
     "vault_warning_policy.py --certificate", "`invalid_config`", "`vault_healthcheck.py --staged`",
     "`--p`", "--ref v0.31.0", "engine=0.31.0",
 )
+SESSION_EVIDENCE_SCRIPT = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_session_evidence.py"
+# Each file states the current checker hash this many times (README in English and Korean), so a
+# stale second statement fails as well as a missing one. The 169d8a6 digest is history and may
+# appear only in the verification record's phrase below.
+CURRENT_CHECKER_HASH_COUNTS = {
+    "README.md": 2, "docs/codex.md": 1, "docs/hardening.md": 1,
+    "docs/releases/v0.31.0.md": 1, "docs/verification/v0.31.0.md": 1,
+}
+CHECKER_SHA256_V0240_TO_V0250_PREFIX = "2ef4b9d4"
+CHECKER_SHA256_AT_169D8A6_PREFIX = "832a86f9"
+CHECKER_HISTORY_AT_169D8A6 = (
+    f"(it was `{CHECKER_SHA256_AT_169D8A6_PREFIX}…` at `169d8a6`, "
+    "before the pre-release cleanup edited `vault_ssot.py` again)"
+)
+_OLD_HASH = f"`{CHECKER_SHA256_V0260_TO_V0300[:8]}…`"
+_NEW_HASH = f"`{CHECKER_SHA256_V0310[:8]}…`"
+_V025_HASH = f"`{CHECKER_SHA256_V0240_TO_V0250_PREFIX}…`"
+# Old-to-new hash statements. Prose is compared with whitespace runs folded to one space, so
+# rewrapping a Markdown paragraph does not matter but a changed hash or version range does.
+REQUIRED_V0310_HASH_STATEMENTS = (
+    ("docs/releases/v0.31.0.md",
+     f"v0.26.0~v0.30.0의 `{CHECKER_SHA256_V0260_TO_V0300}`에서 `{CHECKER_SHA256_V0310}`로 바뀐다"),
+    ("docs/verification/v0.31.0.md",
+     f"`{CHECKER_SHA256_V0260_TO_V0300}` at v0.26.0 to v0.30.0, `{CHECKER_SHA256_V0310}` in v0.31.0 "
+     + CHECKER_HISTORY_AT_169D8A6),
+    ("README.md", f"binds ({_OLD_HASH} in v0.26.0 to v0.30.0, now {_NEW_HASH})"),
+    ("README.md", f"`checker_sha256`가 v0.26.0~v0.30.0의 {_OLD_HASH}에서 {_NEW_HASH}로 바뀐다"),
+    ("docs/codex.md", f"`vault_ssot.py`를 바꿨다({_OLD_HASH}에서 {_NEW_HASH}로"),
+    ("docs/codex.md", f"`vault_provenance.py`를 바꿨다({_V025_HASH}에서 {_OLD_HASH}로"),
+    ("docs/hardening.md",
+     f"v0.24.0·v0.25.0의 `checker_sha256`는 {_V025_HASH}, v0.26.0~v0.30.0은 {_OLD_HASH}, v0.31.0은 {_NEW_HASH}."),
+)
+# The release note's upgrade order: which engine copies a certificate must match, that rollback
+# follows the same order, then steps 1-4 as consecutive list lines.
+V0310_UPGRADE_ORDER_LEAD = (
+    "Claude Code와 Codex의 플러그인 설치본, 그리고 git 볼트에서 pre-commit 훅이 실행하는 볼트 안 엔진 "
+    "사본(`00-meta/scripts/`)이 그 대상이다. 그래서 경고를 `fatal`로 올린 볼트는 갱신 전에 다음 순서를 "
+    "따른다. 이전 버전으로 되돌릴 때도 같은 순서다."
+)
+V0310_UPGRADE_STEPS = (
+    "1. 볼트 설정 `warning_policy.levels`에서 `fatal`로 올린 단계를 `warning`으로 되돌린다.",
+    "2. 볼트를 읽는 엔진을 모두 같은 버전(되돌릴 때는 이전 버전)으로 바꾼다. Claude Code와 Codex 설치본을 "
+    "함께 바꾸고, git 볼트의 엔진 사본은 갱신할 때 `/vault-upgrade`(Codex `upgrade`)로 바꾼다. "
+    "`/vault-upgrade`는 사본을 이전 버전으로 내리지 않으므로, 되돌릴 때는 그 사본도 이전 버전의 파일로 "
+    "직접 되돌린다.",
+    "3. 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 볼트 설정의 "
+    "`warning_policy.certificate`에 넣는다.",
+    "4. 단계를 다시 `fatal`로 올린다.",
+)
+# Every shorter statement of the order keeps the vault's engine copy, rollback and promoting again.
+REQUIRED_V0310_UPGRADE_SENTENCES = (
+    ("README.md",
+     "Before upgrading or rolling back, return promoted levels to `warning`; bring every engine copy that "
+     "checks the vault to the same version (the Claude Code and Codex installations and, in a git vault, "
+     "the copy under `00-meta/scripts/` that the pre-commit hook runs); then run "
+     "`vault_warning_policy.py --certificate` on the installation you switched to and promote again"),
+    ("README.md",
+     "갱신하거나 되돌리기 전에 승격 단계를 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex "
+     "설치본과 git 볼트의 `00-meta/scripts/`)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 "
+     "`vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다"),
+    ("docs/codex.md",
+     "갱신하거나 되돌리기 전에 승격 단계를 warning으로 되돌리고, Claude Code와 Codex 설치본과 git 볼트의 "
+     "엔진 사본(`00-meta/scripts/`, pre-commit 훅이 실행한다)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 "
+     "`vault_warning_policy.py --certificate`로 다시 생성해 승격한다"),
+    ("docs/hardening.md",
+     "갱신하거나 되돌리기 전에 승격 단계를 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex "
+     "설치본과 git 볼트의 `00-meta/scripts/`)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 "
+     "`vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다"),
+)
+V0310_CODEX_UPGRADE_SENTENCE = (
+    "checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude "
+    "Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also "
+    "when rolling back), regenerate the certificate there, then promote again."
+)
+# Wording that the release-candidate review corrected (2026-10-25), compared folded.
+REQUIRED_V0310_REVIEWED_STATEMENTS = (
+    # What --normalize-periods abstains on and what it still compares.
+    ("README.md",
+     "It abstains on periods it cannot resolve and on the listed qualifiers, range marks and list forms; "
+     "text outside those fixed lists is not read, so a period can still be compared whole, by one range end "
+     "or by one list item and give a wrong `equal` or `contained`"),
+    ("README.md",
+     "해석하지 못한 기간과 고정 목록에 있는 수식어·범위 기호·나열 표기는 보류하지만, 목록 밖의 말이나 표기는 "
+     "읽지 않으므로 기간 전체나 범위의 한쪽 끝, 나열의 한 항목으로 비교되어 틀린 `equal`·`contained`가 나올 수 "
+     "있다"),
+    # What the ast guard flags, and the role warning in both languages.
+    ("README.md",
+     "an ast check flags `tests/*.py` body handlers (`do_POST`, `do_PUT`, `do_PATCH`) that never read the "
+     "request body"),
+    ("README.md",
+     "ast 검사는 `tests/*.py`의 `do_POST`·`do_PUT`·`do_PATCH` 처리기 가운데 요청 본문을 읽는 호출이 없는 것을 "
+     "찾아낸다"),
+    ("README.md", "v0.30.0 and older refuse fixtures with `role` and cannot inspect or compare runs prepared with it."),
+    ("README.md",
+     "`role`이 있는 fixture는 v0.30.0 이하가 거절하며, 그런 fixture로 준비한 실행은 v0.30.0 이하에서 "
+     "조회·비교할 수 없다."),
+    # A mismatched certificate also stops the tools that validate the whole vault configuration.
+    ("docs/releases/v0.31.0.md", "볼트 설정 전체를 검증하는 다른 도구도 같은 검사로 멈춘다."),
+    ("docs/releases/v0.31.0.md", "`recall unavailable: invalid_config`와 종료 코드 2"),
+    ("docs/releases/v0.31.0.md", "healthcheck와 staged 검사 밖의 오류 문구에는 인증서가 나오지 않는다."),
+    ("docs/verification/v0.31.0.md",
+     "Other tools that validate the whole vault configuration stop as well; re-run on `52325e3` the same day: "
+     "`vault_recall.py` exit 2 with `recall unavailable: invalid_config`"),
+    ("README.md",
+     "Other tools that validate the whole vault configuration stop as well, for example `/vault-recall` "
+     "reports `invalid_config` and `vault_ssot.py`, `check-support` included, reports "
+     "`ssot_operation_unavailable`."),
+    ("README.md",
+     "볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, `check-support`를 "
+     "포함한 `vault_ssot.py`는 `ssot_operation_unavailable`)."),
+    ("docs/codex.md",
+     "볼트 설정 전체를 검증하는 다른 명령도 멈춘다(예: `recall`은 `invalid_config`, `check-support`를 포함한 "
+     "`vault_ssot.py`는 `ssot_operation_unavailable`)."),
+    ("docs/hardening.md",
+     "볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, 아래 "
+     "`vault_ssot.py`는 `check-support`를 포함해 `ssot_operation_unavailable`)."),
+    # Release-note precision: rows with a period, the last-day rule of 말, the session field and block.
+    ("docs/releases/v0.31.0.md", "출처 노트와 비교한 행 가운데 값에 기간 표현이 있는 행마다 `normalized_match`"),
+    ("docs/releases/v0.31.0.md",
+     "`말`은 그 뒤에 글자·숫자가 오지 않거나(끝·공백·문장 부호) 문서의 조사 목록에 있는 말이 이어지면 그 기간의 "
+     "마지막 하루로 계산하고"),
+    ("docs/releases/v0.31.0.md",
+     "`false`는 알아보지 못했다는 뜻이며 다른 훅이라는 뜻이 아니고, 기록에 명령 값이 없으면 `null`(텍스트 출력은 "
+     "`none`)이다."),
+    ("docs/releases/v0.31.0.md",
+     "`session_start_hooks` 없이 여섯 키(`schema_version`·`status`·`reason_code`·`next_action`·"
+     "`trust_boundary`·`complete`)만 있는 `unparsed`(`probe_failed`) 블록이 붙는다."),
+    # Default output, --help and argparse usage lines; where the final-tree comparison is recorded.
+    ("docs/releases/v0.31.0.md",
+     "이 비교는 최종 트리에서 다시 실행해 `verification.json`에 남기며, "
+     "[검증 기록](../verification/v0.31.0.md)은 이를 게시 전 점검 항목으로 둔다."),
+    ("docs/releases/v0.31.0.md", "argparse usage 줄에도 새 옵션이 보인다. 종료 코드와 오류 문구는 같다."),
+    # The Codex installation check covers the session-evidence reader and doctor.
+    ("docs/releases/v0.31.0.md",
+     "설치본의 `vault_period.py`·`vault_session_evidence.py`·`vault_doctor.py`도 저장소와 바이트로 대조한다."),
+    ("docs/verification/v0.31.0.md",
+     "installed resources verified, including `vault_period.py`, `vault_session_evidence.py` and "
+     "`vault_doctor.py`"),
+    # The run count, the commits after the reviewed head and where their checks are recorded.
+    ("docs/releases/v0.31.0.md", "전체 시험 2,143개(통과 2,109·환경 제외 34·실패/오류 0)"),
+    ("docs/releases/v0.31.0.md", "`169d8a6`부터 최종 소스까지의 커밋 목록은 `verification.json`에 남긴다."),
+    ("docs/verification/v0.31.0.md",
+     "The pre-publication `verification.json` lists every commit between `169d8a6` and the final release "
+     "source with its checks, and records the final-tree re-runs and the independent review listed below."),
+)
+V0310_POST_REVIEW_COMMITS = ("`65555f1`", "`a6c4fc2`", "`3805d24`", "`c007b3b`", "`52325e3`")
+FORBIDDEN_V0310_STALE_STATEMENTS = (
+    ("README.md", "abstains on forms it does not read"),
+    ("README.md", "읽지 못한 표현은 보류한다"),
+    ("README.md", "an ast check keeps it that way"),
+    ("README.md", "ast 검사가 이를 지킨다"),
+    ("docs/releases/v0.31.0.md", "버전 표면을 바꾼 최종 릴리스 트리"),
+    ("docs/releases/v0.31.0.md", "전체 시험 2,143개가 통과했다"),
+    ("docs/releases/v0.31.0.md", "[검증 기록](../verification/v0.31.0.md)과 `verification.json`에 남긴다"),
+    ("docs/verification/v0.31.0.md", "may follow"),
+    (".codex-plugin/plugin.json", "update Claude Code and Codex together"),
+)
+
+
+def _folded(text: str) -> str:
+    """Text with every whitespace run, wrapped Markdown line breaks included, folded to one space."""
+    return " ".join(text.split())
+
+
+def _module_constant(path: Path, name: str) -> object:
+    """A literal module-level constant, read with ast so the module is not imported."""
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} is not a literal module constant in {path.name}")
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -387,12 +560,53 @@ class ReleaseMetadataTests(unittest.TestCase):
         for literal in REQUIRED_V0310_RELEASE_LITERALS:
             with self.subTest(literal=literal):
                 self.assertIn(literal, release)
+        # The note lists exactly the fields the reader reports, in its order.
+        for label, constant in (("`entries`(훅마다 ", "HOOK_FIELDS"),
+                                ("`failed_entries`(실패마다 ", "FAILURE_FIELDS")):
+            fields = _module_constant(SESSION_EVIDENCE_SCRIPT, constant)
+            with self.subTest(fields=constant):
+                self.assertIn(label + "·".join(f"`{field}`" for field in fields) + ")", release)
+        # Which engine copies a certificate must match, that rollback follows the same order, and
+        # steps 1-4 as consecutive list lines. Leaving out the vault's copy blocks later commits.
+        self.assertIn(V0310_UPGRADE_ORDER_LEAD, _folded(release))
+        lines = release.splitlines()
+        self.assertIn(V0310_UPGRADE_STEPS[0], lines)
+        start = lines.index(V0310_UPGRADE_STEPS[0])
+        self.assertEqual(tuple(lines[start:start + len(V0310_UPGRADE_STEPS)]), V0310_UPGRADE_STEPS)
         self.assertTrue((REPO_ROOT / "docs" / "verification" / "v0.31.0.md").is_file())
         for template in sorted(BROWSER_RULE.parent.glob("vault-*.md")):
             with self.subTest(rule=template.name):
                 stamp = template.read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.31.0", stamp)
+
+    def test_v0310_upgrade_and_rollback_order_is_stated(self) -> None:
+        # The shorter statements of the release note's order keep the vault's engine copy,
+        # rollback and promoting again; the note's own steps are pinned with its contract above.
+        for rel_path, sentence in REQUIRED_V0310_UPGRADE_SENTENCES:
+            with self.subTest(path=rel_path):
+                self.assertIn(sentence, _folded((REPO_ROOT / rel_path).read_text(encoding="utf-8")))
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertIn(V0310_CODEX_UPGRADE_SENTENCE, codex["interface"]["longDescription"])
+
+    def test_v0310_reviewed_statements_stay_corrected(self) -> None:
+        texts = {}
+        for rel_path, statement in REQUIRED_V0310_REVIEWED_STATEMENTS:
+            text = texts.setdefault(rel_path, _folded((REPO_ROOT / rel_path).read_text(encoding="utf-8")))
+            with self.subTest(path=rel_path, statement=statement):
+                self.assertIn(statement, text)
+        for rel_path, stale in FORBIDDEN_V0310_STALE_STATEMENTS:
+            text = texts.setdefault(rel_path, _folded((REPO_ROOT / rel_path).read_text(encoding="utf-8")))
+            with self.subTest(path=rel_path, stale=stale):
+                self.assertNotIn(stale, text)
+        # Both records name the commits after the reviewed head instead of promising later cleanup.
+        release = RELEASE_NOTE_V0310.read_text(encoding="utf-8")
+        verification_section = release[release.index("## 검증"):release.index("## 알려진 경계")]
+        record = (REPO_ROOT / "docs" / "verification" / "v0.31.0.md").read_text(encoding="utf-8")
+        for commit in V0310_POST_REVIEW_COMMITS:
+            with self.subTest(commit=commit):
+                self.assertIn(commit, verification_section)
+                self.assertIn(commit, record)
 
     def test_stated_checker_hash_is_the_shipped_checker_hash(self) -> None:
         # Certificates bind these bytes; a stale stated hash misleads every promoted vault.
@@ -402,13 +616,27 @@ class ReleaseMetadataTests(unittest.TestCase):
                                 text=True, encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checker_sha256"], CURRENT_CHECKER_SHA256)
+        texts = {rel_path: (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                 for rel_path in (*CURRENT_CHECKER_HASH_COUNTS, ".codex-plugin/plugin.json",
+                                  "SECURITY.md", "docs/README.md")}
         for rel_path in ("docs/releases/v0.31.0.md", "docs/verification/v0.31.0.md"):
             with self.subTest(path=rel_path):
-                self.assertIn(CURRENT_CHECKER_SHA256, (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+                self.assertIn(CURRENT_CHECKER_SHA256, texts[rel_path])
         for rel_path in ("README.md", "docs/codex.md", "docs/hardening.md"):
             with self.subTest(path=rel_path):
-                self.assertIn(f"`{CURRENT_CHECKER_SHA256[:8]}…`",
-                              (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+                self.assertIn(f"`{CURRENT_CHECKER_SHA256[:8]}…`", texts[rel_path])
+        # Exact counts: every statement of the hash is current, not only one of them.
+        for rel_path, expected in CURRENT_CHECKER_HASH_COUNTS.items():
+            with self.subTest(path=rel_path, count=expected):
+                self.assertEqual(texts[rel_path].count(CURRENT_CHECKER_SHA256[:8]), expected)
+        for rel_path, text in texts.items():
+            expected = 1 if rel_path == "docs/verification/v0.31.0.md" else 0
+            with self.subTest(path=rel_path, digest_at_169d8a6=expected):
+                self.assertEqual(text.count(CHECKER_SHA256_AT_169D8A6_PREFIX), expected)
+        self.assertIn(CHECKER_HISTORY_AT_169D8A6, _folded(texts["docs/verification/v0.31.0.md"]))
+        for rel_path, statement in REQUIRED_V0310_HASH_STATEMENTS:
+            with self.subTest(path=rel_path, statement=statement):
+                self.assertIn(statement, _folded(texts[rel_path]))
 
     def test_v0230_release_note_covers_the_contract(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0230.is_file())

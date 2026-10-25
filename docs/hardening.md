@@ -17,7 +17,8 @@ v0.31.0은 `d8f9559a…`. corpus는 `38efaabd…`로 같다). 경고를 fatal로
 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다. 그러지 않으면 healthcheck가
 `promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,
 SessionStart 훅이 주입하지 않으며, staged 검사(`--staged`)가 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를
-보고한다. 측정과 순서는 [v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)와
+보고한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, 아래 `vault_ssot.py`는
+`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)와
 [v0.26.0 업그레이드 안내](releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
 [v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 

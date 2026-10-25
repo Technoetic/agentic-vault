@@ -68,11 +68,12 @@ codex plugin add agentic-vault@agentic-vault-local
 v0.31.0은 `checker_sha256`가 묶는 `vault_ssot.py`를 바꿨다(`84cf5235…`에서 `d8f9559a…`로, 저장소 바이트로
 측정. corpus는 같다). 그래서 v0.30.0 이하에서 만든 인증서는 새 설치본에서, 새 설치본에서 만든 인증서는 이전
 설치본에서 맞지 않는다. 맞지 않으면 healthcheck가 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않으며,
-staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종료 코드 2)를 보고한다. 갱신하거나 되돌리기
-전에 승격 단계를 warning으로 되돌리고, Claude Code와 Codex 설치본과 git 볼트의 엔진 사본(`00-meta/scripts/`,
-pre-commit 훅이 실행한다)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로
-다시 생성해 승격한다([v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)). `role`로 준비한 실행은 v0.30.0 이하가
-조회·비교하지 못하므로 그런 실행을 읽는 두 설치본도 함께 갱신한다.
+staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종료 코드 2)를 보고한다. 볼트 설정 전체를
+검증하는 다른 명령도 멈춘다(예: `recall`은 `invalid_config`, `check-support`를 포함한 `vault_ssot.py`는
+`ssot_operation_unavailable`). 갱신하거나 되돌리기 전에 승격 단계를 warning으로 되돌리고, Claude Code와 Codex
+설치본과 git 볼트의 엔진 사본(`00-meta/scripts/`, pre-commit 훅이 실행한다)을 모두 같은 버전으로 바꾼 뒤, 바꾼
+설치본에서 `vault_warning_policy.py --certificate`로 다시 생성해 승격한다([v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)).
+`role`로 준비한 실행은 v0.30.0 이하가 조회·비교하지 못하므로 그런 실행을 읽는 두 설치본도 함께 갱신한다.
 v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다(`2ef4b9d4…`에서
 `84cf5235…`로, 저장소 바이트로 측정). 그래서 v0.25.0 이하에서 만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이
 설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로
