@@ -1227,6 +1227,16 @@ class ReadingBoundsTests(SessionEvidenceTestCase):
 
     def test_malformed_and_partial_lines_are_counted_and_make_it_incomplete(self) -> None:
         deep = b'{"type":"system","x":' + b"[" * 100_000 + b"]" * 100_000 + b"}\n"
+        # Whether json.loads rejects this depth depends on the interpreter and platform:
+        # CI on 2026-10-25 parsed it with Python 3.14 on Linux and macOS and raised
+        # RecursionError with 3.10/3.12 everywhere and 3.14 on Windows. Count it the way
+        # the reader does (_decode), so the other two lines are pinned on every runner.
+        try:
+            json.loads(deep)
+        except (ValueError, RecursionError):
+            deep_malformed = 1
+        else:
+            deep_malformed = 0
         report = self.diagnose(
             hook_record(),
             b'{"type":"system","subtype":"api_error","x":"\xff\xfe SECRET-BAD-UTF8"}\n',
@@ -1237,7 +1247,7 @@ class ReadingBoundsTests(SessionEvidenceTestCase):
 
         self.assert_status(report, "observed_ran", "session_start_hook_recorded")
         self.assertFalse(report["complete"])
-        self.assertEqual(report["lines"]["malformed"], 3)
+        self.assertEqual(report["lines"]["malformed"], 2 + deep_malformed)
         self.assertEqual(report["api_errors"]["records"], 1)
 
     def test_spaced_json_a_bom_and_crlf_are_read(self) -> None:
