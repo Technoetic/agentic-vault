@@ -269,6 +269,59 @@ class PeriodParsingTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.records(text, 4), [fiscal_q3, multiple])
 
+    @staticmethod
+    def fiscal_year(year, fiscal_start):
+        if fiscal_start is None:
+            return ('fiscal_year', None, None, None, 'fiscal_start_undeclared')
+        start = D(year, fiscal_start, 1)
+        last = D(year + (fiscal_start > 1), (fiscal_start - 2) % 12 + 1, 1)
+        return ('fiscal_year', f'{start:%Y-%m}/{last:%Y-%m}', start, D(year + 1, fiscal_start, 1), None)
+
+    def test_a_mark_between_two_fiscal_years_goes_with_the_later_one(self):
+        """FY2025, Q1 FY2026: the earlier year is read as written and Q1 FY2026 abstains, never the whole FY2026."""
+        quarter = ('fiscal_quarter', None, None, None, 'period_qualifier')
+        half = ('fiscal_half', None, None, None, 'period_qualifier')
+        cases = (
+            ('FY2025, Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            ('FY2025·1H FY2026', ['FY2025', '1H FY2026'], half),
+            ('FY2025: Q4 FY2026', ['FY2025', 'Q4 FY2026'], quarter),
+            ('FY2025/Q4 FY2026', ['FY2025', 'Q4 FY2026'], quarter),
+            ('2025 회계연도, Q1 2026 회계연도', ['2025 회계연도', 'Q1 2026 회계연도'], quarter),
+            # A Markdown list that check-support collapses to one line, as written and as its literal form.
+            ('FY2025 - Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            ('- fy2025 - q1 fy2026', ['fy2025', 'q1 fy2026'], quarter),
+            ('FY2024, FY2025, Q1 FY2026', ['FY2024', 'FY2025', 'Q1 FY2026'], quarter),
+            ('FY2025(Q1 FY2026)', ['FY2025', 'Q1 FY2026'], quarter),
+            ('FY2025. Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            ('FY2025의 H2 FY2026', ['FY2025', 'H2 FY2026'], half),
+            ('FY2025, 3분기 FY2026', ['FY2025', '3분기 FY2026'], quarter),
+            ('FY2025, 하반기 FY2026', ['FY2025', '하반기 FY2026'], half),
+            ('FY2025  H1 FY2026', ['FY2025', 'H1 FY2026'], half),
+            ('FY2025' + chr(0x200B) + 'Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            # The mark before the later year may start inside the mark read after the earlier one.
+            ('FY2025 Q 1Q FY2026', ['FY2025', '1Q FY2026'], quarter),
+            ('FY2025 H' + chr(0x200B) + '4Q FY2026', ['FY2025', '4Q FY2026'], quarter),
+        )
+        for fiscal_start in (None, 1, 4, 12):
+            for text, spans, mark in cases:
+                with self.subTest(text=text, fiscal_start=fiscal_start):
+                    records = period.parse(text, fiscal_start=fiscal_start)
+                    self.assertEqual([text[slice(*record['span'])] for record in records], spans)
+                    years = [self.fiscal_year(int(span[-4:] if span[-1].isdigit() else span[:4]), fiscal_start)
+                             for span in spans[:-1]]
+                    self.assertEqual(self.records(text, fiscal_start), [*years, mark])
+                    # The body index holds the earlier years only.
+                    self.assertEqual(period.index(records), tuple((year[2], year[3]) for year in years if year[2]))
+        # Unchanged: a mark the earlier year reads, H1-H4, 1Q-4Q or 1H-4H right after it or after one space or tab,
+        # and a mark on its digits that no mark before the later year starts in stay the earlier year's; the later
+        # year is then read on its own.
+        fiscal_q4 = ('fiscal_quarter', '2026-01/2026-03', D(2026, 1, 1), D(2026, 4, 1), None)
+        for text, first in (('FY2025 Q4 FY2026', fiscal_q4), ('FY2025 H1 FY2026', half), ('FY2025\t1Q FY2026', quarter),
+                            ('FY2025 2H FY2026', half), ('FY2025H1 FY2026', half), ('2025 회계연도 h2 FY2026', half),
+                            ('FY2025Q5 FY2026', quarter)):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text, 4), [first, self.fiscal_year(2026, 4)])
+
     def test_a_list_item_no_row_reads_adds_a_multiple_periods_record(self):
         multiple = ('multiple', None, None, None, 'multiple_periods')
         q1 = ('quarter', '2026-33', D(2026, 1, 1), D(2026, 4, 1), None)
@@ -549,6 +602,23 @@ class PeriodMatchTests(unittest.TestCase):
                 ('FY2026', 'FY2026 Q3 실적', {'normalized_match': 'contained', 'via': ['note0']})):
             with self.subTest(value=value, body=body, fiscal_start=4):
                 self.assertEqual(self.classify(value, body, fiscal_start=4), expected)
+
+    def test_a_mark_between_two_fiscal_years_never_indexes_the_later_year_whole(self):
+        """A body that names FY2025 and only a quarter or half of FY2026 is never equal to FY2026."""
+        bodies = ('비교 기간: FY2025, Q1 FY2026 실적.', 'FY2024, FY2025, Q1 FY2026.', 'FY2025·1H FY2026 매출 추이.',
+                  '가이던스 FY2025: Q4 FY2026 대비.', 'FY2025/Q4 FY2026', '2025 회계연도, Q1 2026 회계연도 실적.',
+                  '- fy2025 - q1 fy2026')
+        none = {'normalized_match': 'none'}
+        for fiscal_start in (1, 4, 12):
+            for body in bodies:
+                with self.subTest(body=body, fiscal_start=fiscal_start):
+                    for value in ('FY2026', 'FY26', '2026 회계연도'):
+                        self.assertEqual(self.classify(value, body, fiscal_start=fiscal_start), none)
+                    self.assertEqual(self.classify('FY2025', body, fiscal_start=fiscal_start),
+                                     {'normalized_match': 'equal', 'via': ['note0']})
+                    # Written as a ledger value, the same text abstains through its mark.
+                    self.assertEqual(self.classify(body, 'FY2025 실적. FY2026 실적.', fiscal_start=fiscal_start),
+                                     {'normalized_match': 'abstain', 'reason': 'period_qualifier'})
 
 
 if __name__ == '__main__':

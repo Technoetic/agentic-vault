@@ -47,10 +47,17 @@ Conventions declared here, not taken from a standard:
   3Q, FY2026/Q3, FY2026의 Q3, FY2026 Q 3, FY2026 Q5, FY2026 5분기, FY2026
   Q3Q4).
   A whitespace run, /, ',', '.', ':', _, -, (, a middle dot or 의 may join
-  such a mark to the fiscal year. A word outside these lists is not
-  recognised, so the value is still compared as the whole period (2026년
-  3분기 늦게, 2026년 3분기 중 마지막 달, late 2026Q3); 중, 내 and 동안 keep
-  it whole as well.
+  such a mark to the fiscal year. Between two fiscal years, a mark goes
+  with the later one when a mark before the later year starts at it or
+  inside it (FY2025, Q1 FY2026 and FY2025 Q 1Q FY2026: the earlier year is
+  read as written and the later one abstains). It stays with the earlier
+  year when that year reads it (FY2025 Q4 FY2026), when it is H1-H4, 1Q-4Q
+  or 1H-4H right after the earlier year or after one space or tab (FY2025
+  H1 FY2026), and when no mark before the later year starts in it (FY2025Q5
+  FY2026, a mark on the digits); the later year is then read on its own.
+  A word outside these lists is not recognised, so the value is still
+  compared as the whole period (2026년 3분기 늦게, 2026년 3분기 중 마지막
+  달, late 2026Q3); 중, 내 and 동안 keep it whole as well.
 - Relative expressions (당기, 전기, 전년 동기, 올해, 이번 분기, ...) always
   abstain with relative_needs_anchor. A quarter or half without a year
   abstains with no_year; no anchor year is filled in, because a text such as
@@ -91,11 +98,11 @@ MATCHES = ('equal', 'contained', 'none')
 SCOPE = ('ledger value periods against cited note body periods as half-open date intervals: equal (the same '
          'interval appears somewhere in a cited body), contained (an inner one does) or none, and abstain when '
          'the value has an unresolved period, a listed qualifier, or a range end or list item that no row '
-         'reads; text outside the fixed lists, such as an unlisted qualifier, is not read, so a period can still '
-         'be compared whole; modifiers and the rest of the value are not compared; calendar quarters and halves '
-         'abstain unless fiscal_start is 1 or absent; fiscal years need fiscal_start; relative expressions and '
-         'yearless quarters or halves abstain; durations and ranges are never merged; advisory only, never '
-         'literal support, counts or warnings')
+         'reads after a listed range mark or list separator; text outside the fixed lists, such as an unlisted '
+         'qualifier, is not read, so a period can still be compared whole; modifiers and the rest of the value '
+         'are not compared; calendar quarters and halves abstain unless fiscal_start is 1 or absent; fiscal years '
+         'need fiscal_start; relative expressions and yearless quarters or halves abstain; durations and ranges '
+         'are never merged; advisory only, never literal support, counts or warnings')
 
 
 class PeriodError(ValueError):
@@ -170,7 +177,10 @@ _JOIN = _GAP + r'(?:(?:[/,.:_(\-' + _DOTS + r']|의)' + _GAP + r')?'
 # The lookahead names every first character a mark can have, so most positions fail at once.
 _MARK_BEFORE = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')'
                 + r'|(?<![가-힣])[상하]' + _GAP + r'반기)' + _JOIN)
-_MARK_AFTER = _JOIN + r'(?P<marker>' + _QH + r'|' + _QUARTER_WORD + r'|[상하]' + _GAP + r'반기)'
+# held: H1-H4, 1Q-4Q or 1H-4H right after the fiscal year or after one space
+# or tab (FY2025 H1), which stays its mark even before another fiscal year.
+_MARK_AFTER = (r'(?:(?=' + _SP + r'(?:[Hh][1-4]|[1-4][QqHh])(?![0-9A-Za-z]))(?P<held>)|)' + _JOIN
+               + r'(?P<marker>' + _QH + r'|' + _QUARTER_WORD + r'|[상하]' + _GAP + r'반기)')
 # A range mark between a resolved period and a number that no row reads; a
 # day may carry a weekday in brackets (2026.10.07(수)~10.09(금)), and the near
 # end may be a month or year (2026년 10월~2026.12.31).
@@ -220,10 +230,21 @@ _TABLE = (
     ('half', r'(?<![가-힣])' + _HALF + _TAIL),
 )
 _PATTERNS = tuple((kind, re.compile(pattern)) for kind, pattern in _TABLE)
+# For _scan: the mark-before row, the first characters a mark can have (its
+# lookahead) and a fiscal year with no mark after it.
+_BEFORE_FISCAL = re.compile(_MARK_BEFORE + _FISCAL)
+_MARK_FIRST = re.compile(r'[QqHh0-9제상하]')
+_FISCAL_ALONE = re.compile(_FISCAL + _TAIL)
 
 
 def _scan(text):
-    """Leftmost non-overlapping matches; a pattern searches again only once its pending match is passed."""
+    """Leftmost non-overlapping matches; a pattern searches again only once its pending match is passed.
+
+    Between two fiscal years a mark goes with the later one: when the fiscal
+    row takes a mark after a fiscal year and the mark-before row reads a mark
+    that starts at it or inside it (FY2025, Q1 FY2026; FY2025 Q 1Q FY2026),
+    the earlier year is matched alone, unless its mark is held (FY2025 H1).
+    """
     pending, position = [None] * len(_PATTERNS), 0
     while True:
         best = None
@@ -235,8 +256,13 @@ def _scan(text):
                 best = (kind, found)
         if best is None:
             return
-        yield best
-        position = best[1].end()
+        kind, found = best
+        if ('held' in found.re.groupindex and found['marker'] and found['held'] is None
+                and any(_BEFORE_FISCAL.match(text, first.start())
+                        for first in _MARK_FIRST.finditer(text, *found.span('marker')))):
+            found = _FISCAL_ALONE.match(text, found.start())
+        yield kind, found
+        position = found.end()
 
 
 def _month(first, months):
