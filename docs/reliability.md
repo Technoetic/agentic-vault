@@ -171,9 +171,9 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   `hook_success`·`hook_non_blocking_error`·`hook_cancelled`·`hook_error_during_execution` 기록의 `command`에 명령
   대신 훅의 표시 문구를 남긴다. 표시 문구는 `statusMessage`가 있으면 그 문구이고, 없을 때만 명령이다. 차단
   오류(종료 코드 2)의 기록만 `${CLAUDE_PLUGIN_ROOT}`를 펼친 명령을 남긴다(SessionStart에서는
-  `hook_non_blocking_error`로 바꿔 쓴 기록). 이 플러그인의 SessionStart
-  훅 셋(`session_start.py` 둘과 비동기 `vault_healthcheck.py`)에는 v0.1.0부터 모두 상태 문구가 있어서, 파일 이름만
-  보면 이 플러그인의 훅 기록도 대부분 `false`가 된다. 그래서 설치본 `hooks/hooks.json`의 SessionStart 상태 문구와
+  `hook_non_blocking_error`로 바꿔 쓴 기록). 이 플러그인의 SessionStart 훅에는 v0.1.0 이후 모든 릴리스에서 상태
+  문구가 있으므로(지금은 `session_start.py` 둘과 비동기 `vault_healthcheck.py`), 파일 이름만 보면 이 플러그인의
+  훅 기록도 대부분 `false`가 된다. 그래서 설치본 `hooks/hooks.json`의 SessionStart 상태 문구와
   v0.1.0~v0.30.0 릴리스의 문구(코드에 고정한 세 가지)를, 호스트가 표시 문구를 만들 때처럼 제어 문자를 바꾼 뒤
   비교한다. `hooks/hooks.json`이 없거나 형식이 다르거나 64 KiB를 넘으면 그 파일의 문구는 쓰지 않고 고정한 문구와
   파일 이름만 본다. 바꾸는 방식이 앞뒤 글자나 Unicode 판에 따라 달라지는 문자(서식 문자 등)가 든 문구도 쓰지 않는다.
@@ -203,9 +203,9 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     `not_a_regular_file`·`file_unreadable`), 기록 줄이 없거나(`no_transcript_records`), `version`이 없거나 읽을 수
     없거나(`version_missing`·`version_unparsed`, 이때는 다른 값도 해석하지 않는다), 훅 기록 모양이
     다르거나(`hook_record_shape_unrecognized`), 읽는 중 예상하지 못한 오류가 났다(`probe_failed`). 읽기 모듈을
-    불러오지 못한 경우(설치 손상)도 `probe_failed`이며, 이때 `session_evidence`에는 `schema_version`·`status`·`reason_code`·`next_action`·`trust_boundary`·`complete`만
-    있고, 텍스트 출력은 `session_evidence`·`session_trust_boundary`·`session_complete`·`session_next_action` 네
-    줄뿐이다. 예외 문구는 출력하지 않고, 종료 코드는 이때도 볼트 진단의 값 그대로다.
+    불러오지 못한 경우(설치 손상)도 `probe_failed`이며, 이때 `session_evidence`에는 `schema_version`·`status`·
+    `reason_code`·`next_action`·`trust_boundary`·`complete`만 있고, 텍스트 출력은 `session_evidence`·
+    `session_trust_boundary`·`session_complete`·`session_next_action` 네 줄뿐이다. 예외 문구는 출력하지 않고, 종료 코드는 이때도 볼트 진단의 값 그대로다.
 - **판 범위는 관측값이다:** 2026-10-24에 Windows PC 한 대의 기록에서 키 이름·길이·숫자만 보았다. 2.1.252 세션
   173개에는 훅 기록이 없었고, 2.1.278~2.1.309에서는 동기 훅만 기록됐으며, 2.1.253~2.1.277은 관측하지 않았다.
   두 범위는 `observed_ranges`로 함께 보고한다. 훅 기록이 없을 때 상태를 가르는 경계는 기록 없이 관측된 가장 높은
@@ -244,8 +244,9 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   기록에서 관측하지 않았다.
 - **개인정보:** 세션 기록에는 입력·답변·도구 결과·훅 출력이 모두 들어 있다. 내용·stdout·stderr·명령(명령
   자리에 기록된 상태 문구 포함)·사용자 입력·식별자·예외 문구·기록 파일 경로를 출력하지 않는다. 지침 파일 경로는
-  계정 이름이 들어갈 수 있어 `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와 `removed_paths`(빠진 파일
-  경로)로 보인다. 두 목록은 기록마다 각각 50개까지 싣는다(`limits.paths_per_record`). 50개를 넘는 경로와
+  계정 이름이 들어갈 수 있어 `--session-instruction-paths`를 함께 줄 때만 지침 기록마다 `paths`(파일 경로)와
+  `removed_paths`(빠진 파일 경로)로 보인다. 두 목록은 기록마다 각각 50개까지 싣는다(`limits.paths_per_record`).
+  50개를 넘는 경로와
   문자열이 아니거나 비었거나 1,024자를 넘는 경로, 출력한 줄을 끊거나 글자 순서를 바꿔 보이게 할 수 있는 문자가 든
   경로는 싣지 않고 `paths_omitted`에 센다. 그런 문자는 Unicode 일반 범주가 제어 문자(Cc, C0·C1)·서식 문자(Cf, 양방향 제어·폭
   없는 문자 등)·서로게이트(Cs)·줄 구분자(Zl, U+2028)·문단 구분자(Zp, U+2029)인 문자이고, 범주는 실행하는 Python의
