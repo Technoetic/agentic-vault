@@ -12,7 +12,7 @@ v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기�
 [via_bot 수집 출처](#수집과-경고)를 위해 `vault_provenance.py`를, v0.31.0은 위 대장 기능을 위해 `vault_ssot.py`를
 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는 v0.26.0 이후 설치본에서, v0.30.0 이하에서 만든 인증서는
 v0.31.0 설치본에서 맞지 않고, 그 반대 방향도 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0~v0.30.0은 `84cf5235…`,
-v0.31.0은 `832a86f9…`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
+v0.31.0은 `d8f9559a…`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을
 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다. 그러지 않으면 healthcheck가
 `promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,

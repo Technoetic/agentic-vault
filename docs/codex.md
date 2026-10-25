@@ -65,7 +65,7 @@ codex plugin add agentic-vault@agentic-vault-local
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
 경고를 `fatal`로 승격한 볼트는 갱신 전에 인증서를 다시 만들 준비를 한다.
-v0.31.0은 `checker_sha256`가 묶는 `vault_ssot.py`를 바꿨다(`84cf5235…`에서 `832a86f9…`로, 저장소 바이트로
+v0.31.0은 `checker_sha256`가 묶는 `vault_ssot.py`를 바꿨다(`84cf5235…`에서 `d8f9559a…`로, 저장소 바이트로
 측정. corpus는 같다). 그래서 v0.30.0 이하에서 만든 인증서는 새 설치본에서, 새 설치본에서 만든 인증서는 이전
 설치본에서 맞지 않는다. 맞지 않으면 healthcheck가 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않으며,
 staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종료 코드 2)를 보고한다. 갱신하거나 되돌리기

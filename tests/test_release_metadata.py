@@ -342,7 +342,7 @@ REQUIRED_V0230_RELEASE_LITERALS = (
 # and the upgrade and rollback order. Rule template content did not change.
 RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
 CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
-CHECKER_SHA256_V0310 = "832a86f9dd074bddf92a796913f98769d5e8298e687f569d2067944978803378"
+CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3fbfcbeb9c"
 # checker_sha256 of the seven bound files as shipped now. A change to any of them invalidates
 # promoted vaults' certificates: update this pin together with a release note upgrade section.
 CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0310
