@@ -98,11 +98,11 @@ MATCHES = ('equal', 'contained', 'none')
 SCOPE = ('ledger value periods against cited note body periods as half-open date intervals: equal (the same '
          'interval appears somewhere in a cited body), contained (an inner one does) or none, and abstain when '
          'the value has an unresolved period, a listed qualifier, or a range end or list item that no row '
-         'reads; text outside the fixed lists, such as an unlisted qualifier, is not read, so a period can still '
-         'be compared whole; modifiers and the rest of the value are not compared; calendar quarters and halves '
-         'abstain unless fiscal_start is 1 or absent; fiscal years need fiscal_start; relative expressions and '
-         'yearless quarters or halves abstain; durations and ranges are never merged; advisory only, never '
-         'literal support, counts or warnings')
+         'reads after a listed range mark or list separator; text outside the fixed lists, such as an unlisted '
+         'qualifier, is not read, so a period can still be compared whole; modifiers and the rest of the value '
+         'are not compared; calendar quarters and halves abstain unless fiscal_start is 1 or absent; fiscal years '
+         'need fiscal_start; relative expressions and yearless quarters or halves abstain; durations and ranges '
+         'are never merged; advisory only, never literal support, counts or warnings')
 
 
 class PeriodError(ValueError):
