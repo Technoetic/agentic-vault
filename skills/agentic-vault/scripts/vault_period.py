@@ -161,15 +161,15 @@ _FISCAL = (r'(?:' + _EDGE + r"[Ff][Yy]" + _SP + r"['\N{RIGHT SINGLE QUOTATION MA
            r'|' + _EDGE + r'(?P<year>[1-9][0-9]{3})' + _SP + r'(?:년' + _SP + r')?(?:회계|사업)' + _SP + r'[연년]도)')
 # A Q or H mark beside a fiscal year (Q3, 3Q, H1, 1H, and Q5, Q 3 or Q12, which
 # no row reads) or a quarter or half word: a whitespace run, a joiner or 의
-# may sit between. Only FY2026 Q3, FY2026 3분기 and FY2026 하반기 with one
-# space or tab between are read; every other mark is not computed.
+# may sit between. Only FY2026 Q3, FY2026 3분기 and FY2026 하반기 with at most
+# one space or tab between are read; every other mark is not computed.
 _QH = r'(?:[QqHh]' + _GAP + r'[0-9]{1,2}|[0-9]{1,2}' + _GAP + r'[QqHh])(?![0-9])'
 _QUARTER_WORD = (r'(?:제' + _GAP + r')?[0-9]{1,2}(?:' + _GAP + r'/' + _GAP + r'[0-9]{1,2})?' + _GAP + r'분기'
                  + _MINUTES)
 _JOIN = _GAP + r'(?:(?:[/,.:_(\-' + _DOTS + r']|의)' + _GAP + r')?'
 # The lookahead names every first character a mark can have, so most positions fail at once.
-_MARK_BEFORE = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')|(?<![가-힣])[상하]'
-                + _GAP + r'반기)' + _JOIN)
+_MARK_BEFORE = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')'
+                + r'|(?<![가-힣])[상하]' + _GAP + r'반기)' + _JOIN)
 _MARK_AFTER = _JOIN + r'(?P<marker>' + _QH + r'|' + _QUARTER_WORD + r'|[상하]' + _GAP + r'반기)'
 # A range mark between a resolved period and a number that no row reads; a
 # day may carry a weekday in brackets (2026.10.07(수)~10.09(금)), and the near
