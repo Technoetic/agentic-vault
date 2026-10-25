@@ -641,12 +641,19 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     normalize_periods=True adds normalized_periods: for each compared row whose
     value names a period, normalized_match (equal, contained, none or abstain)
     against the periods of the same cited bodies (vault_period), with via or
-    reason, plus period_convention. Without primary_text_only an entry also
-    names in via_ledger_table_only the via paths that hold only through those
-    ledgers' fact tables, and a cited body too long for vault_period is left
-    out with incomplete ['period_text_limit']. fiscal_start (1-12, needs
-    normalize_periods) declares the first month of a fiscal year. Literal
-    support, counts and warnings stay exactly as without it.
+    reason, plus period_convention. Both sides are read with wiki-link, code
+    and bold markup rendered. Without primary_text_only an entry also names
+    in via_ledger_table_only each via path of another ledger that leaves via,
+    or with which the result weakens, once the fact tables of every cited
+    ledger (the primary_text_only comparison) or of that ledger alone are
+    left out; a cited ledger whose body parse_ledger refuses has no separable
+    tables and is never named. With or without primary_text_only, a cited
+    body too long for vault_period is left out of the comparison with
+    incomplete ['period_text_limit']. fiscal_start (1-12, needs
+    normalize_periods) declares the first month of a fiscal year. A
+    vault_period that cannot be imported raises
+    SSOTError('period_normalizer_unavailable'). Literal support, counts and
+    warnings stay exactly as without it.
     """
     if type(primary_text_only) is not bool or type(normalize_periods) is not bool:
         raise SSOTError('invalid_opt_in')
@@ -655,9 +662,11 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
         raise SSOTError('invalid_opt_in')
     if normalize_periods:
         # Loaded only on request: lint and default check-support never import it.
+        # A damaged module (a syntax error, a failing import) is the same
+        # content-free error as a missing one, never a traceback.
         try:
             import vault_period as period
-        except ImportError as exc:
+        except Exception as exc:
             raise SSOTError('period_normalizer_unavailable') from exc
     try:
         policy = state._Policy(vault)
@@ -729,7 +738,8 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                     warnings.append(_warning('ssot-source-unsupported', row['line'], ledger_path,
                                              dict(cited=sorted(bodies), **extra)))
                 # Period intervals are a separate observation after the literal
-                # result; they never change it. value_forms[-1] has markup rendered.
+                # result; they never change it. value_forms[-1] has markup
+                # rendered, and the body indexes read only rendered forms too.
                 records = period.parse(value_forms[-1], fiscal_start=fiscal_start) if normalize_periods else None
                 if records:
                     for cited, forms in bodies.items():
@@ -738,19 +748,25 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                             # An index is None when a form is longer than vault_period reads;
                             # that body is left out of the comparison, never failing the run.
                             compared = outside.get(cited, forms) if primary_text_only else forms
-                            period_index[cited] = [period.index_of(compared, fiscal_start=fiscal_start), None]
-                    entry = dict(line=row['line'], **period.match(records, {
-                        cited: period_index[cited][0] for cited in bodies if period_index[cited][0] is not None}))
-                    # As for ledger_table_only: a via path that would leave via
-                    # without that ledger's fact tables holds only through them.
+                            period_index[cited] = [_period_index(period, compared, fiscal_start), None]
+                    indexes = {cited: period_index[cited][0] for cited in bodies if period_index[cited][0] is not None}
+                    entry = dict(line=row['line'], **period.match(records, indexes))
+                    # As for ledger_table_only: a via path of another ledger holds
+                    # only through fact tables when leaving out every cited
+                    # ledger's tables (the --primary-text-only comparison) or only
+                    # its own drops it from via or weakens the result.
                     tables = []
-                    for cited in entry.get('via', []) if not primary_text_only else []:
-                        if cited in outside:
-                            cached = period_index[cited]
-                            if cached[1] is None:
-                                cached[1] = period.index_of(outside[cited], fiscal_start=fiscal_start) or ()
-                            if not period.reaches(records, cached[1], entry['normalized_match']):
-                                tables.append(cited)
+                    ledgers = [] if primary_text_only else [cited for cited in entry.get('via', []) if cited in outside]
+                    if ledgers:
+                        for cited in indexes:
+                            if cited in outside and period_index[cited][1] is None:
+                                period_index[cited][1] = _period_index(period, outside[cited], fiscal_start) or ()
+                        joint = {cited: period_index[cited][1] if cited in outside else index
+                                 for cited, index in indexes.items()}
+                        without_all = period.match(records, joint)
+                        tables = [cited for cited in ledgers if not (
+                            _period_kept(period, entry, without_all, cited)
+                            and _period_kept(period, entry, period.match(records, {**indexes, cited: joint[cited]}), cited))]
                     if tables:
                         entry['via_ledger_table_only'] = tables
                     if any(period_index[cited][0] is None for cited in bodies):
@@ -788,6 +804,32 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
         raise
     except (state.StateError, EvidenceError, OSError, ValueError, UnicodeError, RuntimeError) as exc:
         raise SSOTError(str(exc) if isinstance(exc, state.StateError) else 'support_check_unavailable') from exc
+
+
+def _period_forms(forms):
+    """The markup-rendered forms among _forms(text, ...), which lists the form as written first.
+
+    One form is also the rendered one, unless rendering left nothing (a body
+    of markup only); then nothing is indexed. Markup between a period and its
+    qualifier ('**2026년 3분기** 말에', '[[2026-Q3]] 초') never brings the
+    whole period back through the form as written.
+    """
+    if len(forms) > 1:
+        return forms[1:]
+    return tuple(form for form in forms if _render(form, True).strip())
+
+
+def _period_index(period, forms, fiscal_start):
+    """vault_period index of the rendered forms; None when any form is longer than vault_period reads."""
+    if any(len(form) > period.MAX_TEXT_CHARS for form in forms):
+        return None
+    return period.index_of(_period_forms(forms), fiscal_start=fiscal_start)
+
+
+def _period_kept(period, entry, result, cited):
+    """True when cited stays in via of result and result is not weaker than entry's normalized_match."""
+    return (cited in result.get('via', ())
+            and period.MATCHES.index(result['normalized_match']) <= period.MATCHES.index(entry['normalized_match']))
 
 
 def _append(line, values):

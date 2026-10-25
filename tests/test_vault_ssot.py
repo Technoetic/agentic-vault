@@ -1198,7 +1198,7 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
                   "vault_ssot.check_support(sys.argv[2], 'notes/facts.md', normalize_periods=True)\n"
                   "print('vault_period' in sys.modules)\n")
         completed = subprocess.run([sys.executable, '-c', script, str(SCRIPTS), str(self.vault)],
-                                   capture_output=True, text=True)
+                                   capture_output=True, text=True, encoding='utf-8')
         self.assertEqual((completed.returncode, completed.stdout.split()), (0, ['False', 'True']), completed.stderr)
 
     def test_v0300_golden_cases_keep_their_output_with_the_flag(self):
@@ -1329,6 +1329,125 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
         code, out, err = self.run_cli('--normalize-periods')
         self.assertEqual((code, err), (0, ''))
         self.assertEqual(json.loads(out)['normalized_periods'][0], dict(line=3, **qualifier))
+
+    def test_a_multi_interval_value_resting_on_ledger_tables_is_marked(self):
+        """A full range or two dates: each ledger whose fact tables the result needs is named, alone or together."""
+        def fact(subject, start, until=''):
+            return ledger([[subject, 'size', '7', start, until, '2026-10-07', '[[X]]', '', 'confirmed']])
+        # L's prose names 2026.03.31 and its fact table 2026-01-01; M is only a table; R has nine tables (refused).
+        self.write('notes/L.md', '# L\n\n메모: 2026.03.31 종료.\n\n' + fact('Beta', '2026-01-01'))
+        self.write('notes/M.md', fact('Gamma', '2026-01-01', '2026-07-01'))
+        self.write('notes/Plain.md', '2026.01.01 착수.\n')
+        self.write('notes/R.md', '# R\n\n' + '\n\n'.join(fact('R%d' % number, '2026-02-02') for number in range(9)))
+        self.write('notes/facts.md', self.rows(
+            ('2026.01.01~2026.03.31', '[[L]]'), ('2026.01.01, 2026.03.31', '[[L]]'),
+            ('2026.01.01, 2026.03.31', '[[L]], [[M]]'), ('2026.03.31', '[[L]]'),
+            ('2026.01.01~2026.03.31', '[[L]], [[Plain]]'), ('2026.02.02', '[[R]]')))
+        other, table, plain, refused = ['notes/L.md'], ['notes/M.md'], ['notes/Plain.md'], ['notes/R.md']
+        flagged = self.check(normalize_periods=True)
+        self.assertEqual(flagged['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 4, 'normalized_match': 'equal', 'via': other, 'via_ledger_table_only': other},
+            {'line': 5, 'normalized_match': 'equal', 'via': other + table, 'via_ledger_table_only': other + table},
+            {'line': 6, 'normalized_match': 'equal', 'via': other},
+            {'line': 7, 'normalized_match': 'equal', 'via': other + plain},
+            # parse_ledger refuses R: its tables cannot be left out, so it is compared whole and never named.
+            {'line': 8, 'normalized_match': 'equal', 'via': refused}])
+        primary = self.check(normalize_periods=True, primary_text_only=True)
+        self.assertEqual(primary['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'none'}, {'line': 4, 'normalized_match': 'none'},
+            {'line': 5, 'normalized_match': 'none'}, {'line': 6, 'normalized_match': 'equal', 'via': other},
+            {'line': 7, 'normalized_match': 'equal', 'via': other + plain},
+            {'line': 8, 'normalized_match': 'equal', 'via': refused}])
+        self.assertEqual(primary['ledger_tables_unseparated'], [{'path': 'notes/R.md', 'reason': 'table_limit'}])
+        # A named path is a ledger with separable tables that the primary comparison drops or answers more weakly.
+        rank = {'equal': 0, 'contained': 1, 'none': 2}
+        for entry, alone in zip(flagged['normalized_periods'], primary['normalized_periods']):
+            weaker = rank[alone['normalized_match']] > rank[entry['normalized_match']]
+            with self.subTest(line=entry['line']):
+                self.assertEqual(entry.get('via_ledger_table_only', []), [
+                    path for path in entry['via'] if path in ('notes/L.md', 'notes/M.md')
+                    and (weaker or path not in alone.get('via', []))])
+        for base in ({}, {'primary_text_only': True}):
+            with self.subTest(base=base):
+                self.assertEqual(ssot._encode(self.without_periods(self.check(normalize_periods=True, **base))),
+                                 ssot._encode(self.check(**base)))
+
+    def test_markup_in_a_cited_body_never_brings_the_whole_period_back(self):
+        """Body indexes read only the rendered forms, as the value side reads value_forms[-1]."""
+        bodies = {'Bold': '3공장은 **2026년 3분기** 초 착수.', 'Link': '3공장은 [[2026년 3분기]] 초 착수.',
+                  'Code': '3공장은 `2026년 3분기` 초 착수.', 'Periodic': '[[2026-Q3]] 초 착수.',
+                  'Narrow': '**2026년 3분기** 후반 착수.', 'Alias': '[[Plan|2026년 3분기]] 마지막 날 착수.',
+                  'Count': '**2026년 3분기** 연속 흑자.', 'EndBold': '3공장은 **2026년 3분기** 말에 착수.',
+                  'EndLink': '3공장은 [[2026년 3분기]] 말에 착수.', 'Plain': '3공장은 2026년 3분기 착수.',
+                  'BoldOnly': '3공장은 **2026년 3분기** 착수.', 'AliasOnly': '[[Q3 계획|2026년 3분기]] 착수.'}
+        for name, text in bodies.items():
+            self.write(f'notes/{name}.md', text + '\n')
+        self.write('notes/facts.md', self.rows(*[('2026년 3분기 착수', f'[[{name}]]') for name in bodies]))
+        none, end = {'normalized_match': 'none'}, 'contained'
+        expected = [none] * 7 + [{'normalized_match': end, 'via': ['notes/EndBold.md']},
+                                 {'normalized_match': end, 'via': ['notes/EndLink.md']}]
+        expected += [{'normalized_match': 'equal', 'via': [f'notes/{name}.md']} for name in ('Plain', 'BoldOnly', 'AliasOnly')]
+        flagged = self.check(normalize_periods=True)
+        self.assertEqual(flagged['normalized_periods'], [dict(line=line, **row) for line, row in enumerate(expected, 3)])
+        self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(self.check()))
+        # A Q mark in bold before a fiscal year is read as a mark too.
+        self.write('notes/Fiscal.md', 'Q3 **FY2026** 실적.\n')
+        self.write('notes/fiscal-facts.md', self.rows(('FY2026', '[[Fiscal]]')))
+        self.assertEqual(self.check('notes/fiscal-facts.md', normalize_periods=True, fiscal_start=4)['normalized_periods'],
+                         [{'line': 3, 'normalized_match': 'none'}])
+
+    def test_unread_marks_list_items_and_range_forms_abstain_end_to_end(self):
+        """Never the whole fiscal year, one list item or one range end; fully written forms still compare."""
+        self.write('notes/Plan.md', 'FY2026 실적 요약. 2026년 1분기 실적. 점검은 2026.03.05에 했다. 2026.10.07 출발. '
+                                    '계약은 2026.12.31 종료. 2027년 3분기 납품. 2026년 3분기 완공 예정.\n')
+        qualifier = {'normalized_match': 'abstain', 'reason': 'period_qualifier'}
+        multiple = {'normalized_match': 'abstain', 'reason': 'multiple_periods'}
+        partial = {'normalized_match': 'abstain', 'reason': 'partial_range'}
+        rows = [(value, qualifier) for value in ('FY2026/Q3 실적', 'FY2026, Q3 실적', 'Q3/FY2026 실적', 'FY2026_Q3',
+                                                 'FY2026 Q 3 실적', 'FY2026 Q5', '2026년 3분기 2주 차 완공',
+                                                 '2026년 3분기' + chr(0x200B) + '말에 완공')]
+        rows += [(value, multiple) for value in ('2026Q1·Q2 실적', '2026Q1, Q2 실적', '점검 2026.03.05, 09.05',
+                                                 '점검 2026년 3월 5일과 9월 5일')]
+        rows += [(value, partial) for value in ('출장 2026.10.07에서 10.09까지', '출장 2026.10.07(수요일)~10.09(금요일)',
+                                                '출장 2026.10.07\N{HORIZONTAL BAR}10.09', '계약 2026년 10월~2026.12.31',
+                                                '계약 2026년 10월부터 2026년 12월 31일까지', '2026년~2027년 3분기 납품')]
+        via = ['notes/Plan.md']
+        rows += [('FY2026 Q3 실적', {'normalized_match': 'equal', 'via': via}), ('계약 2026.10.01~2026.12.31', {'normalized_match': 'none'}),
+                 ('2026년 1분기 실적', {'normalized_match': 'equal', 'via': via}),
+                 ('매출 1500 Q3 대비', {'normalized_match': 'abstain', 'reason': 'no_year'})]
+        self.write('notes/facts.md', self.rows(*[(value, '[[Plan]]') for value, _ in rows]))
+        flagged = self.check(normalize_periods=True, fiscal_start=1)
+        self.assertEqual(flagged['normalized_periods'], [dict(line=line, **row) for line, (_, row) in enumerate(rows, 3)])
+        self.assertEqual(ssot._encode(self.without_periods(flagged)), ssot._encode(self.check()))
+        code, out, err = self.run_cli('--normalize-periods', '--fiscal-start', '1')
+        self.assertEqual((code, err, json.loads(out)['normalized_periods']), (0, '', flagged['normalized_periods']))
+
+    def test_a_damaged_period_module_is_a_content_free_error(self):
+        """A vault_period that fails to import: SSOTError('period_normalizer_unavailable'), and no traceback from the CLI."""
+        import shutil
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Meeting]]')))
+        copy = Path(self.tmp.name) / 'scripts'
+        shutil.copytree(SCRIPTS, copy, ignore=shutil.ignore_patterns('__pycache__'))
+        (copy / 'vault_period.py').write_text('def broken(:\n', encoding='utf-8')
+        environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+
+        def run(*arguments):
+            return subprocess.run([sys.executable, '-X', 'utf8', *arguments], capture_output=True, text=True,
+                                  encoding='utf-8', env=environment)
+        command = [str(copy / 'vault_ssot.py'), '--vault', str(self.vault), 'check-support', '--path', 'notes/facts.md']
+        completed = run(*command, '--normalize-periods')
+        self.assertEqual((completed.returncode, completed.stdout, completed.stderr),
+                         (1, '', '{"error":"ssot_operation_unavailable"}\n'))
+        # The default path never imports it.
+        completed = run(*command)
+        self.assertEqual((completed.returncode, completed.stderr, json.loads(completed.stdout)['rows_checked']), (0, '', 1))
+        script = ('import sys\nsys.path.insert(0, sys.argv[1])\nimport vault_ssot\ntry:\n'
+                  "    vault_ssot.check_support(sys.argv[2], 'notes/facts.md', normalize_periods=True)\n"
+                  'except vault_ssot.SSOTError as exc:\n    print(exc)\n')
+        completed = run('-c', script, str(copy), str(self.vault))
+        self.assertEqual((completed.returncode, completed.stdout, completed.stderr),
+                         (0, 'period_normalizer_unavailable\n', ''))
 
 
 class DefaultCliRegressionTests(unittest.TestCase):

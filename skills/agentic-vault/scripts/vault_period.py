@@ -26,7 +26,8 @@ Conventions declared here, not taken from a standard:
   abstains with quarter_basis_ambiguous: the text may mean either basis.
 - Two-digit years (3Q26, FY26) are 2000-2099, and a four-digit year never
   starts with 0. A year written without 년 before a quarter or half
-  (2026 3분기) is read only for 1900-2099.
+  (2026 3분기, 2026Q3, 2026 Q3, 2026-Q3) is read only for 1900-2099; the
+  quarter after another such number abstains with no_year (1500 Q3).
 - Qualifiers are recognised from fixed lists only. 말 right after a period,
   attached or spaced, is its last day when no letter or digit follows it or
   what follows starts with a listed particle (에, 까지, 부터, 의, 로, 경,
@@ -37,13 +38,19 @@ Conventions declared here, not taken from a standard:
   상순, 중순, 하순; 시작 as a word of its own; 종료, 마감, 결산, 개시 or 시작
   before 일, 날, 시 or 월; an ordinal before a day, week or month unit, as in
   첫 달, 첫날, 첫 2주, 셋째 주, 두 번째 달; a month or week number such as
-  8월 or 2주차), any of these after the period's 의 (2026년 3분기의
+  8월, 2주차 or 2주 차), any of these after the period's 의 (2026년 3분기의
   마지막 날, 2026년 3분기의 말), a quarter count (4분기 연속, 3분기째,
-  3분기 만에) and a Q or H mark before a fiscal year (Q3 FY2026, H1 FY2026)
-  or after it in any form but Qn (FY2026 H1, FY2026 3Q); FY2026 Q3 is read.
-  A word outside these lists is not recognised, so the value is still
-  compared as the whole period (2026년 3분기 늦게, 2026년 3분기 중 마지막
-  달, late 2026Q3); 중, 내 and 동안 keep it whole as well.
+  3분기 만에) and a Q or H mark or a quarter or half word beside a fiscal
+  year that the fiscal row does not read: before it (Q3 FY2026, H1/FY2026,
+  3분기 FY2026), or after it in any other form than FY2026 Q3, FY2026 3분기
+  or FY2026 하반기 with at most one space or tab between (FY2026 H1, FY2026
+  3Q, FY2026/Q3, FY2026의 Q3, FY2026 Q 3, FY2026 Q5, FY2026 5분기, FY2026
+  Q3Q4).
+  A whitespace run, /, ',', '.', ':', _, -, (, a middle dot or 의 may join
+  such a mark to the fiscal year. A word outside these lists is not
+  recognised, so the value is still compared as the whole period (2026년
+  3분기 늦게, 2026년 3분기 중 마지막 달, late 2026Q3); 중, 내 and 동안 keep
+  it whole as well.
 - Relative expressions (당기, 전기, 전년 동기, 올해, 이번 분기, ...) always
   abstain with relative_needs_anchor. A quarter or half without a year
   abstains with no_year; no anchor year is filled in, because a text such as
@@ -52,15 +59,25 @@ Conventions declared here, not taken from a standard:
   minutes (3분 지연) never become a quarter. A range is not merged into one
   interval: each end is its own period, and a list or range of quarters or
   halves (1~3분기, 상·하반기) abstains with multiple_periods. When a resolved
-  period and a number that no row reads are joined by a range mark (~ 〜 ∼ ～
-  - – — or 부터), as in 2026.10.07~10.09 or 10.07~2026.10.09, a partial_range
-  record is added beside it, so the value is never compared by one end; no
-  year is copied from the other end.
+  period and a number or a Q or H mark that no row reads are joined by a range
+  mark (a tilde ~ 〜 ∼ ～ ˜ ⁓ 〰, a hyphen or dash - ‐ ‑ ‒ – — ― − ⸺ ⸻, also
+  repeated as --, or 부터 or 에서), as in 2026.10.07~10.09 or
+  10.07~2026.10.09, a partial_range record is added beside it. The near end
+  may be a digit, or a digit with ., 일, 월 or 년 (2026년 10월~2026.12.31,
+  2026년~2027년 3분기), and a day may carry one weekday in round or square
+  brackets ((수), (수요일), (Wed), [수], (水)). When a list separator (, / ·
+  ㆍ ・ 및 과 와) and such a number or mark follow a resolved period (2026Q1·Q2,
+  2026.03.05, 09.05), a multiple_periods record is added after it. So the
+  value is never compared by one end or by the first item of these forms; no
+  year is copied from the other end. A list whose earlier item no row reads
+  (09.05, 2026.03.05) is not recognised.
 - The table reads one space or tab where it allows a gap, while the checks
-  that make a record abstain (qualifiers, counts, range marks) take any
-  whitespace run; a Q or H mark beside a fiscal year is read across one space
-  or tab only. vault_ssot passes forms with every whitespace run collapsed to
-  one space.
+  that make a record abstain (qualifiers, counts, Q or H marks beside a
+  fiscal year, range marks and list separators) take any whitespace run and
+  skip format characters (Unicode 15.0 category Cf, such as U+200B, U+2060,
+  U+00AD and U+FEFF). So FY2026  Q3 with two spaces abstains, and 말 after a
+  format character is a qualifier, not the last day. vault_ssot passes forms
+  with every whitespace run collapsed to one space.
 """
 from __future__ import annotations
 
@@ -73,11 +90,12 @@ MAX_TEXT_CHARS = 1024 * 1024
 MATCHES = ('equal', 'contained', 'none')
 SCOPE = ('ledger value periods against cited note body periods as half-open date intervals: equal (the same '
          'interval appears somewhere in a cited body), contained (an inner one does) or none, and abstain when '
-         'the value has an unresolved period, a listed qualifier or a partial range; text outside the fixed '
-         'lists, such as an unlisted qualifier, is not read, so a period can still be compared whole; modifiers '
-         'and the rest of the value are not compared; calendar quarters and halves abstain unless fiscal_start '
-         'is 1 or absent; fiscal years need fiscal_start; relative and yearless expressions abstain; durations '
-         'and ranges are never merged; advisory only, never literal support, counts or warnings')
+         'the value has an unresolved period, a listed qualifier, or a range end or list item that no row '
+         'reads; text outside the fixed lists, such as an unlisted qualifier, is not read, so a period can still '
+         'be compared whole; modifiers and the rest of the value are not compared; calendar quarters and halves '
+         'abstain unless fiscal_start is 1 or absent; fiscal years need fiscal_start; relative expressions and '
+         'yearless quarters or halves abstain; durations and ranges are never merged; advisory only, never '
+         'literal support, counts or warnings')
 
 
 class PeriodError(ValueError):
@@ -85,8 +103,18 @@ class PeriodError(ValueError):
 
 
 _SP = r'[ \t]?'
-# Checks that make a record abstain take any whitespace run: spacing never widens a value.
-_GAP = r'\s*'
+# Format characters, Unicode 15.0 category Cf (soft hyphen, zero-width space
+# and joiners, direction marks and isolates, word joiner, BOM and the rest):
+# NFKC keeps them, so they reach the checks below as written.
+_CF_RANGES = ((0x00AD, 0x00AD), (0x0600, 0x0605), (0x061C, 0x061C), (0x06DD, 0x06DD), (0x070F, 0x070F),
+              (0x0890, 0x0891), (0x08E2, 0x08E2), (0x180E, 0x180E), (0x200B, 0x200F), (0x202A, 0x202E),
+              (0x2060, 0x2064), (0x2066, 0x206F), (0xFEFF, 0xFEFF), (0xFFF9, 0xFFFB), (0x110BD, 0x110BD),
+              (0x110CD, 0x110CD), (0x13430, 0x1343F), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+              (0xE0001, 0xE0001), (0xE0020, 0xE007F))
+_CF = ''.join(chr(first) + ('-' + chr(last) if last > first else '') for first, last in _CF_RANGES)
+# Checks that make a record abstain take any whitespace run and skip format
+# characters: spacing never widens a value.
+_GAP = r'[\s' + _CF + r']*'
 _EDGE = r'(?<![0-9A-Za-z])'
 # 2026년, 2026년도, or a year of 1900-2099 and one space (1500 3분기 is a number).
 _YEAR = (_EDGE + r'(?P<year>[1-9][0-9]{3})(?:' + _SP + r'년도?' + _SP
@@ -115,26 +143,51 @@ _ORDINAL = (r'(?:첫째|첫|[둘셋넷]째|[첫두세네]' + _GAP + r'번째)' +
 # whole: 시작 only as a word of its own (not 시작하는, 시작된), 종료/마감/결산/
 # 개시/시작 only before 일, 날, 시 or 월 (종료일, 마감 시한, 결산월; not 결산
 # 실적), an ordinal only before a unit and 전반 not as 전반적. A month (8월)
-# or week number (2주차) inside the period narrows it too. 초반 and 초순 are 초.
-# 중, 내 and 동안 do not narrow a period, and 이후 or 까지 are modifiers: none
-# is listed.
+# or week number (2주차, 2주 차) inside the period narrows it too. 초반 and
+# 초순 are 초. 중, 내 and 동안 do not narrow a period, and 이후 or 까지 are
+# modifiers: none is listed.
 _NARROW = (r'(?:중?후반|중반|전반(?!적)|끝|마지막|막바지|막판|[상중하]순'
            r'|(?:종료|마감|결산|개시|시작)' + _GAP + r'[일날시월]|시작' + _WORD_END + r'|' + _ORDINAL
-           + r'|(?:1[0-2]|0?[1-9])' + _GAP + r'월|[0-9]+' + _GAP + r'주차)')
-_TAIL = (r'(?:' + _GAP + r'(?:(?P<end>말)(?:(?![^\W_])|(?=' + _PARTICLE + r'))|(?P<qualifier>(?:의' + _GAP
-         + r')?(?:[말초]|' + _NARROW + r'))))?')
-_SEPARATORS = (r'~\N{TILDE OPERATOR}\N{WAVE DASH}\-,\N{MIDDLE DOT}\N{HANGUL LETTER ARAEA}'
-               r'\N{HANGUL JUNGSEONG ARAEA}\N{KATAKANA MIDDLE DOT}')
+           + r'|(?:1[0-2]|0?[1-9])' + _GAP + r'월|[0-9]+' + _GAP + r'주' + _GAP + r'차)')
+# 말 is the last day across whitespace only: after a format character it is a
+# qualifier like the rest, never a computed day.
+_TAIL = (r'(?:\s*(?P<end>말)(?:(?![^\W_])|(?=' + _PARTICLE + r'))|' + _GAP + r'(?P<qualifier>(?:의' + _GAP
+         + r')?(?:[말초]|' + _NARROW + r')))?')
+_DOTS = r'\N{MIDDLE DOT}\N{HANGUL LETTER ARAEA}\N{HANGUL JUNGSEONG ARAEA}\N{KATAKANA MIDDLE DOT}'
+_SEPARATORS = r'~\N{TILDE OPERATOR}\N{WAVE DASH}\-,' + _DOTS
 _NUMBER = r'(?:제' + _SP + r')?[1-4](?:' + _SP + r'/' + _SP + r'4)?'
 _FISCAL = (r'(?:' + _EDGE + r"[Ff][Yy]" + _SP + r"['\N{RIGHT SINGLE QUOTATION MARK}]?"
            r'(?P<short>[1-9][0-9]{3}|[0-9]{2})(?![0-9])'
            r'|' + _EDGE + r'(?P<year>[1-9][0-9]{3})' + _SP + r'(?:년' + _SP + r')?(?:회계|사업)' + _SP + r'[연년]도)')
+# A Q or H mark beside a fiscal year (Q3, 3Q, H1, 1H, and Q5, Q 3 or Q12, which
+# no row reads) or a quarter or half word: a whitespace run, a joiner or 의
+# may sit between. Only FY2026 Q3, FY2026 3분기 and FY2026 하반기 with at most
+# one space or tab between are read; every other mark is not computed.
+_QH = r'(?:[QqHh]' + _GAP + r'[0-9]{1,2}|[0-9]{1,2}' + _GAP + r'[QqHh])(?![0-9])'
+_QUARTER_WORD = (r'(?:제' + _GAP + r')?[0-9]{1,2}(?:' + _GAP + r'/' + _GAP + r'[0-9]{1,2})?' + _GAP + r'분기'
+                 + _MINUTES)
+_JOIN = _GAP + r'(?:(?:[/,.:_(\-' + _DOTS + r']|의)' + _GAP + r')?'
+# The lookahead names every first character a mark can have, so most positions fail at once.
+_MARK_BEFORE = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')'
+                + r'|(?<![가-힣])[상하]' + _GAP + r'반기)' + _JOIN)
+_MARK_AFTER = _JOIN + r'(?P<marker>' + _QH + r'|' + _QUARTER_WORD + r'|[상하]' + _GAP + r'반기)'
 # A range mark between a resolved period and a number that no row reads; a
-# day may carry a weekday in parentheses (2026.10.07(수)~10.09(금)).
-_RANGE = r'(?:[~\-\N{TILDE OPERATOR}\N{WAVE DASH}\N{FULLWIDTH TILDE}\N{EN DASH}\N{EM DASH}]|부터)'
-_WEEKDAY = r'(?:' + _GAP + r'\([월화수목금토일]\))?'
-_RANGE_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'(?:[0-9]+|[QqHh][0-9])')
-_RANGE_BEFORE = re.compile(r'[0-9][.일]?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'\Z')
+# day may carry a weekday in brackets (2026.10.07(수)~10.09(금)), and the near
+# end may be a month or year (2026년 10월~2026.12.31).
+_RANGE = (r'(?:[~\-\N{TILDE OPERATOR}\N{WAVE DASH}\N{FULLWIDTH TILDE}\N{SMALL TILDE}\N{COMBINING TILDE}'
+          r'\N{SWUNG DASH}\N{WAVY DASH}\N{HYPHEN}\N{NON-BREAKING HYPHEN}\N{FIGURE DASH}\N{EN DASH}\N{EM DASH}'
+          r'\N{HORIZONTAL BAR}\N{MINUS SIGN}\N{TWO-EM DASH}\N{THREE-EM DASH}\N{SMALL EM DASH}'
+          r'\N{SMALL HYPHEN-MINUS}\N{FULLWIDTH HYPHEN-MINUS}\N{PRESENTATION FORM FOR VERTICAL EM DASH}'
+          r'\N{PRESENTATION FORM FOR VERTICAL EN DASH}]+|부터|에서)')
+_WEEKDAY = (r'(?:' + _GAP + r'[(\[\N{FULLWIDTH LEFT PARENTHESIS}\N{FULLWIDTH LEFT SQUARE BRACKET}]' + _GAP
+            + r'(?:[월화수목금토일](?:요일)?|[月火水木金土日](?:曜日?)?|(?i:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?))'
+            + _GAP + r'[)\]\N{FULLWIDTH RIGHT PARENTHESIS}\N{FULLWIDTH RIGHT SQUARE BRACKET}])?')
+_UNREAD = r'(?:[0-9]+|[QqHh]' + _GAP + r'[0-9])'
+# After a resolved period: a range mark, or a list separator (2026Q1·Q2,
+# 2026.03.05, 09.05, 2026년 3월 5일과 9월 5일), then a number that no row reads.
+_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + r'(?:(?P<range>' + _RANGE + r')|[,/' + _DOTS + r']|및|과|와)' + _GAP
+                    + _UNREAD)
+_RANGE_BEFORE = re.compile(r'[0-9](?:[.일]|' + _GAP + r'[월년]도?)?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'\Z')
 
 # Fixed table. Scanning takes the leftmost match; at one position the earlier
 # row wins, so a list, a relative word or a fiscal year is read before the
@@ -147,14 +200,15 @@ _TABLE = (
     ('relative', r'(?<![가-힣])(?:전년' + _SP + r'동기|전년도?|금년도?|올해|작년|내년|당해' + _SP + r'[연년]도'
      r'|(?:이번|지난|다음|직전)' + _SP + r'(?:분기|반기|연도|해)|(?:전|당|금)' + _SP + r'분기'
      r'|(?:당기|전기)(?![가-힣]))'),
-    # Q3 FY2026, 1H FY2026: a mark before the fiscal year is not computed.
-    ('fiscal', _EDGE + r'(?P<marker>[QqHh][1-4]|[1-4][QqHh])' + _SP + _FISCAL),
-    ('fiscal', _FISCAL + r'(?:' + _SP + r'(?:' + _QUARTER + r'|' + _HALF + r'|[Qq](?P<q>[1-4])(?![0-9A-Za-z])'
-     r'|(?P<marker>[Hh][1-4]|[1-4][QqHh])(?![0-9A-Za-z])))?' + _TAIL),
+    # Q3 FY2026, 1H/FY2026, 3분기 FY2026: a mark before the fiscal year is not computed.
+    ('fiscal', _MARK_BEFORE + _FISCAL),
+    ('fiscal', _FISCAL + r'(?:' + _SP + r'(?:' + _QUARTER + r'|' + _HALF + r'|[Qq](?P<q>[1-4])(?![0-9A-Za-z]))'
+     r'|' + _MARK_AFTER + r')?' + _TAIL),
     ('quarter', _YEAR + _QUARTER + _TAIL),
     ('quarter', _YEAR + r'(?P<quarter>[1-4])[Qq](?![0-9A-Za-z])' + _TAIL),
     ('quarter', _EDGE + r'(?P<quarter>[1-4])[Qq](?P<short>[1-9][0-9]{3}|[0-9]{2})?(?![0-9A-Za-z])' + _TAIL),
-    ('quarter', _EDGE + r'(?P<year>[1-9][0-9]{3})' + _SP + r'-?' + _SP + r'[Qq](?P<quarter>[1-4])(?![0-9A-Za-z])'
+    # 2026Q3, 2026 Q3, 2026-Q3: bare is checked against 1900-2099 like _YEAR's spaced year.
+    ('quarter', _EDGE + r'(?P<bare>[1-9][0-9]{3})' + _SP + r'-?' + _SP + r'[Qq](?P<quarter>[1-4])(?![0-9A-Za-z])'
      + _TAIL),
     ('half', _YEAR + _HALF + _TAIL),
     ('day', _EDGE + r'(?P<year>[1-9][0-9]{3})-(?P<month>[0-9]{2})-(?P<day>[0-9]{2})(?![0-9])'),
@@ -194,9 +248,9 @@ def _kind(kind, groups):
     if kind != 'fiscal':
         return kind
     marker = (groups.get('marker') or '').casefold()
-    if groups.get('quarter') or groups.get('q') or 'q' in marker:
+    if groups.get('quarter') or groups.get('q') or 'q' in marker or '분기' in marker:
         return 'fiscal_quarter'
-    return 'fiscal_half' if groups.get('half') or 'h' in marker else 'fiscal_year'
+    return 'fiscal_half' if groups.get('half') or 'h' in marker or '반기' in marker else 'fiscal_year'
 
 
 def _resolve(kind, groups, fiscal_start):
@@ -207,8 +261,12 @@ def _resolve(kind, groups, fiscal_start):
         return kind, 'relative_needs_anchor', None, None, None
     if groups.get('qualifier') or groups.get('count') or groups.get('marker'):
         return kind, 'period_qualifier', None, None, None
+    bare = groups.get('bare')
+    if bare and not 1900 <= int(bare) <= 2099:
+        return kind, 'no_year', None, None, None
     short = groups.get('short')
-    year = int(groups['year']) if groups.get('year') else (
+    written = groups.get('year') or bare
+    year = int(written) if written else (
         None if not short else int(short) if len(short) == 4 else 2000 + int(short))
     if kind == 'day':
         start = date(year, int(groups['month']), int(groups['day']))
@@ -237,15 +295,17 @@ def _resolve(kind, groups, fiscal_start):
     return kind, None, label, start, end
 
 
-def _partial(span):
-    return dict(span=span, kind='range', label_edtf=None, start=None, end=None, reason='partial_range')
+def _unread(span, kind, reason):
+    return dict(span=span, kind=kind, label_edtf=None, start=None, end=None, reason=reason)
 
 
 def _ranges(text, records):
-    """Add a partial_range record beside a resolved record joined by a range mark to a number no row read.
+    """Add an abstaining record beside a resolved record joined to a number no row read.
 
-    The number is outside every record span: a full range (2026.10.07~2026.10.09)
-    has a record at both ends and gets none.
+    A range mark on either side adds a partial_range record (kind range); a
+    list separator after it adds a multiple_periods record (kind multiple).
+    The number is outside every record span: a full range
+    (2026.10.07~2026.10.09) or list has a record at both ends and gets none.
     """
     result, cursor = [], 0
     for position, record in enumerate(records):
@@ -256,13 +316,16 @@ def _ranges(text, records):
             first = before.start()
             while first > cursor and '0' <= text[first - 1] <= '9':
                 first -= 1
-            result.append(_partial((first, start)))
+            result.append(_unread((first, start), 'range', 'partial_range'))
         result.append(record)
         cursor = end
+        if not resolved:
+            continue
         limit = records[position + 1]['span'][0] if position + 1 < len(records) else len(text)
-        after = _RANGE_AFTER.match(text, end, limit) if resolved else None
+        after = _AFTER.match(text, end, limit)
         if after:
-            result.append(_partial(after.span()))
+            kind, reason = ('range', 'partial_range') if after['range'] else ('multiple', 'multiple_periods')
+            result.append(_unread(after.span(), kind, reason))
             cursor = after.end()
     return result
 
@@ -275,9 +338,10 @@ def parse(text, *, fiscal_start=None):
     fiscal_quarter, fiscal_half, relative, multiple, range. Reasons: no_year,
     fiscal_start_undeclared, quarter_basis_ambiguous, relative_needs_anchor,
     multiple_periods, period_qualifier, partial_range, invalid_date. A range
-    record spans the range mark and the number beside it. Digits are ASCII;
-    check-support passes NFKC/casefold forms, so full-width digits and FY/fy
-    also match there.
+    record spans the range mark and the number beside it, and a multiple
+    record after a period spans the list separator and the number after it.
+    Digits are ASCII; check-support passes NFKC/casefold forms, so full-width
+    digits and FY/fy also match there.
     """
     if not isinstance(text, str) or len(text) > MAX_TEXT_CHARS:
         raise PeriodError('invalid_text')
@@ -354,15 +418,3 @@ def match(value_records, indexes):
     if worst < 2:
         result['via'] = sorted(keys[0] | keys[1] if worst else keys[0])
     return result
-
-
-def reaches(value_records, indexed, normalized_match):
-    """True when a resolved value interval has normalized_match or a stronger relation to indexed.
-
-    For the equal or contained result of match(), a key is in via exactly
-    when this holds for its index, so a narrower text of the same body (a
-    cited ledger without its fact tables) tells whether that key still is.
-    """
-    limit = MATCHES.index(normalized_match)
-    return any(_relation((record['start'], record['end']), indexed) <= limit
-               for record in value_records if record['reason'] is None)
