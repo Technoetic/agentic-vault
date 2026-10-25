@@ -61,7 +61,8 @@ In scope:
   (`run --allow-network`), the secret filter and API key handling.
 - **Opt-in session-transcript reader** (`vault_doctor.py --session-evidence`,
   `vault_session_evidence.py`): it reads one Claude Code transcript that the user
-  names. A transcript holds every prompt, answer, tool result and hook output, and
+  names and, to recognise this plugin's own SessionStart status labels, the
+  plugin's `hooks/hooks.json` (read-only, up to 64 KiB). A transcript holds every prompt, answer, tool result and hook output, and
   the reader must print only counts, lengths, numbers, booleans and fixed status
   words and, with `--session-instruction-paths`, instruction file paths. Output
   that carries transcript content, commands, identifiers or the transcript path is
