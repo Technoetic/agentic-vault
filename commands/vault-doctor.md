@@ -53,9 +53,12 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    `emitted_chars`·`injected_chars`·`truncated`, 실패한 훅의 `outcome`·`exit_code`·
    `command_mentions_session_start_py`, 판 범위를 보고한다.
    `observed_error`는 훅이 실행되지 않았다거나 기록이 없다는 뜻이 아니라 성공하지 못한 훅 기록이 있다는 뜻이므로
-   그 훅을 확인하도록 안내한다. 실패한 훅의 `command_mentions_session_start_py`가 `true`이면 보통 이 플러그인의
-   `session_start.py`(같은 이름의 다른 파일일 수도 있다), `false`이면 다른 훅(다른 플러그인이나 볼트 설정의 훅)이고,
-   `none`이면 기록에 명령이 없어 어느 훅인지 알 수 없다고 말한다. `not_recorded`를 "실행되지 않음"으로, 첫 응답
+   그 훅을 확인하도록 안내한다. `command_mentions_session_start_py`는 기록된 명령이 `session_start.py`를 가리키거나
+   이 플러그인의 SessionStart 상태 문구 가운데 하나일 때 `true`다(Claude Code 2.1.309는 `statusMessage`가 있는 훅의
+   기록에 명령 대신 그 문구를 남기고, 이 플러그인의 SessionStart 훅에는 모두 문구가 있다). 실패한 훅의 이 값이
+   `true`이면 보통 이 플러그인의 훅이라고(같은 이름의 파일이나 같은 문구를 쓰는 다른 훅일 수도 있다), `false`이면 이
+   플러그인의 훅으로 알아보지 못했다고만 말하고 다른 훅이라고 단정하지 않으며, `none`이면 기록에 명령이 없어 어느
+   훅인지 알 수 없다고 말한다. `not_recorded`를 "실행되지 않음"으로, 첫 응답
    토큰을 훅의 몫으로, 기록을 "모델이 기억을 사용함"으로 해석하지 않는다. 지침 파일 경로는 사용자가 요청할 때만
    `--session-instruction-paths`로 보인다. 종료 코드는 바뀌지 않는다.
    [읽는 값과 한계](../docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)
