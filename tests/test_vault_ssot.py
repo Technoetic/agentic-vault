@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -1448,6 +1449,295 @@ class PeriodNormalizationSupportTests(unittest.TestCase):
         completed = run('-c', script, str(copy), str(self.vault))
         self.assertEqual((completed.returncode, completed.stdout, completed.stderr),
                          (0, 'period_normalizer_unavailable\n', ''))
+
+
+# --- Oracles: the v0.31.0 body helpers (vault_ssot.py:387-398, :586-616 and the
+# self-citation call at :702 of 21c4b47), kept only here so that the tests can
+# show where the current helpers part from them. ---
+def v0310_note_body(text):
+    lines = text.splitlines()
+    if lines and lines[0].strip() == '---':
+        end = next((i for i, line in enumerate(lines[1:65], 1) if line.strip() == '---'), None)
+        if end is not None:
+            return '\n'.join(lines[end + 1:])
+    return text
+
+
+def v0310_body_forms(text):
+    return ssot._forms(re.sub(r'\\([\\|])', r'\1', v0310_note_body(text)), aliases=True)
+
+
+def v0310_without_tables(raw, parsed):
+    pieces, cursor = [], 0
+    for table in parsed['tables']:
+        pieces.append(raw[cursor:table['start']])
+        cursor = table['end']
+    pieces.append(raw[cursor:])
+    return b''.join(pieces).decode('utf-8')
+
+
+def v0310_separate_tables(text):
+    body = v0310_note_body(text)
+    try:
+        parsed = ssot.parse_ledger(body)
+    except ssot.SSOTError as exc:
+        return None, str(exc)
+    if not parsed['tables']:
+        return None, None
+    return ssot._forms(re.sub(r'\\([\\|])', r'\1', v0310_without_tables(body.encode('utf-8'), parsed)),
+                       aliases=True), None
+
+
+def v0310_self_forms(raw, parsed):
+    return v0310_body_forms(v0310_without_tables(raw, parsed))
+
+
+V0310_BODY_HELPERS = {'_body_forms': v0310_body_forms, '_separate_tables': v0310_separate_tables,
+                      '_self_forms': v0310_self_forms}
+LINE_MARKS = ('\x0b', '\x0c', '\x1c', '\x1d', '\x1e', '\x85', '\N{LINE SEPARATOR}', '\N{PARAGRAPH SEPARATOR}')
+
+
+class BodyEdgeSupportTests(unittest.TestCase):
+    """check-support bodies at the three edges v0.31.0 read differently.
+
+    The text on either side of a removed fact table stays apart, a cited note
+    breaks lines where parse_ledger does (CR, LF, CRLF) with or without
+    frontmatter, and a self-cited ledger drops a leading BOM before its
+    frontmatter is decided. Away from these edges every output equals the
+    v0.31.0 helpers.
+    """
+
+    def setUp(self):
+        self.assertIsNotNone(ssot, 'temporal ledger implementation is missing')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.vault = Path(self.tmp.name) / 'vault'
+        self.write('00-meta/vault-config.json', '{"deny_zones": ["private"], "exclude_dirs": ["excluded"]}')
+
+    def write(self, relative, text, bom=False):
+        target = self.vault / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
+        return target
+
+    @staticmethod
+    def rows(*pairs):
+        """A v2 ledger of (value, source) rows; without a preamble the first row is line 3."""
+        return ledger([['Atlas', 'retention', value, '2025-01-01', '', '2026-10-07', source, '', 'confirmed']
+                       for value, source in pairs])
+
+    def check(self, path='notes/facts.md', **options):
+        return ssot.check_support(self.vault, path, **options)
+
+    @staticmethod
+    def found(result):
+        return [(w['line'], w['code'], w['details'].get('reason')) for w in result['warnings']]
+
+    def test_text_on_either_side_of_a_removed_table_is_never_read_as_one_value(self):
+        # v0.31.0 joined the two sides of a cut, so 2026년 3분기 and 12 34 (each only in a
+        # table) were also found outside the tables: never table-only, never unsupported.
+        note = ('기준 연도 2026년\n' + self.rows(('2026년 3분기', '[[facts]]')) + '3분기 계획은 별도. 보존 12\n'
+                + self.rows(('12 34', '')) + '34일 이후 점검.\n')
+        self.write('notes/facts.md', self.rows(
+            ('2026년 3분기', '[[Other]]'), ('12 34', '[[Other]]'), ('기준 연도 2026년', '[[Other]]'),
+            ('3분기 계획은 별도', '[[Other]]'), ('보존 12', '[[Other]]'), ('34일 이후 점검', '[[Other]]')))
+        listed = [{'line': 3, 'via': ['notes/Other.md']}, {'line': 4, 'via': ['notes/Other.md']}]
+        for front in ('', '---\ntitle: Other\n---\n'):
+            for newline in ('\n', '\r\n', '\r'):
+                with self.subTest(frontmatter=bool(front), newline=repr(newline)):
+                    self.write('notes/Other.md', (front + note).replace('\n', newline))
+                    default, flagged = self.check(), self.check(primary_text_only=True)
+                    # Text right above and right below a cut is still found on its own.
+                    self.assertEqual((default['warnings'], default['rows_supported']), ([], 6))
+                    self.assertEqual((default['ledger_table_only'], flagged['ledger_table_only']), (listed, listed))
+                    self.assertEqual(self.found(flagged), [(3, 'ssot-source-unsupported', 'ledger_table_only'),
+                                                           (4, 'ssot-source-unsupported', 'ledger_table_only')])
+
+    def test_periods_and_their_qualifiers_are_never_read_across_a_removed_table(self):
+        # v0.31.0 read 2026년 above a table and 3분기 below it as 2026년 3분기, and a quarter above
+        # a table with 말에 below it as the quarter's last day (which then marked End).
+        self.write('notes/Year.md', '기준 연도 2026년\n' + self.rows(('24개월', '[[facts]]')) + '3분기 계획은 별도.\n')
+        self.write('notes/End.md', '완공 목표 2026년 3분기\n' + self.rows(('36개월', '[[facts]]')) + '말에 재점검.\n')
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[Year]]'), ('2026년 3분기', '[[End]]')))
+        expected = [{'line': 3, 'normalized_match': 'none'},
+                    {'line': 4, 'normalized_match': 'equal', 'via': ['notes/End.md']}]
+        for options in ({}, {'primary_text_only': True}):
+            with self.subTest(options=options):
+                self.assertEqual(self.check(normalize_periods=True, **options)['normalized_periods'], expected)
+
+    def test_a_self_citation_never_joins_the_text_around_its_own_tables(self):
+        self.write('notes/facts.md', '기준 연도 2026년\n' + self.rows(
+            ('2026년 3분기', '[[#근거]]'), ('기준 연도 2026년', '[[#근거]]'), ('3분기 계획은 별도', '[[#근거]]'))
+            + '3분기 계획은 별도.\n')
+        result = self.check(normalize_periods=True)
+        self.assertEqual(self.found(result), [(4, 'ssot-source-unsupported', None)])
+        self.assertEqual(result['warnings'][0]['details'], {'cited': ['notes/facts.md']})
+        self.assertEqual(result['normalized_periods'][0], {'line': 4, 'normalized_match': 'none'})
+        # The marks never move the frontmatter boundary, which the v0.30.0 order decides once the
+        # tables are cut: a closing '---' right above a table still closes the block, and '---'
+        # right above and right below a table still reads as an empty block.
+        self.write('notes/Tight.md', '---\ntitle: 36개월\n---\n'
+                   + self.rows(('36개월', '[[#근거]]'), ('48개월', '[[#근거]]')) + '메모: 48개월.\n')
+        self.assertEqual(self.found(self.check('notes/Tight.md')), [(6, 'ssot-source-unsupported', None)])
+        self.write('notes/Rule.md', '---\n' + self.rows(('72개월', '[[#근거]]')) + '---\na: 72개월\n---\n본문\n')
+        self.assertEqual(self.found(self.check('notes/Rule.md')), [])
+
+    def test_a_ledger_supporting_a_period_through_its_own_prose_is_not_marked_after_a_cut(self):
+        # The documented v0.31.0 case: L1's text around its table read as 2026년 3분기 once the
+        # tables were left out, so the result grew stronger and L2 dropped out of via.
+        self.write('notes/L1.md', '기준 연도 2026년\n' + self.rows(('24개월', '[[facts]]')) + '3분기 계획은 별도.\n')
+        self.write('notes/L2.md', self.rows(('36개월', '[[facts]]')) + '\n점검 2026.09.15 완료.\n')
+        self.write('notes/facts.md', self.rows(('2026년 3분기', '[[L1]], [[L2]]')))
+        for options in ({}, {'primary_text_only': True}):
+            with self.subTest(options=options):
+                self.assertEqual(self.check(normalize_periods=True, **options)['normalized_periods'],
+                                 [{'line': 3, 'normalized_match': 'contained', 'via': ['notes/L2.md']}])
+        # Documented limit: the table's own first line can still hold a qualifier of the period
+        # above it (a header without a leading pipe that starts with 말). Leaving the table out
+        # then lifts it, the joint comparison grows stronger and L2 is marked again.
+        self.write('notes/L1.md', '기준 연도 2026년 3분기\n말 | subject | relation | value |\n| --- | --- | --- | --- |\n'
+                                  '| x | Atlas | retention | 24개월 |\n')
+        self.assertEqual(self.check(normalize_periods=True)['normalized_periods'], [
+            {'line': 3, 'normalized_match': 'contained', 'via': ['notes/L1.md', 'notes/L2.md'],
+             'via_ledger_table_only': ['notes/L2.md']}])
+        self.assertEqual(self.check(normalize_periods=True, primary_text_only=True)['normalized_periods'],
+                         [{'line': 3, 'normalized_match': 'equal', 'via': ['notes/L1.md']}])
+
+    def test_a_bom_prefixed_ledger_leaves_its_frontmatter_out_of_a_self_citation(self):
+        # v0.31.0 decoded the ledger with its BOM, so the first line was not '---' and the
+        # frontmatter (title 36개월, period 2026년 3분기) supported its self-citations.
+        text = ('---\ntitle: 36개월\nperiod: 2026년 3분기\n---\n## 근거\n세부 값 48개월.\n\n'
+                + self.rows(('36개월', '[[#근거]]'), ('48개월', '[[#근거]]'), ('2026년 3분기', '[[#근거]]')))
+        for newline in ('\n', '\r\n'):
+            for bom in (False, True):
+                with self.subTest(newline=repr(newline), bom=bom):
+                    self.write('notes/facts.md', text.replace('\n', newline), bom=bom)
+                    result = self.check(normalize_periods=True)
+                    self.assertEqual(self.found(result), [(10, 'ssot-source-unsupported', None),
+                                                          (12, 'ssot-source-unsupported', None)])
+                    self.assertEqual(result['normalized_periods'], [{'line': 12, 'normalized_match': 'none'}])
+
+    def test_a_cited_table_reads_alike_with_or_without_frontmatter(self):
+        # parse_ledger breaks lines at CR and LF only. Below frontmatter v0.31.0 rejoined the
+        # body on str.splitlines, which also breaks at each of these marks.
+        def layouts(mark):
+            header = [field + mark if field == 'relation' else field for field in FIELDS]
+            cell = ledger([['Atlas', 'retention', '24개월', '2025-01-01', '', '2026-10-07', '[[facts]]', '', 'confirmed']],
+                          fields=header)
+            pipe = self.rows(('12개월', '[[facts]]'), ('36개월', '[[facts]]')).split('\n')
+            pipe[2] += mark
+            return {'mark in a header cell': ('24개월', cell, True),
+                    'mark after a closing pipe': ('36개월', '\n'.join(pipe), True),
+                    'table-shaped line': ('48개월', '| subject | relation | value |' + mark + '| --- | --- | --- |'
+                                          + mark + '| Atlas | retention | 48개월 |\n', False)}
+        for mark in LINE_MARKS:
+            for name, (value, text, table) in layouts(mark).items():
+                with self.subTest(mark=hex(ord(mark)), layout=name):
+                    self.write('notes/Front.md', '---\ntitle: F\n---\n' + text)
+                    self.write('notes/Bare.md', text)
+                    self.write('notes/facts.md', self.rows((value, '[[Front]]'), (value, '[[Bare]]')))
+                    default, flagged = self.check(), self.check(primary_text_only=True)
+                    listed = [{'line': 3, 'via': ['notes/Front.md']}, {'line': 4, 'via': ['notes/Bare.md']}]
+                    self.assertEqual(default['ledger_table_only'], listed if table else [])
+                    self.assertEqual((default['rows_supported'], flagged['rows_supported']), (2, 0 if table else 2))
+                    self.assertEqual(flagged['ledger_tables_unseparated'], [])
+
+    def test_frontmatter_lines_and_links_break_where_parse_ledger_breaks(self):
+        ls = '\N{LINE SEPARATOR}'
+        # A first line '---' that runs on past U+2028 is one line and opens no frontmatter.
+        self.write('notes/Opener.md', '---' + ls + 'title: x\n본문 72개월\n---\n끝\n')
+        # U+2028 breaks no longer count toward the 64-line frontmatter limit, so this block closes.
+        self.write('notes/Window.md', '---\n' + ('x' + ls) * 70 + 'title: 84개월\n---\n본문\n')
+        # A wiki link that holds U+2028 renders below frontmatter as it does without one.
+        link = '메모 [[Plan' + ls + 'A|보존 60개월]] 확인.\n'
+        self.write('notes/Link.md', '---\ntitle: L\n---\n' + link)
+        self.write('notes/BareLink.md', link)
+        self.write('notes/facts.md', self.rows(('72개월', '[[Opener]]'), ('84개월', '[[Window]]'),
+                                               ('메모 보존 60개월 확인', '[[Link]]'),
+                                               ('메모 보존 60개월 확인', '[[BareLink]]')))
+        result = self.check()
+        self.assertEqual((self.found(result), result['rows_supported']), ([(4, 'ssot-source-unsupported', None)], 3))
+        # A self-citation decides its frontmatter on the same lines.
+        self.write('notes/Self.md', '---' + ls + 'x\n세부 값 77일.\n---\n\n' + self.rows(('77일', '[[#근거]]')))
+        self.assertEqual(self.found(self.check('notes/Self.md')), [])
+
+    def corpus(self):
+        """Write ledgers that cite fact-table notes and ledgers that cite themselves; return their paths.
+
+        Values and periods sit right above and right below fact tables but never span a cut,
+        line-break marks other than CR and LF sit only in prose below a frontmatter block, and
+        no BOM-prefixed ledger cites its own frontmatter.
+        """
+        ls, nel = '\N{LINE SEPARATOR}', '\x85'
+        layouts = (
+            lambda k, table, second: table,
+            lambda k, table, second: (f'메모 {k}2개월 기준. 2026년 3분기 착수.\n{table}'
+                                      f'점검 2026.08.15 완료, {k}3개월 유지.\n'),
+            lambda k, table, second: f'# 근거\n\n메모 {k}2개월.\n\n{table}\n{k}3개월 유지.\n',
+            lambda k, table, second: f'메모 {k}2개월.\n{table}중간 {k}3개월.\n{second}끝.',
+            lambda k, table, second: f'메모 {k}2개월{ls}다음 줄.\n{table}{k}3개월{nel}유지.\n',
+        )
+        paths, number = [], 0
+        for newline, name in (('\n', 'lf'), ('\r\n', 'crlf'), ('\r', 'cr')):
+            facts = []
+            for layout in layouts:
+                for front in (False, True):
+                    for bom in (False, True):
+                        number += 1
+                        k = number
+                        body = layout(k, self.rows((f'{k}1개월', '[[facts]]'), (f'{k}6개월', '')),
+                                      self.rows((f'{k}7개월', '')))
+                        head = f'---\ntitle: N{k}\nkeep: {k}4개월\n---\n' if front else ''
+                        self.write(f'corpus/N{k}.md', (head + body).replace('\n', newline), bom=bom)
+                        # 2026.10.07 is only in the tables' recorded cells (2026-10-07).
+                        facts += [(value, f'[[N{k}]]') for value in (
+                            f'{k}1개월', f'{k}2개월', f'{k}3개월', f'{k}4개월', f'{k}5개월', f'{k}7개월',
+                            '2026년 3분기', '2026.08.15', '2026.10.07')]
+            self.write(f'corpus/facts-{name}.md', self.rows(*facts))
+            paths.append(f'corpus/facts-{name}.md')
+            own = self.rows(*[(value, '[[#근거]]') for value in ('66일', '77일', '88일', '99일', '2026년 3분기')])
+            selves = {
+                'Tight': (f'메모 77일.\n{own}99일 유지. 2026년 3분기 착수.\n', False),
+                'Front': (f'---\ntitle: S\nkeep: 66일\n---\n메모 77일.\n{own}99일 유지.\n', False),
+                'FrontTable': (f'---\ntitle: S\nkeep: 66일\n---\n{own}메모 77일.\n', False),
+                'Quirk': (f'{own}---\n메모: 77일 기준.\n---\n끝 99일.\n', False),
+                'Rule': (f'---\n{own}---\na: 77일\n---\n본문 99일\n', False),
+                'Marks': (f'---\ntitle: S\n---\n메모 77일{ls}다음.\n{own}99일{nel}유지.\n', False),
+                'Bom': (f'메모 77일.\n{own}99일 유지.\n', True),
+                'BomFront': (f'---\ntitle: S\n---\n메모 77일.\n{own}99일 유지.\n', True),
+            }
+            for label, (text, bom) in selves.items():
+                self.write(f'corpus/Self{label}-{name}.md', text.replace('\n', newline), bom=bom)
+                paths.append(f'corpus/Self{label}-{name}.md')
+        return paths
+
+    def test_outputs_equal_the_v0310_helpers_away_from_these_edges(self):
+        golden = json.loads(SUPPORT_GOLDEN.read_text(encoding='utf-8'))
+        for relative, text in golden['files'].items():
+            self.write(relative, text, bom=relative in golden['bom'])
+        paths = ['ledgers/A.md', 'ledgers/B.md', 'ledgers/C.md', *self.corpus()]
+        options = ({}, {'primary_text_only': True}, {'normalize_periods': True},
+                   {'normalize_periods': True, 'primary_text_only': True},
+                   {'normalize_periods': True, 'fiscal_start': 4})
+        listed = marked = 0
+        for path in paths:
+            for option in options:
+                with self.subTest(path=path, options=option):
+                    current = self.check(path, **option)
+                    with mock.patch.multiple(ssot, **V0310_BODY_HELPERS):
+                        former = self.check(path, **option)
+                    self.assertEqual(ssot._encode(current), ssot._encode(former))
+                    listed += len(current['ledger_table_only'])
+                    marked += sum('via_ledger_table_only' in row for row in current.get('normalized_periods', ()))
+        # The corpus reaches the table-only listing and the period marking.
+        self.assertGreater(listed, 0)
+        self.assertGreater(marked, 0)
+        # The oracles do differ at an edge: the cut of the first test above.
+        self.write('notes/Other.md', '기준 연도 2026년\n' + self.rows(('2026년 3분기', '[[edge]]')) + '3분기 계획은 별도.\n')
+        self.write('notes/edge.md', self.rows(('2026년 3분기', '[[Other]]')))
+        with mock.patch.multiple(ssot, **V0310_BODY_HELPERS):
+            self.assertEqual(self.check('notes/edge.md')['ledger_table_only'], [])
+        self.assertEqual(self.check('notes/edge.md')['ledger_table_only'], [{'line': 3, 'via': ['notes/Other.md']}])
 
 
 class DefaultCliRegressionTests(unittest.TestCase):

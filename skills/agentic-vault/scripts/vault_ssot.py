@@ -416,18 +416,34 @@ def _forms(text, *, aliases=False):
     return tuple(dict.fromkeys(form for form in map(_literal, candidates) if form))
 
 
-def _note_body(text):
-    lines = text.splitlines()
+def _split_lines(text):
+    """text split into lines where _line_rows splits a note: at LF, CR and CRLF only.
+
+    str.splitlines also breaks at U+000B, U+000C, U+001C-U+001E, U+0085,
+    U+2028 and U+2029, which parse_ledger keeps inside a line.
+    """
+    return [line.decode('utf-8') for line in text.encode('utf-8').splitlines()]
+
+
+def _note_body(text, marked=None):
+    """The text below a leading frontmatter block, else the whole text.
+
+    The block runs from a first line '---' to the next '---' line within 64
+    lines, on _split_lines lines. marked is text with cut marks inside its
+    lines (_without_tables, same lines): the block is decided on text and the
+    body is taken from marked, so a mark never moves the boundary.
+    """
+    lines = _split_lines(text)
     if lines and lines[0].strip() == '---':
         end = next((i for i, line in enumerate(lines[1:65], 1) if line.strip() == '---'), None)
         if end is not None:
-            return '\n'.join(lines[end + 1:])
-    return text
+            return '\n'.join((lines if marked is None else _split_lines(marked))[end + 1:])
+    return text if marked is None else marked
 
 
-def _body_forms(text):
+def _body_forms(text, marked=None):
     # Bodies add a display-alias form; ledger values never match by alias alone.
-    return _forms(re.sub(r'\\([\\|])', r'\1', _note_body(text)), aliases=True)
+    return _forms(re.sub(r'\\([\\|])', r'\1', _note_body(text, marked)), aliases=True)
 
 
 def _support_pattern(literal):
@@ -615,13 +631,45 @@ def _cited_forms(policy, relative, run):
     return outcome
 
 
+# Literal forms fold every whitespace run to one space (_literal), so a line
+# break alone let the text above a removed fact table and the text below it
+# read as one value. The text before a cut ends with this mark instead: NUL is
+# not whitespace, NFKC and casefold keep it, no ledger value holds it
+# (parse_ledger refuses NUL) and vault_period never reads across it.
+_CUT = '\x00'
+
+
 def _without_tables(raw, parsed):
+    """raw without parsed's fact tables, decoded, with _CUT where a table stood between text.
+
+    A table starts and ends on line boundaries, so the text before it ends
+    with a line break; the mark goes just before that break, which keeps every
+    line of the joined text in place (_self_forms relies on it).
+    """
     pieces, cursor = [], 0
     for table in parsed['tables']:
-        pieces.append(raw[cursor:table['start']])
+        pieces.append(raw[cursor:table['start']].decode('utf-8'))
         cursor = table['end']
-    pieces.append(raw[cursor:])
-    return b''.join(pieces).decode('utf-8')
+    pieces.append(raw[cursor:].decode('utf-8'))
+    text = pieces[0]
+    for piece in pieces[1:]:
+        if text and piece:
+            cut = len(text) - (2 if text.endswith('\r\n') else 1 if text.endswith(('\r', '\n')) else 0)
+            text = text[:cut] + _CUT + text[cut:]
+        text += piece
+    return text
+
+
+def _self_forms(raw, parsed):
+    """Forms of the ledger's own body outside its fact tables, for a self-citation.
+
+    The v0.30.0 order stays: the tables are cut first and the frontmatter is
+    decided on what remains, without the cut marks (the ledger holds no NUL,
+    so removing _CUT gives that text back). A leading BOM is dropped first, as
+    the utf-8-sig read of a cited note drops it.
+    """
+    marked = _without_tables(raw, parsed).removeprefix('\ufeff')
+    return _body_forms(marked.replace(_CUT, ''), marked)
 
 
 def _separate_tables(text):
@@ -635,7 +683,7 @@ def _separate_tables(text):
     NUL) also counts as having no tables, and refusal is that fixed error
     code. The offsets are for body.encode('utf-8'): the read decoded
     utf-8-sig, so slicing the raw bytes of a BOM-prefixed note would cut three
-    bytes too early. The self-citation path keeps its v0.30.0 order.
+    bytes too early. The self-citation path keeps its v0.30.0 order (_self_forms).
     """
     body = _note_body(text)
     try:
@@ -666,6 +714,9 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     supported unless primary_text_only=True, which counts it as unsupported
     with reason 'ledger_table_only'. The rule is structural, not provenance:
     a ledger's prose or a plain note that copies its values still counts.
+    The text above and below a left-out fact table never reads as one value
+    or period (_CUT), and bodies break lines at CR and LF only, as
+    parse_ledger does.
     primary_text_only=True also adds ledger_tables_unseparated: the cited
     notes whose body parse_ledger refuses (path and fixed reason only), whose
     fact tables, if any, could not be left out and so still count.
@@ -731,7 +782,7 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                     if kind == 'self':
                         if self_forms is None:
                             # A row cannot support itself: compare outside the fact tables.
-                            self_forms = _body_forms(_without_tables(raw, parsed))
+                            self_forms = _self_forms(raw, parsed)
                             run['cited'][ledger_path] = dict(path=ledger_path, sha256=info['sha256'], bytes=info['size'])
                         bodies[ledger_path] = self_forms
                         continue
