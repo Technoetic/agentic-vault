@@ -4,8 +4,9 @@ assets/adapters/deny-guard/deny-guard.py is a standalone script that a user
 copies into a vault and runs from a Claude Code PreToolUse hook. These tests
 load it from the plugin assets and give it synthetic hook inputs only, against
 a temporary vault: the decision table per tool, case folding, MSYS paths, a
-junction into a zone, the guard's own controls, and the process contract (exit
-0, only deny or ask and never allow, nothing without CLAUDE_PROJECT_DIR). The
+junction into a zone, the guard's own controls, code inside exempt shell words,
+and the process contract (exit 0, only deny or ask and never allow, nothing
+without CLAUDE_PROJECT_DIR). The
 PowerShell branch is tested twice: with a stand-in for its parser on every
 system, and on Windows with the real ps-parse.ps1 child process. The last
 class pins that the default install does not change: no PreToolUse hook in
@@ -229,6 +230,20 @@ class PathToolDecisionTests(GuardCase):
             ({"file_path": self.path(".Obsidian", "app.json")}, "deny"),
         ])
 
+    def test_macos_folds_the_case_of_the_vault_root(self) -> None:
+        # macOS volumes ignore case by default, but normcase keeps case there and realpath does
+        # not fix it. Both are stood in for, so this runs the macOS comparison on every system.
+        self.assertEqual(self.guard._CASELESS_PATHS, sys.platform == "darwin")
+        upper = str(self.vault).upper() + os.sep + os.path.join("90-ASSETS", "A.PNG")
+        notes = str(self.vault).upper() + os.sep + os.path.join("NOTES", "A.MD")
+        with mock.patch.object(self.guard.os.path, "normcase", lambda path: path), \
+                mock.patch.object(self.guard.os.path, "realpath", lambda path, **_: path):
+            with mock.patch.object(self.guard, "_CASELESS_PATHS", True):
+                self.assertEqual(self.decide("Read", {"file_path": upper}), "deny")
+                self.assertIsNone(self.decide("Read", {"file_path": notes}))
+            with mock.patch.object(self.guard, "_CASELESS_PATHS", False):
+                self.assertIsNone(self.decide("Read", {"file_path": upper}))  # a case-sensitive volume
+
     def test_unrelated_tools_get_no_decision(self) -> None:
         for tool in ("WebFetch", "Task", "MultiEdit", "mcp__x__read"):
             with self.subTest(tool=tool):
@@ -310,6 +325,100 @@ class BashDecisionTests(GuardCase):
     def test_missing_command_asks(self) -> None:
         self.assertEqual(self.decide("Bash", {}), "ask")
         self.assertEqual(self.decide("Bash", {"command": ["cat", "90-assets/a"]}), "ask")
+
+    def test_code_inside_exempt_words_asks(self) -> None:
+        # $(...) and backticks run as commands even inside a word that is exempt as text, a
+        # new folder, a move destination, a commit message or an exclude value.
+        tick = "`"
+        commands = (
+            'echo "$(cat 90-assets/x)" > out.txt', f"echo {tick}cat 90-assets/x{tick} > out.txt",
+            'printf "%s" "$(<90-assets/x)" > o', 'git commit -m "$(cat 10-inbox/_processed/a.md)"',
+            f'git tag -m "{tick}cat 20-knowledge/_archive/k{tick}" v1', 'mkdir "$(cat 90-assets/x)"',
+            'mv notes/a "notes/$(cat 90-assets/x)"', 'grep -r x --exclude-dir="$(cat 90-assets/x)" notes',
+            'echo "$(cat 00-meta/vault-config.json)" > o',  # a guard control
+            # shlex splits these across words or ends them early; the shell does not.
+            'echo "$(cat "x y" 90-assets/z)" > o', f"echo {tick}cat  90-assets/x  {tick} > out.txt",
+            'echo "$(case x in x) cat 90-assets/a;; esac)" > o', 'echo "$(echo ${x%)} ; cat 90-assets/a)" > o',
+            'echo "$(echo x # )\ncat 90-assets/a)" > o', 'mkdir "${X:-$(cat 90-assets/x)}"',
+            "echo $'a" + chr(92) + "'' \"$(cat 90-assets/x)\" > o",  # $'...' ends where the shell ends it
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+        result = self.guard.evaluate({"tool_name": "Bash", "tool_input": {"command": commands[0]}}, str(self.vault))
+        self.assertIsNotNone(result)
+        for literal in ("'90-assets'", "inside $(...), backticks or after a here-document"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, result[1])
+
+    def test_text_around_code_keeps_its_exemption(self) -> None:
+        commit = "git commit -m \"$(cat <<'EOF'\n{}\nEOF\n)\""
+        for command in (
+                'mkdir -p "10-inbox/_processed/$(date +%Y-%m)" && '
+                'mv -n 10-inbox/a.md "10-inbox/_processed/$(date +%Y-%m)/"',
+                'git mv 20-knowledge/a.md "20-knowledge/_archive/$(basename a.md)"',
+                commit.format("Fix (part 1) of the 90-assets check\n\nCo-Authored-By: x <x@example.com>"),
+                commit.format("it's in 10-inbox/_processed/2026-10/"),
+                # Single quotes, $'...' and a backslash keep $( and backticks as text.
+                "printf '%s' '$(cat 90-assets/x)' > notes/a.txt", "echo '`cat 90-assets/x`' > notes/a.txt",
+                "echo $'`cat 90-assets/x`' > notes/a.txt", 'echo "\\$(cat 90-assets/x)" > notes/a.txt'):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+
+    def test_only_the_plain_commit_form_is_text(self) -> None:
+        commit = "git commit -m \"$(cat <<'EOF'\n{}\nEOF\n)\""
+        for command in (
+                commit.format("note `90-assets` text"),  # a backtick in the text
+                commit.format("x $(cat 90-assets/x)"),
+                commit.format("msg\nEOF\ncat 90-assets/x"),  # code after the first delimiter line
+                "git commit -m \"$(cat <<'EOF' 90-assets/x\nmsg\nEOF\n)\"",  # cat reads the file it names
+                "git commit -m \"$(cat <<'EOF'\nmsg 90-assets\nEOF\n)$(cat 90-assets/x)\"",
+                "git commit -m \"$(cat <<EOF\nmsg 90-assets\nEOF\n)\"",  # an unquoted delimiter expands the text
+                # A quote in a here-document is text to the shell but a quote to shlex.
+                "cat <<'EOF'\nmkdir it's\nEOF\ncat 90-assets/x; echo y'"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+
+    def test_echo_into_a_stream_is_not_text_in_a_file(self) -> None:
+        for command in ("cat $(echo 90-assets/x > /dev/stdout)", "(echo 90-assets/x > /dev/stdout) | xargs cat",
+                        "echo 90-assets/x > /dev/fd/1 | xargs cat", "echo 90-assets/x > /proc/self/fd/1 | xargs cat",
+                        'echo 90-assets/x > "$OUT" | xargs cat',
+                        "echo 90-assets/x > f > /dev/stdout | xargs cat"):  # the last redirect wins
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        for command in ("echo 90-assets/ > /dev/null", "echo 90-assets/ >> .gitignore 2>&1",
+                        "echo 90-assets/x > /dev/stdout > f"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+
+    def test_only_value_taking_exclude_options_exempt_a_word(self) -> None:
+        for command in ("rsync -a --delete-excluded 90-assets/ /tmp/out/", "tar -czf o.tgz --exclude-vcs 90-assets",
+                        "tar -czf o.tgz --exclude-vcs-ignores 90-assets", "ls --ignore-backups 90-assets",
+                        "git ls-files --ignored 90-assets",
+                        # After -- and after an option used as a value, the word is an operand.
+                        "tool -- --exclude 90-assets", "tar -czf o.tgz --exclude --exclude 90-assets",
+                        # Other names may read the file they name.
+                        "prettier --ignore-path=90-assets/x notes", "git ls-files --exclude-per-directory=90-assets/x",
+                        "eslint --ignore-pattern 90-assets notes"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        for command in ("rsync -a --exclude '90-assets/' notes/ /tmp/out/", "ag --ignore-dir 90-assets foo",
+                        "ls --ignore=90-assets", "grep -rn foo . --exclude-dir 90-assets"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+
+    def test_git_add_of_a_zone_path_says_how_to_stage_a_moved_file(self) -> None:
+        payload = {"tool_name": "Bash",
+                   "tool_input": {"command": "git add 10-inbox/a.md 10-inbox/_processed/2026-10/a.md"}}
+        decision, reason = self.guard.evaluate(payload, str(self.vault))
+        self.assertEqual(decision, "deny")
+        for literal in ("git add", "'10-inbox/_processed'", "git mv, which stages the move",
+                        "a folder outside the zone"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, reason)
+        self.assertIsNone(self.decide("Bash", {"command": "git add 10-inbox"}))
+        payload["tool_input"]["command"] = "cat 10-inbox/_processed/2026-10/a.md"
+        self.assertNotIn("git mv, which stages", self.guard.evaluate(payload, str(self.vault))[1])
 
 
 class PowerShellDecisionTests(GuardCase):
@@ -765,6 +874,17 @@ class WindowsPathTests(GuardCase):
                          "deny")
         self.assertIsNone(self.decide("Read", {"file_path": msys_form(self.vault / "notes" / "a.md")}))
 
+    def test_msys_vault_root_reads_the_vault_config(self) -> None:
+        # A host or shell may pass CLAUDE_PROJECT_DIR as /c/...; the configured zones still apply.
+        self.write_config({"deny_zones": ["secret"]})
+        payload = {"tool_name": "Read", "tool_input": {"file_path": self.path("notes", "secret", "a.md")}}
+        result = self.guard.evaluate(payload, msys_form(self.vault), self.warnings.append)
+        self.assertIsNotNone(result, self.warnings)
+        self.assertEqual(result[0], "deny")
+        payload["tool_input"]["file_path"] = self.path("90-assets", "a.png")  # not configured here
+        self.assertIsNone(self.guard.evaluate(payload, msys_form(self.vault), self.warnings.append))
+        self.assertEqual(self.warnings, [])
+
     def test_vault_root_case_and_windows_name_forms_are_folded(self) -> None:
         self.assert_table("Read", [
             ({"file_path": str(self.vault).upper() + "\\90-ASSETS\\A.PNG"}, "deny"),
@@ -870,6 +990,16 @@ class ProcessContractTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0)
                 self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "ask")
 
+    @unittest.skipUnless(os.name == "nt", "MSYS paths are a Windows form")
+    def test_msys_project_dir_reads_the_vault_config(self) -> None:
+        (self.vault / "00-meta" / "vault-config.json").write_text(json.dumps({"deny_zones": ["secret"]}),
+                                                                  encoding="utf-8")
+        result = self.run_guard(self.payload("Read", {"file_path": str(self.vault / "secret" / "a.md")}),
+                                vault=msys_form(self.vault))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, b"")  # no fallback to the template zones
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_missing_project_dir_decides_nothing_and_says_so_once(self) -> None:
         stdin = self.payload("Read", {"file_path": str(self.vault / "90-assets" / "a.png")})
         for vault in (None, "", str(self.vault / "missing")):
@@ -970,10 +1100,33 @@ class HookTemplateTests(unittest.TestCase):
                         "fail-open", "allow", "샌드박스", "Codex", "끄기", "지연", "PowerShell", "mv", "mkdir",
                         "vault_paths.zone_matches", "code.claude.com/docs/en/hooks", "shlex",
                         "00-meta/scripts/ps-parse.ps1", "Parser.ParseInput", "Join-Path 90 -assets",
-                        "-EncodedCommand", "5초(`PARSE_TIMEOUT`)", "expandable_strings"):
+                        "-EncodedCommand", "5초(`PARSE_TIMEOUT`)", "expandable_strings",
+                        # Code inside exempt words, the exclude options, the limits found in review.
+                        "**코드는 예외가 아니다:**", "`$(cat <<'EOF'`", "2.7.4 Here-Document", "`/dev/stdout`",
+                        "`--exclude`·`--exclude-dir`·`--ignore`·`--ignore-dir`", "`--exclude-vcs`", "`9?-assets`",
+                        "`90-asset[s]`", "`$'...'`", "`echo 90-assets/x > list; xargs cat < list`",
+                        "`git add 10-inbox`", "`Move-Item`",
+                        "종료 코드 2", "`casefold`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
         self.assertIsNone(re.search(r"\]\((?!https?:)[^)]+\)", text))  # no repository links to keep in sync
+
+    def test_workflow_commands_say_how_to_move_and_stage_with_the_guard_on(self) -> None:
+        # The guard denies Move-Item into a zone and git add of a zone path, which these steps use.
+        def read(rel: str) -> str:
+            return (ROOT / "commands" / rel).read_text(encoding="utf-8")
+
+        inbox = read("vault-process-inbox.md")
+        self.assertIn("deny zone 가드(`00-meta/scripts/deny-guard.py` 훅)를 켠 볼트는 `Move-Item`이 막히므로", inbox)
+        self.assertIn("Bash 도구의 `mv -n`을 쓴다", inbox)
+        session = read("vault-session-end.md")
+        self.assertIn("구역 안 경로를 이름으로 스테이징하면 `deny`된다", session)
+        self.assertIn("구역 밖 상위 폴더(예: `git add 10-inbox`)", session)
+        init = read("vault-init.md")
+        step = init[init.index("## 4-2. deny zone 가드"):init.index("## 5. 권한 병합")]
+        for literal in ("PowerShell `Move-Item`이 막히므로", "`git mv`로 옮기거나 구역 밖 상위 폴더(`git add 10-inbox`)"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, step)
 
 
 class DefaultInstallUnchangedTests(unittest.TestCase):

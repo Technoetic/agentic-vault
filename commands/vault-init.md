@@ -90,6 +90,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
   3. **훅 병합:** `settings-hooks.json`을 보여 주고 JSON을 파싱해 `.claude/settings.local.json`의 `hooks.PreToolUse` 배열에 이 그룹을 추가한다(파일이 없으면 이 내용으로 만든다). 기존 키와 훅은 모두 보존하고, `deny-guard.py`를 부르는 훅이 이미 있으면 건너뛴다. 공유 `.claude/settings.json`에는 넣지 않는다(python 경로가 기기마다 다르다). `matcher`·`"onFailure": "block"`·`${CLAUDE_PROJECT_DIR}` 경로를 고치지 말고 `if` 필터를 더하지 마라. 1에서 실행기를 바꾸기로 했으면 그것만 `command`·`args`에 반영한다. 폴더 동기화를 쓰는 볼트는 local 파일도 다른 기기로 퍼진다는 점을 알린다.
   4. **확인:** 같은 진단을 `--offer-deny-guard` 없이 다시 실행해 `deny_guard.state=installed`, `guard.state`·`parser.state`=`current`, `hook.state=configured`를 확인한다. 끄는 법(`.claude/settings.local.json`에서 `deny-guard.py`를 부르는 그룹을 지운다)과, Claude Code v2.1.295 미만에서는 가드가 충돌하거나 시간을 넘기면 호출이 그대로 진행된다는 점(fail-open)을 한 줄씩 알린다. 훅 반영을 위해 세션 재시작을 권한다(9단계).
 - 이 세션에 훅이 곧바로 적용되면 이후 단계(5단계 권한 병합, 6단계 초기 커밋에서 구역 폴더의 `.gitkeep`을 이름으로 스테이징하는 명령)가 `ask`·`deny`를 받을 수 있다. 우회하지 말고 결과를 그대로 보고한다.
+- 가드를 켜면 엔진 작업 흐름 두 곳이 달라진다는 점을 한 줄로 알린다: `/vault-process-inbox`의 격리 이동은 PowerShell `Move-Item`이 막히므로 Bash 도구의 `mv -n`(이미 추적 중인 파일은 `git mv`)으로 하고, 구역으로 옮긴 파일을 이름으로 스테이징하는 `git add`(`/vault-session-end` 7단계)는 `deny`이므로 `git mv`로 옮기거나 구역 밖 상위 폴더(`git add 10-inbox`)를 스테이징한다. 자세한 것은 `guide.md` 「한계」에 있다.
 
 ## 5. 권한 병합 (사용자 확인 후에만)
 

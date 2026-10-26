@@ -30,9 +30,13 @@ What it checks:
     zone) and guard control names, then shlex words. A literal word that
     resolves into a zone returns deny. Words that name a zone without opening
     it are exempt: a move destination (mv, git mv) or a new folder (mkdir),
-    which the vault rules use to quarantine files, echo or printf text, a git
-    commit or tag message, and exclude patterns. Paths built at run time
-    return ask.
+    which the vault rules use to quarantine files, echo or printf text sent
+    to a file, a git commit or tag message, and the value of an exclude
+    option (--exclude, --exclude-dir, --ignore, --ignore-dir, a '!' glob).
+    Paths built at run time return ask, and so does a zone name inside
+    $(...), backticks or after a here-document (<<), exempt word or not: the
+    shell may run that text. The Claude Code commit form
+    "$(cat <<'EOF' ... EOF)" is text.
   - PowerShell: the same pre-filter (a backtick, PowerShell's escape
     character, does not hide a zone name). Only on a hit, ps-parse.ps1 next
     to this file parses the command in a Windows PowerShell child process
@@ -83,6 +87,7 @@ SHELL_TOOLS = ("Bash", "PowerShell")
 MAX_LABEL = 120
 
 _WINDOWS = os.name == "nt"
+_CASELESS_PATHS = sys.platform == "darwin"  # macOS volumes ignore case unless formatted otherwise
 _MSYS_DRIVE_RE = re.compile(r"^/([A-Za-z])(?=/|$)")
 _DEVICE_PREFIX_RE = re.compile(r"^[\\/]{2}[?.][\\/](?=[A-Za-z]:)")
 _ROOTED_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/~])")
@@ -91,14 +96,26 @@ _RUNTIME_RE = re.compile(r"[$`]")
 _RUNTIME_TEXT_RE = re.compile(r"`|\$\S")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _CONTROL_TEXT_RE = re.compile(r"vault-config\.json|deny-guard\.py|ps-parse\.ps1|\.claude|settings[^\s/\\'\"]*\.json")
-_OPTION_NAME_RE = re.compile(r"--?[a-z][a-z-]*")
 _SHELL_FLAG_RE = re.compile(r"-[a-z]*c")
 
 # Shell operators. shlex merges a run of these characters into one word; a
 # newline is an operator here, so the next line starts a new command.
 _OPERATOR_CHARS = "();<>|&\n"
 _REDIRECTS = frozenset({">", ">>", "<", "<<", "<<<", ">&", "<&", ">|", "<>", "&>", "&>>"})
-_FILE_OUTPUTS = frozenset({">", ">>", ">|", "&>", "&>>"})
+_STDOUT_REDIRECTS = frozenset({">", ">>", ">|", ">&", "&>", "&>>"})
+# Redirect targets that are streams, not files (/dev/null only discards): a
+# pipe or $(...) can read what goes there.
+_STREAM_TARGET_RE = re.compile(r"^/(?:dev/(?!null$)|proc/)")
+# Options whose value (--name=VALUE or the next word) is a pattern of files to
+# leave out. Only these names: a flag such as --exclude-vcs, --ignore-backups or
+# --delete-excluded takes no value, so the word after it stays an operand, and
+# an option that reads a file (--exclude-from, --ignore-file, --ignore-path)
+# opens what it names.
+_EXCLUDE_OPTIONS = frozenset({"--exclude", "--exclude-dir", "--ignore", "--ignore-dir"})
+# The commit form Claude Code writes: git commit -m "$(cat <<'EOF' ... EOF)".
+_HEREDOC_TEXT_RE = re.compile(r"\$\(cat <<[ \t]*'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\n")
+_CLOSE_PAREN_RE = re.compile(r"[ \t]*\)")
+_CASE_RE = re.compile(r"\bcase\b")
 _KEYWORDS = frozenset({"!", "{", "}", "do", "then", "else", "elif", "if", "while", "until", "time"})
 _CD_COMMANDS = frozenset({"cd", "pushd", "popd"})
 _SOURCE_COMMANDS = frozenset({"eval", "source", "."})
@@ -233,6 +250,12 @@ def _deny_shell(zone: str) -> str:
             "the exceptions. To search notes for the zone name, use the Grep tool.")
 
 
+def _deny_git_add(zone: str) -> str:
+    return (f"this git add names a path inside the deny zone '{_label(zone)}' (deny_zones in "
+            f"{CONFIG_REL}). To stage files moved into a zone, move them with git mv, which stages "
+            "the move, or stage a folder outside the zone that holds them.")
+
+
 def _deny_powershell(zone: str) -> str:
     return (f"this PowerShell command names a path inside the deny zone '{_label(zone)}' (deny_zones in "
             f"{CONFIG_REL}). PowerShell commands do not read or change deny zones and have none of the "
@@ -274,6 +297,12 @@ def _fold_part(part: str) -> str:
     if _WINDOWS:
         part = part.split(":", 1)[0].rstrip(" .")
     return part
+
+
+def _fold_path(path: str) -> str:
+    """The form paths are compared in: normcase (case and separators on Windows), and casefold on macOS."""
+    path = os.path.normcase(path)
+    return path.casefold() if _CASELESS_PATHS else path
 
 
 def _relative(path: str, root: str) -> tuple[str, ...] | None:
@@ -382,18 +411,24 @@ def _simple_commands(words: list[str]) -> list[list[tuple[str, str]]]:
 
 
 def _writes_stdout_to_file(simple: list[tuple[str, str]]) -> bool:
-    """True when the command sends its standard output to a file (> f, >> f, &> f).
+    """True when the command's standard output ends in a file (> f, >> f, &> f).
 
     shlex splits 2>f into '2', '>', 'f', so a redirect right after a bare
     descriptor number other than 1 moves another stream and does not count.
+    The last redirect of standard output wins, as in the shell. A stream
+    (/dev/stdout, /dev/fd/1, /proc/self/fd/1, >&2) or a target built at run
+    time is no file: a pipe or $(...) can read what goes there.
     """
-    for index, (_, redirect) in enumerate(simple):
-        if redirect not in _FILE_OUTPUTS:
+    to_file = False
+    for index, (target, redirect) in enumerate(simple):
+        if redirect not in _STDOUT_REDIRECTS:
             continue
         before = simple[index - 1][0] if index else ""
-        if redirect.startswith("&") or not (before.isdigit() and before != "1"):
-            return True
-    return False
+        if not redirect.startswith("&") and before.isdigit() and before != "1":
+            continue  # 2> f moves standard error
+        to_file = not (_STREAM_TARGET_RE.match(target) or _RUNTIME_RE.search(target)
+                       or (redirect == ">&" and (target.isdigit() or target == "-")))
+    return to_file
 
 
 def _head_index(plain: list[str]) -> int:
@@ -438,16 +473,11 @@ def _move_destinations(args: list[str]) -> set[int]:
     return {operands[-1]} if len(operands) >= 2 else set()
 
 
-def _is_exclude_option(word: str) -> bool:
-    """--exclude=X, --exclude-dir X, --ignore X: an option whose value leaves files out.
-
-    Options that read a file (--exclude-from, --ignore-file) or take no value
-    (--exclude-standard, --ignore-case, --no-ignore) do not count.
-    """
-    name = word.split("=", 1)[0].casefold()
-    return (_OPTION_NAME_RE.fullmatch(name) is not None and ("exclude" in name or "ignore" in name)
-            and not name.startswith("--no-")
-            and not any(part in name for part in ("from", "file", "standard", "case")))
+def _git_subcommand(plain: list[str], head_index: int) -> int | None:
+    """Index of the git subcommand (the first word after git that is no option), or None."""
+    if head_index >= len(plain) or _command_name(plain[head_index]) != "git":
+        return None
+    return next((index for index in range(head_index + 1, len(plain)) if not plain[index].startswith("-")), None)
 
 
 def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[int]:
@@ -456,16 +486,26 @@ def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[i
     A move destination (mv, git mv) or a new folder (mkdir) puts files into a
     zone, which the vault rules use to quarantine processed notes. Text that
     echo or printf writes to a file (echo 'zone/' >> .gitignore) and a git
-    commit or tag message are text; echo output that goes to a pipe or into
-    $(...) can become a path, so it stays checked. An exclude option value or
-    a word starting with '!' (rg -g '!zone') leaves the zone out.
+    commit or tag message are text; echo output that goes to a pipe, a stream
+    or into $(...) can become a path, so it stays checked. The value of an
+    option in _EXCLUDE_OPTIONS (--exclude-dir=zone, --exclude-dir zone) or a
+    word starting with '!' (rg -g '!zone') leaves the zone out. Code inside
+    an exempt word ($(...), backticks) is checked on its own (_code_spans).
     """
     exempt: set[int] = set()
     value_next = False
+    options = True
     for index, word in enumerate(plain):
-        if word.startswith("!") or value_next or (_is_exclude_option(word) and "=" in word):
+        if value_next:
+            exempt.add(index)  # the value of --exclude-dir zone
+            value_next = False
+            continue
+        if word == "--":
+            options = False  # what follows is an operand, even --exclude
+        name, has_value = word.split("=", 1)[0], "=" in word
+        if word.startswith("!") or (options and has_value and name in _EXCLUDE_OPTIONS):
             exempt.add(index)
-        value_next = _is_exclude_option(word) and "=" not in word
+        value_next = options and not has_value and name in _EXCLUDE_OPTIONS
     if head_index >= len(plain):
         return exempt
     head = _command_name(plain[head_index])
@@ -477,7 +517,7 @@ def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[i
     elif head in _TEXT_COMMANDS and writes_file:
         exempt.update(range(start, len(plain)))
     elif head == "git":
-        sub = next((index for index in range(start, len(plain)) if not plain[index].startswith("-")), None)
+        sub = _git_subcommand(plain, head_index)
         if sub is not None and plain[sub] == "mv":
             exempt.update(sub + 1 + index for index in _move_destinations(plain[sub + 1:]))
         elif sub is not None and plain[sub] in ("commit", "tag"):
@@ -512,6 +552,123 @@ def _candidates(word: str) -> list[str]:
     if len(word) > 2 and word[0] == "-" and word[1].isalpha():
         candidates.append(word[2:])  # -Ipath
     return [candidate for candidate in candidates if candidate]
+
+
+# -- code inside words ------------------------------------------------------------
+
+def _skip_escaped(text: str, index: int, close: str) -> int:
+    """Index after close, where a backslash escapes the next character (`...` and $'...')."""
+    size = len(text)
+    while index < size:
+        if text[index] == "\\":
+            index += 2
+        elif text[index] == close:
+            return index + 1
+        else:
+            index += 1
+    return size
+
+
+def _heredoc_text_end(text: str, start: int) -> int | None:
+    """Index after the Claude Code commit form at start, or None.
+
+    The form is $(cat <<'EOF', its lines, a line EOF, then ')'. The quoted
+    delimiter makes the lines text that the shell does not expand. Nothing
+    may follow the delimiter on the first line or come between the closing
+    line and ')', and no line may hold $( or a backtick, so a shell that reads
+    the form another way still runs nothing.
+    """
+    match = _HEREDOC_TEXT_RE.match(text, start)
+    if match is None:
+        return None
+    position = match.end()
+    while True:
+        newline = text.find("\n", position)
+        if newline < 0:
+            return None
+        line = text[position:newline]
+        position = newline + 1
+        if line == match.group(1):
+            close = _CLOSE_PAREN_RE.match(text, position)
+            return close.end() if close else None
+        if "$(" in line or "`" in line:
+            return None
+
+
+def _walk(text: str, index: int, spans: list[str] | None, inside: bool) -> int:
+    """Walk shell text from index; record code spans in spans and return where the walk ends.
+
+    Single quotes and $'...' are literal; double quotes keep $( and backticks
+    live. With inside, index starts the body of a $( ... ) and the walk ends
+    after the ')' that closes it. Quotes start over in that body, as in the
+    shell. A body that may hold a ')' of its own (a case pattern, ${...}, a
+    comment, a here-document) runs to the end of the text, so an early ')'
+    never hides code.
+    """
+    start = index
+    size = len(text)
+    depth = 0
+    quoted = False  # inside double quotes
+    while index < size:
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "`":
+            end = _skip_escaped(text, index + 1, "`")
+            if spans is not None:
+                spans.append(text[index:end])
+            index = end
+        elif text.startswith("$(", index):
+            end = _heredoc_text_end(text, index)
+            if end is None:
+                end = _walk(text, index + 2, None, True)
+                if spans is not None:
+                    spans.append(text[index:end])
+            index = end
+        elif char == '"':
+            quoted = not quoted
+            index += 1
+        elif quoted:
+            index += 1
+        elif char == "'":
+            end = text.find("'", index + 1)
+            index = size if end < 0 else end + 1
+        elif text.startswith("$'", index):
+            index = _skip_escaped(text, index + 2, "'")
+        elif text.startswith("<<", index) and not text.startswith("<<<", index):
+            if spans is not None:
+                spans.append(text[index:])  # where the here-document ends is not parsed
+            return size
+        elif inside and (char == "#" or text.startswith("${", index)):
+            return size
+        elif inside and char == "(":
+            depth += 1
+            index += 1
+        elif inside and char == ")":
+            if depth:
+                depth -= 1
+                index += 1
+            elif _CASE_RE.search(text, start, index):
+                return size
+            else:
+                return index + 1
+        else:
+            index += 1
+    return size
+
+
+def _code_spans(command: str) -> list[str]:
+    """Text in a command that the shell may run as code: each $(...) and `...`
+    (quoted or not), and everything after a here-document operator (<<).
+
+    shlex keeps "$(cat zone)" in one word, splits `cat zone` across words and
+    reads quotes in a here-document as quotes, so word exemptions cannot
+    cover this text; Guard.bash checks it on its own. The Claude Code commit
+    form "$(cat <<'EOF' ... EOF)" is text (_heredoc_text_end).
+    """
+    spans: list[str] = []
+    _walk(command, 0, spans, False)
+    return spans
 
 
 # -- PowerShell parser ---------------------------------------------------------
@@ -626,7 +783,7 @@ class Guard:
             real = _DEVICE_PREFIX_RE.sub("", real)
         if real not in roots:
             roots.append(real)
-        self.roots = [os.path.normcase(root) for root in roots]
+        self.roots = [_fold_path(root) for root in roots]
         self.vault_on_unc = any(_is_unc(root) for root in roots)
         self.cwd = given
         if isinstance(cwd, str) and cwd.strip():
@@ -661,7 +818,7 @@ class Guard:
                 paths.append(real)
         views: list[tuple[str, ...]] = []
         for path in paths:
-            folded = os.path.normcase(path)
+            folded = _fold_path(path)
             for root in self.roots:
                 parts = _relative(folded, root)
                 if parts is not None and parts not in views:
@@ -691,7 +848,7 @@ class Guard:
 
     def above_vault(self, location: _Location) -> bool:
         for path in location.paths:
-            folded = os.path.normcase(path)
+            folded = _fold_path(path)
             prefix = folded if folded.endswith(os.sep) else folded + os.sep
             if any(root.startswith(prefix) for root in self.roots):
                 return True
@@ -869,13 +1026,29 @@ class Guard:
             verdicts.append((ASK, _ask_unchecked(None, "matches it with a wildcard")))
         return verdicts
 
+    def code_verdicts(self, command: str) -> list[tuple[str, str]]:
+        """Ask when a zone or control name sits in text the shell may run as code (_code_spans)."""
+        coded: list[str] = []
+        control = False
+        for span in _code_spans(command):
+            named, has_control = self.mentions(span)
+            coded.extend(zone for zone in named if zone not in coded)
+            control = control or has_control
+        if not coded and not control:
+            return []
+        return [(ASK, _ask_unchecked(coded[0] if coded else None,
+                                     "inside $(...), backticks or after a here-document (<<), where the "
+                                     "shell may run it as code"))]
+
     def bash(self, command: str) -> list[tuple[str, str]]:
         verdicts = self.cwd_verdicts()
         zones, controls = self.mentions(command)
         if not zones and not controls:
             return verdicts
+        stripped = _strip_comments(command)
+        verdicts.extend(self.code_verdicts(stripped))
         try:
-            words = _words(_strip_comments(command))
+            words = _words(stripped)
         except ValueError:
             return verdicts + [(ASK, _ask_unchecked(zones[0] if zones else None,
                                                     "cannot be split into words (unbalanced quotes)"))]
@@ -890,12 +1063,16 @@ class Guard:
             head_index = _head_index(plain)
             exempt = _exempt_words(plain, head_index, _writes_stdout_to_file(simple))
             dynamic = dynamic or _builds_at_run_time(plain, head_index)
+            sub = _git_subcommand(plain, head_index)
+            staging = sub is not None and plain[sub] == "add"
             plain_index = 0
             for word, redirect in simple:
                 word_exempt = False
+                deny = _deny_shell
                 if not redirect:
                     word_exempt = plain_index in exempt
                     plain_index += 1
+                    deny = _deny_git_add if staging else _deny_shell
                 folded = word.casefold()
                 named = {zone for zone in zones if zone.split("/")[-1].casefold() in folded}
                 has_control = bool(_CONTROL_TEXT_RE.search(folded))
@@ -907,7 +1084,8 @@ class Guard:
                     live.update(named)
                     control_live = control_live or has_control
                 for candidate in _candidates(word):
-                    verdicts.extend(self.shell_candidate(candidate, exempt=word_exempt, cwd_known=cwd_known))
+                    verdicts.extend(self.shell_candidate(candidate, exempt=word_exempt, cwd_known=cwd_known,
+                                                         deny=deny))
             if head_index < len(plain) and _command_name(plain[head_index]) in _CD_COMMANDS:
                 cwd_known = False
         missing = [zone for zone in zones if zone not in seen]
@@ -995,6 +1173,7 @@ def evaluate(payload: object, vault: str, warn=None) -> tuple[str, str] | None:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return ASK, f"the {tool} input is not a JSON object, so the guard cannot check deny zones."
+    vault = _native(vault)  # an MSYS root (/c/vault) reads the same config as C:/vault
     zones, problem = load_zones(vault)
     if problem is not None and warn is not None:
         warn(f"deny-guard: {problem}; using the template deny zones")
@@ -1025,8 +1204,8 @@ def _warn(message: str) -> None:
 
 
 def main() -> int:
-    vault = os.environ.get("CLAUDE_PROJECT_DIR", "")
-    if not vault.strip() or not os.path.isdir(_native(vault)):
+    vault = _native(os.environ.get("CLAUDE_PROJECT_DIR", ""))
+    if not vault.strip() or not os.path.isdir(vault):
         _warn("deny-guard: CLAUDE_PROJECT_DIR does not name the vault folder; no decision was made")
         return 0
     try:
