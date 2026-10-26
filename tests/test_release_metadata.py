@@ -932,3 +932,147 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("v0.9.0--local.2", readme)
         self.assertNotIn("releases/tag/v0.9.0-local.2", readme)
         self.assertIn("(docs/releases/v0.9.0.md)", readme)
+
+
+# v0.32.0: linear-time heading, frontmatter, code, link and wiki-link parsing (results unchanged), the
+# check-support body edges R10-R12 (the only default verdict changes), the opt-in period-normalization
+# metamorphic suite, gold-removal twins and keyed-token row order, the real-vault sample audit and the
+# opt-in deny-zone guard. Checker-bound files changed, so the note carries both hashes and the v0.31.0
+# upgrade and rollback order. The new hash is CHECKER_SHA256_V0320, a placeholder token until the release
+# host fills in the digest of the final bound files, in the constant and in both documents alike.
+class V0320ReleaseNoteTests(unittest.TestCase):
+    RELEASE_NOTE = REPO_ROOT / "docs" / "releases" / "v0.32.0.md"
+    VERIFICATION = REPO_ROOT / "docs" / "verification" / "v0.32.0.md"
+    NEW_CHECKER_SHA256 = CHECKER_SHA256_V0320
+    SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
+    LITERALS = (
+        # Linear-time parsing: the shared heading helper, the oracle tests and the removed module names.
+        "`_atx_heading`", "`tests/test_linear_line_parsers.py`", "`wikilink_targets`",
+        "`vault_healthcheck.WIKILINK_RE`", "`RULE_HEADING_RE`", "`vault_recall._TITLE_RE`", "`_HEADING_RE`",
+        "`vault_ssot.CODE_SPAN_RE`", "`split_frontmatter`", "1,948,717", "`AGENTIC_VAULT_SLOW_TESTS=1`",
+        "21.15초", "1.4 µs", "48.6초", "0.019초",
+        # check-support body edges R10-R12 and their examples.
+        "R10·R11·R12", "`ledger_table_only`", "`rows_supported_ledger_table_only`", "`--primary-text-only`",
+        "`ssot-source-unsupported`", 'reason: "ledger_table_only"', "`ledger_tables_unseparated`",
+        "`via_ledger_table_only`", "U+2028", "`utf-8-sig`", "NUL", "`기준 연도 2026년`",
+        "`3분기 계획은 별도.`", "`title: 36개월`",
+        # Period normalization: the metamorphic ratchet, the differential test, abstentions and recoveries.
+        "`tests/test_vault_period_metamorphic.py`", "`KNOWN_FAILURES`", "`KNOWN_FAILURE_COUNTS`",
+        "`PeriodDifferentialTests`", "`unittest.expectedFailure`", "`fetch-depth: 0`", "13,547",
+        "561건 중 264건", "74건 중 16건", "1,656건 중 108건", "537·74·864건", "`초과`", "`late 2026Q3`",
+        "`FY2026 & Q3`", "`period_convention`", "CheckList",
+        # Gold-removal twins and keyed-token row order (scripts/evaluate_recall.py).
+        "`--gold-removal-twins`", "`gold_removal_twins`", "`refused_empty_complete`", "`stale_only`",
+        "`returned_candidates`", "`twin_error`", "`twin_error_reason`", "`retrieval_not_ok`",
+        "`search_incomplete`", "`note_scan_incomplete`", "`possibly_still_answerable`", "`operating_point`",
+        "`--redact-row-order token`", 'row_order: "sorted_by_keyed_id_token"', "`--redact-key-file`",
+        "`--redact-ephemeral`", "`diagnostics.temporal`", "arXiv 2610.05348", "26/56", "30/56",
+        # Real-vault sample audit (scripts/real_vault_audit.py, eval_stats).
+        "`scripts/real_vault_audit.py`", "`draw`", "`bound`", "`eval_stats.hypergeometric_upper_bound`",
+        "`sample_sha256`", "`population_sha256`", "`population_verified`", "`confidence_mismatch`",
+        "`sample_mismatch`", "`--population`", "`--confidence`", "`--flagged-true-positives`",
+        "`upper_misses`", "Systematic Reviews 9:273",
+        # Opt-in deny-zone guard and its adapter report.
+        "`assets/adapters/deny-guard/`", "`deny-guard.py`", "`ps-parse.ps1`", "`settings-hooks.json`",
+        "`hooks/hooks.json`", "`.claude/settings.local.json`", "`adapters.deny_guard`",
+        "`--offer-deny-guard`", "`offer_deny_guard`", "`offer_guard_update`", "`review_guard`",
+        "`review_settings`", "`absent`", "`installed`", "`incomplete`", "`needs_review`",
+        "`deny_guard.state`", '`"onFailure": "block"`', "v2.1.295", "fail-open", "`Move-Item`",
+        "`Parser.ParseInput`", "`allow`", "4-2단계",
+        # Cleanup and packaging.
+        "`# v7.0.1`", "`# v7.0.0`", "`ref-version-mismatch`", "`tests/test_supply_chain.py`",
+        "`text eol=lf`", "`skills/agentic-vault/scripts/resources/lint-benign-v1.json`", "`4b31a673…`",
+        "`38efaabd…`", "`scripts/verify_codex_plugin.py`",
+        # Command documents, upgrade, rollback and version surfaces.
+        "`/vault-init`", "`/vault-doctor`", "`/vault-upgrade`", "`/vault-process-inbox`",
+        "`/vault-session-end`", "checker_sha256", "vault_warning_policy.py --certificate",
+        "`invalid_config`", "`ssot_operation_unavailable`", "`--g`·`--go`·`--gold`", "--ref v0.32.0",
+        "engine=0.32.0", "`vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`",
+    )
+    # Statements compared with whitespace runs folded, as for v0.31.0.
+    RELEASE_STATEMENTS = (
+        "경고 승격 인증서의 `checker_sha256`가 바뀐다. 경고를 `fatal`로 올린 볼트는 갱신하거나 되돌리기 전에 "
+        "[아래 순서](#하위호환업그레이드)를 따른다.",
+        "이 세 경우가 이번 버전에서 기본 판정이 바뀌는 유일한 곳이며",
+        "플러그인 훅 정의(`hooks/hooks.json`)도 바꾸지 않는다",
+        "두 방향 확인은 최종 트리에서 다시 실행해 `verification.json`에 남긴다.",
+        "근거는 아래와 같으며 모든 입력에 대한 증명은 아니다",
+        "로컬 전체 시험 2,297개(통과 2,258·환경 제외 38·실패 1)",
+        "이번 릴리스는 이 도구로 실제 볼트를 재지 않았다.",
+        "골드셋만 가진 사람이 위치로 행을 맞추는 일만 막을 뿐 익명화가 아니다.",
+        "실제 Claude Code 세션 안에서 훅으로 실행해 확인하지 않았다",
+        "수정 커밋은 수정한 쪽이 시험과 수정 전 커밋에서의 실패로 확인했으며 따로 다시 검토하지 않았다.",
+    )
+    VERIFICATION_STATEMENTS = (
+        "Pending gates are not passes.",
+        "2,297 tests, 1 failure, 38 skipped",
+        "Not run as a hook inside a live Claude Code session",
+        "installed resources verified, including `vault_adapters.py`, `deny-guard.py` and `ps-parse.ps1`",
+    )
+
+    def test_v0320_release_note_covers_the_contract(self) -> None:
+        self.assertTrue(self.RELEASE_NOTE.is_file())
+        self.assertTrue(self.VERIFICATION.is_file())
+        release = self.RELEASE_NOTE.read_text(encoding="utf-8")
+        for section in self.SECTIONS:
+            with self.subTest(section=section):
+                self.assertIn(section, release)
+        for literal in self.LITERALS:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        folded = _folded(release)
+        for statement in self.RELEASE_STATEMENTS:
+            with self.subTest(statement=statement):
+                self.assertIn(statement, folded)
+
+    def test_v0320_upgrade_and_rollback_order_is_the_v0310_order(self) -> None:
+        # The same engine copies, the same rollback rule and the same four consecutive steps.
+        release = self.RELEASE_NOTE.read_text(encoding="utf-8")
+        self.assertIn(V0310_UPGRADE_ORDER_LEAD, _folded(release))
+        lines = release.splitlines()
+        self.assertIn(V0310_UPGRADE_STEPS[0], lines)
+        start = lines.index(V0310_UPGRADE_STEPS[0])
+        self.assertEqual(tuple(lines[start:start + len(V0310_UPGRADE_STEPS)]), V0310_UPGRADE_STEPS)
+
+    def test_v0320_states_both_checker_hashes(self) -> None:
+        release = self.RELEASE_NOTE.read_text(encoding="utf-8")
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertIn(f"v0.31.0의 `{CHECKER_SHA256_V0310}`에서 `{self.NEW_CHECKER_SHA256}`로 바뀐다",
+                      _folded(release))
+        self.assertIn(f"`{CHECKER_SHA256_V0310}` in v0.31.0, `{self.NEW_CHECKER_SHA256}` in v0.32.0",
+                      _folded(record))
+        # One statement of the new hash in each document, so a stale second statement fails too.
+        for name, text in (("release note", release), ("verification", record)):
+            with self.subTest(document=name):
+                self.assertEqual(text.count(self.NEW_CHECKER_SHA256), 1)
+                self.assertIn(CHECKER_SHA256_V0310, text)
+
+    def test_v0320_verification_record_separates_evidence_from_gates(self) -> None:
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        for heading in ("## Implementation evidence", "## Final release gates", "## Limits"):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, record)
+        folded = _folded(record)
+        for statement in self.VERIFICATION_STATEMENTS:
+            with self.subTest(statement=statement):
+                self.assertIn(statement, folded)
+
+    def test_v0320_documents_link_to_existing_files(self) -> None:
+        import re
+        from urllib.parse import unquote
+
+        for document in (self.RELEASE_NOTE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            for target in re.findall(r"\]\(([^)\s]+)\)", text):
+                if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                with self.subTest(document=document.name, target=target):
+                    self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
+
+    def test_v0320_rule_templates_keep_their_stamps(self) -> None:
+        # Rule template content did not change, so no rule stamp moves to 0.32.0.
+        for template in sorted(BROWSER_RULE.parent.glob("vault-*.md")):
+            with self.subTest(rule=template.name):
+                stamp = template.read_text(encoding="utf-8").splitlines()[0]
+                self.assertIn("agentic-vault:rule engine=", stamp)
+                self.assertNotIn("engine=0.32.0", stamp)
