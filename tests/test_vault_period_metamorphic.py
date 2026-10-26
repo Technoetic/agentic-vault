@@ -8,7 +8,7 @@ outputs with each other, so no gold labels are needed. vault_period's comparison
 none < contained < equal and abstaining is always safe, so here:
 
 - DIR: a narrowing word after a period (listed or not), an English prefix before it, or a list item
-  in a period unit after it (also one that looks like a count: 10.09 시행, 2027 시점, 4개 분기, 3만 년)
+  in a period unit after it (also one that looks like a count: 10.09 시행, 2027 시점, 4개 분기, 4개의 분기, 3만 년)
   never leaves the whole period to compare, and a mark between two fiscal years with only whitespace
   beside it leaves neither year whole. Day forms are left out of the narrowing relations: a time
   inside a day does not narrow it at day granularity (a declared convention, not a proven property).
@@ -85,9 +85,11 @@ NOT_ITEMS = ('10:00', '14:30 회의', '120억', '3만 개', '5천 원', '3개 �
 # separator after one.
 PERIOD_ITEMS = ('10.09', '9월 5일', '12월', '2주', '3일', '4분기', 'Q2', 'H2', '2027년', '3개월', '2차 연도')
 # Items that look like a count: a word that starts with a unit syllable (시행, 개최, 만료, 차례, 시점), a
-# number written as a day or a year before a count unit, and a count of periods (4개 분기, 3만 년).
+# number written as a day or a year before a count unit, and a count of periods (4개 분기, 3만 년), also
+# with a particle between (4개의 분기).
 COUNT_LIKE_ITEMS = ('10.09 시행', '10.09 개최', '10.09 만료', '10.09 차례', '09 개최', '10.09만', '10.09 건', '2027 시점',
-                    '2027만', '2026.5만', '4개 분기', '2개 반기', '3개 주', '3개년 평균', '3개 년도', '3만 년', '3천 일', '3개일년')
+                    '2027만', '2026.5만', '4개 분기', '2개 반기', '3개 주', '3개년 평균', '3개 년도', '3만 년', '3천 일', '3개일년',
+                    '4개의 분기', '3개의 달', '2차의 연도', '3천의 일')
 ITEMS_BEFORE = ('', '10:00, ', '3개 신규 고객, ', '10:00~', '120억 ')
 
 # INV: joiners between a fiscal year and a Q or H mark, in both orders, at fiscal_start 4.
@@ -97,8 +99,10 @@ FY_H2 = (D(2026, 10, 1), D(2027, 4, 1))
 # Each mark with the interval of its canonical form (FY2026 Q3, FY2026 하반기).
 JOIN_MARKS = (('Q3', FY_Q3), ('3분기', FY_Q3), ('3Q', FY_Q3), ('하반기', FY_H2), ('H2', FY_H2), ('2H', FY_H2))
 WORD_CONNECTORS = (' 중 ', ' 기준 ', ', 그리고 ')
+# ㆍ and ᆞ (the form NFKC gives ㆍ) are letters to the regex engine, unlike · and ・.
 CONNECTORS = (' ', '\t', '', '  ', '\n', chr(0xA0), chr(0x3000), chr(0x200B), '/', ' / ', ', ', '.', '. ', ': ', '_',
-              '-', ' - ', '(', ' (', '·', '의 ', ' 의 ', '&', ' & ', '[', ' [', '+', ' + ', '|', ' | ', ';', '; ', '>',
+              '-', ' - ', '(', ' (', '·', '\N{HANGUL LETTER ARAEA}', ' \N{HANGUL LETTER ARAEA} ',
+              '\N{HANGUL JUNGSEONG ARAEA}', '의 ', ' 의 ', '&', ' & ', '[', ' [', '+', ' + ', '|', ' | ', ';', '; ', '>',
               ' > ', '\N{EM DASH}', ' \N{EM DASH} ', '~', ' ~ ', '#', '*', ' 및 ', '과 ', '와 ') + WORD_CONNECTORS
 
 # DIR: two fiscal years with a mark between them and only whitespace or a format character beside
@@ -223,9 +227,9 @@ KNOWN_FAILURES = {
 }
 # Generated and failing cases per relation, measured 2026-10-27 (v0.31.0 failed the number in each comment).
 CASE_COUNTS = {
-    'dir_listed_narrowing': 1419, 'dir_unlisted_narrowing': 561, 'dir_english_prefix': 77, 'dir_period_list_item': 8120,
+    'dir_listed_narrowing': 1419, 'dir_unlisted_narrowing': 561, 'dir_english_prefix': 77, 'dir_period_list_item': 9240,
     'dir_mark_between_fiscal_years': 74, 'inv_neutral_follower': 592, 'inv_not_a_list_item': 1008,
-    'inv_fiscal_joiner': 1656, 'inv_fiscal_year_order': 40,
+    'inv_fiscal_joiner': 1764, 'inv_fiscal_year_order': 40,
 }
 KNOWN_FAILURE_COUNTS = {
     'dir_listed_narrowing': 0,  # 0
@@ -335,7 +339,12 @@ RECOVERED_EXISTING = {'2026.10.07 / 14:00': '2026.10.07', '2026.10.07(수), 09:3
                       '2026년 3분기, 1,200억 원': '2026년 3분기', '2026년 3분기와 12명': '2026년 3분기',
                       '2026년 3분기, 120억, 3개 신규 고객': '2026년 3분기',
                       '2026.10.07, 10:00, 2026.10.09': '2026.10.07, 2026.10.09',
-                      '2026년 3분기, 1억 2천만 원': '2026년 3분기', '2026년 3분기, 12명이 참석': '2026년 3분기'}
+                      '2026년 3분기, 1억 2천만 원': '2026년 3분기', '2026년 3분기, 12명이 참석': '2026년 3분기',
+                      '2026년 3분기, 3천의 일자리': '2026년 3분기',
+                      # The list check stops at a NUL (a removed table): a day or period word below it never
+                      # decides the count above it.
+                      '2026년 3분기, 120억\x00\n10.09': '2026년 3분기', '2026.10.07, 10:00\x00, 10.09': '2026.10.07',
+                      '2026년 3분기, 4개\x00 분기': '2026년 3분기'}
 
 
 def released_period():

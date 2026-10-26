@@ -958,8 +958,8 @@ class V0320ReleaseNoteTests(unittest.TestCase):
         "`3분기 계획은 별도.`", "`title: 36개월`",
         # Period normalization: the metamorphic ratchet, the differential test, abstentions and recoveries.
         "`tests/test_vault_period_metamorphic.py`", "`KNOWN_FAILURES`", "`KNOWN_FAILURE_COUNTS`",
-        "`PeriodDifferentialTests`", "`unittest.expectedFailure`", "`fetch-depth: 0`", "13,547",
-        "561건 중 264건", "74건 중 16건", "1,656건 중 108건", "537·74·864건", "`초과`", "`late 2026Q3`",
+        "`PeriodDifferentialTests`", "`unittest.expectedFailure`", "`fetch-depth: 0`", "14,775",
+        "561건 중 264건", "74건 중 16건", "1,764건 중 108건", "537·74·864건", "`초과`", "`late 2026Q3`",
         "`FY2026 & Q3`", "`period_convention`", "CheckList",
         # Gold-removal twins and keyed-token row order (scripts/evaluate_recall.py).
         "`--gold-removal-twins`", "`gold_removal_twins`", "`refused_empty_complete`", "`stale_only`",

@@ -1565,6 +1565,23 @@ class BodyEdgeSupportTests(unittest.TestCase):
             with self.subTest(options=options):
                 self.assertEqual(self.check(normalize_periods=True, **options)['normalized_periods'], expected)
 
+    def test_a_fiscal_year_and_a_mark_are_never_joined_across_a_removed_table(self):
+        # The fiscal-year joiner of vault_period once took the cut mark as a joiner: FY2026 above a table
+        # and Q3 or 1·2분기 below it (or Q3 above and FY2026 below) abstained once the tables were left
+        # out, so --primary-text-only gave none and the default run marked the note via_ledger_table_only.
+        self.write('notes/Above.md', '사업 계획 FY2026\n' + self.rows(('24개월', '[[facts]]')) + 'Q3 일정은 별도.\n')
+        self.write('notes/Below.md', '일정 Q3\n' + self.rows(('36개월', '[[facts]]')) + 'FY2026 사업 계획.\n')
+        self.write('notes/List.md', '사업 계획 FY2026\n' + self.rows(('48개월', '[[facts]]')) + '1·2분기 실적은 별도.\n')
+        self.write('notes/Plain.md', '사업 계획 FY2026\n' + self.rows(('60개월', '[[facts]]')))
+        self.write('notes/facts.md', self.rows(('FY2026', '[[Above]]'), ('FY2026', '[[Below]]'), ('FY2026', '[[List]]'),
+                                               ('FY2026', '[[Plain]]')))
+        expected = [{'line': line, 'normalized_match': 'equal', 'via': [f'notes/{name}.md']}
+                    for line, name in ((3, 'Above'), (4, 'Below'), (5, 'List'), (6, 'Plain'))]
+        for options in ({}, {'primary_text_only': True}):
+            with self.subTest(options=options):
+                self.assertEqual(self.check(normalize_periods=True, fiscal_start=4, **options)['normalized_periods'],
+                                 expected)
+
     def test_a_self_citation_never_joins_the_text_around_its_own_tables(self):
         self.write('notes/facts.md', '기준 연도 2026년\n' + self.rows(
             ('2026년 3분기', '[[#근거]]'), ('기준 연도 2026년', '[[#근거]]'), ('3분기 계획은 별도', '[[#근거]]'))

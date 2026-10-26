@@ -51,24 +51,24 @@ Conventions declared here, not taken from a standard:
   FY2026 3분기 or FY2026 하반기 with at most one space or tab between (FY2026
   H1, FY2026 3Q, FY2026/Q3, FY2026의 Q3, FY2026 Q 3, FY2026 Q5, FY2026 5분기,
   FY2026 Q3Q4).
-  Any run of whitespace, punctuation, symbols and format characters, with at
-  most one 의, 및, 과 or 와 in it, may join such a mark to the fiscal year
-  (FY2026/Q3, FY2026 & Q3, FY2026 [Q3], Q3 및 FY2026). Between two fiscal
-  years, a mark goes with the later one when a mark before the later year,
-  joined to it by a whitespace run, /, ',', '.', ':', _, -, (, a middle dot
-  or 의, starts at it or inside it (FY2025, Q1 FY2026 and FY2025 Q 1Q FY2026:
-  the earlier year is read as written and the later one abstains); a wider
-  joiner never moves a mark away from the earlier year. It stays with the
-  earlier year when that year reads it (FY2025 Q4 FY2026), when it is H1-H4,
-  1Q-4Q or 1H-4H right after the earlier year or after one space or tab
-  (FY2025 H1 FY2026), and when no mark before the later year starts in it
-  (FY2025Q5 FY2026, a mark on the digits). A whole fiscal year with only
-  whitespace or format characters between it and a mark the other fiscal
-  year reads abstains with period_qualifier, since the mark may be either
-  year's: FY2025 Q4 FY2026 reads FY2025 Q4 and abstains on FY2026, and
-  FY2025  H1 FY2026 (two spaces) abstains on both. So does a fiscal year
-  joined to a list of quarters or halves as a mark would be (FY2026 1·2분기,
-  1·2분기 FY2026, FY2026, 상·하반기).
+  Any run of whitespace, punctuation, symbols, format characters and middle
+  dots (· ㆍ ᆞ ・), with at most one 의, 및, 과 or 와 in it, may join such a
+  mark to the fiscal year (FY2026/Q3, FY2026 & Q3, FY2026 [Q3], FY2026ㆍQ3, Q3
+  및 FY2026). Between two fiscal years, a mark goes with the later one when a
+  mark before the later year, joined to it by a whitespace run, /, ',', '.',
+  ':', _, -, (, a middle dot or 의, starts at it or inside it (FY2025, Q1
+  FY2026 and FY2025 Q 1Q FY2026: the earlier year is read as written and the
+  later one abstains); a wider joiner never moves a mark away from the earlier
+  year. It stays with the earlier year when that year reads it (FY2025 Q4
+  FY2026), when it is H1-H4, 1Q-4Q or 1H-4H right after the earlier year or
+  after one space or tab (FY2025 H1 FY2026), and when no mark before the later
+  year starts in it (FY2025Q5 FY2026, a mark on the digits). A whole fiscal
+  year with only whitespace or format characters between it and a mark the
+  other fiscal year reads abstains with period_qualifier, since the mark may be
+  either year's: FY2025 Q4 FY2026 reads FY2025 Q4 and abstains on FY2026, and
+  FY2025  H1 FY2026 (two spaces) abstains on both. So does a fiscal year joined
+  to a list of quarters or halves as a mark would be (FY2026 1·2분기, 1·2분기
+  FY2026, FY2026, 상·하반기).
   A word outside these lists is not recognised, so the value is still
   compared as the whole period (2026년 3분기 늦게, 2026년 3분기 종반); 중, 내
   and 동안 alone keep it whole as well. The known failures of these lists are
@@ -92,26 +92,26 @@ Conventions declared here, not taken from a standard:
   2026.03.05, 09.05), a multiple_periods record is added after it, unless
   that number and every other number or Q or H mark before the next period
   is a time (10:00) or a count (2026년 3분기, 120억; 2026.10.07, 1차 납품).
-  A count is a number in 억, 만 or 천 (also chained: 3만 5천 원), 원, 개,
-  명, 건, 차, 시, % or 공장 whose unit ends the word (no letter or digit
-  follows it, format characters skipped, or one of the particles 에, 까지,
-  부터, 의, 으로, 로, 경, 쯤, 께, 기준, 현재, 은, 는, 이, 가, 도, 엔, 과,
-  와, 을, 를 or 만 does, never 일) and is not followed by a period word: one
-  that starts with 년, 연도, 연간, 개월, 개년, 분기, 반기, 학기, 세기, 시즌,
-  시간, 기간, 회계 or 사업 연도, or the word 월, 일, 주, 날, 달 or 해, also
-  with 간, 차 or 째. So 10.09 시행, 2027 시점, 3개월, 3개년, 3개일, 2시즌,
-  15%p, 4개 분기, 3만 년, 3개 주 and 2차 연도 are not counts. Nor is a
-  number with a leading zero (09), a comma group of other than three digits
-  or more than one point, or one shaped like a day (M.D with M 1-12 and D
-  1-31: 10.09, 1.5) or a year (an integer part of 1900-2099 without a
-  comma: 2027, 2026.5). A number written as a day, month, year, quarter,
-  week, Q or H mark is therefore never let through (2026.10.07, 10:00,
-  10.09 and 2026.10.07, 10:00~10.09 abstain), but the unit alone decides:
-  9만 is a count even where it means only the 9th, and a period written
-  without digits (2026.10.07, 10시부터 일주일) is not read, as anywhere
-  else. So the value is never compared by one end or by the first item of
-  these forms; no year is copied from the other end. A list whose earlier
-  item no row reads (09.05, 2026.03.05) is not recognised.
+  A count is a number in 억, 만 or 천 (also chained: 3만 5천 원), 원, 개, 명,
+  건, 차, 시, % or 공장 whose unit ends the word (no letter or digit follows
+  it, format characters skipped, or one of the particles 에, 까지, 부터, 의,
+  으로, 로, 경, 쯤, 께, 기준, 현재, 은, 는, 이, 가, 도, 엔, 과, 와, 을, 를 or
+  만 does, never 일) and is not followed by a period word, directly or after
+  that particle: one that starts with 년, 연도, 연간, 개월, 개년, 분기, 반기,
+  학기, 세기, 시즌, 시간, 기간, 회계 or 사업 연도, or the word 월, 일, 주, 날,
+  달 or 해, also with 간, 차 or 째. So 10.09 시행, 2027 시점, 3개월, 3개년,
+  3개일, 2시즌, 15%p, 4개 분기, 4개의 분기, 3만 년, 3개 주 and 2차 연도 are not
+  counts. Nor is a number with a leading zero (09), a comma group of other than
+  three digits or more than one point, or one shaped like a day (M.D with M
+  1-12 and D 1-31: 10.09, 1.5) or a year (an integer part of 1900-2099 without
+  a comma: 2027, 2026.5). A number written as a day, month, year, quarter,
+  week, Q or H mark is therefore never let through (2026.10.07, 10:00, 10.09
+  and 2026.10.07, 10:00~10.09 abstain), but the unit alone decides: 9만 is a
+  count even where it means only the 9th, and a period written without digits
+  (2026.10.07, 10시부터 일주일) is not read, as anywhere else. So the value is
+  never compared by one end or by the first item of these forms; no year is
+  copied from the other end. A list whose earlier item no row reads (09.05,
+  2026.03.05) is not recognised.
 - The table reads one space or tab where it allows a gap, while the checks
   that make a record abstain (qualifiers, counts, Q or H marks beside a
   fiscal year, range marks and list separators) take any whitespace run and
@@ -119,6 +119,8 @@ Conventions declared here, not taken from a standard:
   U+00AD and U+FEFF). So FY2026  Q3 with two spaces abstains, and 말 after a
   format character is a qualifier, not the last day. vault_ssot passes forms
   with every whitespace run collapsed to one space.
+- No check reads across a NUL, the mark vault_ssot leaves where it removed a
+  fact table: the text on either side of it reads as each side alone.
 """
 from __future__ import annotations
 
@@ -221,10 +223,13 @@ _QUARTER_WORD = (r'(?:제' + _GAP + r')?[0-9]{1,2}(?:' + _GAP + r'/' + _GAP + r'
 _MARK = (r'(?=[QqHh0-9제상하])(?P<marker>' + _EDGE + r'(?:' + _QH + r'|' + _QUARTER_WORD + r')'
          + r'|(?<![가-힣])[상하]' + _GAP + r'반기)')
 # A joiner: any run of characters other than letters and digits (whitespace,
-# punctuation, symbols, format characters: FY2026 & Q3, FY2026 [Q3]) with at
-# most one 의, 및, 과 or 와 in it (Q3 및 FY2026). A mark it joins is not
-# computed, so a wider joiner only abstains more.
-_MARK_JOIN = r'[\W_]*(?:(?:의|및|과|와)[\W_]*)?'
+# punctuation, symbols, format characters: FY2026 & Q3, FY2026 [Q3]) or of the
+# middle dots (ㆍ and ᆞ are letters to the regex engine), with at most one 의,
+# 및, 과 or 와 in it (Q3 및 FY2026). A mark it joins is not computed, so a wider
+# joiner only abstains more. NUL never joins: vault_ssot leaves it where it
+# removed a fact table, and no check reads across it.
+_JOIN_CHAR = r'(?:(?!\x00)[\W_' + _DOTS + r'])'
+_MARK_JOIN = _JOIN_CHAR + r'*(?:(?:의|및|과|와)' + _JOIN_CHAR + r'*)?'
 # The hand-off between two fiscal years (_scan) reads only these joiners, so a
 # mark joined to the later year by another one (FY2025, Q1 & FY2026) stays with
 # the earlier year and never leaves it to be read whole.
@@ -271,11 +276,15 @@ _COUNT = re.compile(r'(?:' + _AMOUNT + r'(?:' + _GAP + _AMOUNT + r')*(?:' + _GAP
 _UNIT_PARTICLE = r'(?:에|까지|부터|의|으로|로|경|쯤|께|기준|현재|은|는|이|가|도|엔|과|와|을|를|만)'
 _UNIT_END = r'(?:(?![' + _CF + r']*[^\W_])|(?=[' + _CF + r']*' + _UNIT_PARTICLE + r'))'
 _TIME_END = re.compile(_UNIT_END)
-# A period word after a count makes it a number of periods, not a count
-# (4개 분기, 2개 반기, 3개 주, 3개 년도, 3만 년, 3천 일, 2차 연도, 1차 시즌).
+# A period word after a count, directly or after its particle, makes it a
+# number of periods, not a count (4개 분기, 4개의 분기, 2개 반기, 3개 주, 3개 년도,
+# 3만 년, 3천 일, 3천의 일, 2차 연도, 1차 시즌). The two lookaheads stay apart: a
+# format-character run before an optional particle would overlap _GAP and make
+# the check quadratic in that run.
 _PERIOD_WORD = (r'(?:년|연[도간]|개[년월]|분기|반기|학기|세기|시즌|시간|기간|회계|사업' + _GAP + r'연도'
                 r'|[월일주달해날](?:간|차|째)?' + _WORD_END + r')')
-_COUNT_END = re.compile(_UNIT_END + r'(?!' + _GAP + _PERIOD_WORD + r')')
+_COUNT_END = re.compile(_UNIT_END + r'(?!' + _GAP + _PERIOD_WORD + r')(?![' + _CF + r']*' + _UNIT_PARTICLE + _GAP
+                        + _PERIOD_WORD + r')')
 # The next number or Q or H mark after a time or a count.
 _NUMBER_TOKEN = re.compile(r'(?<![0-9])[0-9]|(?<![A-Za-z])[QqHh]' + _GAP + r'[0-9]')
 _RANGE_BEFORE = re.compile(r'[0-9](?:[.일]|' + _GAP + r'[월년]도?)?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'\Z')
@@ -484,7 +493,12 @@ def _counts_only(text, start, limit):
     3분기, 120억 is a period and a count, while 2026.10.07, 10:00, 10.09 and
     2026.10.07, 10:00~10.09 go on with a day. Each number is read once, from
     where the time or count before it ends, so the scan is linear in the text.
+    The scan stops at a NUL (a removed fact table): a number below it never
+    decides the item above it.
     """
+    cut = text.find('\x00', start, limit)
+    if cut >= 0:
+        limit = cut
     position = start
     while True:
         found, ending = _TIME.match(text, position, limit), _TIME_END
