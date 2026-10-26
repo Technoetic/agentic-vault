@@ -26,17 +26,24 @@ What it checks:
   - Glob: path and pattern. Grep: path and glob (its pattern is the text to
     find, not a path). A search without a path starts in the working
     directory and may walk through a zone; that is not denied.
-  - Bash: a raw-text pre-filter for zone names (the last segment of each
-    zone) and guard control names, then shlex words. A literal word that
-    resolves into a zone returns deny. Words that name a zone without opening
-    it are exempt: a move destination (mv, git mv) or a new folder (mkdir),
-    which the vault rules use to quarantine files, echo or printf text sent
-    to a file, a git commit or tag message, and the value of an exclude
-    option (--exclude, --exclude-dir, --ignore, --ignore-dir, a '!' glob).
-    Paths built at run time return ask, and so does a zone name inside
-    $(...), backticks or after a here-document (<<), exempt word or not: the
-    shell may run that text. The Claude Code commit form
-    "$(cat <<'EOF' ... EOF)" is text.
+  - Bash, and Monitor, whose command runs in the Bash tool's shell (a
+    WebSocket watch, ws without a command, runs nothing: no decision): a
+    raw-text pre-filter for zone names (the last segment of each zone), guard
+    control names and, on Windows, 8.3 short names that can stand for them
+    (90-ASS~1), then shlex words. A literal word that resolves into a zone
+    returns deny. The text after a ':' is a path too (git REV:PATH, :PATH,
+    :N:PATH, pathspec magic such as :/PATH, host:PATH), checked from the
+    working directory, the vault root and the repository root. Words that
+    name a zone without opening it are exempt: the destination of a move
+    that keeps existing files (mv -n or --no-clobber, git mv without -f) or a
+    new folder (mkdir), which the vault rules use to quarantine files, echo or
+    printf text sent to a file, a git commit or tag message, and the value of
+    an exclude option (--exclude, --exclude-dir, --ignore-dir, --ignore=VALUE,
+    --ignore VALUE only for ls and ag, a '!' glob). A move into a zone that may
+    replace a file there returns ask. Paths built at run time return ask, and
+    so does a zone name inside $(...), backticks or after a here-document
+    (<<), exempt word or not: the shell may run that text. The Claude Code
+    commit form "$(cat <<'EOF' ... EOF)" is text.
   - PowerShell: the same pre-filter (a backtick, PowerShell's escape
     character, does not hide a zone name). Only on a hit, ps-parse.ps1 next
     to this file parses the command in a Windows PowerShell child process
@@ -50,12 +57,13 @@ What it checks:
     (Set-Location, cd), or a zone name that is no literal path returns ask.
     PowerShell has none of the Bash exceptions.
   - Edit, Write and NotebookEdit on the guard's own controls
-    (00-meta/vault-config.json, .claude/settings*.json, this script and
-    ps-parse.ps1), and shell words that name them, return ask.
+    (00-meta/vault-config.json, the .claude folder and .claude/settings*.json,
+    this script and ps-parse.ps1), and shell words that name them, return ask.
 
 A guard, not a sandbox: it does not see files that a started program opens by
 itself, paths assembled at run time that never spell a zone name, searches
-that start above a zone, or a junction swapped after the check.
+that start above a zone, a junction swapped after the check, or tools that its
+hook matcher leaves out.
 """
 from __future__ import annotations
 
@@ -83,7 +91,8 @@ PARSE_TIMEOUT = 5.0  # seconds for the PowerShell parser child; the hook allows 
 CONTROL_NAMES = ("settings.json", "settings.local.json", "vault-config.json", "deny-guard.py", "ps-parse.ps1")
 PATH_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
-SHELL_TOOLS = ("Bash", "PowerShell")
+# Monitor runs its command in the Bash tool's shell, under Bash permission rules (Claude Code tools reference).
+SHELL_TOOLS = ("Bash", "PowerShell", "Monitor")
 MAX_LABEL = 120
 
 _WINDOWS = os.name == "nt"
@@ -95,8 +104,20 @@ _WILDCARD_RE = re.compile(r"[*?\[{]")
 _RUNTIME_RE = re.compile(r"[$`]")
 _RUNTIME_TEXT_RE = re.compile(r"`|\$\S")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_CONTROL_TEXT_RE = re.compile(r"vault-config\.json|deny-guard\.py|ps-parse\.ps1|\.claude|settings[^\s/\\'\"]*\.json")
+# Guard control names in text. .claude counts as the folder itself or with a wildcard name right
+# inside it (.claude/*.json), not as part of a deeper path such as ~/.claude/plugins/cache/...;
+# Windows drops trailing dots and spaces from a name.
+_CONTROL_TEXT_RE = re.compile(
+    r"vault-config\.json|deny-guard\.py|ps-parse\.ps1|settings[^\s/\\'\"]*\.json"
+    r"|\.claude[. ]*(?:[\\/]+[^\s\\/'\"]*[*?\[{][^\s\\/'\"]*)?[\\/]*(?=$|[\s'\"`:;&|()<>,{}*?\[])")
 _SHELL_FLAG_RE = re.compile(r"-[a-z]*c")
+# A Windows 8.3 short name in text (90-ASS~1, SETTIN~1.JSO): one to six characters, '~' and digits.
+_SHORT_NAME_RE = re.compile(
+    r"(?:^|(?<=[\s\\/'\"`=:;&|()<>,{}]))([^\s\\/'\"`=:;&|()<>,{}.~*?\[\]]{1,6})~[0-9]{1,6}"
+    r"(?=$|[\s\\/.'\"`:;&|()<>,}*?\[])")
+_SHORT_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'()-@^_`{}~")
+_HEX_DIGITS = frozenset("0123456789ABCDEF")
+_DRIVE_ROOT_RE = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
 
 # Shell operators. shlex merges a run of these characters into one word; a
 # newline is an operator here, so the next line starts a new command.
@@ -112,6 +133,15 @@ _STREAM_TARGET_RE = re.compile(r"^/(?:dev/(?!null$)|proc/)")
 # an option that reads a file (--exclude-from, --ignore-file, --ignore-path)
 # opens what it names.
 _EXCLUDE_OPTIONS = frozenset({"--exclude", "--exclude-dir", "--ignore", "--ignore-dir"})
+# ripgrep's --ignore takes no value (it turns --no-ignore off), so the word after
+# a bare --ignore is its value only for the commands where --ignore names a
+# pattern; --ignore=VALUE stays exempt everywhere.
+_IGNORE_VALUE_COMMANDS = frozenset({"ls", "ag"})
+# Appended to a descriptor number that touches its redirect (the 2 of 2>&1), so
+# that shlex keeps it apart from an operand that is a number (mv a b 2 > f).
+_IO_MARK = "\x01"
+_DIGITS = "0123456789"
+_WORD_BREAKS = " \t\r\n;&|()<>"
 # The commit form Claude Code writes: git commit -m "$(cat <<'EOF' ... EOF)".
 _HEREDOC_TEXT_RE = re.compile(r"\$\(cat <<[ \t]*'([A-Za-z_][A-Za-z0-9_]*)'[ \t]*\n")
 _CLOSE_PAREN_RE = re.compile(r"[ \t]*\)")
@@ -245,9 +275,16 @@ def _deny_pattern(what: str, zone: str) -> str:
 
 def _deny_shell(zone: str) -> str:
     return (f"this command names a path inside the deny zone '{_label(zone)}' (deny_zones in "
-            f"{CONFIG_REL}). Shell commands do not read or change deny zones; mv or git mv "
+            f"{CONFIG_REL}). Shell commands do not read or change deny zones; mv -n or git mv "
             "into a zone, mkdir, echo or printf text, commit messages and exclude options are "
             "the exceptions. To search notes for the zone name, use the Grep tool.")
+
+
+def _ask_replace(zone: str) -> str:
+    return (f"this move may replace a file inside the deny zone '{_label(zone)}' (deny_zones in "
+            f"{CONFIG_REL}): mv without -n (or --no-clobber) and git mv -f overwrite an existing "
+            "file. Quarantine moves use mv -n or git mv; confirm only if you asked to replace a "
+            "file there.")
 
 
 def _deny_git_add(zone: str) -> str:
@@ -259,7 +296,7 @@ def _deny_git_add(zone: str) -> str:
 def _deny_powershell(zone: str) -> str:
     return (f"this PowerShell command names a path inside the deny zone '{_label(zone)}' (deny_zones in "
             f"{CONFIG_REL}). PowerShell commands do not read or change deny zones and have none of the "
-            "Bash exceptions: to move a file into a zone, use mv or git mv in the Bash tool; to search "
+            "Bash exceptions: to move a file into a zone, use mv -n or git mv in the Bash tool; to search "
             "notes for the zone name, use the Grep tool.")
 
 
@@ -330,6 +367,61 @@ def _may_match_control(pattern: str) -> bool:
     return "{" in last or any(fnmatch.fnmatchcase(name, last) for name in CONTROL_NAMES)
 
 
+def _short_stem(name: str) -> str | None:
+    """The upper-case characters that a Windows 8.3 short name of name starts with.
+
+    Windows drops leading dots, the extension and the other dots and spaces, and
+    writes + , ; = [ ] as '_'. None for any other character (non-ASCII text goes
+    through the code page), so that any short name may stand for such a name.
+    """
+    text = name.lstrip(".").upper()
+    if "." in text:
+        text = text[:text.rindex(".")]
+    stem: list[str] = []
+    for char in text.replace(".", "").replace(" ", ""):
+        if char in _SHORT_CHARS:
+            stem.append(char)
+        elif char in "+,;=[]":
+            stem.append("_")
+        else:
+            return None
+    return "".join(stem) or None
+
+
+def _short_alias(base: str, stem: str | None) -> bool:
+    """True when a short name whose part before '~' is base can stand for a name with this stem.
+
+    Windows writes the first characters of the stem and ~N (90-ASS~1, 90-AS~10)
+    or, once four such names exist, the first two characters (one for a
+    one-letter stem), four hex digits of a hash and ~N (90A1B2~1).
+    """
+    base = base.upper()
+    if stem is None:
+        return True
+    prefix = stem[:2]
+    return stem.startswith(base) or (base.startswith(prefix) and len(base) == len(prefix) + 4
+                                     and set(base[len(prefix):]) <= _HEX_DIGITS)
+
+
+_CONTROL_STEMS = tuple(_short_stem(name) for name in (*CONTROL_NAMES, ".claude"))
+
+
+def _git_toplevel(start: str) -> str | None:
+    """The nearest folder at or above start that holds .git (a repository or worktree root), or None."""
+    current = start
+    for _ in range(256):
+        try:
+            if os.path.exists(os.path.join(current, ".git")):
+                return current
+        except (OSError, ValueError):
+            return None
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
 class _Location:
     __slots__ = ("paths", "views")
 
@@ -389,45 +481,100 @@ def _words(command: str) -> list[str]:
     return list(lexer)
 
 
+def _mark_io_numbers(command: str) -> str:
+    """Mark each descriptor number written against its redirect (2>&1, 2>/dev/null, 1>f).
+
+    shlex splits '2>&1' and '2 >&1' alike into '2', '>&' and '1'. The shell
+    reads only an unquoted run of digits that starts a word and touches < or >
+    as a descriptor; in 'mv a b 2 > f' the 2 is an operand. _IO_MARK after
+    such a number lets _simple_commands drop it from the words.
+    """
+    out: list[str] = []
+    quote = ""
+    starts_word = True
+    index = 0
+    size = len(command)
+    while index < size:
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < size:
+                out.append(command[index:index + 2])
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char == "\\" and index + 1 < size:
+            out.append(command[index:index + 2])
+            index += 2
+            starts_word = False
+            continue
+        elif char in "'\"":
+            quote = char
+        elif char in _DIGITS and starts_word:
+            end = index
+            while end < size and command[end] in _DIGITS:
+                end += 1
+            out.append(command[index:end])
+            if end < size and command[end] in "<>":
+                out.append(_IO_MARK)
+            index = end
+            starts_word = False
+            continue
+        out.append(char)
+        starts_word = not quote and char in _WORD_BREAKS
+        index += 1
+    return "".join(out)
+
+
 def _is_operator(word: str) -> bool:
     return bool(word) and all(char in _OPERATOR_CHARS for char in word)
 
 
 def _simple_commands(words: list[str]) -> list[list[tuple[str, str]]]:
-    """Group words into simple commands; each word is (text, redirect operator or '')."""
+    """Group words into simple commands; each word is (text, redirect or '').
+
+    A redirect is its operator with the descriptor number in front when the
+    command writes one against it ('2>&', '1>>'; _mark_io_numbers). The number
+    is no word of the command.
+    """
     commands: list[list[tuple[str, str]]] = [[]]
     redirect = ""
+    number = ""
     for word in words:
         if _is_operator(word):
             if word in _REDIRECTS:
-                redirect = word
+                redirect = number + word
             else:
                 commands.append([])
                 redirect = ""
+            number = ""
+            continue
+        if word.endswith(_IO_MARK) and word[:-1].isdigit():
+            number = word[:-1]
             continue
         commands[-1].append((word, redirect))
         redirect = ""
+        number = ""
     return [command for command in commands if command]
 
 
 def _writes_stdout_to_file(simple: list[tuple[str, str]]) -> bool:
-    """True when the command's standard output ends in a file (> f, >> f, &> f).
+    """True when the command's standard output ends in a file (> f, 1>> f, &> f).
 
-    shlex splits 2>f into '2', '>', 'f', so a redirect right after a bare
-    descriptor number other than 1 moves another stream and does not count.
-    The last redirect of standard output wins, as in the shell. A stream
-    (/dev/stdout, /dev/fd/1, /proc/self/fd/1, >&2) or a target built at run
-    time is no file: a pipe or $(...) can read what goes there.
+    A redirect with a descriptor number other than 1 (2> f) moves another
+    stream and does not count. The last redirect of standard output wins, as
+    in the shell. A stream (/dev/stdout, /dev/fd/1, /proc/self/fd/1, >&2) or a
+    target built at run time is no file: a pipe or $(...) can read what goes
+    there.
     """
     to_file = False
-    for index, (target, redirect) in enumerate(simple):
-        if redirect not in _STDOUT_REDIRECTS:
-            continue
-        before = simple[index - 1][0] if index else ""
-        if not redirect.startswith("&") and before.isdigit() and before != "1":
+    for target, redirect in simple:
+        operator = redirect.lstrip(_DIGITS)
+        number = redirect[:len(redirect) - len(operator)]
+        if operator not in _STDOUT_REDIRECTS or number not in ("", "1"):
             continue  # 2> f moves standard error
         to_file = not (_STREAM_TARGET_RE.match(target) or _RUNTIME_RE.search(target)
-                       or (redirect == ">&" and (target.isdigit() or target == "-")))
+                       or (operator == ">&" and (target.isdigit() or target == "-")))
     return to_file
 
 
@@ -473,6 +620,38 @@ def _move_destinations(args: list[str]) -> set[int]:
     return {operands[-1]} if len(operands) >= 2 else set()
 
 
+def _move_keeps_files(args: list[str], git: bool) -> bool:
+    """True when this mv or git mv (args after the command) refuses to replace an existing file.
+
+    git mv refuses unless -f or --force is given. mv replaces files unless the
+    last of -f, -i and -n is -n (GNU and BSD mv both let the last one win), or
+    --no-clobber; --update=none and --update=none-fail skip existing files too.
+    """
+    mode = ""
+    for word in args:
+        if word == "--":
+            break
+        short = word.startswith("-") and not word.startswith("--") and len(word) > 1
+        if git:
+            if word == "--force" or (short and "f" in word[1:]):
+                return False
+        elif word in ("--no-clobber", "--update=none", "--update=none-fail"):
+            mode = "n"
+        elif word == "--force":
+            mode = "f"
+        elif word == "--interactive":
+            mode = "i"
+        elif word == "--exchange":
+            return False  # swaps the two files
+        elif short:
+            for char in word[1:]:
+                if char in "St":
+                    break  # the rest is the option's value (-S SUFFIX, -t DIR)
+                if char in "fin":
+                    mode = char
+    return git or mode == "n"
+
+
 def _git_subcommand(plain: list[str], head_index: int) -> int | None:
     """Index of the git subcommand (the first word after git that is no option), or None."""
     if head_index >= len(plain) or _command_name(plain[head_index]) != "git":
@@ -480,19 +659,24 @@ def _git_subcommand(plain: list[str], head_index: int) -> int | None:
     return next((index for index in range(head_index + 1, len(plain)) if not plain[index].startswith("-")), None)
 
 
-def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[int]:
-    """Indexes of words whose zone names do not open the zone.
+def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> tuple[set[int], set[int]]:
+    """Indexes of words whose zone names do not open the zone, and of move destinations that may replace a file.
 
     A move destination (mv, git mv) or a new folder (mkdir) puts files into a
-    zone, which the vault rules use to quarantine processed notes. Text that
-    echo or printf writes to a file (echo 'zone/' >> .gitignore) and a git
-    commit or tag message are text; echo output that goes to a pipe, a stream
-    or into $(...) can become a path, so it stays checked. The value of an
-    option in _EXCLUDE_OPTIONS (--exclude-dir=zone, --exclude-dir zone) or a
-    word starting with '!' (rg -g '!zone') leaves the zone out. Code inside
-    an exempt word ($(...), backticks) is checked on its own (_code_spans).
+    zone, which the vault rules use to quarantine processed notes; a move
+    destination is exempt only when the move keeps existing files (mv -n,
+    git mv without -f), and is returned second otherwise. Text that echo or
+    printf writes to a file (echo 'zone/' >> .gitignore) and a git commit or
+    tag message are text; echo output that goes to a pipe, a stream or into
+    $(...) can become a path, so it stays checked. The value of an option in
+    _EXCLUDE_OPTIONS (--exclude-dir=zone, --exclude-dir zone; a bare --ignore
+    only for ls and ag) or a word starting with '!' (rg -g '!zone') leaves
+    the zone out. Code inside an exempt word ($(...), backticks) is checked on
+    its own (_code_spans).
     """
     exempt: set[int] = set()
+    replacing: set[int] = set()
+    head = _command_name(plain[head_index]) if head_index < len(plain) else ""
     value_next = False
     options = True
     for index, word in enumerate(plain):
@@ -505,13 +689,14 @@ def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[i
         name, has_value = word.split("=", 1)[0], "=" in word
         if word.startswith("!") or (options and has_value and name in _EXCLUDE_OPTIONS):
             exempt.add(index)
-        value_next = options and not has_value and name in _EXCLUDE_OPTIONS
-    if head_index >= len(plain):
-        return exempt
-    head = _command_name(plain[head_index])
+        value_next = (options and not has_value and name in _EXCLUDE_OPTIONS
+                      and (name != "--ignore" or head in _IGNORE_VALUE_COMMANDS))
+    if not head:
+        return exempt, replacing
     start = head_index + 1
     if head == "mv":
-        exempt.update(start + index for index in _move_destinations(plain[start:]))
+        moved = {start + index for index in _move_destinations(plain[start:])}
+        (exempt if _move_keeps_files(plain[start:], git=False) else replacing).update(moved)
     elif head == "mkdir":
         exempt.update(start + index for index, word in enumerate(plain[start:]) if not word.startswith("-"))
     elif head in _TEXT_COMMANDS and writes_file:
@@ -519,7 +704,8 @@ def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[i
     elif head == "git":
         sub = _git_subcommand(plain, head_index)
         if sub is not None and plain[sub] == "mv":
-            exempt.update(sub + 1 + index for index in _move_destinations(plain[sub + 1:]))
+            moved = {sub + 1 + index for index in _move_destinations(plain[sub + 1:])}
+            (exempt if _move_keeps_files(plain[sub + 1:], git=True) else replacing).update(moved)
         elif sub is not None and plain[sub] in ("commit", "tag"):
             for index in range(sub + 1, len(plain)):
                 word = plain[index]
@@ -527,7 +713,7 @@ def _exempt_words(plain: list[str], head_index: int, writes_file: bool) -> set[i
                     exempt.add(index + 1)
                 elif word.startswith("--message=") or (word.startswith("-m") and len(word) > 2):
                     exempt.add(index)
-    return exempt
+    return exempt, replacing
 
 
 def _builds_at_run_time(plain: list[str], head_index: int) -> bool:
@@ -552,6 +738,34 @@ def _candidates(word: str) -> list[str]:
     if len(word) > 2 and word[0] == "-" and word[1].isalpha():
         candidates.append(word[2:])  # -Ipath
     return [candidate for candidate in candidates if candidate]
+
+
+def _colon_tails(word: str, scoped_variables: bool = False) -> list[tuple[str, bool]]:
+    """The text after each ':' in a word that is no drive (C:\\x), and whether it starts at the top (:/x).
+
+    git reads REV:PATH, :PATH and :N:PATH (a stage in the index) as a path in a
+    tree, and the pathspec magic :/PATH, :(top)PATH or :(icase)PATH as a path
+    from the top of the repository; host:PATH names a remote copy. An exclusion
+    (:!PATH, :^PATH, :(exclude)PATH) gives no tail. With scoped_variables
+    (PowerShell), a ':' after a '$' may belong to a variable ($env:X, $script:x)
+    and gives no tail.
+    """
+    tails: list[tuple[str, bool]] = []
+    index = word.find(":", 2 if _DRIVE_ROOT_RE.match(word) else 0)
+    while index >= 0:
+        if scoped_variables and "$" in word[:index]:
+            break
+        tail = word[index + 1:]
+        top = index == 0 and tail[:1] in ("/", "\\")
+        if tail.startswith("("):
+            close = tail.find(")")
+            tail = "" if close < 0 or "exclude" in tail[:close].casefold() else tail[close + 1:]
+        elif tail.startswith(("!", "^")):
+            tail = ""
+        if tail:
+            tails.append((tail, top))
+        index = word.find(":", index + 1)
+    return tails
 
 
 # -- code inside words ------------------------------------------------------------
@@ -773,7 +987,10 @@ class Guard:
 
     def __init__(self, vault: str, zones: Sequence[str], cwd: object = None) -> None:
         self.zones = tuple(zones)
+        self.zone_stems = [(zone, _short_stem(zone.split("/")[-1])) for zone in self.zones]
         given = os.path.normpath(os.path.abspath(_native(vault)))
+        self.vault_root = given
+        self._tree_roots: list[str] | None = None
         roots = [given]
         try:
             real = os.path.realpath(given)
@@ -854,24 +1071,75 @@ class Guard:
                 return True
         return False
 
-    def zone_named_in(self, text: str) -> str | None:
-        """The first zone whose last segment appears in text, ignoring case."""
+    def short_names(self, text: str) -> tuple[list[str], bool]:
+        """Zones, and whether a guard control, that a Windows 8.3 short name in text can stand for.
+
+        Only Windows resolves short names. 90-ASS~1 or 90A1B2~1 can stand for
+        90-assets (_short_alias); whether it does is left to realpath, which
+        expands a short name that exists.
+        """
+        if not _WINDOWS or "~" not in text:
+            return [], False
+        bases = [match.group(1) for match in _SHORT_NAME_RE.finditer(text)]
+        if not bases:
+            return [], False
+        zones = [zone for zone, stem in self.zone_stems if any(_short_alias(base, stem) for base in bases)]
+        return zones, any(_short_alias(base, stem) for base in bases for stem in _CONTROL_STEMS)
+
+    def zones_in(self, text: str) -> list[str]:
+        """Zones whose last segment, or a short name that can stand for it, appears in text, ignoring case."""
         folded = text.casefold()
-        for zone in self.zones:
-            if zone.split("/")[-1].casefold() in folded:
-                return zone
-        return None
+        short = self.short_names(text)[0]
+        return [zone for zone in self.zones if zone.split("/")[-1].casefold() in folded or zone in short]
+
+    def control_named(self, text: str) -> bool:
+        """True when text names a guard control, or holds a short name that can stand for one."""
+        return bool(_CONTROL_TEXT_RE.search(text.casefold())) or self.short_names(text)[1]
+
+    def zone_named_in(self, text: str) -> str | None:
+        """The first zone named in text (zones_in), or None."""
+        zones = self.zones_in(text)
+        return zones[0] if zones else None
 
     def mentions(self, text: str) -> tuple[list[str], bool]:
-        """Zones whose last segment appears in a raw command, and whether a control name does.
+        """Zones named in a raw command (zones_in), and whether a control name is.
 
         A second look drops quotes, backslashes, braces and commas, so 90-ass"ets"
         and 90-ass\\ets still show the zone name.
         """
         variants = (text.casefold(), re.sub(r"[\"'\\{},]", "", text.casefold()))
-        zones = [zone for zone in self.zones
-                 if any(zone.split("/")[-1].casefold() in variant for variant in variants)]
-        return zones, any(_CONTROL_TEXT_RE.search(variant) for variant in variants)
+        named = [set(self.zones_in(variant)) for variant in variants]
+        zones = [zone for zone in self.zones if any(zone in found for found in named)]
+        return zones, any(self.control_named(variant) for variant in variants)
+
+    def tree_roots(self) -> list[str]:
+        """Where a path in a git tree starts: the vault root, and the repository root above the working directory."""
+        if self._tree_roots is None:
+            roots = [self.vault_root]
+            if not _is_unc(self.cwd) or self.vault_on_unc:  # no network lookup for other hosts
+                top = _git_toplevel(self.cwd)
+                if top is not None and top not in roots:
+                    roots.append(top)
+            self._tree_roots = roots
+        return self._tree_roots
+
+    def word_candidates(self, word: str, powershell: bool = False) -> list[str]:
+        """The literal pieces of one word to check as paths.
+
+        The word, the value after '=' (VAR=path, --option=path) and after -X
+        (-Ipath), and the text after each ':' (_colon_tails). git resolves
+        REV:PATH from the top of the repository, so a relative tail is also
+        checked from each tree root (tree_roots); ./ and ../ follow the working
+        directory there.
+        """
+        candidates = _candidates(word)
+        for candidate in list(candidates):
+            for tail, top in _colon_tails(candidate, scoped_variables=powershell):
+                candidates.append(tail)
+                anchor = tail.lstrip("/\\") if top else tail
+                if anchor and not _ROOTED_RE.match(anchor) and not anchor.startswith(("./", "../", ".\\", "..\\")):
+                    candidates.extend(os.path.join(root, anchor) for root in self.tree_roots())
+        return list(dict.fromkeys(candidates))
 
     def path_hit(self, text: str, base: str | None = None) -> tuple[str | None, str | None, bool]:
         """(zone, control, resolved) for one path; resolved is False for ~user or an invalid name."""
@@ -986,10 +1254,15 @@ class Guard:
         return [(ASK, f"the shell's working directory is inside the deny zone '{_label(zone)}'.")]
 
     def shell_candidate(self, text: str, *, exempt: bool, cwd_known: bool,
-                        deny=_deny_shell) -> list[tuple[str, str]]:
-        """Verdicts for one literal piece of a shell word; deny(zone) words a deny reason."""
+                        deny=_deny_shell, decision: str = DENY) -> list[tuple[str, str]]:
+        """Verdicts for one literal piece of a shell word.
+
+        A path in a zone gives (decision, deny(zone)): deny, or ask for the
+        destination of a move that may replace a file there.
+        """
         named = None if exempt else self.zone_named_in(text)
-        if named is None and not _CONTROL_TEXT_RE.search(text.casefold()):
+        control = self.control_named(text)
+        if named is None and not control:
             return []
         native = _native(text)
         if not cwd_known and not _ROOTED_RE.match(native):
@@ -998,14 +1271,14 @@ class Guard:
         wildcard = _WILDCARD_RE.search(native)
         verdicts: list[tuple[str, str]] = []
         if runtime is None and wildcard is None:
-            zone, control, resolved = self.path_hit(native)
+            zone, control_path, resolved = self.path_hit(native)
             if not resolved:
                 return [(ASK, _ask_unchecked(named, "uses a path it cannot resolve (a ~user home or "
                                                     "an invalid name)"))]
             if zone is not None and not exempt:
-                verdicts.append((DENY, deny(zone)))
-            if control is not None:
-                verdicts.append((ASK, _ask_control("this command names", control)))
+                verdicts.append((decision, deny(zone)))
+            if control_path is not None:
+                verdicts.append((ASK, _ask_control("this command names", control_path)))
             return verdicts
         if runtime is not None:
             stop = min(found.start() for found in (runtime, wildcard) if found is not None)
@@ -1013,16 +1286,16 @@ class Guard:
             if literal and not exempt:
                 zone = self.path_hit(literal)[0]
                 if zone is not None:
-                    verdicts.append((DENY, deny(zone)))
+                    verdicts.append((decision, deny(zone)))
             verdicts.append((ASK, _ask_unchecked(named, "builds this path at run time")))
             return verdicts
         if not exempt:
             hit = self.glob_hit(self.cwd, native)
             if hit is not None and hit[0] == DENY:
-                verdicts.append((DENY, deny(hit[1])))
+                verdicts.append((decision, deny(hit[1])))
             elif hit is not None:
                 verdicts.append((ASK, _ask_wildcard("this command", hit[1])))
-        if _CONTROL_TEXT_RE.search(text.casefold()) and _may_match_control(native):
+        if control and _may_match_control(native):
             verdicts.append((ASK, _ask_unchecked(None, "matches it with a wildcard")))
         return verdicts
 
@@ -1047,8 +1320,11 @@ class Guard:
             return verdicts
         stripped = _strip_comments(command)
         verdicts.extend(self.code_verdicts(stripped))
+        if _IO_MARK in stripped:  # the character that marks descriptor numbers (_mark_io_numbers)
+            return verdicts + [(ASK, _ask_unchecked(zones[0] if zones else None,
+                                                    "holds the control character U+0001"))]
         try:
-            words = _words(stripped)
+            words = _words(_mark_io_numbers(stripped))
         except ValueError:
             return verdicts + [(ASK, _ask_unchecked(zones[0] if zones else None,
                                                     "cannot be split into words (unbalanced quotes)"))]
@@ -1061,21 +1337,22 @@ class Guard:
         for simple in _simple_commands(words):
             plain = [word for word, redirect in simple if not redirect]
             head_index = _head_index(plain)
-            exempt = _exempt_words(plain, head_index, _writes_stdout_to_file(simple))
+            exempt, replacing = _exempt_words(plain, head_index, _writes_stdout_to_file(simple))
             dynamic = dynamic or _builds_at_run_time(plain, head_index)
             sub = _git_subcommand(plain, head_index)
             staging = sub is not None and plain[sub] == "add"
             plain_index = 0
             for word, redirect in simple:
                 word_exempt = False
+                replaces = False
                 deny = _deny_shell
                 if not redirect:
                     word_exempt = plain_index in exempt
+                    replaces = plain_index in replacing
                     plain_index += 1
-                    deny = _deny_git_add if staging else _deny_shell
-                folded = word.casefold()
-                named = {zone for zone in zones if zone.split("/")[-1].casefold() in folded}
-                has_control = bool(_CONTROL_TEXT_RE.search(folded))
+                    deny = _ask_replace if replaces else _deny_git_add if staging else _deny_shell
+                named = set(self.zones_in(word)) & set(zones)
+                has_control = self.control_named(word)
                 if not named and not has_control:
                     continue
                 seen.update(named)
@@ -1083,9 +1360,9 @@ class Guard:
                 if not word_exempt:
                     live.update(named)
                     control_live = control_live or has_control
-                for candidate in _candidates(word):
+                for candidate in self.word_candidates(word):
                     verdicts.extend(self.shell_candidate(candidate, exempt=word_exempt, cwd_known=cwd_known,
-                                                         deny=deny))
+                                                         deny=deny, decision=ASK if replaces else DENY))
             if head_index < len(plain) and _command_name(plain[head_index]) in _CD_COMMANDS:
                 cwd_known = False
         missing = [zone for zone in zones if zone not in seen]
@@ -1124,15 +1401,15 @@ class Guard:
             path = _ps_file_path(text)
             if path is None:  # Registry::, Env:, HKLM:, another PSDrive
                 named = self.zone_named_in(text)
-                if named or _CONTROL_TEXT_RE.search(text.casefold()):
+                if named or self.control_named(text):
                     verdicts.append((ASK, _ask_unchecked(named, "only in a provider path outside the file "
                                                                 "system (Registry::, Env:, a PSDrive)")))
                 continue
-            for candidate in _candidates(path):
+            for candidate in self.word_candidates(path, powershell=True):
                 if moved and not _ps_fixed(_native(candidate)):
                     # Set-Location may run before or after this word (loops, blocks).
                     named = self.zone_named_in(candidate)
-                    if named or _CONTROL_TEXT_RE.search(candidate.casefold()):
+                    if named or self.control_named(candidate):
                         verdicts.append((ASK, _ask_unchecked(named, "changes the location (Set-Location, cd) "
                                                                     "in the same command")))
                     continue
@@ -1144,12 +1421,12 @@ class Guard:
         if run_time:
             verdicts.append((ASK, _ask_unchecked(first, f"has parts that are only known when it runs "
                                                         f"({run_time})")))
-        folded = [text.casefold() for text in texts]
-        missing = [zone for zone in zones if not any(zone.split("/")[-1].casefold() in text for text in folded)]
+        named_by = [set(self.zones_in(text)) for text in texts]
+        missing = [zone for zone in zones if not any(zone in found for found in named_by)]
         if missing:
             verdicts.append((ASK, _ask_unchecked(missing[0], "not as a literal path it can resolve (a comment, "
                                                              "a variable or function name, or joined text)")))
-        elif controls and not any(_CONTROL_TEXT_RE.search(text) for text in folded):
+        elif controls and not any(self.control_named(text) for text in texts):
             verdicts.append((ASK, _ask_unchecked(None, "not as a literal path it can resolve")))
         return verdicts
 
@@ -1173,6 +1450,8 @@ def evaluate(payload: object, vault: str, warn=None) -> tuple[str, str] | None:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return ASK, f"the {tool} input is not a JSON object, so the guard cannot check deny zones."
+    if tool == "Monitor" and tool_input.get("command") is None and "ws" in tool_input:
+        return None  # a WebSocket watch runs no shell command
     vault = _native(vault)  # an MSYS root (/c/vault) reads the same config as C:/vault
     zones, problem = load_zones(vault)
     if problem is not None and warn is not None:
@@ -1183,9 +1462,9 @@ def evaluate(payload: object, vault: str, warn=None) -> tuple[str, str] | None:
     command = tool_input.get("command")
     if not isinstance(command, str):
         return ASK, f"the {tool} input has no command string, so the guard cannot check deny zones."
-    if tool == "Bash":
-        return _strongest(guard.bash(command))
-    return _strongest(guard.powershell(command))
+    if tool == "PowerShell":
+        return _strongest(guard.powershell(command))
+    return _strongest(guard.bash(command))  # Bash, and Monitor, whose command runs in the Bash tool's shell
 
 
 def hook_output(decision: str, reason: str) -> dict:

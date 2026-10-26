@@ -15,19 +15,26 @@
 | Read·Edit·Write·NotebookEdit | 키가 `path`로 끝나는 모든 문자열(`file_path`·`notebook_path`) | 경로가 구역 안(정션·링크를 푼 실제 경로 포함) | 경로 필드가 없는 입력. Edit·Write·NotebookEdit으로 가드 제어 파일을 바꿈 | 그 밖 |
 | Glob | `path`, `pattern` | `path`가 구역 안. 패턴의 고정 앞부분이 구역 안. 와일드카드 뒤의 한 단계 구역 이름(`**/90-assets/**`) | 와일드카드 옆의 구역 이름(`**/_processed/*`) | 구역 이름 없이 볼트 전체를 도는 검색(`**/*.md`) |
 | Grep | `path`, `glob`(`pattern`은 찾을 글자라 보지 않는다) | `path`나 `glob`이 구역 안 | `glob` 와일드카드 옆의 구역 이름 | `!90-assets/**` 같은 제외 glob, 경로 없는 검색 |
-| Bash | `command` | 글자 그대로의 단어(리디렉션 대상 포함)가 구역 안 | 구역 이름이나 제어 파일 이름이 보이는 명령 가운데 실행 중에 경로·명령을 만듦(`$VAR`·`$(...)`·백틱·`eval`·`source`·`sh -c`·`python -c` 같은 인라인 코드), `$(...)`·백틱 안이나 here-document(`<<`) 뒤에 보이는 구역 이름(예외 단어 안이어도), `cd` 뒤의 상대 경로, 와일드카드 옆의 구역 이름, 따옴표가 맞지 않음, 주석처럼 경로로 풀 수 없는 구역 이름, 가드 제어 파일을 가리킴. 그리고 셸 작업 폴더가 구역 안 | 구역 이름도 제어 파일 이름도 없는 명령 |
+| Bash·Monitor | `command`(Monitor는 이 명령을 Bash 도구의 셸에서 실행한다) | 글자 그대로의 단어(리디렉션 대상 포함)가 구역 안. 단어의 `:` 뒤 글자(git `REV:경로`·`:경로`·`:N:경로`, `:/경로` 같은 pathspec, `host:경로`)도 작업 폴더·볼트 루트·작업 폴더 위의 저장소 루트에서 경로로 푼다. Windows 8.3 짧은 이름(`90-ASS~1`)은 실제로 있으면 긴 이름으로 풀어 본다 | 구역 이름이나 제어 파일 이름이 보이는 명령 가운데 실행 중에 경로·명령을 만듦(`$VAR`·`$(...)`·백틱·`eval`·`source`·`sh -c`·`python -c` 같은 인라인 코드), `$(...)`·백틱 안이나 here-document(`<<`) 뒤에 보이는 구역 이름(예외 단어 안이어도), `cd` 뒤의 상대 경로, 와일드카드 옆의 구역 이름, 기존 파일을 덮어쓸 수 있는 이동(`-n` 없는 `mv`, `git mv -f`)의 구역 목적지, 따옴표가 맞지 않음, 주석처럼 경로로 풀 수 없는 구역 이름, 가드 제어 파일을 가리킴. 그리고 셸 작업 폴더가 구역 안 | 구역 이름도 제어 파일 이름도(그것을 대신할 수 있는 짧은 이름도) 없는 명령, `command` 없이 `ws`만 받은 Monitor(WebSocket 감시는 명령을 실행하지 않는다) |
 | PowerShell | `command`(구역 이름이나 제어 파일 이름이 보일 때만 `ps-parse.ps1`로 구문 분석) | 글자 그대로의 문자열(인자, 리디렉션 대상, 파이프 입력, 변수에 넣는 값, 확장 문자열의 `$` 앞 고정 폴더)이 구역 안. Bash 예외가 없어 `Move-Item`의 목적지와 `-Exclude` 값도 포함 | 구문 오류, 파서 실패·5초 초과, 실행 중에 정해지는 부분(`Invoke-Expression`·`iex`, `Start-Process`, `Invoke-Command`, `&`·`.`로 부르는 스크립트 블록, dot-source, `-EncodedCommand`, FileSystem 밖 공급자 경로, 변수·연산자·메서드 호출, 확장 문자열, 다른 셸·인터프리터), 같은 명령 안 `Set-Location`·`cd`와 상대 경로, 문자열로 보이지 않는 구역 이름(주석 등), 가드 제어 파일. 그리고 작업 폴더가 구역 안 | 구역 이름도 제어 파일 이름도 없는 명령(파서를 띄우지 않는다), 구역 이름을 글자로만 품은 문자열(`Write-Output 'see 90-assets'`) |
 
-- **Bash 예외(구역을 열지 않는 단어):** `mv`·`git mv`의 목적지와 `mkdir` 폴더(볼트 규칙의 격리 이동 — `/vault-process-inbox`·`/vault-lint`가
-  처리한 원본을 셸 move로 구역에 옮긴다), 표준 출력을 파일로 보내는 `echo`·`printf`의 글자(`echo '90-assets/' >> .gitignore`),
-  `git commit`·`git tag`의 `-m` 메시지, 제외 옵션 네 개(`--exclude`·`--exclude-dir`·`--ignore`·`--ignore-dir`)의 값
-  (`--exclude-dir=90-assets`, `--exclude-dir 90-assets`)과 `!`로 시작하는 단어(`rg -g '!90-assets/**'`). 파이프나 `$(...)`로 넘어가는
+- **Bash 예외(구역을 열지 않는 단어):** 기존 파일을 덮어쓰지 않는 이동(`mv -n`·`mv --no-clobber`, `-f` 없는 `git mv`)의 목적지와
+  `mkdir` 폴더(볼트 규칙의 격리 이동 — `/vault-process-inbox`·`/vault-lint`가 처리한 원본을 셸 move로 구역에 옮긴다), 표준 출력을 파일로
+  보내는 `echo`·`printf`의 글자(`echo '90-assets/' >> .gitignore`), `git commit`·`git tag`의 `-m` 메시지, 제외 옵션 `--exclude`·`--exclude-dir`·
+  `--ignore-dir`의 값(`--exclude-dir=90-assets`, `--exclude-dir 90-assets`)과 `--ignore=값`, `ls`·`ag`의 `--ignore 값`, 그리고 `!`로 시작하는
+  단어(`rg -g '!90-assets/**'`). 파이프나 `$(...)`로 넘어가는
   `echo` 출력, 파일이 아닌 스트림(`/dev/stdout`·`/dev/fd/1`·`/proc/self/fd/1`·`>&2`)이나 실행 중에 정해지는 대상(`> "$f"`)으로 보내는
   출력은 경로가 될 수 있어 예외가 아니다(`/dev/null`은 버리는 곳이라 예외다). 표준 출력 리디렉션이 여럿이면 셸처럼 마지막 것을 본다.
-  다른 이름의 제외·무시 옵션은 예외가 아니다: 값이 없는 옵션(`--exclude-vcs`·`--ignore-backups`·`--delete-excluded`·`--exclude-standard`)
-  뒤의 단어는 피연산자이고, 파일을 읽는 옵션(`--exclude-from`·`--ignore-file`·`--ignore-path`)의 값은 그 파일을 연다. `--` 뒤의 단어는
-  옵션으로 보지 않는다. `mv`의 `-t`가 다른 짧은 옵션과 붙은 형태(`-vt`)나 `git -C`처럼 하위 명령 앞에 옵션 값이 오는 형태는 예외로 보지
-  않고 그대로 검사한다.
+  다른 이름의 제외·무시 옵션은 예외가 아니다: 값이 없는 옵션(`--exclude-vcs`·`--ignore-backups`·`--delete-excluded`·`--exclude-standard`,
+  `--no-ignore`를 끄는 ripgrep의 `--ignore`) 뒤의 단어는 피연산자이고, 파일을 읽는 옵션(`--exclude-from`·`--ignore-file`·`--ignore-path`)의
+  값은 그 파일을 연다. `--` 뒤의 단어는 옵션으로 보지 않는다. `mv`의 `-t`가 다른 짧은 옵션과 붙은 형태(`-vt`)나 `git -C`처럼 하위 명령
+  앞에 옵션 값이 오는 형태는 예외로 보지 않고 그대로 검사한다.
+- **덮어쓸 수 있는 이동은 ask:** `mv`는 `-n`(`--no-clobber`, `--update=none`)이 없거나 그 뒤에 `-f`·`-i`가 오면(GNU·BSD `mv`는 셋 가운데
+  마지막 것을 따른다) 목적지에 같은 이름의 파일이 있을 때 그 파일을 바꿔 쓴다. 그래서 목적지가 구역 안이면 `deny`가 아니라 `ask`이고,
+  이유 문구가 `mv -n`이나 `git mv`를 안내한다. `git mv -f`·`git mv --force`와 `mv --exchange`도 같다.
+- **리디렉션 번호:** `2>&1`·`2>/dev/null`·`1>f`처럼 숫자를 `<`·`>`에 붙여 쓰면 셸은 그 숫자를 스트림 번호로 읽으므로 가드도 이동의
+  피연산자로 보지 않는다(`mv -n a.md 10-inbox/_processed/2026-10/ 2>&1`의 목적지는 그대로 예외다). 띄어 쓴 `2 > f`의 `2`는 셸에서도
+  피연산자다. 구역이나 제어 파일 이름이 보이는 명령에 U+0001 문자가 있으면, 가드가 번호를 표시하는 데 쓰는 문자이므로 `ask`다.
 - **코드는 예외가 아니다:** 셸이 명령으로 실행할 수 있는 글자, 곧 `$(...)`·백틱 안(따옴표 안이든 밖이든)과 here-document(`<<`) 뒤에 구역
   이름이나 제어 파일 이름이 보이면 예외 단어 안이어도 `ask`다(`echo "$(cat 90-assets/x)" > out.txt`,
   `git commit -m "$(cat 10-inbox/_processed/a.md)"`, `mkdir "$(cat 90-assets/x)"`). 그 바깥의 고정 글자는 예외 그대로다
@@ -38,7 +45,9 @@
   따옴표로 읽는다) 이 검사는 단어와 따로 한다.
 - **가드 제어 파일(자기 보호):** `00-meta/vault-config.json`, `00-meta/scripts/deny-guard.py`, `00-meta/scripts/ps-parse.ps1`,
   `.claude/settings*.json`과 `.claude` 폴더(볼트 밖 사용자 설정 `~/.claude/settings.json` 포함). 이것을 바꾸면 가드를 끌 수 있으므로
-  `ask`로 확인한다. Read로 읽는 것은 그대로 둔다.
+  `ask`로 확인한다. Read로 읽는 것은 그대로 둔다. 셸 명령의 글자에서는 `.claude`를 폴더 자체(`rm -rf .claude`)나 바로 안의 와일드카드
+  이름(`.claude/*.json`)일 때만 제어 파일 이름으로 본다. 그래서 플러그인 설치 경로(`~/.claude/plugins/...`)나 `.claude/rules/` 아래
+  파일을 쓰는 명령은 그 이름 때문에 묻지 않는다.
 - **구역 비교:** 플러그인 `vault_paths.zone_matches`를 그대로 복사해 쓴다. 한 단계 구역(`90-assets`)은 어느 깊이의 같은 이름 폴더든,
   여러 단계 구역(`10-inbox/_processed`)은 볼트 루트에서 시작할 때만 맞고, 대소문자는 무시한다. 경로는 글자 그대로의 경로와
   `realpath`로 푼 경로를 둘 다 볼트 루트(주어진 경로와 `realpath`로 푼 경로)에 대고 `normcase`로 비교한다. 그래서 구역 밖 폴더가
@@ -46,10 +55,18 @@
   `D:/vault/...`로 바꾸고(`CLAUDE_PROJECT_DIR`가 MSYS 형식이어도 같은 `vault-config.json`을 읽는다), `\\?\` 접두사와 끝의 점·공백,
   `:` 뒤의 스트림 이름을 Windows가 여는 방식대로 접는다. macOS 볼륨은 기본으로 대소문자를 가리지 않는데 `normcase`는 그곳에서
   대소문자를 그대로 두므로, macOS에서는 비교 전에 `casefold`로도 접는다(`/Users/me/VAULT/90-assets`도 볼트 안이다).
+- **8.3 짧은 이름(Windows):** Windows는 `90-assets`에 `90-ASS~1` 같은 짧은 이름을 붙일 수 있다. 공백과 맨 앞의 점, 확장자를 가르는
+  것 말고의 점을 빼고 대문자로 바꾼 이름의 앞 여섯 글자에 `~숫자`를 붙이고, 그런 이름이 이미 넷 있으면 앞 두 글자, 16진수 네 자리,
+  `~숫자`를 쓴다. 셸 명령의 한 단계 이름이 여섯 글자 이하와 `~숫자`(뒤에 확장자가 올 수 있다)로 되어 있고 그 앞부분이 구역이나 제어
+  파일 이름에서 이렇게 나올 수 있으면(`90-ASS~1`, `_PROCE~1`, `OBSIDI~1`, `CLAUDE~1`, `SETTIN~1.JSO`) 그 이름이 보이는 것처럼 다룬다.
+  경로는 `realpath`가 실제로 있는 짧은 이름만 긴 이름으로 풀므로 그것으로 판정한다. ASCII 밖 글자가 든 이름은 코드 페이지에 따라 짧은
+  이름이 달라지므로 그 꼴의 이름을 모두 대상으로 본다. `HEAD~1` 같은 git 리비전은 앞부분이 맞지 않아 걸리지 않는다. Windows가 아닌
+  곳에서는 짧은 이름을 보지 않는다.
 
 ## PowerShell 구문 분석 (`ps-parse.ps1`)
 
-- **언제 띄우나:** Bash와 같은 미리 거르기(구역의 마지막 단계 이름이나 제어 파일 이름이 명령 글자에 보이는가)가 걸릴 때만 띄운다.
+- **언제 띄우나:** Bash와 같은 미리 거르기(구역의 마지막 단계 이름이나 제어 파일 이름, 그것을 대신할 수 있는 8.3 짧은 이름이 명령
+  글자에 보이는가)가 걸릴 때만 띄운다.
   PowerShell의 이스케이프 문자인 백틱은 미리 거를 때 지운다(``90-ass`ets``도 걸린다). 걸리지 않는 PowerShell 호출은 Python 시작
   시간만 든다.
 - **어떻게 띄우나:** 가드 파일과 같은 폴더의 `ps-parse.ps1`을 Windows 폴더의 Windows PowerShell 5.1
@@ -69,12 +86,14 @@
   | `expandable_strings` | 그 글자(변수와 `$(...)`는 쓴 그대로) |
   | `flags` | 실행 중에 정해지는 구성의 이름(정렬): `invoke_expression`(`Invoke-Expression`·`iex`), `start_process`(`Start-Process`·`start`·`saps`), `invoke_command`(`Invoke-Command`·`icm`), `script_block_call`(`&`·`.`로 스크립트 블록이나 상수가 아닌 값을 실행), `dot_source`(`.`), `encoded_command`(`-EncodedCommand`·`-ec`와 `-enc`·`-e` 같은 앞부분), `provider_path`(`Registry::`·`Env:`·`HKLM:`처럼 FileSystem 밖 공급자 경로, 한 글자보다 긴 드라이브 이름, `${C:\x}`·`$env:X` 같은 드라이브 지정 변수), `expression`(그 밖의 계산: `$true`·`$false`·`$null` 아닌 변수, 연산자, 메서드 호출과 속성, 하위 식, 스크립트 블록, 대입, 반복문, 정의) |
 - **판정:** `strings`와 `expandable_strings`의 값을 Bash 단어처럼 판정한다. `FileSystem::` 접두사는 떼고, FileSystem 밖 공급자 경로는
-  파일 경로로 풀지 않고 `ask`, 확장 문자열은 `$` 앞의 고정 폴더가 구역이면 `deny`, 와일드카드는 Glob처럼 본다. 같은 명령에
+  파일 경로로 풀지 않고 `ask`, 확장 문자열은 `$` 앞의 고정 폴더가 구역이면 `deny`, 와일드카드는 Glob처럼 본다. `:` 뒤의 글자도 Bash처럼
+  경로로 보지만(`git show :90-assets/x`는 `deny`), `$` 뒤에 오는 `:`는 `$env:X`처럼 변수의 일부일 수 있어 보지 않는다.
+  `HEAD:90-assets/x`처럼 두 글자 이상 뒤에 `:`가 오는 문자열은 공급자 경로 꼴이라 `ask`다. 같은 명령에
   `Set-Location`(`cd`·`sl`·`chdir`·`Push-Location`·`Pop-Location`과 별칭)이 있으면 실행 순서를 알 수 없어 상대 경로는 `ask`다
   (드라이브 문자 없이 `\`로 시작하는 경로와 `~`도 현재 드라이브·공급자를 따르므로 같다).
   `deny`가 하나라도 있으면 `deny`이고, 없으면 구문 오류·`flags`·확장 문자열·다른 셸이나 인터프리터 이름(`cmd`·`powershell`·`pwsh`·
   `bash`·`python` 등)·문자열로 보이지 않는 구역 이름 가운데 하나라도 있으면 `ask`다.
-- **deny 이유:** PowerShell에는 Bash 예외가 없다고 밝히고, 구역으로 옮기는 격리 이동은 Bash 도구의 `mv`·`git mv`로, 노트 검색은
+- **deny 이유:** PowerShell에는 Bash 예외가 없다고 밝히고, 구역으로 옮기는 격리 이동은 Bash 도구의 `mv -n`·`git mv`로, 노트 검색은
   Grep 도구로 하라고 안내한다.
 
 ## 출력
@@ -115,7 +134,9 @@
 
 훅 항목의 뜻:
 
-- `matcher`는 정확한 도구 이름 목록이다(글자·`|`만 있으면 정규식으로 보지 않는다).
+- `matcher`는 정확한 도구 이름 목록이다(글자·`|`만 있으면 정규식으로 보지 않는다). Monitor는 받은 명령을 Bash 도구의 셸에서 백그라운드로
+  실행하고 Bash 권한 규칙을 따르므로(Claude Code 도구 참조) 함께 넣는다. `command` 대신 `ws`를 받는 WebSocket 감시는 명령을 실행하지 않아
+  가드가 결정하지 않는다.
 - `if` 필터를 쓰지 않는다. 문서상 `if`는 최선 노력(best-effort) 필터라 강제 수단으로 쓰지 말라고 되어 있으므로, 대상 도구마다 실행하고 스크립트 안에서 거른다.
 - `command`+`args`는 셸을 거치지 않는 exec 형식이다. `${CLAUDE_PROJECT_DIR}`가 Git Bash·PowerShell 어느 훅 셸에서도 같은 볼트 경로로 바뀐다.
 - `-I`는 볼트 폴더에 놓인 다른 `.py`나 `PYTHON*` 환경 변수를 불러오지 않게 하고, `-X utf8`은 입출력을 UTF-8로 고정한다.
@@ -144,7 +165,7 @@ python "<플러그인 루트>/skills/agentic-vault/scripts/vault_adapters.py" --
 
 - **`problems`가 잡는 것:** 가드를 소리 없이 약하게 만드는 설정 네 가지다. `"onFailure": "block"`이 없음(가드가 실패하면 호출이
   그대로 진행된다), `if` 필터가 있음(best-effort라 가드를 건너뛸 수 있다), 중괄호 없는 `$CLAUDE_PROJECT_DIR`(훅 셸에 따라 달라지고
-  PowerShell에서는 빈 값이다), 정확한 도구 이름 목록인 `matcher`가 대상 도구 여덟 개 가운데 하나라도 빠뜨림(`*`·빈 값·생략은
+  PowerShell에서는 빈 값이다), 정확한 도구 이름 목록인 `matcher`가 대상 도구 아홉 개 가운데 하나라도 빠뜨림(`*`·빈 값·생략은
   모든 도구에 맞는다. 정규식 matcher는 판정하지 않는다). 실행기(`python`·`py -3`·절대 경로)와 `timeout`은 보지 않는다.
 - **제안은 `/vault-init`만:** `offer_deny_guard`는 `--offer-deny-guard`를 줄 때만, 그리고 `state`가 `absent`이고
   `.claude/settings.local.json`을 읽을 수 있을(또는 아직 없을) 때만 나온다. 이 플래그는 `/vault-init` 4-2만 쓰고, 다른 보고 내용은
@@ -174,7 +195,9 @@ Windows 11(10.0.26300), Python 3.12.10, Windows PowerShell 5.1.26100, 보안 제
 | PowerShell, 실행 중에 정해지는 구성(ask, 파서를 띄움) | 1.05초 | 1.65초 |
 | `ps-parse.ps1` 자식 프로세스만 | 0.45초 | 0.51초 |
 
-훅 한 번은 거의 전부 프로세스 시작 시간이다. 판정 자체(설정 파일 읽기 포함)는 같은 때 1ms 미만(0.25–0.4ms)이었다. 구역 이름이나
+훅 한 번은 거의 전부 프로세스 시작 시간이다. 판정 자체(설정 파일 읽기 포함)는 같은 때 1ms 미만(0.25–0.4ms)이었다. 같은 날 검토 지적을
+고친 뒤 프로세스 안에서 판정만 입력마다 400회씩 다시 재면 중앙값 0.2–0.65ms였고, 가장 느린 것은 `:` 뒤 경로를 저장소 루트에서도 푸는
+`git show HEAD:...`였다. 구역 이름이나
 제어 파일 이름이 보이는 PowerShell 명령만 Windows PowerShell을 하나 더 띄워 약 0.5초가 더 든다. 자식 프로세스만 잰 값은 부하 속에서도
 0.42–0.56초로 고르게 나왔다. 약 15분 뒤 같은 조건의 두 번째 측정도 중앙값 차이가 0.15초 이내였다. 다른 작업이 없던 앞선 측정에서는
 Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에 따라 두 배까지 늘어난다. 대상 도구를 부를 때마다 이만큼 늦어지고,
@@ -190,18 +213,21 @@ Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에
   못한다. `90-{assets,x}` 같은 중괄호 확장과 주석 속 구역 이름은 ask로만 잡는다.
 - 볼트 루트에서 경로 없이 도는 Grep·Glob과 Bash의 `rg`·`find .`는 구역을 지나가도 막지 않는다(막으면 모든 검색이 막힌다). Read deny
   규칙이 파일 읽기를 따로 막는다.
-- 확인한 뒤 실행 전에 정션·링크를 바꿔치면 보지 못한다. 구역 이름이 들어 있지 않은 Bash 명령은 정션을 거쳐 구역에 닿아도 보지 않는다
-  (경로 도구는 `realpath`로 잡는다). UNC 경로(`\\server\share`)는 네트워크 조회를 피하려고 실제 경로로 풀지 않고, 8.3 짧은 이름은 실제로
-  있는 경로만 풀린다. macOS에서는 경로를 `casefold`로 비교하므로, 대소문자를 가리도록 포맷한 볼륨에서는 대소문자만 다른 볼트 밖 폴더를
-  볼트로 볼 수 있다(더 막는 쪽이다). Linux에서는 대소문자를 가린다.
+- 확인한 뒤 실행 전에 정션·링크를 바꿔치면 보지 못한다. 구역 이름(이나 그것을 대신할 수 있는 8.3 짧은 이름)이 들어 있지 않은 Bash
+  명령은 정션을 거쳐 구역에 닿아도 보지 않는다(경로 도구는 `realpath`로 잡는다). UNC 경로(`\\server\share`)는 네트워크 조회를 피하려고
+  실제 경로로 풀지 않고, 8.3 짧은 이름은 실제로 있는 경로만 풀린다. 셸 명령에서는 앞부분이 구역이나 제어 파일 이름과 맞는 짧은 이름만
+  보므로, 짧은 이름을 실행 중에 조립하는 경로는 보지 못한다. macOS에서는 경로를 `casefold`로 비교하므로, 대소문자를 가리도록 포맷한
+  볼륨에서는 대소문자만 다른 볼트 밖 폴더를 볼트로 볼 수 있다(더 막는 쪽이다). Linux에서는 대소문자를 가린다.
 - Bash에서 구역 경로와 같은 글자는 경로가 아닌 인자(검색어 `grep -rn 90-assets notes`, 화면에 찍는 `echo 90-assets`)여도 deny될 수
-  있다. here-document 본문도 셸에서는 글자이지만 가드는 본문 줄을 명령처럼 나눠 보므로 그 안의 구역 경로가 deny될 수 있다
-  (`cat > note.md <<'EOF'`). 노트 검색은 Grep 도구로, 노트 편집은 Edit·Write 도구로 한다. `cd` 뒤의 상대 경로는 ask로 넘기고,
-  `git -C`·`make -C` 같은 작업 폴더 옵션은 따라가지 않는다.
-- 엔진 작업 흐름과 부딪치는 곳이 있다. `/vault-process-inbox`가 Windows에 권하는 `Move-Item` 격리 이동은 막히므로 Bash 도구의 `mv -n`을
-  쓴다. 구역으로 옮긴 파일을 이름으로 스테이징하는 명령(`/vault-session-end` 7단계의 `git add <변경파일>`에 든
-  `10-inbox/_processed/2026-10/a.md`, `/vault-init` 6단계에서 구역 폴더의 `.gitkeep`을 스테이징하는 명령)은 `deny`다. `git mv`로 옮기면 이동이
-  함께 스테이징되고, 이미 옮긴 파일은 구역 밖 상위 폴더로 스테이징한다(`git add 10-inbox`). `git add`의 `deny` 이유 문구도 이 두 방법을
+  있다. 단어의 `:` 뒤 글자도 경로로 보므로 원격 경로(`scp host:90-assets/x .`)나 경로가 아닌 글자(`echo note:90-assets`)도 `:` 뒤가
+  볼트의 구역 경로와 같으면 deny된다. here-document 본문도 셸에서는 글자이지만 가드는 본문 줄을 명령처럼 나눠 보므로 그 안의 구역
+  경로가 deny될 수 있다(`cat > note.md <<'EOF'`). 노트 검색은 Grep 도구로, 노트 편집은 Edit·Write 도구로 한다. `cd` 뒤의 상대 경로는 ask로 넘기고,
+  `git -C`·`make -C` 같은 작업 폴더 옵션은 따라가지 않는다. git `REV:경로`의 경로는 작업 폴더, 볼트 루트, 작업 폴더에서 위로 처음 만나는
+  `.git`이 있는 폴더에서만 풀어 보므로, `git -C`나 `GIT_DIR`·`GIT_WORK_TREE`로 다른 저장소를 가리키면 그 저장소의 루트는 따라가지 않는다.
+- 엔진 작업 흐름과 부딪치는 곳이 있다. `/vault-process-inbox`의 격리 이동과 `/vault-lint`의 노화 문서 아카이브 이동에서 Windows에 쓰는
+  `Move-Item`은 막히므로 Bash 도구의 `mv -n`을 쓴다(`-n` 없는 `mv`는 구역 안 파일을 덮어쓸 수 있어 `ask`다). 구역으로 옮긴 파일을
+  이름으로 스테이징하는 명령(`/vault-session-end` 7단계의 `git add <변경파일>`에 든 `10-inbox/_processed/2026-10/a.md`, `/vault-init`
+  6단계에서 구역 폴더의 `.gitkeep`을 스테이징하는 명령)은 `deny`다. `git mv`로 옮기면 이동이 함께 스테이징되고, 이미 옮긴 파일은 구역 밖 상위 폴더로 스테이징한다(`git add 10-inbox`). `git add`의 `deny` 이유 문구도 이 두 방법을
   알려 준다. 상위 폴더를 스테이징하면 그 폴더의 다른 변경도 함께 올라가므로 커밋 전에 `git status`로 확인한다.
 - PowerShell은 미리 거르기에 걸린 명령만 구문 분석한다. `Get-Content (Join-Path 90 -assets)`처럼 구역 이름을 글자로 쓰지 않는 명령은
   파서를 띄우지 않고 통과한다(실측). 문자열 결합(`'90-ass' + 'ets'`), `-f` 서식, 와일드카드(`9?-assets`), `-EncodedCommand`의 Base64,
@@ -210,7 +236,7 @@ Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에
   (글자 그대로의 구역 경로가 트리에 남으면 `deny`). Windows가 아니면 파서를 띄우지 않으므로 구역 이름이 보이는 PowerShell 명령은
   모두 `ask`다.
 - PowerShell에는 Bash 예외가 없다. `Move-Item`으로 구역에 넣는 격리 이동, `-Exclude 90-assets` 같은 제외 값, 구역 경로와 같은 검색어
-  (`Select-String -Pattern 90-assets`)도 `deny`된다. 격리 이동은 Bash 도구의 `mv`·`git mv`로 한다. 반대로 구역 이름을 글자로만 품고
+  (`Select-String -Pattern 90-assets`)도 `deny`된다. 격리 이동은 Bash 도구의 `mv -n`·`git mv`로 한다. 반대로 구역 이름을 글자로만 품고
   경로로 풀리지 않는 문자열(`Write-Output 'see 90-assets'`, 커밋 메시지)은 결정하지 않으므로, 다른 프로그램이 그런 문자열을 명령으로
   실행하는 경우(`schtasks /tr`, WMI의 프로세스 생성)는 보지 못한다.
 - 그룹 정책의 실행 정책, AppLocker·WDAC, 제한 언어 모드(Constrained Language)가 `ps-parse.ps1`을 막거나, 보안 제품 검사로 5초를
@@ -224,6 +250,8 @@ Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에
   `deny-guard.py`가 없을 때는 버전과 상관없이 막힌다: python이 종료 코드 2로 끝나고 Claude Code는 종료 코드 2를 차단으로 읽는다.
   그래서 스크립트를 지우거나 옮기기 전에 훅 그룹부터 지운다.
 - Claude Code 전용이다. Codex는 훅 모델이 달라 이 템플릿을 쓰지 않는다.
+- 가드는 `matcher`에 든 아홉 도구의 호출만 본다. MCP 도구처럼 목록 밖의 도구와, 도구 호출 없이 실행되는 명령(다른 훅, 플러그인이 선언해
+  저절로 시작하는 monitor)은 보지 않는다.
 - `ask`가 잦으면 내용을 보지 않고 승인하는 습관이 생긴다. 구역마다 마지막 단계 이름으로 미리 거르므로, 구역 이름을 짧은 일반 단어로
   정하면 ask가 늘어난다.
 
@@ -232,6 +260,16 @@ Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에
 - Claude Code hooks 문서(`code.claude.com/docs/en/hooks`): PreToolUse 입력(`tool_name`·`tool_input`·`cwd`), `hookSpecificOutput`의
   `permissionDecision`(allow·deny·ask·defer)과 `permissionDecisionReason`, 여러 훅의 우선순위, exec 형식(`command`+`args`)의 경로 치환,
   `if` 필터가 best-effort라는 설명, `onFailure: "block"`(v2.1.295 이상)과 실패로 치는 경우.
+- Claude Code 도구 참조(`code.claude.com/docs/en/tools-reference`): 도구 이름은 훅 matcher에 쓰는 글자이고, `Monitor`는 명령을 백그라운드에서
+  실행하며 Bash와 같은 권한 규칙을 쓰고(Windows에서는 Git Bash가 있어야 한다), WebSocket 감시는 `command` 대신 `ws`를 받는다. Claude Code
+  세션의 Monitor 도구 스키마(`command`·`ws`·`description`·`timeout_ms`, "The script runs in the same shell environment as Bash.")와도 맞춰
+  보았다.
+- git 문서 `gitrevisions`(`<rev>:<path>`, `:[<n>:]<path>`: 경로는 작업 트리 루트에서 읽고 `./`·`../`로 시작할 때만 작업 폴더에서 읽는다)와
+  `gitglossary`의 pathspec magic(`top`의 표시 `/`, `exclude`의 표시 `!`·`^`). ripgrep 14.1.1 `rg --help`의 `--no-ignore` 설명("This flag can
+  be disabled with --ignore."): `--ignore`는 값을 받지 않는다.
+- Windows 8.3 짧은 이름의 꼴: 위키백과 「8.3 filename」의 VFAT·NT 생성 규칙(앞의 점과 공백을 빼고 대문자로 바꿔 앞 여섯 글자에 `~숫자`,
+  같은 꼴이 넷 이상이면 앞 두 글자·해시 16진수 네 자리·`~숫자`)과, 엔진 개발 기기 임시 폴더에서 `GetShortPathNameW`로 본 이름
+  (`90-ASS~1`, `_PROCE~1`, `OBSIDI~1`, `CLAUDE~1`, `SETTIN~1.JSO`).
 - Python 표준 라이브러리 `shlex.shlex(posix=True, punctuation_chars=...)`와 `whitespace_split`: 셸 연산자를 따로 떼는 단어 분리. 이 가드는
   줄바꿈도 연산자로 다뤄 다음 줄을 새 명령으로 본다. `shlex`는 명령 치환과 here-document를 모르므로 그 부분은 가드가 따로 훑는다.
 - POSIX Shell Command Language(XCU 2장) 2.6.3 Command Substitution과 2.7.4 Here-Document: `$( )` 안은 따옴표가 새로 시작하는 명령이고,

@@ -49,7 +49,7 @@ HOOK_FILTERS = {"Bash(aside *)", "PowerShell(aside *)"}
 # shell, which makes `-File "$CLAUDE_PROJECT_DIR/..."` point at the drive root.
 SHELL_BOUND_VAR_RE = re.compile(r"(?<!env:)\$CLAUDE_PROJECT_DIR(?!\})")
 # The tools the guard reads (its PATH_TOOLS and SHELL_TOOLS); its hook group must match them all.
-GUARD_TOOLS = ("Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell")
+GUARD_TOOLS = ("Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Monitor")
 # A matcher of only these characters is an exact tool name or a |- or ,-separated
 # list of names (Claude Code hooks docs); anything else is a regular expression.
 EXACT_MATCHER_RE = re.compile(r"[A-Za-z0-9_\- ,|]*")
