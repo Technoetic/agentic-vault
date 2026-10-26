@@ -272,6 +272,10 @@ class PeriodParsingTests(unittest.TestCase):
             'FY2026 및 Q3': 'fiscal_quarter', 'FY2026과 3분기': 'fiscal_quarter', 'FY2026, (Q3)': 'fiscal_quarter',
             'Q3 & FY2026': 'fiscal_quarter', 'Q3 및 FY2026': 'fiscal_quarter', '하반기와 FY2026': 'fiscal_half',
             'Q3 [FY2026]': 'fiscal_quarter', '1H + FY26': 'fiscal_half',
+            # The middle dots ㆍ and ᆞ (NFKC folds ㆍ into ᆞ) are letters to the regex engine but join like ·.
+            'FY2026\N{HANGUL LETTER ARAEA}Q3': 'fiscal_quarter', 'Q3\N{HANGUL LETTER ARAEA}FY2026': 'fiscal_quarter',
+            'FY2026 \N{HANGUL LETTER ARAEA} 하반기': 'fiscal_half', 'fy2026\N{HANGUL JUNGSEONG ARAEA}q4': 'fiscal_quarter',
+            '3분기\N{HANGUL JUNGSEONG ARAEA}fy2026': 'fiscal_quarter', 'FY2026\N{HANGUL JUNGSEONG ARAEA}3Q': 'fiscal_quarter',
             # Quarter or half tokens the fiscal row cannot read.
             'FY2026 Q5': 'fiscal_quarter', 'FY2026 Q0': 'fiscal_quarter', 'FY2026 5분기': 'fiscal_quarter',
             'FY2026 Q3Q4': 'fiscal_quarter', 'FY2026 Q12': 'fiscal_quarter', 'FY2026Q5': 'fiscal_quarter',
@@ -369,6 +373,8 @@ class PeriodParsingTests(unittest.TestCase):
         for text, expected in (('FY2025 1·2분기 FY2026', [unread, multiple, unread]), ('FY2026 1·2분기', [unread, multiple]),
                                ('1~2분기 FY2026', [multiple, unread]), ('FY2026, 상·하반기', [unread, multiple]),
                                ('FY2026 및 1, 2분기', [unread, multiple]),
+                               ('FY2026\N{HANGUL LETTER ARAEA}1·2분기', [unread, multiple]),
+                               ('1·2분기\N{HANGUL JUNGSEONG ARAEA}FY2026', [multiple, unread]),
                                # A word between keeps the year whole.
                                ('FY2026 실적, 1·2분기', [self.fiscal_year(2026, 4), multiple])):
             with self.subTest(text=text):
@@ -433,9 +439,15 @@ class PeriodParsingTests(unittest.TestCase):
             '2026년 3분기, 10개일년': [q3, multiple],
             '3Q26, 4시작 중 H2': [('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None), multiple],
             '도2026.10.07과 2026 시작은 기준 실적': [day(10, 7), multiple],
-            # Over-abstentions: a decimal shaped like a day, a year without a comma, 분 and %p are not read.
+            # A period word after the count's particle makes it a number of periods as well.
+            '2026년 3분기, 4개의 분기': [q3, multiple], '2026년 3분기, 3개의 달': [q3, multiple],
+            '2026.10.07, 2차의 연도': [day(10, 7), multiple], '2026년 3분기, 3천의 일': [q3, multiple],
+            '2026년 3분기, 4개\N{ZERO WIDTH SPACE}의 분기': [q3, multiple], '2026년 3분기, 3천의 일자리': [q3],
+            # Over-abstentions: a decimal shaped like a day, a year without a comma, 분 and %p are not read, and a
+            # period word after any particle makes a count no count (120억은 연간 목표 names no number of years).
             '2026년 3분기, 1.5억': [q3, multiple], '2026년 3분기, 2000만 원': [q3, multiple],
             '2026.10.07, 10시 30분': [day(10, 7), multiple], '2026년 3분기, 15%p': [q3, multiple],
+            '2026년 3분기, 120억은 연간 목표': [q3, multiple],
             # Unchanged: the later item is read (a yearless quarter abstains on its own), or a word comes first.
             '2026년 1분기, 2분기': [q1, ('quarter', None, None, None, 'no_year')],
             '2026.03.05, 2026.09.05': [day(3, 5), day(9, 5)],
@@ -455,7 +467,9 @@ class PeriodParsingTests(unittest.TestCase):
         for text, expected in (('2026년 3분기, ' + '120억, ' + '1,' * 32000 + '1억', [q3, multiple]),
                                ('2026.10.07, ' + '10:00, ' + '1,' * 32000 + '1명', [day, multiple]),
                                ('2026년 3분기, ' + '120억, ' + '111,' * 32000 + '111억', [q3]),
-                               ('2026년 3분기, ' + '1명, ' * 32000, [q3])):
+                               ('2026년 3분기, ' + '1명, ' * 32000, [q3]),
+                               # The period-word checks after a count stay linear in a format-character run.
+                               ('2026년 3분기, 120억' + chr(0x200B) * 32000 + '.', [q3])):
             with self.subTest(length=len(text)):
                 started = time.monotonic()
                 records = self.records(text)
@@ -493,6 +507,29 @@ class PeriodParsingTests(unittest.TestCase):
         if tuple(int(part) for part in unicodedata.unidata_version.split('.')) <= (15, 1, 0):
             self.assertEqual({code for code in range(0x110000) if unicodedata.category(chr(code)) == 'Cf'} - listed,
                              set())
+
+    def test_text_on_either_side_of_a_nul_is_read_as_each_side_alone(self):
+        """vault_ssot leaves a NUL where it removed a fact table: no record, joiner, gap or list check reads across it."""
+        texts = ('사업 계획 FY2026\x00 Q3 일정', '일정 Q3\x00 FY2026 계획', 'FY2026\x00\n1·2분기', '1·2분기\x00 FY2026',
+                 'FY2026\x00 & H1', 'FY2026\x00\x00Q3', 'FY2026\N{HANGUL LETTER ARAEA}\x00Q3', 'FY2025 Q4\x00 FY2026',
+                 'FY2025\x00, Q1 FY2026', '2026년\x00 3분기', '2026년 3분기\x00 말에', '2026년 3분기 중\x00 마지막 달',
+                 'late\x00 2026Q3', '2026.10.07\x00~10.09', '10.07~\x002026.10.09', '2026년 3분기,\x00 2027년',
+                 '2026년 3분기, 120억\x00\n10.09', '2026.10.07, 10:00\x00, 10.09', '2026년 3분기, 4개\x00 분기')
+        for text in texts:
+            for fiscal_start in (None, 4):
+                with self.subTest(text=text, fiscal_start=fiscal_start):
+                    records, pieces, offset = period.parse(text, fiscal_start=fiscal_start), [], 0
+                    for piece in text.split('\x00'):
+                        pieces += [dict(record, span=(record['span'][0] + offset, record['span'][1] + offset))
+                                   for record in period.parse(piece, fiscal_start=fiscal_start)]
+                        offset += len(piece) + 1
+                    self.assertEqual(records, pieces)
+                    self.assertFalse([record for record in records if '\x00' in text[slice(*record['span'])]])
+        # No joiner or gap takes the NUL.
+        for pattern in (period._GAP_ONLY, period._JOINED, period._PREFIX_GAP):
+            for text in ('\x00', ' \x00 ', '/\x00', '\x00의 '):
+                with self.subTest(pattern=pattern.pattern[:20], text=text):
+                    self.assertIsNone(pattern.fullmatch(text))
 
     def test_a_range_end_no_row_reads_adds_a_partial_range_record(self):
         partial = ('range', None, None, None, 'partial_range')
