@@ -213,7 +213,9 @@ def _hypergeometric_cdf_numerator(misses: int, sample: int, population: int, tot
 
     The sum of C(K, i) * C(N - K, k - i) over the feasible i <= misses. Each
     term after the first comes from the one before it; the division is exact
-    because both terms are integers. Terms grow with k, not with N.
+    because both terms are integers. Every term is at most C(N, k) <= N**k, so
+    the integers have at most about k*log2(N) bits: linear in k and only
+    logarithmic in N.
     """
     first = max(0, sample - (population - total))
     last = min(misses, total)

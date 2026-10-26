@@ -12,8 +12,10 @@ draw reads a population of item references and writes a sample file. A
 population is either {"population_id": ..., "items": [{"id", "path", "line",
 "match"}], "source_sha256"?} or a saved `vault_ssot.py check-support
 --normalize-periods` JSON, whose rows with normalized_match none become items
-(id "path:line"). Items may carry only those four fields, so note text never
-enters the sample. A path is a vault-relative POSIX path, so one note has one
+(id "path:line"). Items may carry only those four fields, but the id (up to
+1,040 characters) and population_id (up to 200) are copied into the sample as
+given, so ids should be references such as "path:line" to keep note text out
+of the sample. A path is a vault-relative POSIX path, so one note has one
 spelling: backslashes, the characters :*?"<>|, and empty, '.' or '..'
 segments or segments ending in a dot or space are refused (the goldset path
 rule of evaluate_recall.py without its .md suffix). Each item is ranked by the
@@ -197,7 +199,7 @@ def _line(value, code: str) -> int:
 
 
 def item_reference(raw) -> dict:
-    """An item reduced to its references; any other field is refused, so content never enters a sample."""
+    """An item reduced to its references; any other field is refused, and the id is kept as given."""
     if not isinstance(raw, dict):
         raise UsageError('invalid_item')
     if not set(raw) <= set(ITEM_FIELDS):
