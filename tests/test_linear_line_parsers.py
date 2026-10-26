@@ -1,9 +1,11 @@
 """Linear line parsers and scanners that replaced super-linear regexes.
 
 The former patterns live only here, as oracles: the lazy-suffix heading and
-frontmatter-line patterns, and the backtick code-span, wiki-link (lint,
-healthcheck and privileged-note), Markdown-link and frontmatter-block patterns
-that the scanners replaced. The acceptance gates
+frontmatter-line patterns, the backtick code-span, wiki-link (lint,
+healthcheck, privileged-note and Telegram bridge), Markdown-link and
+frontmatter-block patterns that the scanners replaced, and the credential
+pattern jev_client.SENSITIVE before four of its fragments were rewritten in
+place (callers use only whether it matches). The acceptance gates
 borrow the two tiers of VULCANBOOST (Li et al., "VULCANBOOST: Boosting ReDoS Fixes through
 Symbolic Representation and Feature Normalization", USENIX Security 2025), not
 its DFA machinery: tier A, fixed cases (CommonMark-derived and vault lines)
@@ -29,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tracemalloc
 from typing import Callable, NamedTuple
 import unittest
 from unittest import mock
@@ -36,8 +39,12 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
-import vault_egress  # noqa: E402,F401  (lint loads it lazily; keep the run self-contained)
+import jarvis_bridge  # noqa: E402
+import jev_ask  # noqa: E402
+import jev_client  # noqa: E402
+import vault_egress  # noqa: E402  (lint also loads it lazily)
 import vault_healthcheck  # noqa: E402
+import vault_judge  # noqa: E402
 import vault_links  # noqa: E402
 import vault_lint_extensions as lint  # noqa: E402
 import vault_provenance  # noqa: E402
@@ -68,6 +75,32 @@ OLD_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)       # va
 OLD_CODE_SPAN = re.compile(r'(`+)(.+?)\1')                                  # vault_ssot.py:70 (CODE_SPAN_RE)
 OLD_WIKILINK = re.compile(r'\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]')  # vault_healthcheck.py:796 (WIKILINK_RE)
 OLD_PRIVILEGED_LINK = re.compile(r'\[\[([^\]\n]+)\]\]')                     # vault_provenance.py:520 (finditer)
+OLD_TELEGRAM_LINK = re.compile(r'\[\[([^\]]+)\]\]')                         # jarvis_bridge.py:1237 (re.sub)
+# jev_client.py:29 (SENSITIVE), the whole v0.31.0 credential pattern. Every
+# caller uses only whether search() finds a match (jev_client._matches_sensitive;
+# jev_ask and vault_judge hold the same object), so verdicts are compared.
+OLD_SENSITIVE = re.compile(
+    r"apikey_[a-f0-9]{32}_[a-f0-9]{64}|"
+    r"\b(?:sk[-_][a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9]{20,}|"
+    r"github_pat_[a-zA-Z0-9_]{20,}|AKIA[A-Z0-9]{16}|(?:ts|tsk|typesafe)[_-][a-zA-Z0-9_-]{16,})\b|"
+    r"\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b|"
+    r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|"
+    r"\b(?:authorization\s*[:=]\s*(?:bearer|basic)\s+\S+|"
+    r"(?:[A-Z0-9_]*API[_-]?KEY|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
+    r"password|passwd|secret)\s*[\"']?\s*[:=]\s*[\"']?[^\s\"',;]{4,})|"
+    r"\b(?:authorization\s*:\s*bearer|api[_-]?key\s*[:=]|"
+    r"password\s*[:=]|secret\s*[:=])\s*[^\s]{8,}|"
+    r"(?<![0-9])[0-9]{5,12}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])|"
+    r"\bxox[abposr]-[A-Za-z0-9-]{10,}|\bxapp-[0-9]-[A-Za-z0-9-]{10,}|"
+    r"hooks\.slack\.com/services/[A-Za-z0-9_/-]{20,}|"
+    r"\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])|"
+    r"\b[a-z][a-z0-9+.-]*://[^\s:/?#@]*:[^\s/?#@]+@|"
+    r"(?:비밀\s?번호|비번|패스워드|암호|토큰|인증\s?키|액세스\s?키|시크릿|api\s?키)"
+    r"\s*[\"']?\s*[:=]\s*[\"']?(?:(?![\"',;])[\x21-\x7e]){4,}", re.IGNORECASE)
+# The super-linear fragments of OLD_SENSITIVE: the JWT first part and the URL
+# scheme read their run again from every later start, and \s* on both sides of
+# an optional quote tried every split of a whitespace run.
+OLD_SENSITIVE_FRAGMENTS = (r'\beyJ[a-zA-Z0-9_-]{8,}\.', r'\b[a-z][a-z0-9+.-]*://', '\\s*[\\"\']?\\s*[:=]')
 
 
 def oracle_atx(text):
@@ -155,6 +188,18 @@ def oracle_privileged_link_texts(text, limit=128):
     return [match[1] for match in list(OLD_PRIVILEGED_LINK.finditer(text))[:limit]]
 
 
+def oracle_telegram_links(text):
+    return OLD_TELEGRAM_LINK.sub(r'<i>\1</i>', text)
+
+
+def former_verdict(text):
+    return OLD_SENSITIVE.search(text) is not None
+
+
+def verdict(text):
+    return jev_client.SENSITIVE.search(text) is not None
+
+
 # One code point of each kind of whitespace a split line can still hold: ASCII
 # space and tab, vertical tab, file separator, NEL, no-break space, line
 # separator and ideographic space (bytes.splitlines splits only on CR and LF).
@@ -224,10 +269,14 @@ PAIRS = (
          ((LINKS, 6), ('[]|#a', 9)), newline_free=False, special='[]|#a'),
     Pair('provenance link texts', vault_provenance, '_wiki_link_texts', oracle_privileged_link_texts,
          ((LINKS, 6), ('[]\na', 10)), newline_free=False, special='[]a'),
+    # The opt-in Telegram bridge turns the wiki links of each message line into
+    # italics; its pattern tells only '[' and ']' apart from other characters.
+    Pair('telegram wiki links', jarvis_bridge, '_italic_wiki_links', oracle_telegram_links,
+         ((LINKS, 6), ('[]a', 11)), newline_free=False, special='[]a'),
 )
 PAIR = {pair.name: pair for pair in PAIRS}
 SCANNERS = ('lint code removal', 'lint link texts', 'lint heading link text', 'healthcheck frontmatter',
-            'ssot code spans', 'healthcheck wikilinks', 'provenance link texts')
+            'ssot code spans', 'healthcheck wikilinks', 'provenance link texts', 'telegram wiki links')
 
 
 def strings(alphabet, length, prefixes=('',)):
@@ -545,6 +594,147 @@ def privileged_notes(lines=LINK_LINES, per_note=4):
     return notes, config
 
 
+# --- The credential detector: what its comparisons feed it. ---
+KELVIN, LONG_S, DOTLESS_I, DOTTED_I = '\u212a', '\u017f', '\u0131', '\u0130'  # IGNORECASE folds them into [a-z]
+# Letters (with the 'eyJ' of a JWT), a digit, the punctuation the branches
+# name, both quotes, whitespace with a line feed, and a Hangul syllable.
+CREDENTIAL_CHARS = 'aeyJ0:/@.+-_="\' \n가'
+# Runs before a URL tail: scheme characters ('+', '.' and '-' are the ones that
+# are not word characters), word characters outside the scheme class ('_' and
+# a Hangul syllable), the Kelvin sign, and characters that end a scheme.
+URL_HEAD = ('a', KELVIN, '0', '-', '+', '.', '_', '가', ' ', ':', '/', '@')
+URL_TAILS = ('://u:p@h', '://:p@', '://u@h', '://u:@h', 'a://u:p@h', ':/u:p@h', '://u:p', '')
+# Runs before the second and third JWT parts: starts (a later one after '-'),
+# seven characters and one more toward the eight a first part needs, and what
+# ends or splits a run. The tails close a JWT, cut its second part short, or
+# end its third part with and without a word boundary.
+JWT_HEAD = ('eyJ', 'EyJ', '-eyJ', 'a', 'aaaaaaa', '-', '_', '.', '가', ' ')
+JWT_TAILS = ('.' + 'b' * 8 + '.' + 'c' * 8, '.' + 'b' * 7 + '.' + 'c' * 8,
+             '.' + 'b' * 8 + '.' + 'c' * 8 + '가', '.' + 'b' * 8 + '.' + 'c' * 8 + '-가')
+# Labels, whitespace of several kinds, quotes and separators around a value.
+ASSIGNMENT = ('password', 'secret', '암호', 'api 키', ' ', '\t', '\n', '\u3000', '"', "'", ':', '=', 'abcd', ',')
+# (text, verdict): one synthetic shape per branch, near misses, the rewritten
+# branches' starts and whitespace runs, and IGNORECASE folding. Every value is
+# a run of letters or digits written here, not a credential.
+JWT_REST = '.' + 'b' * 8 + '.' + 'c' * 8  # the second and third parts of a JWT
+CREDENTIAL_CASES = (
+    ('sk-' + 'a' * 16, True), ('sk-' + 'a' * 15, False), ('ghp_' + 'a' * 20, True), ('AKIA' + 'A' * 16, True),
+    ('apikey_' + 'f' * 32 + '_' + 'e' * 64, True), ('-----BEGIN RSA PRIVATE KEY-----', True),
+    ('1' * 9 + ':' + 'A' * 35, True), ('xoxb-' + '1' * 10, True), ('xapp-1-' + 'A' * 10, True),
+    ('AIza' + 'S' * 35, True), ('hooks.slack.com/services/' + 'T' * 20, True), ('Authorization: Bearer abcdefgh', True),
+    # JWT: a start inside a run follows '-'; one with eight characters after its 'eyJ' is enough.
+    ('eyJ' + 'a' * 8 + JWT_REST, True), ('eyJ' + 'a' * 7 + JWT_REST, False), ('-eyJ' * 3 + JWT_REST, True),
+    ('eyJ' + 'a' * 8 + '-eyJ' + 'b' * 8 + JWT_REST, True), ('eyJ' + 'a' * 8 + '-eyJ' + 'b' * 7 + JWT_REST, True),
+    ('_eyJ' + 'a' * 8 + JWT_REST, False), ('EYJ' + 'a' * 8 + JWT_REST + '-가', True),
+    ('eyJ' + 'a' * 8 + JWT_REST + '가', False), ('-eyJ' * 100, False), ('eyJ' + 'a' * 8 + JWT_REST + '-eyJ' * 50, True),
+    # URL: a scheme starts at a word boundary, inside a run only after '+', '.' or '-'.
+    ('postgres://admin:fake@db', True), ('a-b://u:p@h', True), ('x+y.z-w://u:p@h', True), ('a-1://u:p@h', True),
+    ('+a://u:p@h', True), ('1a://u:p@h', False), ('_a://u:p@h', False), ('가a://u:p@h', False), ('-1://u:p@h', False),
+    ('a://u@h', False), ('a://u:@h', False), ('a:// u:p@h', False), ('a-' * 50 + '://u:p@h', True),
+    ('a-' * 50 + '://u:p', False),
+    # Whitespace and one optional quote between a label and ':' or '='.
+    ('password = abcd', True), ('password "= abcd', True), ('password' + ' ' * 9 + "'" + '\t' * 9 + ':abcd', True),
+    ('password "":abcd', False), ('password\n\n: abcd', True), ('secret' + ' ' * 40, False),
+    ('client-secret \u3000=x1y2', True), ('암호 : abcd', True), ('암호\u3000"\u3000=abcd', True), ('비밀 번호: abcd', True),
+    ('api 키 = abcd', True), ('암호' + ' ' * 40 + 'abcd', False),
+    # IGNORECASE folds the long s, dotless i, dotted capital I and Kelvin sign.
+    ('pa' + LONG_S * 2 + 'word=abcd', True), ('author' + DOTLESS_I + 'zation: bearer abcdefgh', True),
+    ('api_' + KELVIN + 'ey=abcd', True), (KELVIN + 'a://u:p@h', True), ('a.' + LONG_S + '://u:p@h', True),
+    ('x-' + DOTLESS_I + '://u:p@h', True), (DOTTED_I + '://u:p@h', True), ('_' + KELVIN + '://u:p@h', False),
+    ('eyJ' + KELVIN * 8 + JWT_REST, True),
+)
+
+
+def joined(heads, tails):
+    for head in heads:
+        for tail in tails:
+            yield head + tail
+
+
+def credential_texts(count, seed=20261027):
+    """Deterministic texts of synthetic credential shapes, near misses and pieces, built in memory.
+
+    Every value is a run of letters, digits or hex digits drawn here; none is a
+    real credential.
+    """
+    rng = random.Random(seed)
+    letters, hexdigits = 'abcdefghijklmnopqrstuvwxyz', '0123456789abcdef'
+
+    def run(alphabet, low, high):
+        return ''.join(rng.choice(alphabet) for _ in range(rng.randint(low, high)))
+
+    # Lengths straddle each branch's minimum, so both verdicts occur.
+    shapes = (
+        lambda: 'sk' + rng.choice('-_') + run(letters + '-_', 14, 18),
+        lambda: 'gh' + rng.choice('pousr') + '_' + run(letters, 18, 22),
+        lambda: 'github_pat_' + run(letters + '_', 18, 22),
+        lambda: 'AKIA' + run('ABCDEFGHIJ0123456789', 15, 17),
+        lambda: rng.choice(('ts', 'tsk', 'typesafe')) + rng.choice('-_') + run(letters, 14, 18),
+        lambda: 'eyJ' + run(letters + '-', 6, 10) + '.' + run(letters, 6, 10) + '.' + run(letters, 6, 10),
+        lambda: 'apikey_' + run(hexdigits, 31, 33) + '_' + run(hexdigits, 63, 65),
+        lambda: '-----BEGIN ' + rng.choice(('', 'RSA ', 'EC ', 'OPENSSH ')) + 'PRIVATE KEY-----',
+        lambda: run('0123456789', 4, 13) + ':' + run(letters + '-_', 34, 36),
+        lambda: 'xox' + rng.choice('abposrz') + '-' + run(letters + '-', 8, 12),
+        lambda: 'xapp-' + rng.choice('1x') + '-' + run(letters, 8, 12),
+        lambda: 'hooks.slack.com/services/' + run(letters + '/', 18, 22),
+        lambda: 'AIza' + run(letters + '_-', 34, 36),
+        lambda: (run(letters + '+.-', 1, 6) + '://' + run(letters, 0, 4) + rng.choice((':', ''))
+                 + run(letters, 0, 4) + rng.choice(('@', '', '/'))),
+        lambda: (rng.choice(('password', 'passwd', 'secret', 'api_key', 'MY_API-KEY', 'access-token', 'client_secret',
+                             'authorization', 'Authorization')) + run(' \t"\'', 0, 4) + rng.choice(':=')
+                 + run(' "\'', 0, 3) + run(letters + ',;', 2, 9)),
+        lambda: (rng.choice(('비밀번호', '비밀 번호', '비번', '패스워드', '암호', '토큰', '인증키', '액세스 키', '시크릿', 'api키'))
+                 + run(' \u3000"\'', 0, 3) + rng.choice(':=\uff1a') + run(' "', 0, 2) + run(letters + '!,;', 2, 7)),
+    )
+    # Separators, folding and disguise characters (normalization removes
+    # U+200B and folds full-width letters), and runs of the rewritten branches.
+    pieces = (' ', '\n', '\t', '-', '.', '+', '_', ':', '/', '@', '"', "'", '=', ',', ';', 'a', 'Z', '0', '가', '암호',
+              KELVIN, LONG_S, DOTLESS_I, DOTTED_I, '\u3000', '\xa0', '\u200b', '\uff53\uff4b-', 'eyJ', '://', 'pass',
+              'word', 'pa' + LONG_S * 2 + 'word', 'author' + DOTLESS_I + 'zation', 'bearer ', 'basic ', 'a-' * 4,
+              '-eyJ' * 3)
+    return [''.join(rng.choice(shapes)() if rng.random() < 0.3 else rng.choice(pieces)
+                    for _ in range(rng.randint(0, 12))) for _ in range(count)]
+
+
+CREDENTIAL_TEXTS = tuple(credential_texts(400))
+
+
+def egress_notes(texts=CREDENTIAL_TEXTS, per_note=4):
+    """Notes of the texts, plus assignments that span lines (only the whole-note scan finds them)
+    and a path that is itself credential-shaped (its label is replaced)."""
+    notes = {f'notes/c{number}.md': '\n'.join(texts[start:start + per_note]) + '\n'
+             for number, start in enumerate(range(0, len(texts), per_note))}
+    notes.update({'notes/span.md': 'plain\npassword\n= abcd1234\n', 'notes/korean-span.md': '암호\n:\nabcd\n',
+                  'notes/sk-' + 'a' * 20 + '.md': 'a-b://u:p@h\n'})
+    return notes
+
+
+def ask_request(text):
+    return json.dumps({'schema_version': 1, 'context': {'kind': 'selected_text', 'text': text},
+                       'questions': [{'id': 'claim', 'type': 'choice', 'instructions': 'Is it supported?',
+                                      'criteria': {'yes': 'Supported', 'unknown': 'Insufficient evidence'},
+                                      'abstain': 'unknown'}]}, ensure_ascii=False).encode('utf-8')
+
+
+def judge_request(excerpt, instructions='Is it supported?'):
+    return {'schema_version': 1, 'task': 'support',
+            'sources': [{'path': '20-knowledge/evidence.md', 'excerpt': excerpt}],
+            'questions': [{'id': 'claim', 'instructions': instructions,
+                           'choices': {'yes': 'Supported', 'unknown': 'Insufficient evidence'}, 'abstain': 'unknown'}]}
+
+
+def judge_vault(root, texts):
+    """A vault whose evidence note holds each text on its own lines."""
+    return write_vault(root, {'00-meta/vault-config.json': json.dumps({'vault_name': 'Detector vault'}),
+                              '20-knowledge/evidence.md': '# Evidence\n' + '\n'.join(texts) + '\n'})
+
+
+def excerpts(texts):
+    """The texts vault_judge accepts as excerpts: not blank, no control characters but tab and line feed."""
+    return [text for text in texts if text.strip() and len(text) <= 8192
+            and not any(ord(char) < 32 and char not in '\n\t' or ord(char) == 127 for char in text)]
+
+
 @contextmanager
 def recorded(test, pair):
     """Record what a caller passes to the new helper and hold it to the oracle."""
@@ -563,14 +753,40 @@ def recorded(test, pair):
         test.assertEqual(real(value), pair.oracle(value), (pair.name, value))
 
 
+# oracles() name for the credential pattern. It is not a Pair: the callers
+# search a pattern object rather than call a helper.
+DETECTOR = 'credential detector'
+
+
 @contextmanager
 def oracles(*names):
     """Run the callers with the former regexes in place of the new helpers."""
     with ExitStack() as stack:
         for name in names:
+            if name == DETECTOR:
+                # _matches_sensitive reads the module global on every call; the
+                # aliases in jev_ask and vault_judge are never searched.
+                stack.enter_context(mock.patch.object(jev_client, 'SENSITIVE', OLD_SENSITIVE))
+                continue
             pair = PAIR[name]
             stack.enter_context(mock.patch.object(pair.module, pair.attr, pair.oracle))
         yield
+
+
+@contextmanager
+def recorded_detector(test):
+    """Record what the callers search with the credential pattern and hold each verdict to the oracle."""
+    real, calls = jev_client.SENSITIVE, []
+
+    class Recording:
+        def search(self, text):
+            calls.append(text)
+            return real.search(text)
+
+    with mock.patch.object(jev_client, 'SENSITIVE', Recording()):
+        yield calls
+    test.assertTrue(calls, 'the caller never searched with SENSITIVE')
+    test.assertEqual([text for text in calls if verdict(text) != former_verdict(text)], [])
 
 
 def ledger_note(heading):
@@ -688,6 +904,13 @@ class TierACasesTests(unittest.TestCase):
             'provenance link texts': (
                 ('[[a]] ![[b]] [[c#d|e]]', ['a', 'b', 'c#d|e']), ('[[[a]]', ['[a']), ('[[a]b]]', []),
                 ('[[a\n]]', []), ('[[a\n[[b]]', ['b']), ('[[]]', []), ('[[x]]' * 130, ['x'] * 128)),
+            # The bridge's substitution closed a '[[' only at the first ']' after it,
+            # line feeds included, and left everything else as it was.
+            'telegram wiki links': (
+                ('[[a]] b [[c|d]]', '<i>a</i> b <i>c|d</i>'), ('[[[a]]', '<i>[a</i>'), ('[[a]b]]', '[[a]b]]'),
+                ('[[]] [[a]]]', '[[]] <i>a</i>]'), ('[[a\n]]', '<i>a\n</i>'), ('[[a', '[[a'), ('[[a]', '[[a]'),
+                ('&lt;[[x]]&gt; [[y]][[z]]', '&lt;<i>x</i>&gt; <i>y</i><i>z</i>'),
+                ('[' * 9 + 'a]]', '<i>' + '[' * 7 + 'a</i>')),
         }
         self.assertEqual(tuple(cases), SCANNERS)
         for name, values in cases.items():
@@ -754,6 +977,91 @@ class TierBEquivalenceTests(unittest.TestCase):
             with self.subTest(pair=name):
                 _, found = mismatches(pair, strings(' \n#a—-', 4), limit=1)
                 self.assertTrue(found, name)
+
+
+def verdict_mismatches(texts, limit=5):
+    """Return (count, detected, first texts whose verdict differs from the oracle's)."""
+    count = detected = 0
+    found = []
+    for text in texts:
+        count += 1
+        expected = former_verdict(text)
+        detected += expected
+        if verdict(text) != expected and len(found) < limit:
+            found.append(text)
+    return count, detected, found
+
+
+class CredentialDetectorEquivalenceTests(unittest.TestCase):
+    """The rewritten jev_client.SENSITIVE finds a match in exactly the texts the former one did.
+
+    A missed text would let a credential leave the machine; an extra one would
+    change egress warnings and Jev refusals. Callers use only the verdict.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        everything = ''.join(map(chr, range(0x110000)))
+        cls.chars = {pattern: set(re.findall(pattern, everything, re.IGNORECASE))
+                     for pattern in (r'\w', r'[a-z]', r'[a-z0-9+.-]', r'[a-zA-Z0-9_-]', 'e|y|j')}
+
+    def test_classes_the_rewritten_branches_rely_on(self):
+        # A scheme starts at a word boundary before [a-z]. Inside a run of
+        # [a-z0-9+.-] that boundary follows '+', '.' or '-', the class's only
+        # characters that are not word characters; inside a run of
+        # [a-zA-Z0-9_-] a JWT's 'eyJ' can start only after '-'. IGNORECASE adds
+        # the dotted capital I, dotless i, long s and Kelvin sign to [a-z].
+        word, letters = self.chars[r'\w'], self.chars[r'[a-z]']
+        self.assertEqual(letters - set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+                         {DOTTED_I, DOTLESS_I, LONG_S, KELVIN})
+        self.assertLessEqual(letters, word)
+        self.assertEqual(self.chars[r'[a-z0-9+.-]'] - word, {'+', '.', '-'})
+        self.assertEqual(self.chars[r'[a-zA-Z0-9_-]'] - word, {'-'})
+        self.assertLessEqual(self.chars['e|y|j'], self.chars[r'[a-zA-Z0-9_-]'] & word)
+        self.assertEqual(jev_client.SENSITIVE.flags, OLD_SENSITIVE.flags)
+
+    def test_fixed_cases_keep_the_former_verdicts(self):
+        for text, expected in CREDENTIAL_CASES:
+            with self.subTest(text=text[:40]):
+                self.assertIs(former_verdict(text), expected)
+                self.assertIs(verdict(text), expected)
+
+    def test_every_short_string_gets_the_former_verdict(self):
+        count, _, found = verdict_mismatches(strings(CREDENTIAL_CHARS, 5))
+        self.assertEqual(count, sum(len(CREDENTIAL_CHARS) ** n for n in range(6)))
+        self.assertEqual(found, [])
+
+    def test_rewritten_branches_get_the_former_verdict_on_their_pieces(self):
+        # Every run before a URL or JWT tail, and every arrangement of labels,
+        # whitespace, quotes and separators, through the whole detector.
+        for name, texts in (('url', joined(strings(URL_HEAD, 4), URL_TAILS)),
+                            ('jwt', joined(strings(JWT_HEAD, 5), JWT_TAILS)),
+                            ('assignment', strings(ASSIGNMENT, 5))):
+            with self.subTest(domain=name):
+                count, detected, found = verdict_mismatches(texts)
+                self.assertTrue(0 < detected < count)
+                self.assertEqual(found, [])
+
+    def test_random_texts_get_the_former_verdict(self):
+        texts = CREDENTIAL_TEXTS + tuple(credential_texts(40_000, seed=1027))
+        count, detected, found = verdict_mismatches(texts)
+        self.assertTrue(count // 5 < detected < count)
+        self.assertEqual(found, [])
+
+    def test_normalized_and_nested_values_get_the_former_verdict(self):
+        # _matches_sensitive also searches the NFKC copy without invisible
+        # splitters, and contains_sensitive every string of a JSON-like value.
+        texts = ('pass\u200bword=abcd1234', '\uff53\uff4b-' + 'a' * 16, '\uff50assword\uff1aabcd') + CREDENTIAL_TEXTS
+        values = [{'a': [text], text: 1} for text in texts[:100]] + [{'password': text} for text in texts[:20]]
+        current = ([jev_client._matches_sensitive(text) for text in texts],
+                   [jev_client.contains_sensitive(value) for value in values])
+        with oracles(DETECTOR):
+            former = ([jev_client._matches_sensitive(text) for text in texts],
+                      [jev_client.contains_sensitive(value) for value in values])
+        self.assertEqual(current, former)
+        self.assertTrue(any(current[0]) and not all(current[0]))
+        self.assertTrue(any(raw != normalized for raw, normalized in zip(
+            [verdict(text) for text in texts], current[0])))
 
 
 class CallerPreconditionTests(unittest.TestCase):
@@ -888,6 +1196,41 @@ class CallerPreconditionTests(unittest.TestCase):
         with recorded(self, PAIR['provenance link texts']) as calls:
             lint.analyze_notes(notes, config)
         self.assertEqual(calls, privileged)
+
+    def test_telegram_messages_reach_the_wiki_link_conversion(self):
+        # tg_send cuts a message into chunks of at most TG_CHUNK characters and
+        # converts each chunk line by line.
+        message = '\n'.join(LINK_LINES[:40]) + '\n' + '[' * 5_000 + '[[a]]\n[[b]]'
+        with mock.patch.object(jarvis_bridge, 'tg_call', return_value={'ok': True}), \
+                mock.patch.object(jarvis_bridge, 'log'), recorded(self, PAIR['telegram wiki links']) as calls:
+            self.assertTrue(jarvis_bridge.tg_send('fake-token', 111, message))
+        self.assertIn('[' * jarvis_bridge.TG_CHUNK, calls)
+        self.assertIn('[[b]]', calls)
+
+    def test_egress_lint_and_jev_paths_search_with_the_detector(self):
+        # The egress scan searches each line, then the whole note, and the path
+        # label of a finding; jev_ask and vault_judge search each string they
+        # would send. recorded_detector() holds every searched text to the oracle.
+        note = 'plain line\n' + 'a-' * 40 + '\n' + '-eyJ' * 20 + '\n암호' + ' ' * 40 + '\npassword\n= abcd1234\n'
+        self.assertFalse(any(former_verdict(line) for line in note.splitlines()))
+        with recorded_detector(self) as calls:
+            findings = vault_egress.scan_text(note, 'notes/a.md')
+        self.assertEqual([(row['code'], row['line']) for row in findings], [('egress-secret', 0)])
+        self.assertLessEqual({*note.splitlines(), note, 'notes/a.md'}, set(calls))
+        with recorded_detector(self) as calls:
+            lint.analyze_notes({'notes/a.md': note}, {})
+        self.assertIn(note, calls)
+        texts = excerpts(CREDENTIAL_TEXTS[:12])
+        with recorded_detector(self) as calls:
+            for text in texts:
+                jev_ask.prepare(ask_request(text), api_key='')
+        self.assertLessEqual(set(texts), set(calls))
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = judge_vault(Path(tmp).resolve(), texts)
+            with recorded_detector(self) as calls:
+                for text in texts:
+                    vault_judge.prepare(vault, judge_request(text))
+        self.assertLessEqual(set(texts), set(calls))
 
 
 class DefaultOutputUnchangedTests(unittest.TestCase):
@@ -1061,19 +1404,76 @@ class DefaultOutputUnchangedTests(unittest.TestCase):
         warnings = self.same_with_oracles(names, lambda: lint.analyze_notes(notes, config))
         self.assertEqual({item['path'] for item in warnings if item['code'] == 'provenance-unresolved'}, flagged)
 
+    def test_telegram_html_and_sent_messages_are_unchanged(self):
+        lines = LINK_LINES + SCAN_LINES + ('## [[제목]] **굵게** `코드` a<b & [[x|y]]', '| a | [[b]] |', '|---|---|',
+                                           '[' * 300 + 'a]] [[c]')
+        html = self.same_with_oracles(('telegram wiki links',), lambda: [
+            jarvis_bridge.md_to_telegram_html(text) for text in (*lines, '\n'.join(lines))])
+        self.assertTrue(sum('<i>' in item for item in html) > 10)
+
+        def sent():
+            calls = []
+
+            def fake_call(_token, _method, **kwargs):
+                calls.append(kwargs)
+                return {'ok': True}
+
+            with mock.patch.object(jarvis_bridge, 'tg_call', side_effect=fake_call), \
+                    mock.patch.object(jarvis_bridge, 'log'):
+                status = jarvis_bridge.tg_send('fake-token', 111, '\n'.join(lines) + '\n' + '[' * 5_000 + '[[a]]')
+            return status, calls
+
+        status, calls = self.same_with_oracles(('telegram wiki links',), sent)
+        self.assertTrue(status)
+        self.assertTrue(len(calls) > 2 and any(call.get('parse_mode') == 'HTML' for call in calls))
+
+    def test_egress_and_lint_warnings_are_unchanged(self):
+        # Chunks keep each run under the egress (128) and lint (200) warning caps.
+        notes = sorted(egress_notes().items())
+        chunks = [dict(notes[start:start + 40]) for start in range(0, len(notes), 40)]
+        findings = self.same_with_oracles((DETECTOR,), lambda: [vault_egress.analyze_notes(chunk, {})
+                                                                for chunk in chunks])
+        rows = [row for result in findings for row in result]
+        secret = {row['path'] for row in rows if row['code'] == 'egress-secret'}
+        self.assertTrue(10 < len(secret) < len(notes))
+        self.assertIn('notes/span.md', secret)
+        self.assertIn('<redacted-sensitive-path>', secret)
+        self.assertTrue(any(row['line'] == 0 for row in rows))
+        self.assertNotIn('egress-incomplete', {row['code'] for row in rows})
+        warnings = self.same_with_oracles((DETECTOR,), lambda: [lint.analyze_notes(chunk, {}) for chunk in chunks])
+        self.assertEqual({row['path'] for result in warnings for row in result if row['code'] == 'egress-secret'},
+                         secret)
+
+    def test_jev_ask_and_vault_judge_results_are_unchanged(self):
+        # api_key='' keeps jev_ask from reading TYPESAFE_API_KEY; nothing is sent.
+        texts = excerpts(CREDENTIAL_TEXTS[:120])
+        asked = self.same_with_oracles((DETECTOR,), lambda: [jev_ask.prepare(ask_request(text), api_key='')
+                                                             for text in texts])
+        self.assertEqual({result.get('error_code', result['status']) for result in asked},
+                         {'prepared', 'sensitive_input'})
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = judge_vault(Path(tmp).resolve(), texts)
+            judged = self.same_with_oracles((DETECTOR,), lambda: [
+                (vault_judge.prepare(vault, judge_request(text)),
+                 vault_judge.prepare(vault, judge_request('# Evidence', instructions='Check ' + text)))
+                for text in texts])
+        self.assertEqual({result.get('error', result['status']) for pair in judged for result in pair},
+                         {'prepared', 'sensitive_input'})
+
     def test_warning_promotion_replay_is_unchanged(self):
         # The certificate binds the bundled benign corpus results; only the
         # checker file hash may change with this work.
         names = ('ssot ATX heading', 'lint heading text', 'lint closing run', 'lint date field',
                  'lint comment split', 'provenance header field', 'lint code removal', 'lint link texts',
-                 'lint heading link text', 'ssot code spans', 'provenance link texts')
+                 'lint heading link text', 'ssot code spans', 'provenance link texts', DETECTOR)
         result = self.same_with_oracles(names, vault_warning_policy.build_promotion_certificate)
         self.assertEqual(result['false_positives'], 0)
 
 
 TIMING_SIZES = (8_000, 16_000, 32_000, 64_000)
 # Seconds for every shape and size of one helper (measured on this PC: under 2 ms
-# for a line parser, up to about 20 ms for a scanner).
+# for a line parser, up to about 20 ms for a scanner), or of one credential
+# detector shape (15-33 ms at the median of 20 runs, 44 ms at most).
 TIMING_BUDGET = 0.25
 SHAPES = {
     'ssot ATX heading': (lambda n: '# a' + ' ' * n + 'b', lambda n: '# ' + ' ' * n,
@@ -1115,8 +1515,19 @@ SHAPES = {
     'healthcheck wikilinks': (lambda n: '[' * n, lambda n: '[' * (n - 3) + '|]x', lambda n: '[[a#' * (n // 4) + ']',
                               lambda n: '[[a]]' * (n // 5)),
     'provenance link texts': (lambda n: '[' * n, lambda n: '[[a]x' * (n // 5), lambda n: '[[a]]' * (n // 5)),
+    # Every '[[' of the second shape stops at the same ']' and fails there.
+    'telegram wiki links': (lambda n: '[' * n, lambda n: '[' * (n - 2) + ']x', lambda n: '[[a' * (n // 3),
+                            lambda n: '[[a]x' * (n // 5), lambda n: '[[]' * (n // 3), lambda n: '[[a]]' * (n // 5)),
 }
 SHAPES['state ATX heading'] = SHAPES['ssot ATX heading']
+# The credential pattern's slowest shapes before the rewrite (scheme runs, JWT
+# starts, whitespace after a label) and a long JWT first part. It is a
+# 13-branch alternation tried at every position, about 0.2 µs per character on
+# this PC even where nothing matches, so each shape gets the budget on its own;
+# the former pattern needs more at N = 16,000 already.
+DETECTOR_SHAPES = (lambda n: 'a-' * (n // 2), lambda n: 'a.' * (n // 2), lambda n: '+Z' * (n // 2),
+                   lambda n: '-eyJ' * (n // 4), lambda n: 'eyJ' + 'a' * n, lambda n: 'password' + ' ' * n,
+                   lambda n: 'access_token' + '\u3000' * n, lambda n: '암호' + '\n' * n)
 
 
 class TimingGateTests(unittest.TestCase):
@@ -1137,6 +1548,26 @@ class TimingGateTests(unittest.TestCase):
             with self.subTest(pair=pair.name):
                 self.assertLess(self.elapsed(pair.new(), SHAPES[pair.name]), TIMING_BUDGET)
 
+    def test_credential_detector_stays_under_the_budget_up_to_64k(self):
+        for shape in DETECTOR_SHAPES:
+            with self.subTest(shape=shape(12)):
+                self.assertLess(self.elapsed(jev_client.SENSITIVE.search, (shape,)), TIMING_BUDGET)
+
+    def test_credential_detector_memory_does_not_grow_with_a_run(self):
+        # re keeps backtracking state for every pass of a group loop such as
+        # (?:(?![+.-][a-z])[a-z0-9+.-])*: about 2.2 MB for one 32,768-character
+        # run on this PC, 20 MB at 262,144. The rewritten branches repeat only
+        # single characters, so a long run needs no more memory than a short one.
+        for text in ('a' * 32_768, 'eyJ' + 'a' * 32_768, 'a-1' * 10_923, 'eyJ' + 'a-' * 16_384):
+            with self.subTest(text=text[:12]):
+                tracemalloc.start()
+                try:
+                    jev_client.SENSITIVE.search(text)
+                    peak = tracemalloc.get_traced_memory()[1]
+                finally:
+                    tracemalloc.stop()
+                self.assertLess(peak, 1 << 20)
+
     def test_link_scans_read_each_character_a_bounded_number_of_times(self):
         # str.find runs in C: a wiki-link scan that searched for the ']' of a
         # tail again from every '[[' read the text once per link, yet took only
@@ -1149,7 +1580,7 @@ class TimingGateTests(unittest.TestCase):
                 self.read += max(0, (found if found >= 0 else len(self)) - start)
                 return found
 
-        for name in ('healthcheck wikilinks', 'provenance link texts'):
+        for name in ('healthcheck wikilinks', 'provenance link texts', 'telegram wiki links'):
             for shape in SHAPES[name]:
                 text = CountingText(shape(64_000))
                 with self.subTest(pair=name, text=text[:12]):
@@ -1216,11 +1647,18 @@ class NoLazySuffixLeftTests(unittest.TestCase):
         # Nor a backtick run closed by a backreference, which retries every
         # opening length against every later position.
         former = {OLD_LINT_CODE.pattern, OLD_LINT_LINKS.pattern, OLD_KEY_LINK.pattern, OLD_FRONTMATTER.pattern,
-                  OLD_CODE_SPAN.pattern, OLD_WIKILINK.pattern, OLD_PRIVILEGED_LINK.pattern}
+                  OLD_CODE_SPAN.pattern, OLD_WIKILINK.pattern, OLD_PRIVILEGED_LINK.pattern, OLD_TELEGRAM_LINK.pattern}
         shape = re.compile(r'\(`\+\).*\\[1-9]')
         self.assertTrue(shape.search(OLD_LINT_CODE.pattern) and shape.search(OLD_CODE_SPAN.pattern))
         self.assertEqual([where for where, value in shipped_code_strings()
                           if value in former or shape.search(value)], [])
+
+    def test_no_shipped_regex_keeps_a_former_credential_fragment(self):
+        # Nor a JWT first part or URL scheme that every later start reads again,
+        # or \s* on both sides of an optional quote.
+        self.assertEqual([OLD_SENSITIVE.pattern.count(fragment) for fragment in OLD_SENSITIVE_FRAGMENTS], [1, 1, 2])
+        self.assertEqual([(where, fragment) for where, value in shipped_code_strings()
+                          for fragment in OLD_SENSITIVE_FRAGMENTS if fragment in value], [])
 
     def test_no_python_file_uses_the_removed_wikilink_regex(self):
         # vault_links imported WIKILINK_RE; every importer now calls
@@ -1294,11 +1732,51 @@ class SlowEquivalenceTests(unittest.TestCase):
                 'lint code removal': ('`a\n', 14, ('',)), 'ssot code spans': ('`a\n', 14, ('',)),
                 'lint link texts': ('[]!a\n', 10, ('',)), 'lint heading link text': ('[]()a\n', 9, ('',)),
                 'healthcheck frontmatter': ('-\n\r a', 10, ('---',)),
-                'healthcheck wikilinks': ('[]|#a', 11, ('',)), 'provenance link texts': ('[]\na', 12, ('',))}.items():
+                'healthcheck wikilinks': ('[]|#a', 11, ('',)), 'provenance link texts': ('[]\na', 12, ('',)),
+                'telegram wiki links': ('[]a', 14, ('',))}.items():
             pair = PAIR[name]
             with self.subTest(pair=name):
                 _, found = mismatches(pair, strings(alphabet, length, prefixes))
                 self.assertEqual(found, [])
+
+    def test_credential_detector_on_larger_domains(self):
+        for name, texts in (('characters', strings(CREDENTIAL_CHARS, 6)),
+                            ('url', joined(strings(URL_HEAD, 5), URL_TAILS)),
+                            ('jwt', joined(strings(JWT_HEAD, 6), JWT_TAILS)),
+                            ('assignment', strings(ASSIGNMENT, 6)),
+                            ('random', credential_texts(400_000, seed=20261028))):
+            with self.subTest(domain=name):
+                _, _, found = verdict_mismatches(texts)
+                self.assertEqual(found, [])
+
+    def test_report_former_and_new_detector_times(self):
+        report = io.StringIO()
+        for shape in DETECTOR_SHAPES:
+            for size in (8_000, 16_000, 32_000):
+                value = shape(size)
+                started = time.perf_counter()
+                OLD_SENSITIVE.search(value)
+                former = time.perf_counter() - started
+                started = time.perf_counter()
+                jev_client.SENSITIVE.search(value)
+                new = time.perf_counter() - started
+                print(f'credential {shape(12)[:14]!r:26} N={size:>6}  former {former:9.4f} s  new {new:.6f} s',
+                      file=report)
+                self.assertLess(new, TIMING_BUDGET)
+        # The default lint's egress scan searches the line and then the whole note.
+        for size in (16_000, 32_000):
+            note = 'a-' * (size // 2)
+            started = time.perf_counter()
+            with oracles(DETECTOR):
+                former_rows = vault_egress.scan_text(note, 'notes/a.md')
+            former = time.perf_counter() - started
+            started = time.perf_counter()
+            rows = vault_egress.scan_text(note, 'notes/a.md')
+            new = time.perf_counter() - started
+            self.assertEqual(rows, former_rows)
+            print(f'egress scan_text, one-line note       N={size:>6}  former {former:9.4f} s  new {new:.6f} s',
+                  file=report)
+        sys.stderr.write('\n' + report.getvalue())
 
     def test_report_former_and_new_times(self):
         report = io.StringIO()
