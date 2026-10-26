@@ -19,7 +19,7 @@ import unicodedata
 from typing import Sequence
 
 from vault_evidence import EvidenceError, regular, stable_read, stamp
-from vault_healthcheck import HealthcheckError, WIKILINK_RE, estimate_tokens, validate_config
+from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config, wikilink_targets
 from vault_paths import resolve_note_path
 import vault_recall as recall_module
 from vault_recall import recall
@@ -137,8 +137,8 @@ def _existing_links(text: str) -> set[str]:
     # Aliases and headings are decorations on an actual filename/path target.
     # Frontmatter aliases themselves deliberately do not resolve links.
     found = set()
-    for match in WIKILINK_RE.finditer(text):
-        name = match.group(1).strip().replace("\\", "/").rsplit("/", 1)[-1]
+    for target in wikilink_targets(text):
+        name = target.strip().replace("\\", "/").rsplit("/", 1)[-1]
         if name.casefold().endswith(".md"):
             name = name[:-3]
         found.add(name.casefold())

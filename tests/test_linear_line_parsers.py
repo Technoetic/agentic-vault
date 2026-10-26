@@ -1,8 +1,9 @@
 """Linear line parsers and scanners that replaced super-linear regexes.
 
 The former patterns live only here, as oracles: the lazy-suffix heading and
-frontmatter-line patterns, and the backtick code-span, wiki-link, Markdown-link
-and frontmatter-block patterns that the scanners replaced. The acceptance gates
+frontmatter-line patterns, and the backtick code-span, wiki-link (lint,
+healthcheck and privileged-note), Markdown-link and frontmatter-block patterns
+that the scanners replaced. The acceptance gates
 borrow the two tiers of VULCANBOOST (Li et al., "VULCANBOOST: Boosting ReDoS Fixes through
 Symbolic Representation and Feature Normalization", USENIX Security 2025), not
 its DFA machinery: tier A, fixed cases (CommonMark-derived and vault lines)
@@ -37,6 +38,7 @@ SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 import vault_egress  # noqa: E402,F401  (lint loads it lazily; keep the run self-contained)
 import vault_healthcheck  # noqa: E402
+import vault_links  # noqa: E402
 import vault_lint_extensions as lint  # noqa: E402
 import vault_provenance  # noqa: E402
 import vault_query_expansion  # noqa: E402
@@ -64,6 +66,8 @@ OLD_LINT_LINKS = re.compile(r'(?<!!)\[\[([^]\n]+)\]\]|!\[\[([^]\n]+)\]\]')  # va
 OLD_KEY_LINK = re.compile(r'\[([^]]+)\]\([^)]*\)')                          # vault_lint_extensions.py:122 (re.sub)
 OLD_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)       # vault_healthcheck.py:1254
 OLD_CODE_SPAN = re.compile(r'(`+)(.+?)\1')                                  # vault_ssot.py:70 (CODE_SPAN_RE)
+OLD_WIKILINK = re.compile(r'\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]')  # vault_healthcheck.py:796 (WIKILINK_RE)
+OLD_PRIVILEGED_LINK = re.compile(r'\[\[([^\]\n]+)\]\]')                     # vault_provenance.py:520 (finditer)
 
 
 def oracle_atx(text):
@@ -141,6 +145,16 @@ def oracle_code_spans(cell):
     return [(match.start(), match.end(), match[2]) for match in OLD_CODE_SPAN.finditer(cell)]
 
 
+def oracle_wikilink_matches(text):
+    # findall (the healthcheck) returned group 1 of these matches; vault_links read group(1).
+    return [(match.start(), match.end(), match[1]) for match in OLD_WIKILINK.finditer(text)]
+
+
+def oracle_privileged_link_texts(text, limit=128):
+    # The privileged-note scan listed every match and kept the first 128.
+    return [match[1] for match in list(OLD_PRIVILEGED_LINK.finditer(text))[:limit]]
+
+
 # One code point of each kind of whitespace a split line can still hold: ASCII
 # space and tab, vertical tab, file separator, NEL, no-break space, line
 # separator and ideographic space (bytes.splitlines splits only on CR and LF).
@@ -151,6 +165,11 @@ RECORD = WHITESPACE + '#a가'  # the 11-symbol alphabet of the deep verification
 # letter and a Hangul syllable. Every other character acts in these patterns
 # like the letter, or for the frontmatter pattern's \s like the space.
 SCAN = '`[]()!\n- a가'
+# The wiki-link scans' 9-symbol alphabet: the characters WIKILINK_RE tells
+# apart ('[', ']', '|', '#'), the line feed the privileged-note scan stops at,
+# the '!' of an embed, a space, a letter and a Hangul syllable. Every other
+# character acts in these two patterns like the letter.
+LINKS = '[]|#\n! a가'
 
 
 class Pair(NamedTuple):
@@ -199,10 +218,16 @@ PAIRS = (
          (('-\n\r \ta가', 6),), prefixes=('', '---', '---\n', '---\r\n'), newline_free=False, special='-a'),
     Pair('ssot code spans', vault_ssot, '_code_spans', oracle_code_spans,
          ((SCAN, 6), ('`a\n', 11)), newline_free=False, special='`a'),
+    # The healthcheck wiki-link scan (full mode, --staged backlinks and
+    # vault_links) is compared by match position and group 1.
+    Pair('healthcheck wikilinks', vault_healthcheck, '_wikilink_matches', oracle_wikilink_matches,
+         ((LINKS, 6), ('[]|#a', 9)), newline_free=False, special='[]|#a'),
+    Pair('provenance link texts', vault_provenance, '_wiki_link_texts', oracle_privileged_link_texts,
+         ((LINKS, 6), ('[]\na', 10)), newline_free=False, special='[]a'),
 )
 PAIR = {pair.name: pair for pair in PAIRS}
 SCANNERS = ('lint code removal', 'lint link texts', 'lint heading link text', 'healthcheck frontmatter',
-            'ssot code spans')
+            'ssot code spans', 'healthcheck wikilinks', 'provenance link texts')
 
 
 def strings(alphabet, length, prefixes=('',)):
@@ -402,6 +427,124 @@ def support_vault(root, cells):
     return root
 
 
+def link_lines(count=240, seed=20261027):
+    """Deterministic text of wiki links, broken links and bracket runs for the link-scan callers."""
+    rng = random.Random(seed)
+    pieces = ('[[', '[[', '[[', ']]', ']]', '[', ']', '|', '#', '!', '\n', ' ', 'n1', 'n2', 'n3', 'gone', 'Gone',
+              'missing', 'x/n2', 'n3.md', 'img.png', 'Alpha one', '가', '`', 'risky', 'plain', '[[n2]]',
+              '[[risky|r]]', '[[plain#h]]', '[[gone]]', '[[n3.md]]')
+    return [''.join(rng.choice(pieces) for _ in range(rng.randint(0, 12))) for _ in range(count)]
+
+
+LINK_LINES = tuple(link_lines())
+# The hot note and notes/n1.md are privileged, so the default lint also runs
+# the privileged-note link scan inside the healthcheck.
+LINK_CONFIG = {**HEALTH_CONFIG, 'vault_name': 'Link vault', 'index_note': '00-meta/index.md',
+               'hot_note': '00-meta/hot.md', 'privileged_notes': ['notes/n1.md']}
+
+
+def link_notes(lines=LINK_LINES, per_note=12):
+    """An index, a hot note and notes holding the link lines, with the targets they name.
+
+    The --staged runs delete gone.md and rename n3.md; risky.md declares a
+    forwarded origin, so a privileged note that links to it gets a warning.
+    n1, n2 and risky each hold one link whose target only the exact former
+    rules read: a lone ']' or a line feed inside the target, and a tail that
+    a single ']' does not close.
+    """
+    def note(title, body, extra=''):
+        return f'---\ntitle: "{title}"\ntype: note\n{extra}---\n{body}\n'
+
+    notes = {
+        'notes/n1.md': note('N1', '[[risky]] [[n2]] [[gone|x] y'), 'notes/n2.md': note('N2', 'plain [[x]/gone]]'),
+        'notes/n3.md': note('N3', '[[n1|back]]'), 'notes/gone.md': note('Gone', '[[n3]]'),
+        'notes/risky.md': note('Risky', 'forwarded [[x\n/n3.md]]', 'content_origin: forwarded\n'),
+        'notes/plain.md': note('Plain', '[[gone#Part]] [[n3.md|three]]'),
+        '00-meta/index.md': note('Index', '\n'.join(lines[:30]) + '\n```\n[[n4]]\n```\n`[[n5]]` [[n1]] [[n2|x]]'),
+        '00-meta/hot.md': note('Hot', '\n'.join(lines[30:60])),
+    }
+    for number, start in enumerate(range(60, len(lines), per_note), 4):
+        notes[f'notes/n{number}.md'] = note(f'N{number}', '\n'.join(lines[start:start + per_note]))
+    return notes
+
+
+def write_vault(root, files):
+    """Write each file's text as UTF-8 bytes, line ends as given."""
+    for relative, text in files.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_bytes(text.encode('utf-8'))
+    return root
+
+
+def link_vault(root, per_note=12):
+    """A fresh link vault at root, so the report of an earlier run is never read."""
+    shutil.rmtree(root, ignore_errors=True)
+    return write_vault(root, {'00-meta/vault-config.json': json.dumps(LINK_CONFIG), **link_notes(per_note=per_note)})
+
+
+def git(vault, *args):
+    subprocess.run(['git', *args], cwd=vault, check=True, capture_output=True)
+
+
+def staged_link_vault(root):
+    """A git vault whose index deletes gone.md, renames n3.md and changes the hot note.
+
+    The link lines fill few notes, since --staged starts git processes per note.
+    """
+    link_vault(root, per_note=90)
+    for args in (('init', '-q'), ('config', 'core.autocrlf', 'false'), ('config', 'user.name', 'Linear Test'),
+                 ('config', 'user.email', 'linear@example.invalid'), ('add', '--', '.'),
+                 ('commit', '-q', '-m', 'seed'), ('rm', '-q', '--', 'notes/gone.md'),
+                 ('mv', 'notes/n3.md', 'notes/renamed.md')):
+        git(root, *args)
+    hot = root / '00-meta' / 'hot.md'
+    hot.write_bytes(hot.read_bytes() + b'[[risky]] [[gone]]\n')
+    git(root, 'add', '--', '00-meta/hot.md')
+    return root
+
+
+def staged_healthcheck(vault):
+    """Run the --staged healthcheck in process: (exit code, stdout, stderr)."""
+    out, err = io.StringIO(), io.StringIO()
+    with mock.patch.object(sys, 'argv', ['vault_healthcheck.py', '--vault', str(vault), '--staged']), \
+            redirect_stdout(out), redirect_stderr(err):
+        code = vault_healthcheck.main()
+    return code, out.getvalue(), err.getvalue()
+
+
+PROPOSAL_STEMS = ('n1', 'n2', 'n3', 'gone', 'missing', 'risky', 'plain', 'Alpha one', 'other', 'spare')
+
+
+def proposal_vault(root, lines=LINK_LINES):
+    """A vault whose source note holds the link lines and whose candidates all match one query.
+
+    The last line links spare and other only by the exact former rules, and
+    names missing in a tail that a single ']' does not close.
+    """
+    files = {'00-meta/vault-config.json': json.dumps({'required_keys': ['title'], 'enums': {}}),
+             '20-knowledge/source.md': '# Source\n' + '\n'.join(lines) + '\n[[x]/spare]] [[x\n/other.md]] [[missing|x] y\n'}
+    files.update({f'20-knowledge/{stem}.md': '# Memory storage\nmemory storage\n' for stem in PROPOSAL_STEMS})
+    return write_vault(root, files)
+
+
+def privileged_notes(lines=LINK_LINES, per_note=4):
+    """Privileged notes over the link lines, and notes of each provenance kind they can name."""
+    notes = {
+        'notes/risky.md': '---\ncontent_origin: forwarded\n---\nforwarded\n',
+        'notes/n1.md': '---\nprovenance_trust: untrusted\n---\nuntrusted\n',
+        'notes/n2.md': 'plain\n', 'x/n2.md': '---\nprovenance_manifest: "00-meta/provenance/x.json"\n---\nderived\n',
+        'notes/n3.md': 'plain\n', 'notes/plain.md': 'plain\n', 'notes/gone.md': 'plain\n',
+        # The scan keeps the first 128 links: a risky 128th counts, a risky 129th does not.
+        'priv/after127.md': '[[plain]]' * 127 + '[[risky]]\n', 'priv/after128.md': '[[plain]]' * 128 + '[[risky]]\n',
+        'priv/brackets.md': '[' * 200 + '\n[[risky|x]]\n',
+    }
+    for number, start in enumerate(range(0, len(lines), per_note)):
+        notes[f'priv/p{number}.md'] = '\n'.join(lines[start:start + per_note]) + '\n'
+    config = {'privileged_notes': sorted(path for path in notes if path.startswith('priv/') and path != 'priv/p0.md'),
+              'hot_note': 'priv/p0.md'}
+    return notes, config
+
+
 @contextmanager
 def recorded(test, pair):
     """Record what a caller passes to the new helper and hold it to the oracle."""
@@ -533,6 +676,18 @@ class TierACasesTests(unittest.TestCase):
                 ('```notes/a.md``', [(0, 15, '`notes/a.md')]), ('`a``b`', [(0, 3, 'a'), (3, 6, 'b')]),
                 ('``a`', [(0, 4, '`a')]), ('```', [(0, 3, '`')]), ('````', [(0, 3, '`')]), ('``', []),
                 ('`` `x` ``', [(0, 9, ' `x` ')]), ('`a\nb`', [])),
+            # WIKILINK_RE kept a lone ']' and line feeds in the target, ended it at
+            # '|', '#' or ']]', and let the tail after '|' or '#' run to the first ']'.
+            'healthcheck wikilinks': (
+                ('[[a]] ![[b|c]] [[d#e]]', [(0, 5, 'a'), (7, 14, 'b'), (15, 22, 'd')]),
+                ('[[a]b]]', [(0, 7, 'a]b')]), ('[[[a]]', [(0, 6, '[a')]), ('[[a\nb]]', [(0, 7, 'a\nb')]),
+                ('[[a#[[b]]', [(0, 9, 'a')]), ('[[a#b]x]]', []), ('[[a#b]x[[c]]', [(7, 12, 'c')]),
+                ('[[a|b\n|c]]', [(0, 10, 'a')]), ('[[#a]]', []), ('[[]]', []), ('[[a]]]', [(0, 5, 'a')]),
+                ('[[a', []), ('[[a|b', [])),
+            # The privileged-note scan stopped at the first ']' or line feed and kept 128 matches.
+            'provenance link texts': (
+                ('[[a]] ![[b]] [[c#d|e]]', ['a', 'b', 'c#d|e']), ('[[[a]]', ['[a']), ('[[a]b]]', []),
+                ('[[a\n]]', []), ('[[a\n[[b]]', ['b']), ('[[]]', []), ('[[x]]' * 130, ['x'] * 128)),
         }
         self.assertEqual(tuple(cases), SCANNERS)
         for name, values in cases.items():
@@ -567,6 +722,27 @@ class TierBEquivalenceTests(unittest.TestCase):
                     expected_count = len(pair.prefixes) * sum(len(alphabet) ** n for n in range(length + 1))
                     self.assertEqual(count, expected_count)
                     self.assertEqual(found, [])
+
+    def test_wikilink_targets_are_the_former_findall(self):
+        # The healthcheck and vault_links call wikilink_targets(), group 1 of
+        # each match in order, which is what WIKILINK_RE.findall returned.
+        values = itertools.chain(strings(LINKS, 5), LINK_LINES, SCAN_LINES, ['\n'.join(LINK_LINES)])
+        self.assertEqual([value for value in values
+                          if vault_healthcheck.wikilink_targets(value) != OLD_WIKILINK.findall(value)], [])
+
+    def test_privileged_link_scan_stops_where_the_former_slice_did(self):
+        # The scan stops at `limit` texts where the former code listed every
+        # match and sliced. Joined link pieces give several matches per string.
+        pair = PAIR['provenance link texts']
+        found = [(text, limit) for text in strings(('[[', ']]', '[', ']', '\n', 'a'), 6) for limit in range(4)
+                 if pair.new()(text, limit) != pair.oracle(text, limit)]
+        self.assertEqual(found, [])
+        for links in (124, 125, 126, 300):  # 127, 128, 129 and 303 matches
+            text = '[[a]x [[b]] [' * 3 + ''.join(f'[[n{i}|x]] ' if i % 7 else f'[[[n{i}]]\n' for i in range(links))
+            every = [match[1] for match in OLD_PRIVILEGED_LINK.finditer(text)]
+            with self.subTest(links=links):
+                self.assertEqual(len(every), links + 3)
+                self.assertEqual(pair.new()(text), every[:128])
 
     def test_heading_forms_differ_once_a_line_feed_is_inside(self):
         # The heading forms differ from their oracles once a line feed is inside
@@ -673,6 +849,45 @@ class CallerPreconditionTests(unittest.TestCase):
             with recorded(self, PAIR['healthcheck frontmatter']) as calls:
                 vault_healthcheck.validate_staged(vault, vault_healthcheck.load_staged_config(vault))
             self.assertEqual(sorted(calls), sorted(texts))
+
+    def test_wikilink_scan_reaches_full_mode_staged_backlinks_and_link_proposals(self):
+        # Full mode scans each note without code and the index without fences;
+        # --staged scans each index blob with '[[' once a commit deletes or
+        # renames a note; vault_links scans the source note as read. The scan
+        # has no line-feed precondition, and recorded() holds every value to
+        # the oracle.
+        def without_code(text):
+            return vault_healthcheck.INLINE_CODE_RE.sub('', vault_healthcheck.CODE_FENCE_RE.sub('', text))
+
+        notes = link_notes()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / 'vault'
+            with recorded(self, PAIR['healthcheck wikilinks']) as calls:
+                full_healthcheck(link_vault(root))
+            self.assertLessEqual({without_code(text) for text in notes.values()}, set(calls))
+            self.assertIn(vault_healthcheck.CODE_FENCE_RE.sub('', notes['00-meta/index.md']), calls)
+            if shutil.which('git') is not None:
+                vault = staged_link_vault(root)
+                with recorded(self, PAIR['healthcheck wikilinks']) as calls:
+                    errors = vault_healthcheck.validate_staged(vault, vault_healthcheck.load_staged_config(vault))
+                self.assertIn(without_code(notes['notes/plain.md']), calls)
+                self.assertTrue(any(error.startswith('스테이징 차단: notes/plain.md') for error in errors))
+            vault = proposal_vault(Path(tmp).resolve() / 'proposals')
+            with recorded(self, PAIR['healthcheck wikilinks']) as calls:
+                vault_links.propose_links(vault, '20-knowledge/source.md', 'memory storage')
+            self.assertIn((vault / '20-knowledge' / 'source.md').read_bytes().decode('utf-8'), calls)
+
+    def test_privileged_notes_reach_the_link_scan(self):
+        # privileged_notes and hot_note name the notes; the default lint runs the
+        # provenance analysis on every approved original.
+        notes, config = privileged_notes()
+        privileged = [notes[path] for path in sorted({*config['privileged_notes'], config['hot_note']})]
+        with recorded(self, PAIR['provenance link texts']) as calls:
+            vault_provenance.analyze_notes(notes, config)
+        self.assertEqual(calls, privileged)
+        with recorded(self, PAIR['provenance link texts']) as calls:
+            lint.analyze_notes(notes, config)
+        self.assertEqual(calls, privileged)
 
 
 class DefaultOutputUnchangedTests(unittest.TestCase):
@@ -789,12 +1004,69 @@ class DefaultOutputUnchangedTests(unittest.TestCase):
             for number, text in enumerate(FRONTMATTER_TEXTS)])
         self.assertTrue(any(errors) and not all(errors))
 
+    def test_healthcheck_link_report_is_unchanged(self):
+        # The dead-link, orphan and index sections come from the wiki-link scan;
+        # section 15 holds the privileged-note warnings of the default lint.
+        names = ('healthcheck wikilinks', 'provenance link texts')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / 'vault'
+            code, _, _, report = self.same_with_oracles(names, lambda: full_healthcheck(link_vault(root)))
+        self.assertEqual(code, 0)
+        counts = {section: int(re.search(rf'^## {section}\. [^\n]*\((\d+)\)$', report, re.M)[1])
+                  for section in ('5', '6b', '6c')}
+        self.assertTrue(all(counts.values()), counts)
+        self.assertIn('[provenance-unresolved]', report)
+
+    def test_staged_backlink_errors_and_warnings_are_unchanged(self):
+        # stderr carries the backlink errors of validate_staged and the warnings
+        # of the default lint over the index, privileged-note scan included.
+        if shutil.which('git') is None:
+            self.skipTest('git is not available')
+        names = ('healthcheck wikilinks', 'provenance link texts')
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = staged_link_vault(Path(tmp).resolve() / 'vault')
+            code, _, err = self.same_with_oracles(names, lambda: staged_healthcheck(vault))
+        referrers = {line.split(' — ')[0].removeprefix('스테이징 차단: ') for line in err.splitlines()
+                     if line.startswith('스테이징 차단: ') and '백링크' in line}
+        self.assertIn('notes/plain.md', referrers)
+        self.assertNotIn('notes/n1.md', referrers)  # its '[[' names neither stem
+        self.assertEqual(code, 1)
+        self.assertIn('[provenance-unresolved]', err)
+
+    def test_link_proposals_are_unchanged(self):
+        def cli():
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = vault_links.main(['--vault', str(vault), '--source', '20-knowledge/source.md',
+                                         '--query', 'memory storage', '--limit', '10', '--format', 'json'])
+            return code, out.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = proposal_vault(Path(tmp).resolve() / 'vault')
+            result = self.same_with_oracles(('healthcheck wikilinks',), lambda: vault_links.propose_links(
+                vault, '20-knowledge/source.md', 'memory storage', limit=10, max_tokens=50_000))
+            code, _ = self.same_with_oracles(('healthcheck wikilinks',), cli)
+        self.assertEqual((result['diagnostics']['status'], code), ('ok', 0))
+        self.assertTrue(result['proposals'])
+        self.assertGreater(result['diagnostics']['skipped_existing'], 0)
+
+    def test_privileged_provenance_findings_are_unchanged(self):
+        notes, config = privileged_notes()
+        names = ('provenance link texts',)
+        findings = self.same_with_oracles(names, lambda: vault_provenance.analyze_notes(notes, config))
+        flagged = {item['path'] for item in findings if item['code'] == 'provenance-unresolved'}
+        self.assertIn('priv/after127.md', flagged)
+        self.assertNotIn('priv/after128.md', flagged)
+        self.assertTrue(flagged and not set(config['privileged_notes']) <= flagged)
+        warnings = self.same_with_oracles(names, lambda: lint.analyze_notes(notes, config))
+        self.assertEqual({item['path'] for item in warnings if item['code'] == 'provenance-unresolved'}, flagged)
+
     def test_warning_promotion_replay_is_unchanged(self):
         # The certificate binds the bundled benign corpus results; only the
         # checker file hash may change with this work.
         names = ('ssot ATX heading', 'lint heading text', 'lint closing run', 'lint date field',
                  'lint comment split', 'provenance header field', 'lint code removal', 'lint link texts',
-                 'lint heading link text', 'ssot code spans')
+                 'lint heading link text', 'ssot code spans', 'provenance link texts')
         result = self.same_with_oracles(names, vault_warning_policy.build_promotion_certificate)
         self.assertEqual(result['false_positives'], 0)
 
@@ -838,6 +1110,11 @@ SHAPES = {
                                 lambda n: '---\n' + '\n' * n + '---\n'),
     'ssot code spans': (lambda n: '`' * n, lambda n: '``a' * (n // 3),
                         lambda n: '`' * (n // 2) + 'a' + '`' * (n // 2 - 1)),
+    # Every '[[' of the second shape fails at the same tail; the tails of the
+    # third all reach its one ']'; the last matches once per link.
+    'healthcheck wikilinks': (lambda n: '[' * n, lambda n: '[' * (n - 3) + '|]x', lambda n: '[[a#' * (n // 4) + ']',
+                              lambda n: '[[a]]' * (n // 5)),
+    'provenance link texts': (lambda n: '[' * n, lambda n: '[[a]x' * (n // 5), lambda n: '[[a]]' * (n // 5)),
 }
 SHAPES['state ATX heading'] = SHAPES['ssot ATX heading']
 
@@ -859,6 +1136,25 @@ class TimingGateTests(unittest.TestCase):
         for pair in PAIRS:
             with self.subTest(pair=pair.name):
                 self.assertLess(self.elapsed(pair.new(), SHAPES[pair.name]), TIMING_BUDGET)
+
+    def test_link_scans_read_each_character_a_bounded_number_of_times(self):
+        # str.find runs in C: a wiki-link scan that searched for the ']' of a
+        # tail again from every '[[' read the text once per link, yet took only
+        # about 20 ms at 64k on this PC, under the budget. Count what find() reads.
+        class CountingText(str):
+            read = 0
+
+            def find(self, sub, start=0, end=None):
+                found = super().find(sub, start, end)
+                self.read += max(0, (found if found >= 0 else len(self)) - start)
+                return found
+
+        for name in ('healthcheck wikilinks', 'provenance link texts'):
+            for shape in SHAPES[name]:
+                text = CountingText(shape(64_000))
+                with self.subTest(pair=name, text=text[:12]):
+                    PAIR[name].new()(text)
+                    self.assertLessEqual(text.read, 2 * len(text))
 
 
 def shipped_code_strings():
@@ -885,11 +1181,26 @@ class NoLazySuffixLeftTests(unittest.TestCase):
         # Nor a backtick run closed by a backreference, which retries every
         # opening length against every later position.
         former = {OLD_LINT_CODE.pattern, OLD_LINT_LINKS.pattern, OLD_KEY_LINK.pattern, OLD_FRONTMATTER.pattern,
-                  OLD_CODE_SPAN.pattern}
+                  OLD_CODE_SPAN.pattern, OLD_WIKILINK.pattern, OLD_PRIVILEGED_LINK.pattern}
         shape = re.compile(r'\(`\+\).*\\[1-9]')
         self.assertTrue(shape.search(OLD_LINT_CODE.pattern) and shape.search(OLD_CODE_SPAN.pattern))
         self.assertEqual([where for where, value in shipped_code_strings()
                           if value in former or shape.search(value)], [])
+
+    def test_no_python_file_uses_the_removed_wikilink_regex(self):
+        # vault_links imported WIKILINK_RE; every importer now calls
+        # wikilink_targets(), and no module keeps the name for another to import.
+        self.assertFalse(hasattr(vault_healthcheck, 'WIKILINK_RE'))
+        users = []
+        for path in sorted(ROOT.rglob('*.py')):
+            if '.git' in path.parts:
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+                name = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute)
+                        else node.name if isinstance(node, ast.alias) else None)
+                if name == 'WIKILINK_RE':
+                    users.append(f'{path.relative_to(ROOT)}:{node.lineno}')
+        self.assertEqual(users, [])
 
 
 @unittest.skipUnless(SLOW, 'set AGENTIC_VAULT_SLOW_TESTS=1 for the larger runs')
@@ -914,7 +1225,8 @@ class SlowEquivalenceTests(unittest.TestCase):
         for name, (alphabet, length, prefixes) in {
                 'lint code removal': ('`a\n', 14, ('',)), 'ssot code spans': ('`a\n', 14, ('',)),
                 'lint link texts': ('[]!a\n', 10, ('',)), 'lint heading link text': ('[]()a\n', 9, ('',)),
-                'healthcheck frontmatter': ('-\n\r a', 10, ('---',))}.items():
+                'healthcheck frontmatter': ('-\n\r a', 10, ('---',)),
+                'healthcheck wikilinks': ('[]|#a', 11, ('',)), 'provenance link texts': ('[]\na', 12, ('',))}.items():
             pair = PAIR[name]
             with self.subTest(pair=name):
                 _, found = mismatches(pair, strings(alphabet, length, prefixes))

@@ -459,6 +459,36 @@ def _header_fields(text):
     return fields
 
 
+_LINK_STOP_RE = re.compile(r'[]\n]')
+
+
+def _wiki_link_texts(text, limit=128):
+    """Group 1 of the first `limit` matches of the former re.finditer(r'\\[\\[([^\\]\\n]+)\\]\\]', text).
+
+    The same texts in linear time, line feeds included: the regex ran its class
+    to the first ']' or line feed again from each '[' (quadratic on a run of
+    '[') and stays in tests/test_linear_line_parsers.py as an oracle. The
+    privileged-note scan kept only the first 128 matches, so the scan stops
+    there.
+    """
+    # Each match runs from one '[[' to the first ']' or line feed after it and
+    # needs ']]' there: a shorter text would end before a character that is
+    # neither, where ']]' cannot start.
+    texts, search = [], 0
+    while len(texts) < limit:
+        opening = text.find('[[', search)
+        if opening < 0:
+            break
+        stop = _LINK_STOP_RE.search(text, opening + 2)
+        end = stop.start() if stop else len(text)
+        if end > opening + 2 and text.startswith(']]', end):
+            texts.append(text[opening + 2:end])
+            search = end + 2
+        else:
+            search = end + 1  # every '[[' before this stop stops there too and fails
+    return texts
+
+
 def analyze_notes(notes, config=None):
     """Pure index-original checks; unresolved evidence is never declared absent.
 
@@ -532,7 +562,7 @@ emit provenance-unresolved until the separate explicit validator is run.
         references = fields.get('provenance_sources', [])
         references = references if isinstance(references, list) else []
         references = [ref for ref in references[:128] if isinstance(ref, str)]
-        references += [m[1].split('|', 1)[0].split('#', 1)[0] for m in list(re.finditer(r'\[\[([^\]\n]+)\]\]', text))[:128]]
+        references += [raw.split('|', 1)[0].split('#', 1)[0] for raw in _wiki_link_texts(text)]
         for ref in references:
             candidate = ref if ref.casefold().endswith('.md') else ref + '.md'
             if '/' not in ref and '\\' not in ref:
