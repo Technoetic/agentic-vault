@@ -507,7 +507,9 @@ class BashDecisionTests(GuardCase):
             with self.subTest(command=command):
                 self.assertIsNone(self.decide("Bash", {"command": command}))
         for command in ("rm -rf .claude/", "tar -czf b.tgz .claude", "mv .claude .claude-old", "cat .claude/*",
-                        'rm -rf "$HOME/.claude"'):
+                        'rm -rf "$HOME/.claude"',
+                        # A path that climbs back to the folder names it too.
+                        "tar -xf x.tar -C .claude/rules/..", "cp -r notes/. .claude/.", "unzip x.zip -d .claude/rules/x/../.."):
             with self.subTest(command=command):
                 self.assertEqual(self.decide("Bash", {"command": command}), "ask")
 

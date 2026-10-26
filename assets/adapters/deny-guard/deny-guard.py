@@ -104,12 +104,14 @@ _WILDCARD_RE = re.compile(r"[*?\[{]")
 _RUNTIME_RE = re.compile(r"[$`]")
 _RUNTIME_TEXT_RE = re.compile(r"`|\$\S")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-# Guard control names in text. .claude counts as the folder itself or with a wildcard name right
-# inside it (.claude/*.json), not as part of a deeper path such as ~/.claude/plugins/cache/...;
-# Windows drops trailing dots and spaces from a name.
+# Guard control names in text. .claude counts as the folder itself, with a wildcard name right
+# inside it (.claude/*.json) or with a path that ends in '.' or '..' (.claude/rules/..), not as
+# part of a deeper path such as ~/.claude/plugins/cache/...; Windows drops trailing dots and
+# spaces from a name.
 _CONTROL_TEXT_RE = re.compile(
     r"vault-config\.json|deny-guard\.py|ps-parse\.ps1|settings[^\s/\\'\"]*\.json"
-    r"|\.claude[. ]*(?:[\\/]+[^\s\\/'\"]*[*?\[{][^\s\\/'\"]*)?[\\/]*(?=$|[\s'\"`:;&|()<>,{}*?\[])")
+    r"|\.claude[. ]*(?:[\\/]+[^\s\\/'\"]*[*?\[{][^\s\\/'\"]*|[\\/]+(?:[^\s\\/'\"]+[\\/]+)*\.\.?)?[\\/]*"
+    r"(?=$|[\s'\"`:;&|()<>,{}*?\[])")
 _SHELL_FLAG_RE = re.compile(r"-[a-z]*c")
 # A Windows 8.3 short name in text (90-ASS~1, SETTIN~1.JSO): one to six characters, '~' and digits.
 _SHORT_NAME_RE = re.compile(
