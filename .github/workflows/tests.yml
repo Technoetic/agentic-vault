@@ -12,7 +12,11 @@ jobs:
   unittest:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # 35, not 20: the slowest v0.31.0 Windows cell took 19.1 min, and v0.32.0's new and
+    # extended tests take about 2.7 min more in a local Windows run (2026-10-27), which would
+    # likely put that cell over 20. 35 leaves a clear margin for cold runners that start many
+    # Python and PowerShell subprocesses, and a hung job still stops well within the hour.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:

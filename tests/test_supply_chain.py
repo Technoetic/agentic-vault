@@ -29,6 +29,11 @@ AUDIT_REQUIREMENTS_IN = ROOT / "ci" / "requirements-audit.in"
 AUDIT_REQUIREMENTS = ROOT / "ci" / "requirements-audit.txt"
 AUDIT_JOB = "supply-chain-audit"
 BLOCKING_JOBS = ("unittest", "stateful")
+# Time limits (minutes) of the blocking jobs. The slowest v0.31.0 Windows unittest cell took
+# 19.1 of the former 20 minutes, and v0.32.0's new and extended tests take about 2.7 minutes
+# more in a local Windows run (2026-10-27), so the unittest job has 35. The stateful job runs
+# an unchanged test file and keeps 10.
+BLOCKING_JOB_TIMEOUTS = {"unittest": "35", "stateful": "10"}
 AUDIT_ACTIONS = {
     "actions/checkout",
     "actions/setup-python",
@@ -57,7 +62,8 @@ COOL_DOWN_PINS = {
 }
 # Every pinned action in the workflow and the tag that points at its commit, resolved on
 # 2026-10-27 with read-only `gh api repos/OWNER/REPO/git/matching-refs/tags` (annotated tags
-# dereferenced; no other tag points at these commits). zizmor's ref-version-mismatch audit
+# dereferenced; no other release tag (vX.Y.Z) points at these commits, though checkout's major
+# tag v7 currently points at 3d3c42e5 too). zizmor's ref-version-mismatch audit
 # checks the comment against the SHA, and a major tag moves: actions/setup-python moved v7
 # from v7.0.0 to v7.1.0 (6d4fd22b, published 2026-10-22), so the "# v7" comments became three
 # medium findings. The commit stays on v7.0.0 because v7.1.0 is younger than the 14-day
@@ -398,6 +404,12 @@ class SupplyChainAuditJobTests(unittest.TestCase):
                 self.assertIn(name, self.jobs)
                 directives = {strip_comment(line).strip().partition(":")[0] for line in self.jobs[name]}
                 self.assertNotIn("continue-on-error", directives)
+
+    def test_blocking_jobs_keep_a_time_limit_with_margin(self) -> None:
+        # A limit the slowest cell nearly reaches turns a slow runner into a failed release gate.
+        for name, minutes in BLOCKING_JOB_TIMEOUTS.items():
+            with self.subTest(job=name):
+                self.assertEqual(scalars(self.jobs[name], 4).get("timeout-minutes"), minutes)
 
     def test_blocking_jobs_keep_their_v0240_commands(self) -> None:
         for name, expected in BLOCKING_RUNS_V0240.items():
