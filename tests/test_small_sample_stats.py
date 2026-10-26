@@ -3,17 +3,22 @@
 scripts/eval_stats.py holds the statistics. evaluate_recall.py uses them only
 behind --exact-paired and --rate-bounds; without the flags every report, the
 CLI output and the exit code stay as before and the module is never loaded.
+The exact hypergeometric miss bound is used only by scripts/real_vault_audit.py;
+the functions that existed in v0.31.0 keep their values (pinned below).
 """
 from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import importlib.util
+import inspect
 import io
 import itertools
 import json
 import math
 import random
+import time
 import unittest
 from fractions import Fraction
 from pathlib import Path
@@ -117,6 +122,67 @@ def run_main(argv):
             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         code = evaluator.main(argv)
     return code, stdout.getvalue(), stderr.getvalue()
+
+
+def hypergeometric_cdf(population, total, sample, misses) -> Fraction:
+    """P(X <= misses) for X ~ Hypergeometric(population, total, sample) as a Fraction, from math.comb."""
+    return Fraction(sum(math.comb(total, i) * math.comb(population - total, sample - i) for i in range(misses + 1)),
+                    math.comb(population, sample))
+
+
+def hypergeometric_pmf(population, total, sample, misses) -> Fraction:
+    return Fraction(math.comb(total, misses) * math.comb(population - total, sample - misses),
+                    math.comb(population, sample))
+
+
+def stable(value):
+    """Floats at 10 significant digits: last-bit libm differences between CI platforms stay out."""
+    if isinstance(value, dict):
+        return {key: stable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [stable(item) for item in value]
+    if isinstance(value, float):
+        return format(value, ".10g")
+    return value
+
+
+def existing_outputs(module):
+    """Outputs of every function eval_stats.py had in v0.31.0 on a fixed grid."""
+    rows = []
+    for confidence in (0.9, 0.95, 0.99):
+        for trials in (1, 2, 4, 8, 21, 56, 300):
+            for events in sorted({0, 1, trials // 2, trials - 1, trials}):
+                rows.append(["rate_upper_bounds", events, trials, confidence,
+                             module.rate_upper_bounds(events, trials, confidence=confidence)])
+        rows.append(["confidence_alpha", confidence, module.confidence_alpha(confidence)])
+    for baseline, improved in (([0.0] * 4, [0.1, 0.2, 0.3, -0.3]), ([0.25, 0.5, 0.0], [0.75, 0.5, 0.5]),
+                               ([], []), ([0, 0, 0], [1, 1, -0.5])):
+        rows.append(["exact_paired_sign_flip", baseline, improved,
+                     module.exact_paired_sign_flip(baseline, improved)])
+    rows.append(["paired_differences", module.paired_differences([0.25, 0.5], [0.75, 0.25])])
+    rows.append(["minimum_attainable_p_value", [module.minimum_attainable_p_value(k) for k in range(6)]])
+    rows.append(["constants", module.EXACT_PAIRED_MAX_NONZERO, module.TIE_TOLERANCE, module.EXACT_PAIRED_METHOD])
+    return stable(rows)
+
+
+# existing_outputs() of v0.31.0 (21c4b47) as compact sorted JSON, captured before the
+# hypergeometric bound was added (Windows, Python 3.12.10).
+V0310_EXISTING_OUTPUTS_SHA256 = "8a32eee6101093ab8c399922f55103f4a9dcc38d630d8e601a7bc9383bf2a891"
+# Parameter names, kinds and defaults of the v0.31.0 public functions.
+V0310_SIGNATURES = {
+    "clopper_pearson_upper_bound": [("events", "POSITIONAL_OR_KEYWORD", None),
+                                    ("trials", "POSITIONAL_OR_KEYWORD", None),
+                                    ("confidence", "KEYWORD_ONLY", 0.95)],
+    "confidence_alpha": [("confidence", "POSITIONAL_OR_KEYWORD", None)],
+    "exact_paired_sign_flip": [("baseline", "POSITIONAL_OR_KEYWORD", None),
+                               ("improved", "POSITIONAL_OR_KEYWORD", None)],
+    "minimum_attainable_p_value": [("nonzero_pairs", "POSITIONAL_OR_KEYWORD", None)],
+    "paired_differences": [("baseline", "POSITIONAL_OR_KEYWORD", None), ("improved", "POSITIONAL_OR_KEYWORD", None)],
+    "rate_upper_bounds": [("events", "POSITIONAL_OR_KEYWORD", None), ("trials", "POSITIONAL_OR_KEYWORD", None),
+                          ("confidence", "KEYWORD_ONLY", 0.95)],
+    "wilson_upper_bound": [("events", "POSITIONAL_OR_KEYWORD", None), ("trials", "POSITIONAL_OR_KEYWORD", None),
+                           ("confidence", "KEYWORD_ONLY", 0.95)],
+}
 
 
 class ExactPairedSignFlipTests(unittest.TestCase):
@@ -326,6 +392,110 @@ class RateUpperBoundTests(unittest.TestCase):
         self.assertEqual(stats.confidence_alpha(0.95), ALPHA)
         self.assertGreater(stats.clopper_pearson_upper_bound(1, 5, confidence=0.99),
                            stats.clopper_pearson_upper_bound(1, 5, confidence=0.9))
+
+
+class HypergeometricUpperBoundTests(unittest.TestCase):
+    """Exact finite-population bound on misses (Callaghan and Mueller-Hansen 2020, inverted)."""
+
+    def test_bisection_equals_a_linear_scan_of_an_independent_fraction_cdf(self):
+        # Every N <= 30 at 95% (N <= 16 at 90% and 99%): the largest K whose CDF reaches alpha.
+        cases, rises, mismatches = 0, [], []
+        for confidence, alpha, largest in ((0.95, Fraction(1, 20), 30), (0.9, Fraction(1, 10), 16),
+                                           (0.99, Fraction(1, 100), 16)):
+            for population in range(1, largest + 1):
+                for sample in range(population + 1):
+                    table = [[hypergeometric_cdf(population, total, sample, x) for x in range(sample + 1)]
+                             for total in range(population + 1)]
+                    for x in range(sample + 1):
+                        column = [row[x] for row in table]
+                        # The bisection relies on the CDF never rising with K.
+                        if any(a < b for a, b in zip(column, column[1:])):
+                            rises.append((population, sample, x))
+                        expected = max(total for total, value in enumerate(column) if value >= alpha)
+                        actual = stats.hypergeometric_upper_bound(x, sample, population,
+                                                                  confidence=confidence)["upper_misses"]
+                        cases += 1
+                        if actual != expected:
+                            mismatches.append((confidence, population, sample, x, actual, expected))
+        self.assertEqual(cases, 7391)
+        self.assertEqual(rises, [])
+        self.assertEqual(mismatches, [])
+
+    def test_exact_coverage_is_at_least_the_confidence_for_sixty_items(self):
+        # P(bound >= K) summed exactly over x for every true K = 0..60, k = 15.
+        population, sample, minimum = 60, 15, {}
+        for confidence, floor in ((0.95, Fraction(19, 20)), (0.9, Fraction(9, 10))):
+            bounds = [stats.hypergeometric_upper_bound(x, sample, population, confidence=confidence)["upper_misses"]
+                      for x in range(sample + 1)]
+            minimum[confidence] = min(sum(hypergeometric_pmf(population, total, sample, x)
+                                          for x in range(sample + 1) if bounds[x] >= total)
+                                      for total in range(population + 1))
+            with self.subTest(confidence=confidence):
+                self.assertGreaterEqual(minimum[confidence], floor)
+        self.assertEqual(round(float(minimum[0.95]), 4), 0.9503)  # the documented exact minimum
+
+    def test_documented_values_and_the_binomial_comparison(self):
+        cases = {(0, 20, 500): 68, (0, 40, 500): 34, (1, 20, 500): 106, (0, 40, 100): 5,
+                 (0, 40, 20_000): 1441, (3, 400, 1_000_000): 19_266}
+        for (misses, sample, population), upper in cases.items():
+            with self.subTest(misses=misses, sample=sample, population=population):
+                result = stats.hypergeometric_upper_bound(misses, sample, population)
+                self.assertEqual(result, {"misses": misses, "sample": sample, "population": population,
+                                          "confidence": 0.95, "upper_misses": upper,
+                                          "upper_miss_share": upper / population,
+                                          "method": "hypergeometric_exact_inversion; integer bisection over K"})
+        self.assertEqual(stats.hypergeometric_upper_bound(0, 20, 500)["upper_miss_share"], 0.136)
+        # The binomial (with-replacement) Clopper-Pearson bound times N is looser.
+        for (sample, population), binomial in (((20, 500), 69.55), ((40, 500), 36.08), ((40, 100), 7.22)):
+            with self.subTest(sample=sample, population=population):
+                scaled = stats.clopper_pearson_upper_bound(0, sample) * population
+                self.assertEqual(round(scaled, 2), binomial)
+                self.assertLess(stats.hypergeometric_upper_bound(0, sample, population)["upper_misses"], scaled)
+
+    def test_edge_cases_need_no_special_handling(self):
+        for population in (1, 2, 7, 50):
+            with self.subTest(population=population):
+                # Every sampled item missed: nothing excludes N.
+                self.assertEqual([stats.hypergeometric_upper_bound(k, k, population)["upper_misses"]
+                                  for k in range(population + 1)], [population] * (population + 1))
+                # A census counts the misses exactly.
+                self.assertEqual([stats.hypergeometric_upper_bound(x, population, population)["upper_misses"]
+                                  for x in range(population + 1)], list(range(population + 1)))
+        self.assertEqual(stats.hypergeometric_upper_bound(10, 10, 50)["upper_misses"], 50)
+        self.assertEqual(stats.hypergeometric_upper_bound(7, 50, 50)["upper_misses"], 7)
+        self.assertEqual(stats.hypergeometric_upper_bound(0, 50, 50)["upper_misses"], 0)
+        self.assertEqual(stats.hypergeometric_upper_bound(0, 0, 10)["upper_misses"], 10)
+        # The bound only grows with x and with confidence, and shrinks as k grows.
+        rising = [stats.hypergeometric_upper_bound(x, 20, 500)["upper_misses"] for x in range(21)]
+        self.assertEqual(rising, sorted(set(rising)))
+        falling = [stats.hypergeometric_upper_bound(0, k, 500)["upper_misses"] for k in (5, 10, 20, 40, 80, 160)]
+        self.assertEqual(falling, sorted(set(falling), reverse=True))
+        self.assertGreater(stats.hypergeometric_upper_bound(1, 20, 500, confidence=0.99)["upper_misses"],
+                           stats.hypergeometric_upper_bound(1, 20, 500, confidence=0.9)["upper_misses"])
+
+    def test_large_populations_use_exact_integers_quickly(self):
+        started = time.perf_counter()
+        self.assertEqual(stats.hypergeometric_upper_bound(3, 400, 1_000_000)["upper_misses"], 19_266)
+        self.assertEqual(stats.hypergeometric_upper_bound(100, 5_000, 1_000_000)["upper_misses"], 23_564)
+        self.assertLess(time.perf_counter() - started, 5.0)
+
+    def test_alpha_is_exact_from_the_decimal_confidence(self):
+        self.assertEqual(stats.exact_alpha(0.95), Fraction(1, 20))
+        self.assertEqual(stats.exact_alpha(0.9), Fraction(1, 10))
+        self.assertEqual(stats.exact_alpha(0.99), Fraction(1, 100))
+        self.assertNotEqual(1 - Fraction(0.95), Fraction(1, 20))  # why the float is not used directly
+        for confidence in (0.5, 1.0, 0.0, 1, True, "0.95", 1.5, -0.95, float("nan")):
+            with self.subTest(confidence=confidence):
+                with self.assertRaises(ValueError):
+                    stats.exact_alpha(confidence)
+                with self.assertRaises(ValueError):
+                    stats.hypergeometric_upper_bound(0, 20, 500, confidence=confidence)
+
+    def test_input_validation(self):
+        for misses, sample, population in ((-1, 5, 10), (6, 5, 10), (0, 11, 10), (0, 0, 0), (0, -1, 10),
+                                           (True, 5, 10), (0, 5.0, 10), (0, 5, 10.0), ("0", 5, 10), (None, 5, 10)):
+            with self.subTest(misses=misses, sample=sample, population=population), self.assertRaises(ValueError):
+                stats.hypergeometric_upper_bound(misses, sample, population)
 
 
 class ExactPairedEvaluatorTests(unittest.TestCase):
@@ -560,6 +730,35 @@ class RateBoundEvaluatorTests(unittest.TestCase):
         # The split note stays first; rate-bound notes only add lines.
         self.assertTrue(flag_err.startswith(plain_err), flag_err)
         self.assertIn("recall evaluation split: heldout n=32", flag_err)
+
+
+class ExistingOutputsUnchangedTests(unittest.TestCase):
+    """Adding the hypergeometric bound leaves every earlier output alone."""
+
+    def test_v0310_functions_return_the_same_values(self):
+        text = json.dumps(existing_outputs(stats), sort_keys=True, separators=(",", ":"))
+        self.assertEqual(hashlib.sha256(text.encode("utf-8")).hexdigest(), V0310_EXISTING_OUTPUTS_SHA256)
+
+    def test_v0310_signatures_are_unchanged(self):
+        for name, expected in V0310_SIGNATURES.items():
+            with self.subTest(function=name):
+                parameters = inspect.signature(getattr(stats, name)).parameters.values()
+                self.assertEqual([(p.name, p.kind.name, None if p.default is inspect.Parameter.empty else p.default)
+                                  for p in parameters], expected)
+
+    def test_recall_reports_never_call_the_hypergeometric_bound(self):
+        flagged = ["--fixture", str(ADVANCED_FIXTURE), "--compare", *GATES, "--exact-paired", "--rate-bounds"]
+        expected = [run_main([]), run_main(flagged)]
+        loaded = evaluator._load_eval_stats()
+        with mock.patch.object(loaded, "hypergeometric_upper_bound", create=True,
+                               side_effect=AssertionError("called")), \
+                mock.patch.object(loaded, "exact_alpha", create=True, side_effect=AssertionError("called")), \
+                mock.patch.object(evaluator, "_load_eval_stats", wraps=evaluator._load_eval_stats) as loads:
+            self.assertEqual(run_main([]), expected[0])
+            self.assertEqual(loads.call_count, 0, "the default run never loads eval_stats")
+            self.assertEqual(run_main(flagged), expected[1])
+        self.assertEqual(expected[0][0], 0)
+        self.assertEqual(expected[1][0], 0)
 
 
 if __name__ == "__main__":
