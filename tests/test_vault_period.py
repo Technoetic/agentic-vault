@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import importlib
 from pathlib import Path
 import sys
+import time
 import unicodedata
 import unittest
 
@@ -409,9 +410,32 @@ class PeriodParsingTests(unittest.TestCase):
             '2026년 3분기 및 15%': [q3], '2026년 3분기와 12명': [q3], '2026년 3분기, 7건': [q3],
             '2026.10.07, 5천 원': [day(10, 7)], '2026.10.07(수), 09:30': [day(10, 7)],
             '2026년 3분기, 120억, 3개 신규 고객': [q3], '2026.10.07, 10:00, 2026.10.09': [day(10, 7), day(10, 9)],
-            # Unless another number follows a later list separator: the list goes on.
+            # A unit may carry a particle or be chained, and a count may have one decimal part.
+            '2026년 3분기, 120억원': [q3], '2026년 3분기, 3만 5천 원': [q3], '2026년 3분기, 1억 2천만 원': [q3],
+            '2026.10.07, 10시부터': [day(10, 7)], '2026년 3분기, 15.3%': [q3], '2026년 3분기, 12명이 참석': [q3],
+            '2026.10.07, 10:00~12:00': [day(10, 7)], '2026년 3분기, 3개 주문': [q3],
+            # Unless another number or a Q or H mark that is not a time or a count comes before the next period.
             '2026.10.07, 10:00, 10.09': [day(10, 7), multiple], '2026년 3분기, 3개 신규 고객, 10.09': [q3, multiple],
-            '2026년 3분기, 120억, Q4': [q3, multiple],
+            '2026년 3분기, 120억, Q4': [q3, multiple], '2026.10.07, 10:00~10.09': [day(10, 7), multiple],
+            '2026.10.07, 10:00 10.09까지': [day(10, 7), multiple], '2026년 3분기, 120억 Q4': [q3, multiple],
+            # A word that starts with a unit syllable, a number written as a day or a year, and a count of periods
+            # are not counts.
+            '2026.10.07, 10.09 시행': [day(10, 7), multiple], '2026.10.07, 10.09 개최': [day(10, 7), multiple],
+            '2026.10.07, 10.09 만료': [day(10, 7), multiple], '2026.10.07/10.09 시작': [day(10, 7), multiple],
+            '2026.10.07, 09 개최': [day(10, 7), multiple], '2026.10.07, 10.09 차례': [day(10, 7), multiple],
+            '2026.10.07, 10.09만': [day(10, 7), multiple], '2026.10.07, 10.09 건': [day(10, 7), multiple],
+            '2026년 3분기, 2027 시점': [q3, multiple], '2026.10.07, 2027 시행': [day(10, 7), multiple],
+            '2026년 3분기, 2027만': [q3, multiple], '2026.10.07, 2026.5만': [day(10, 7), multiple],
+            '2026년 3분기, 4개 분기': [q3, multiple], '2026년 3분기, 2개 반기': [q3, multiple],
+            '2026년 3분기, 3개 주': [q3, multiple], '2026년 3분기, 3개년 평균': [q3, multiple],
+            '2026.10.07, 3만 년': [day(10, 7), multiple], '2026년 3분기, 3천 일': [q3, multiple],
+            '2026년 3분기, 3만 개월': [q3, multiple], '2026년 3분기, 1차 시즌': [q3, multiple],
+            '2026년 3분기, 10개일년': [q3, multiple],
+            '3Q26, 4시작 중 H2': [('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None), multiple],
+            '도2026.10.07과 2026 시작은 기준 실적': [day(10, 7), multiple],
+            # Over-abstentions: a decimal shaped like a day, a year without a comma, 분 and %p are not read.
+            '2026년 3분기, 1.5억': [q3, multiple], '2026년 3분기, 2000만 원': [q3, multiple],
+            '2026.10.07, 10시 30분': [day(10, 7), multiple], '2026년 3분기, 15%p': [q3, multiple],
             # Unchanged: the later item is read (a yearless quarter abstains on its own), or a word comes first.
             '2026년 1분기, 2분기': [q1, ('quarter', None, None, None, 'no_year')],
             '2026.03.05, 2026.09.05': [day(3, 5), day(9, 5)],
@@ -422,6 +446,21 @@ class PeriodParsingTests(unittest.TestCase):
                 self.assertEqual(self.records(text), expected)
         text = '점검 2026.03.05, 09.05'
         self.assertEqual([text[slice(*record['span'])] for record in period.parse(text)], ['2026.03.05', ', 09'])
+
+    def test_a_long_run_of_numbers_after_a_list_separator_is_read_in_linear_time(self):
+        """Each number is read once: a digit-comma run once took seconds at 64 KB and minutes near the text limit."""
+        q3 = ('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None)
+        day = ('day', '2026-10-07', D(2026, 10, 7), D(2026, 10, 8), None)
+        multiple = ('multiple', None, None, None, 'multiple_periods')
+        for text, expected in (('2026년 3분기, ' + '120억, ' + '1,' * 32000 + '1억', [q3, multiple]),
+                               ('2026.10.07, ' + '10:00, ' + '1,' * 32000 + '1명', [day, multiple]),
+                               ('2026년 3분기, ' + '120억, ' + '111,' * 32000 + '111억', [q3]),
+                               ('2026년 3분기, ' + '1명, ' * 32000, [q3])):
+            with self.subTest(length=len(text)):
+                started = time.monotonic()
+                records = self.records(text)
+                self.assertLess(time.monotonic() - started, 2)
+                self.assertEqual(records, expected)
 
     def test_format_characters_never_defeat_the_abstaining_checks(self):
         """Cf characters are skipped where a check abstains, never where the table resolves a period."""
@@ -440,6 +479,9 @@ class PeriodParsingTests(unittest.TestCase):
                 self.assertEqual(self.records('2026.10.07~' + cf + '10.09'), [day, partial])
                 self.assertEqual(self.records('10.07' + cf + '~2026.10.07'), [partial, day])
                 self.assertEqual(self.records('2026Q1' + cf + '·Q2'), [q1, multiple])
+                # A format character between a unit and a letter does not end the word, or a period word after it.
+                for item in ('10 시' + cf + '행', '3개' + cf + '분기', '3' + cf + '개월', '3만 ' + cf + '년'):
+                    self.assertEqual(self.records('2026.10.07, ' + item), [day, multiple])
                 for text in ('Q3' + cf + 'FY2026', 'FY2026' + cf + 'Q3'):
                     self.assertEqual(self.records(text, 4), [('fiscal_quarter', None, None, None, 'period_qualifier')])
                 # Inside a period form a format character still stops the table: no new period is read.

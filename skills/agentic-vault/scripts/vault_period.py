@@ -90,12 +90,26 @@ Conventions declared here, not taken from a standard:
   brackets ((수), (수요일), (Wed), [수], (水)). When a list separator (, / ·
   ㆍ ・ 및 과 와) and such a number or mark follow a resolved period (2026Q1·Q2,
   2026.03.05, 09.05), a multiple_periods record is added after it, unless
-  the number is a time (10:00) or a count in a unit that is never a period
-  (억, 만, 천, 원, 개 but not 개월, 명, 건, 차 but not 2차 연도, 시 but not 시즌,
-  % or 공장: 2026년 3분기, 120억) and no later list separator before the
-  next period is followed by any other number (2026.10.07, 10:00, 10.09
-  abstains). A day, month, year, quarter, week, Q or H number is never let
-  through. So the value is never compared by one end or by the first item of
+  that number and every other number or Q or H mark before the next period
+  is a time (10:00) or a count (2026년 3분기, 120억; 2026.10.07, 1차 납품).
+  A count is a number in 억, 만 or 천 (also chained: 3만 5천 원), 원, 개,
+  명, 건, 차, 시, % or 공장 whose unit ends the word (no letter or digit
+  follows it, format characters skipped, or one of the particles 에, 까지,
+  부터, 의, 으로, 로, 경, 쯤, 께, 기준, 현재, 은, 는, 이, 가, 도, 엔, 과,
+  와, 을, 를 or 만 does, never 일) and is not followed by a period word: one
+  that starts with 년, 연도, 연간, 개월, 개년, 분기, 반기, 학기, 세기, 시즌,
+  시간, 기간, 회계 or 사업 연도, or the word 월, 일, 주, 날, 달 or 해, also
+  with 간, 차 or 째. So 10.09 시행, 2027 시점, 3개월, 3개년, 3개일, 2시즌,
+  15%p, 4개 분기, 3만 년, 3개 주 and 2차 연도 are not counts. Nor is a
+  number with a leading zero (09), a comma group of other than three digits
+  or more than one point, or one shaped like a day (M.D with M 1-12 and D
+  1-31: 10.09, 1.5) or a year (an integer part of 1900-2099 without a
+  comma: 2027, 2026.5). A number written as a day, month, year, quarter,
+  week, Q or H mark is therefore never let through (2026.10.07, 10:00,
+  10.09 and 2026.10.07, 10:00~10.09 abstain), but the unit alone decides:
+  9만 is a count even where it means only the 9th, and a period written
+  without digits (2026.10.07, 10시부터 일주일) is not read, as anywhere
+  else. So the value is never compared by one end or by the first item of
   these forms; no year is copied from the other end. A list whose earlier
   item no row reads (09.05, 2026.03.05) is not recognised.
 - The table reads one space or tab where it allows a gap, while the checks
@@ -233,20 +247,37 @@ _WEEKDAY = (r'(?:' + _GAP + r'[(\[\N{FULLWIDTH LEFT PARENTHESIS}\N{FULLWIDTH LEF
             + _GAP + r'[)\]\N{FULLWIDTH RIGHT PARENTHESIS}\N{FULLWIDTH RIGHT SQUARE BRACKET}])?')
 _UNREAD = r'(?:[0-9]+|[QqHh]' + _GAP + r'[0-9])'
 _LIST = r'(?:[,/' + _DOTS + r']|및|과|와)'
-# After a list separator, a time (10:00) or a count in a unit that is never a
-# period (120억, 3만 개, 3개, 12명, 7건, 1차, 10시, 15%, 2공장) is not another
-# item. A unit that may be a period (일, 월, 년, 분기, 주, 3개월, 2차 연도,
-# 2시즌) never is let through.
-_NOT_ITEM = (r'(?:[0-9]{1,2}:[0-9]{2}|[0-9]+(?:[,.][0-9]+)*' + _GAP + r'(?:억|만|천|원|개(?!' + _GAP + r'월)|명|건'
-             r'|차(?!' + _GAP + r'[년연월주분일])|시(?!즌)|%|공장))')
 # After a resolved period: a range mark, or a list separator (2026Q1·Q2,
-# 2026.03.05, 09.05, 2026년 3월 5일과 9월 5일), then a number that no row reads.
-# A time or count after the separator is let through only when no later list
-# separator before the next record is followed by another number
-# (2026.10.07, 10:00, 10.09 still abstains).
-_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + r'(?:(?P<range>' + _RANGE + r')' + _GAP + r'|' + _LIST + _GAP
-                    + r'(?!' + _NOT_ITEM + r'(?![\s\S]*?' + _LIST + _GAP + r'(?!' + _NOT_ITEM + r')' + _UNREAD
-                    + r')))' + _UNREAD)
+# 2026.03.05, 09.05, 2026년 3월 5일과 9월 5일), then a number that no row reads
+# (item). A list item that _counts_only accepts adds no record.
+_AFTER = re.compile(r'\.?' + _WEEKDAY + _GAP + r'(?:(?P<range>' + _RANGE + r')|' + _LIST + r')' + _GAP
+                    + r'(?P<item>' + _UNREAD + r')')
+# A list item that is not another period: a time (10:00) or a count in a unit
+# that is never a period (120억, 1,200억 원, 3만 5천 원, 3개, 12명, 7건, 1차,
+# 10시, 15%, 2공장). The number of a count has no leading zero, three digits
+# in each group after a comma and at most one decimal part, and is not shaped
+# like a day (M.D with M 1-12 and D 1-31: 10.09, 1.5) or a year (an integer
+# part of 1900-2099 without a comma: 2027, 2026.5).
+_TIME = re.compile(r'[0-9]{1,2}:[0-9]{2}')
+_COUNT_NUMBER = (r'(?!(?:0?[1-9]|1[0-2])\.(?:0?[1-9]|[12][0-9]|3[01])(?![0-9])|(?:19|20)[0-9]{2}(?![0-9]|,[0-9]))'
+                 r'(?:[1-9][0-9]{0,2}(?:,[0-9]{3})+|[1-9][0-9]*|0)(?:\.[0-9]+)?(?![0-9]|[.,][0-9])')
+_AMOUNT = _COUNT_NUMBER + _GAP + r'[억만천]+'
+_COUNT = re.compile(r'(?:' + _AMOUNT + r'(?:' + _GAP + _AMOUNT + r')*(?:' + _GAP + r'[원개명건])?|' + _COUNT_NUMBER
+                    + _GAP + r'(?:[원개명건차시%]|공장))')
+# The unit or the time ends a word: no letter or digit follows it once format
+# characters are skipped, or one of _UNIT_PARTICLE does (10시부터, 120억의,
+# 3개만; 일 right after a unit is a day, never a particle). 시행, 시작, 시점,
+# 개최, 만료, 차례, 3개월, 3개년, 3개일, 2차년도, 2시즌 and 15%p are not counts.
+_UNIT_PARTICLE = r'(?:에|까지|부터|의|으로|로|경|쯤|께|기준|현재|은|는|이|가|도|엔|과|와|을|를|만)'
+_UNIT_END = r'(?:(?![' + _CF + r']*[^\W_])|(?=[' + _CF + r']*' + _UNIT_PARTICLE + r'))'
+_TIME_END = re.compile(_UNIT_END)
+# A period word after a count makes it a number of periods, not a count
+# (4개 분기, 2개 반기, 3개 주, 3개 년도, 3만 년, 3천 일, 2차 연도, 1차 시즌).
+_PERIOD_WORD = (r'(?:년|연[도간]|개[년월]|분기|반기|학기|세기|시즌|시간|기간|회계|사업' + _GAP + r'연도'
+                r'|[월일주달해날](?:간|차|째)?' + _WORD_END + r')')
+_COUNT_END = re.compile(_UNIT_END + r'(?!' + _GAP + _PERIOD_WORD + r')')
+# The next number or Q or H mark after a time or a count.
+_NUMBER_TOKEN = re.compile(r'(?<![0-9])[0-9]|(?<![A-Za-z])[QqHh]' + _GAP + r'[0-9]')
 _RANGE_BEFORE = re.compile(r'[0-9](?:[.일]|' + _GAP + r'[월년]도?)?' + _WEEKDAY + _GAP + _RANGE + _GAP + r'\Z')
 
 # Fixed table. Scanning takes the leftmost match; at one position the earlier
@@ -446,6 +477,27 @@ def _unread(span, kind, reason):
     return dict(span=span, kind=kind, label_edtf=None, start=None, end=None, reason=reason)
 
 
+def _counts_only(text, start, limit):
+    """Whether the list item at start and every later number or Q or H mark before limit is a time or a count.
+
+    A count ends a word and no period word follows it (_COUNT_END), so 2026년
+    3분기, 120억 is a period and a count, while 2026.10.07, 10:00, 10.09 and
+    2026.10.07, 10:00~10.09 go on with a day. Each number is read once, from
+    where the time or count before it ends, so the scan is linear in the text.
+    """
+    position = start
+    while True:
+        found, ending = _TIME.match(text, position, limit), _TIME_END
+        if not found:
+            found, ending = _COUNT.match(text, position, limit), _COUNT_END
+        if not found or not ending.match(text, found.end()):
+            return False
+        following = _NUMBER_TOKEN.search(text, found.end(), limit)
+        if not following:
+            return True
+        position = following.start()
+
+
 def _ranges(text, records):
     """Add an abstaining record beside a resolved record joined to a number no row read.
 
@@ -470,7 +522,7 @@ def _ranges(text, records):
             continue
         limit = records[position + 1]['span'][0] if position + 1 < len(records) else len(text)
         after = _AFTER.match(text, end, limit)
-        if after:
+        if after and (after['range'] or not _counts_only(text, after.start('item'), limit)):
             kind, reason = ('range', 'partial_range') if after['range'] else ('multiple', 'multiple_periods')
             result.append(_unread(after.span(), kind, reason))
             cursor = after.end()

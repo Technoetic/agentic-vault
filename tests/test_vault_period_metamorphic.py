@@ -8,10 +8,10 @@ outputs with each other, so no gold labels are needed. vault_period's comparison
 none < contained < equal and abstaining is always safe, so here:
 
 - DIR: a narrowing word after a period (listed or not), an English prefix before it, or a list item
-  in a period unit after it never leaves the whole period to compare, and a mark between two fiscal
-  years with only whitespace beside it leaves neither year whole. Day forms are left out of the
-  narrowing relations: a time inside a day does not narrow it at day granularity (a declared
-  convention, not a proven property).
+  in a period unit after it (also one that looks like a count: 10.09 시행, 2027 시점, 4개 분기, 3만 년)
+  never leaves the whole period to compare, and a mark between two fiscal years with only whitespace
+  beside it leaves neither year whole. Day forms are left out of the narrowing relations: a time
+  inside a day does not narrow it at day granularity (a declared convention, not a proven property).
 - INV: a neutral follower, or a time or a count after a list separator, keeps the records of the
   period alone; a joiner between a fiscal year and its Q or H mark gives the interval of the
   canonical form (FY2026 Q3) or abstains, never the whole year; and swapping two fiscal years across
@@ -75,14 +75,20 @@ NEUTRAL = ('중', '중에', '내', '이내', '동안', '이후', '이전', '까�
            '목표', '계획') + RECOVERED_NEUTRAL
 NEUTRAL_JOINS = (' ', '')
 
-# INV: a time or a count after a list separator is not another item (v0.31.0: multiple_periods).
+# INV: a time or a count after a list separator is not another item (v0.31.0: multiple_periods). A unit
+# may be chained or carry a particle, a count may have one decimal part, and two times may form a range.
 LIST_SEPARATORS = (', ', ' / ', '·', ' 및 ')
 NOT_ITEMS = ('10:00', '14:30 회의', '120억', '3만 개', '5천 원', '3개 신규 고객', '12명', '7건', '1차 납품', '10시', '15%',
-             '2공장 가동')
+             '2공장 가동', '120억원', '3만 5천 원', '10시부터', '15.3%', '10:00~12:00', '3개 주문')
 # DIR: an item in a period unit keeps the value abstaining, so it is never compared by its first item,
-# also when it comes after a time or a count that is let through.
+# also when it comes after a time or a count that is let through, after a range mark or with no
+# separator after one.
 PERIOD_ITEMS = ('10.09', '9월 5일', '12월', '2주', '3일', '4분기', 'Q2', 'H2', '2027년', '3개월', '2차 연도')
-ITEMS_BEFORE = ('', '10:00, ', '3개 신규 고객, ')
+# Items that look like a count: a word that starts with a unit syllable (시행, 개최, 만료, 차례, 시점), a
+# number written as a day or a year before a count unit, and a count of periods (4개 분기, 3만 년).
+COUNT_LIKE_ITEMS = ('10.09 시행', '10.09 개최', '10.09 만료', '10.09 차례', '09 개최', '10.09만', '10.09 건', '2027 시점',
+                    '2027만', '2026.5만', '4개 분기', '2개 반기', '3개 주', '3개년 평균', '3개 년도', '3만 년', '3천 일', '3개일년')
+ITEMS_BEFORE = ('', '10:00, ', '3개 신규 고객, ', '10:00~', '120억 ')
 
 # INV: joiners between a fiscal year and a Q or H mark, in both orders, at fiscal_start 4.
 FISCAL_YEARS = ('FY2026', '2026 회계연도', 'FY26')
@@ -199,7 +205,7 @@ RELATIONS = {
     'dir_listed_narrowing': (lambda: _suffixes(NARROWING_LISTED), _narrowed),
     'dir_unlisted_narrowing': (lambda: _suffixes(NARROWING_UNLISTED), _narrowed),
     'dir_english_prefix': (_prefixes, _narrowed),
-    'dir_period_list_item': (lambda: _list_items(PERIOD_ITEMS, ITEMS_BEFORE), _abstains),
+    'dir_period_list_item': (lambda: _list_items(PERIOD_ITEMS + COUNT_LIKE_ITEMS, ITEMS_BEFORE), _abstains),
     'dir_mark_between_fiscal_years': (_between_fiscal_years, _neither_year_whole),
     'inv_neutral_follower': (_neutral, _unchanged),
     'inv_not_a_list_item': (lambda: _list_items(NOT_ITEMS), _unchanged),
@@ -217,8 +223,8 @@ KNOWN_FAILURES = {
 }
 # Generated and failing cases per relation, measured 2026-10-27 (v0.31.0 failed the number in each comment).
 CASE_COUNTS = {
-    'dir_listed_narrowing': 1419, 'dir_unlisted_narrowing': 561, 'dir_english_prefix': 77, 'dir_period_list_item': 1848,
-    'dir_mark_between_fiscal_years': 74, 'inv_neutral_follower': 592, 'inv_not_a_list_item': 672,
+    'dir_listed_narrowing': 1419, 'dir_unlisted_narrowing': 561, 'dir_english_prefix': 77, 'dir_period_list_item': 8120,
+    'dir_mark_between_fiscal_years': 74, 'inv_neutral_follower': 592, 'inv_not_a_list_item': 1008,
     'inv_fiscal_joiner': 1656, 'inv_fiscal_year_order': 40,
 }
 KNOWN_FAILURE_COUNTS = {
@@ -228,7 +234,7 @@ KNOWN_FAILURE_COUNTS = {
     'dir_period_list_item': 0,  # 0
     'dir_mark_between_fiscal_years': 16,  # 74
     'inv_neutral_follower': 0,  # 114
-    'inv_not_a_list_item': 0,  # 672
+    'inv_not_a_list_item': 0,  # 1008
     'inv_fiscal_joiner': 108,  # 864
     'inv_fiscal_year_order': 0,  # 0
 }
@@ -328,7 +334,8 @@ RECOVERED = {
 RECOVERED_EXISTING = {'2026.10.07 / 14:00': '2026.10.07', '2026.10.07(수), 09:30': '2026.10.07(수)',
                       '2026년 3분기, 1,200억 원': '2026년 3분기', '2026년 3분기와 12명': '2026년 3분기',
                       '2026년 3분기, 120억, 3개 신규 고객': '2026년 3분기',
-                      '2026.10.07, 10:00, 2026.10.09': '2026.10.07, 2026.10.09'}
+                      '2026.10.07, 10:00, 2026.10.09': '2026.10.07, 2026.10.09',
+                      '2026년 3분기, 1억 2천만 원': '2026년 3분기', '2026년 3분기, 12명이 참석': '2026년 3분기'}
 
 
 def released_period():
