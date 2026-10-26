@@ -326,6 +326,38 @@ zizmor, pip-audit 설치, pip-audit 감사 세 단계와 작업 모두 `continue
 - **한계:** CI의 zizmor는 GitHub API를 쓰는 온라인 감사도 실행하므로 로컬 오프라인 측정과 결과가 다를 수 있다.
   pip-audit 설치·감사의 한계는 아래 "해시 고정 설치의 한계"에 적는다.
 
+### 고정 커밋의 태그 주석(2026-10-27)
+
+워크플로의 action은 모두 전체 커밋 SHA로 고정하고, 주석에는 그 커밋을 가리키는 정확한 릴리스 태그(`vX.Y.Z`)를
+적는다. zizmor의 [`ref-version-mismatch`](https://docs.zizmor.sh/audits/#ref-version-mismatch) 감사는 주석의 태그가
+고정한 커밋을 가리키는지 확인한다. `v7` 같은 주 버전 태그는 새 릴리스로 옮겨지므로 주석에 쓰지 않는다.
+
+- **발견:** actions/setup-python의 `v7` 태그는 고정 커밋인 v7.0.0(`5fda3b95…`, 2026-07-20 게시)이 아니라
+  v7.1.0(`6d4fd22b20465ccc0f7354476588e8df7c9ca0e0`, 2026-10-22 게시)을 가리킨다. 그래서 세 작업의 `# v7` 주석이
+  medium 발견 3건이 됐고, v0.31.0 태그의 CI 실행(작업 121063778587, 2026-10-25)에서 zizmor 단계가 종료 코드 13으로
+  끝났다. 경고 전용 작업이라 워크플로는 실패하지 않았다.
+- **고침:** 커밋은 바꾸지 않고 주석만 그 커밋의 정확한 태그로 고쳤다. v7.1.0은 게시 14일이 지나지 않았으므로
+  (2026-11-05부터) 올리지 않는다. actions/checkout의 `v7`은 아직 고정 커밋과 같은 v7.0.1을 가리켜 발견이 없었지만,
+  옮겨지면 같은 발견이 나므로 함께 고쳤다.
+- **확인(2026-10-27, 측정):** 세 저장소의 태그 전체를 아래 읽기 전용 조회로 받았다. annotated 태그(setup-python
+  2개, checkout 5개)는 `gh api repos/OWNER/REPO/git/tags/SHA`로 대상 커밋을 풀었다. 세 고정 커밋을 가리키는 태그는
+  아래 표에 적은 것뿐이었다. 게시일은 `gh api repos/OWNER/REPO/releases/tags/TAG`의 `published_at`이다.
+- **테스트:** `tests/test_supply_chain.py`는 워크플로의 모든 `uses:` 줄이 전체 커밋 SHA와 `# vX.Y.Z` 주석을 갖고 그
+  쌍이 이 조회 결과와 같은지 검사한다. 고정을 바꿀 때는 같은 조회로 새 커밋의 태그를 확인해 워크플로와 테스트를 함께
+  고친다.
+
+```text
+gh api --paginate repos/actions/checkout/git/matching-refs/tags --jq '.[] | [.ref, .object.type, .object.sha] | @tsv'
+gh api --paginate repos/actions/setup-python/git/matching-refs/tags --jq '.[] | [.ref, .object.type, .object.sha] | @tsv'
+gh api --paginate repos/zizmorcore/zizmor-action/git/matching-refs/tags --jq '.[] | [.ref, .object.type, .object.sha] | @tsv'
+```
+
+| action | 고정 커밋 | 커밋을 가리키는 태그 | 주석 |
+| --- | --- | --- | --- |
+| actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` | `v7`, `v7.0.1`(2026-07-20 게시) | `# v7` → `# v7.0.1` |
+| actions/setup-python | `5fda3b95a4ea91299a34e894583c3862153e4b97` | `v7.0.0`(2026-07-20 게시) | `# v7` → `# v7.0.0` |
+| zizmorcore/zizmor-action | `cc914d7f3750a2d13d75c7f184a1060aa0e9d482` | `v0.6.4`(2026-09-09 게시) | `# v0.6.4`(그대로) |
+
 ### pip-audit 해시 고정 설치
 
 v0.24.0까지 이 작업은 `pypa/gh-action-pip-audit` v1.1.0을 썼다. action 코드는 커밋 SHA로 고정했지만 실행할 때
