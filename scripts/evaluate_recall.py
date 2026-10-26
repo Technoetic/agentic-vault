@@ -5,7 +5,9 @@ Opt-in: --vault/--goldset evaluates a user gold set against a real vault in
 place (local output only), --split evaluates one side of a committed
 dev/held-out split, and --redact hashes gold-set free text in the report
 (--redact-key-file and --redact-ephemeral use a secret key and also cover
-vault-relative paths).
+vault-relative paths; --redact-row-order token then sorts rows by their keyed
+id token). --gold-removal-twins runs every answerable query again with its gold
+notes removed and reports those twins as no-answer probes.
 """
 from __future__ import annotations
 
@@ -788,6 +790,340 @@ def lexical_ngrams_ignored(report: dict) -> bool:
     return bool(rows) and all(row['retrieval_options'].get('backend', 'lexical') == 'lexical' for row in rows)
 
 
+# --- Opt-in: gold-removal twins (--gold-removal-twins) ---------------------
+# Nothing here runs without the flag. Twins call vault_retrieval.retrieve
+# directly: evaluate() forwards a query's own excluded_sources only on the
+# advanced path, so a hand-written twin query would search the unexcluded vault
+# under the legacy method.
+
+TWIN_OUTCOMES = ('refused_empty_complete', 'returned_candidates', 'stale_only', 'twin_error')
+TWIN_TRIGGER = 'empty result (no abstention trigger exists)'
+TWIN_DEFINITIONS = {
+    'protocol': 'Gold-removal twins after arXiv 2610.05348 (v1): every answerable headline query runs again with its '
+                'gold notes removed from the searchable notes, so the twin asks the same question of a vault that no '
+                'longer holds the answer. The paper deletes every passage of the gold articles and, as a safety net, '
+                'passages holding an answer string or a gold alias.',
+    'removed_notes': "expected_paths, every relevance path graded above 0, and every listed note whose normalised "
+                     "text contains a normalised required claim (read once through recall's policy-checked note "
+                     "walk, so deny zones and exclude_dirs are never read). They reach vault_retrieval.retrieve as "
+                     "excluded_sources after the query's own excluded_sources, with the arm's own per-query options "
+                     "(the legacy arm forwards neither, as evaluate() does). Engine zone rules apply: a one-segment "
+                     "path (a note at the vault root, or an unresolved filename label) removes every note of that "
+                     "name at any depth, and removed_note_count counts the listed notes a twin removed. "
+                     "excluded_path_count counts every path the twin removed (the sum of removed_path_counts); the "
+                     "query's own excluded_sources are listed but not counted. retrieve accepts at most 50 "
+                     "excluded_sources in all, so a row lists at most 51, one more than that.",
+    'outcomes': 'refused_empty_complete: complete search, nothing returned. stale_only: every returned path is a '
+                'stale_paths label of the query. returned_candidates: anything else returned. twin_error: retrieval '
+                "status not ok or search incomplete (more than 50 excluded_sources in all, the query's own "
+                'included, is invalid_options), or an incomplete note scan for a query with required claims. A '
+                'twin_error is never a refusal.',
+    'possibly_still_answerable': 'A returned_candidates twin that returned a note graded above 0 by another query '
+                                 'sharing one of its required claims (residual_graded_paths), or whose rendered '
+                                 'context contains one of its required claims (covered_claims). An unlabelled '
+                                 'near-duplicate may still answer it, so it is counted apart from '
+                                 'false_positive_query_count. Grading overlapping notes in the gold set keeps twins '
+                                 'honest.',
+    'rates': 'Rates divide by twin_count, twin errors included. complete_empty_rate is the twin refusal recall at the '
+             'empty-result operating point. false_positive_query_count leaves out stale_only and '
+             'possibly_still_answerable twins, which have their own counts. stale_exposed_query_count overlaps the '
+             'outcomes: twins without an error that returned any stale_paths label.',
+    'interpretation': 'A twin is not the base result minus its gold paths: lower-ranked notes fill the freed top_k '
+                      'places, and BM25 statistics and alias-based query expansion depend on the notes still '
+                      'eligible, so the remaining notes can re-rank. Unlabelled near-duplicates make twin false '
+                      'positives overstate lexical false positives. Fixture twins are designed cases, not a sample '
+                      'of real use. Observational: gates and the exit code never read this section.',
+    'source': "Chandradevan, Ghosh and Selvendran, 'Search Engines Never Say No' (arXiv 2610.05348 v1, 2026-10-04; "
+              'not peer reviewed; English Wikipedia QA over BM25). Only the twin protocol and the '
+              'recall-at-a-false-refusal-budget framing are borrowed, not its detector, refusal message or numbers.',
+}
+
+
+def _twin_population(row: dict) -> bool:
+    """Headline answerable rows get a twin; inspected and no_answer rows do not."""
+    return row['expectation'] == 'answerable' and row.get('inspected') is not True
+
+
+def _graded_paths(item: dict) -> list[str]:
+    """expected_paths, then every other relevance path graded above 0, in label order."""
+    graded = dict.fromkeys(item['expected_paths'])
+    graded.update((path, None) for path, grade in item['relevance'].items() if grade > 0)
+    return list(graded)
+
+
+def _twin_exclusions(item: dict, note_texts: dict | None = None, *, normalize=None, cache: dict | None = None) -> list:
+    """Paths a gold-removal twin excludes, sorted like recall's listing; reads nothing.
+
+    The union of expected_paths and every relevance path graded above 0. With
+    note_texts (vault-relative path -> text already normalised by recall's
+    _normalize, from the policy-checked note walk) and normalize, every note
+    containing a normalised required claim is added. cache maps a normalised
+    claim to the notes holding it, so twins that share a claim scan once.
+    """
+    removed = set(_graded_paths(item))
+    if note_texts is not None:
+        for claim in item['required_claims']:
+            key = normalize(claim)
+            if not key:
+                continue
+            found = None if cache is None else cache.get(key)
+            if found is None:
+                found = frozenset(path for path, text in note_texts.items() if key in text)
+                if cache is not None:
+                    cache[key] = found
+            removed.update(found)
+    return sorted(removed, key=lambda path: (path.casefold(), path))
+
+
+def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool) -> dict:
+    """List eligible notes, and read them only when read_texts, through recall's own policy.
+
+    Same root bootstrap, deny zones, exclude_dirs (with .git), file cut and
+    byte budgets as the legacy recall reader, so a deny zone or an excluded
+    directory is never listed or read. Never a plain recursive glob.
+    """
+    diagnostics = recall_module._diagnostics()
+    listing: list[str] = []
+    texts: dict[str, str] = {}
+    config = None
+    try:
+        if not isinstance(vault, Path) or not vault.is_dir():
+            raise OSError('vault is not a directory')
+        recall_module.resolve_note_path(vault, recall_module.CONFIG_RELPATH)
+        safe_vault = vault.resolve(strict=True)
+    except (OSError, ValueError, RuntimeError):
+        diagnostics.update(status='invalid_vault', search_complete=False)
+    else:
+        config = recall_module._read_config(safe_vault, diagnostics)
+    if config is not None:
+        deny = tuple(config.get('deny_zones') or ())
+        exclude = (*tuple(config.get('exclude_dirs') or ()), '.git')
+        paths = recall_module._markdown_paths(safe_vault, deny, exclude, diagnostics)
+        if len(paths) > recall_module.MAX_FILES:
+            diagnostics['omitted_file_limit'] = len(paths) - recall_module.MAX_FILES
+            recall_module._omit(diagnostics, 'file_count_limit')
+            paths = paths[:recall_module.MAX_FILES]
+        listing = [relative for relative, _ in paths]
+        for index, (relative, path) in enumerate(paths if read_texts else ()):
+            diagnostics['files_considered'] += 1
+            try:
+                metadata = path.stat()
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    diagnostics['skipped_unsafe'] += 1
+                    recall_module._omit(diagnostics, 'unsafe_path')
+                    continue
+            except OSError:
+                diagnostics['skipped_unreadable'] += 1
+                recall_module._omit(diagnostics, 'unreadable_file')
+                continue
+            # Same budget check as the legacy reader: stop before a read that would pass the total.
+            size = min(metadata.st_size, recall_module.MAX_FILE_BYTES + 1)
+            if diagnostics['bytes_read'] + size > recall_module.MAX_TOTAL_READ_BYTES:
+                diagnostics['omitted_total_byte_limit'] += len(paths) - index
+                recall_module._omit(diagnostics, 'total_byte_limit')
+                break
+            text = recall_module._read_markdown(path, diagnostics, relative)
+            if text is not None:
+                texts[relative] = recall_module._normalize(text)
+    return {'listing': listing, 'texts': texts if read_texts else None,
+            'summary': {'status': diagnostics['status'], 'search_complete': diagnostics['search_complete'],
+                        'omissions': list(diagnostics['omissions']), 'listed_note_count': len(listing),
+                        'claim_texts_read': read_texts, 'notes_read': diagnostics['files_read'],
+                        'bytes_read': diagnostics['bytes_read'],
+                        'scope': 'one policy-checked walk shared by every arm; notes are read only when a twin '
+                                 'query has required claims'}}
+
+
+def _twin_row(recall_module, vault: Path, row: dict, removed: list, *, top_k: int, max_tokens: int,
+              graded: list, claim_pool: set, removed_notes: int, scan_complete: bool) -> dict:
+    """Run one twin with the arm's own options and classify what came back."""
+    options = dict(row['retrieval_options'])
+    own = options.pop('excluded_sources', [])
+    if isinstance(own, (list, tuple)) and all(isinstance(value, str) for value in own):
+        excluded = list(dict.fromkeys([*own, *removed]))
+    else:
+        excluded = own  # invalid: retrieve() rejects it, so the twin is a twin_error
+    started = time.perf_counter()
+    result = recall_module._advanced_retrieval.retrieve(vault, row['query'], limit=top_k, max_tokens=max_tokens,
+                                                        **options, excluded_sources=excluded)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    diagnostics = result['diagnostics']
+    retrieved = [match['path'] for match in result['matches']]
+    reason = ('retrieval_not_ok' if diagnostics['status'] != 'ok' else
+              'search_incomplete' if not diagnostics['search_complete'] else
+              'note_scan_incomplete' if row['required_claims'] and not scan_complete else None)
+    if reason is not None:
+        outcome = 'twin_error'
+    elif not retrieved:
+        outcome = 'refused_empty_complete'
+    elif all(path in row['stale_paths'] for path in retrieved):
+        outcome = 'stale_only'
+    else:
+        outcome = 'returned_candidates'
+    residual, covered = [], []
+    if outcome == 'returned_candidates':
+        residual = [path for path in retrieved if path in claim_pool]
+        # Same rule as evaluate(): rendered context only, attribution labels removed.
+        context_text = recall_module._normalize(re.sub(r'^\[Source: .*\]\s*$', '', result['context'],
+                                                       flags=re.MULTILINE))
+        covered = [claim for claim in row['required_claims']
+                   if (normalized := recall_module._normalize(claim)) and normalized in context_text]
+    expected = set(row['expected_paths'])
+    # retrieve() accepts at most MAX_RESULTS exclusions; one more entry shows a row went over.
+    shown = (excluded if isinstance(excluded, list) else list(removed))[:recall_module.MAX_RESULTS + 1]
+    return {
+        'id': row['id'], 'language': row['language'], 'scenario': row['scenario'],
+        'outcome': outcome, 'twin_error_reason': reason,
+        'possibly_still_answerable': bool(residual or covered),
+        'excluded_sources': shown,
+        'excluded_path_count': len(removed),
+        'removed_path_counts': {'expected': len(expected), 'graded_beyond_expected': len(set(graded) - expected),
+                                'claim_bearing_beyond_graded': len(set(removed) - set(graded))},
+        'removed_note_count': removed_notes,
+        'retrieved_paths': retrieved,
+        'stale_retrieved_paths': [path for path in retrieved if path in row['stale_paths']],
+        'residual_graded_paths': residual,
+        'covered_claims': covered,
+        'diagnostics': {'status': diagnostics['status'], 'search_complete': diagnostics['search_complete'],
+                        'omissions': list(diagnostics['omissions']), 'bytes_read': diagnostics['bytes_read']},
+        'elapsed_ms': round(elapsed_ms, 3),
+    }
+
+
+def _twin_summary(rows: list[dict]) -> dict:
+    outcomes = Counter(row['outcome'] for row in rows)
+    flagged = sum(row['possibly_still_answerable'] for row in rows)
+    false_positives = outcomes['returned_candidates'] - flagged
+    return {
+        'twin_count': len(rows),
+        'complete_empty_query_count': outcomes['refused_empty_complete'],
+        'complete_empty_rate': _ratio(outcomes['refused_empty_complete'], len(rows)),
+        'returned_candidates_query_count': outcomes['returned_candidates'],
+        'false_positive_query_count': false_positives,
+        'false_positive_rate': _ratio(false_positives, len(rows)),
+        'possibly_still_answerable_query_count': flagged,
+        'stale_only_query_count': outcomes['stale_only'],
+        'stale_exposed_query_count': sum(bool(row['stale_retrieved_paths']) for row in rows
+                                         if row['outcome'] != 'twin_error'),
+        'twin_error_count': outcomes['twin_error'],
+        'excluded_path_count': sum(row['excluded_path_count'] for row in rows),
+        'removed_path_counts': {key: sum(row['removed_path_counts'][key] for row in rows)
+                                for key in ('expected', 'graded_beyond_expected', 'claim_bearing_beyond_graded')},
+        'removed_note_count': sum(row['removed_note_count'] for row in rows),
+    }
+
+
+def _gold_removal_twin_section(recall_module, vault: Path, arm: dict, scan: dict, claim_cache: dict,
+                               rule_cache: dict) -> dict:
+    """The gold_removal_twins section of one evaluate() arm, from its own per_query rows."""
+    normalize = recall_module._normalize
+    # Near-duplicate check: what every query (inspected ones included) grades for each claim it requires.
+    graded_by_claim: dict[str, set] = defaultdict(set)
+    for row in arm['per_query']:
+        for key in filter(None, map(normalize, row['required_claims'])):
+            graded_by_claim[key].update(_graded_paths(row))
+
+    def removed_notes(rules: list) -> int:
+        matched = set()
+        for rule in rules:
+            if rule not in rule_cache:
+                rule_cache[rule] = frozenset(relative for relative in scan['listing']
+                                             if recall_module._path_matches_rule(tuple(relative.split('/')), rule))
+            matched |= rule_cache[rule]
+        return len(matched)
+
+    scan_complete = scan['summary']['status'] == 'ok' and scan['summary']['search_complete']
+    rows = []
+    for row in arm['per_query']:
+        if not _twin_population(row):
+            continue
+        removed = _twin_exclusions(row, scan['texts'], normalize=normalize, cache=claim_cache)
+        claim_pool = set().union(*(graded_by_claim.get(normalize(claim), ()) for claim in row['required_claims']))
+        rows.append(_twin_row(recall_module, vault, row, removed, top_k=arm['top_k'],
+                              max_tokens=arm['costs']['max_context_tokens'], graded=_graded_paths(row),
+                              claim_pool=claim_pool, removed_notes=removed_notes(removed),
+                              scan_complete=scan_complete))
+    answerable = [row for row in arm['per_query'] if _twin_population(row)]
+    false_refusals = sum(not row['retrieved_paths'] and row['diagnostics']['status'] == 'ok'
+                         and row['diagnostics']['search_complete'] for row in answerable)
+    summary = _twin_summary(rows)
+    total_elapsed = sum(row['elapsed_ms'] for row in rows)
+    return {
+        'definitions': dict(TWIN_DEFINITIONS),
+        **summary,
+        'by_language': {key: _twin_summary([row for row in rows if row['language'] == key])
+                        for key in sorted({row['language'] for row in rows})},
+        'by_scenario': {key: _twin_summary([row for row in rows if row['scenario'] == key])
+                        for key in sorted({row['scenario'] for row in rows})},
+        'operating_point': {
+            'trigger': TWIN_TRIGGER,
+            'twin_refusal_recall': summary['complete_empty_rate'],
+            'twin_refusal_count': summary['complete_empty_query_count'],
+            'twin_count': len(rows),
+            'answerable_false_refusal_rate': _ratio(false_refusals, len(answerable)),
+            'answerable_false_refusal_count': false_refusals,
+            'answerable_query_count': len(answerable),
+            'note': f'One operating point, the empty result, not a curve or a calibrated threshold: nothing in '
+                    f'recall can abstain, so there is no trigger to sweep. n = {len(rows)} twins of '
+                    f'{len(answerable)} answerable headline queries (false refusals: complete searches of those '
+                    f'queries that returned nothing). At this n a 5% false-refusal budget allows at most '
+                    f'{len(answerable) * 5 // 100} false refusals.',
+        },
+        'possibly_still_answerable_ids': [row['id'] for row in rows if row['possibly_still_answerable']],
+        'note_scan': dict(scan['summary']),
+        'costs': {'twin_retrieval_calls': len(rows),
+                  'total_source_bytes_read': sum(row['diagnostics']['bytes_read'] for row in rows),
+                  'total_elapsed_ms': round(total_elapsed, 3),
+                  'timing_scope': 'twin retrieval calls only; the shared note scan is not timed'},
+        'rows': rows,
+    }
+
+
+def with_gold_removal_twins(report: dict, fixture) -> dict:
+    """Return an evaluate() or compare() report whose every arm gains gold_removal_twins.
+
+    Opt-in (--gold-removal-twins). fixture is the fixture directory or the
+    EvaluationInput the report was evaluated from. Each arm's twins reuse that
+    arm's per_query rows (labels and retrieval_options), top_k and context
+    budget, and call vault_retrieval.retrieve directly. Existing keys and values
+    are unchanged, the input is not mutated, and gates never read the section.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('gold-removal twins require an evaluate() or compare() report')
+    if 'per_query' in report:
+        arms = {None: report}
+    elif 'baseline' in report and 'improved' in report:
+        arms = {name: report[name] for name in REPORT_ARMS if name in report}
+    else:
+        raise ValueError('gold-removal twins require an evaluate() or compare() report')
+    recall_module = _load_recall_module()
+    vault = fixture.vault if isinstance(fixture, EvaluationInput) else fixture / 'vault'
+    read_texts = any(row['required_claims'] for arm in arms.values() for row in arm['per_query']
+                     if _twin_population(row))
+    scan = _twin_note_scan(recall_module, vault, read_texts=read_texts)
+    claim_cache: dict = {}
+    rule_cache: dict = {}
+    sections = {name: _gold_removal_twin_section(recall_module, vault, arm, scan, claim_cache, rule_cache)
+                for name, arm in arms.items()}
+    if None in sections:
+        return {**report, 'gold_removal_twins': sections[None]}
+    return {**report, **{name: {**report[name], 'gold_removal_twins': section} for name, section in sections.items()}}
+
+
+def gold_removal_twin_notes(report: dict) -> list[str]:
+    """Non-blocking stderr notes for twins that could not be measured."""
+    arms = ([(None, report)] if 'per_query' in report else
+            [(name, report[name]) for name in REPORT_ARMS if name in report])
+    notes = []
+    for name, arm in arms:
+        section = arm.get('gold_removal_twins')
+        if section and section['twin_error_count']:
+            notes.append(f"gold-removal twins note (non-blocking): {'' if name is None else name + ' arm: '}"
+                         f"{section['twin_error_count']} of {section['twin_count']} twins could not be measured "
+                         "(twin_error) and are not counted as refusals")
+    return notes
+
+
 # --- Opt-in: in-place gold set, dev/held-out split and redaction -----------
 # None of this runs unless --vault/--goldset, --split, --derive-split or
 # --redact is given. No network, model call or file write is involved.
@@ -1181,12 +1517,23 @@ _KEYED_REPLACED = [
     "the keyed hash of their sha256 hex",
     "candidate paths inside gold-set warnings; a warning of an unknown shape is hashed whole",
 ]
+# The default (--redact-row-order gold) row-order sentence; --redact-row-order
+# token replaces only this sentence in the printed limits.
+_GOLD_ROW_ORDER_LIMIT = (
+    "Rows keep the gold-set order, so whoever holds the gold set, or part of it, can link rows, and the path "
+    "tokens labelled in them, by position; sort or shuffle rows before sharing to avoid that.")
+_TOKEN_ROW_ORDER_LIMIT = (
+    "Rows are sorted by their keyed id token (--redact-row-order token): per_query, failed_queries, "
+    "evaluation_errors, inspected ids and gold-removal twin rows of every arm, after all statistics and gates. "
+    "Whoever holds the gold set but not the key can no longer link rows by position, but row counts, languages "
+    "and expectations (kept in clear), per-scenario counts, each row's shape (numbers of expected paths, claims "
+    "and relevance grades), equal-token repeats and timing fields remain and can still single out rows; "
+    "by_scenario keys keep the order of the plain scenario names, gold-set warnings name query positions, and "
+    "lists inside a row keep their own order (temporal diagnostics list notes in vault path order).")
 _KEYED_LIMITS = (
     "Pseudonymisation, not encryption or anonymisation. Equal values get equal tokens within this report, so "
-    "repeats and frequencies stay visible. Whole values are hashed, not single words. Rows keep the gold-set "
-    "order, so whoever holds the gold set, or part of it, can link rows, and the path tokens labelled in them, "
-    "by position; sort or shuffle rows before sharing to avoid that. The report never records the key or a "
-    "fingerprint of it.")
+    "repeats and frequencies stay visible. Whole values are hashed, not single words. " + _GOLD_ROW_ORDER_LIMIT
+    + " The report never records the key or a fingerprint of it.")
 KEYED_REDACTION_DESCRIPTION = {
     "method": "HMAC-SHA256 hex, under a secret key of at least 32 bytes, of the UTF-8 text; a non-text value "
               "is hashed as its compact sorted JSON",
@@ -1209,7 +1556,9 @@ _PATH_FIELDS = frozenset({
     "excluded_sources", "expected_paths", "forbidden_paths", "stale_paths", "retrieved_paths",
     "forbidden_retrieved_paths", "stale_retrieved_paths",
     # Temporal diagnostics: the raw successor wikilink, which names a note and can name folders.
-    "superseded_by"})
+    "superseded_by",
+    # Gold-removal twin rows (only present with --gold-removal-twins).
+    "residual_graded_paths"})
 # Keyed modes: raw temporal frontmatter values stay readable only when date-shaped.
 _DATE_FIELDS = frozenset({"valid_from", "valid_until", "checked_at", "superseded_at"})
 _PATH_KEYED_MAPS = frozenset({"relevance"})
@@ -1323,7 +1672,28 @@ def _redacted_evaluation(report: dict, digest=_digest) -> dict:
     if "inspected_queries" in report:
         redacted["inspected_queries"] = {**report["inspected_queries"],
                                          "ids": [digest(value) for value in report["inspected_queries"]["ids"]]}
+    if "gold_removal_twins" in report:
+        redacted["gold_removal_twins"] = _redacted_twins(report["gold_removal_twins"], digest)
     return redacted
+
+
+# Twin-only row keys: counts, flags, an enum and a path list (keyed through
+# _PATH_FIELDS). Every other twin row key goes through _redacted_row.
+_TWIN_ROW_KEYS = frozenset({"twin_error_reason", "possibly_still_answerable", "excluded_path_count",
+                            "removed_path_counts", "removed_note_count", "residual_graded_paths"})
+
+
+def _redacted_twin_row(row: dict, digest=_digest) -> dict:
+    shared = _redacted_row({key: value for key, value in row.items() if key not in _TWIN_ROW_KEYS}, digest)
+    return {key: (value if key in _TWIN_ROW_KEYS else shared[key]) for key, value in row.items()}
+
+
+def _redacted_twins(section: dict, digest=_digest) -> dict:
+    """Twin ids, scenarios (by_scenario keys too) and claims as in per_query rows."""
+    return {**section,
+            "by_scenario": {digest(key): value for key, value in section["by_scenario"].items()},
+            "possibly_still_answerable_ids": [digest(value) for value in section["possibly_still_answerable_ids"]],
+            "rows": [_redacted_twin_row(row, digest) for row in section["rows"]]}
 
 
 def _keyed_warning(warning: object, digest) -> str:
@@ -1399,6 +1769,52 @@ def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = F
     redacted["redaction_mode"] = mode
     redacted["redaction_algorithm"] = algorithm
     return redacted
+
+
+TOKEN_ROW_ORDER = "sorted_by_keyed_id_token"
+
+
+def _row_token(row: dict) -> str:
+    return row["id"]
+
+
+def _token_ordered_arm(arm: dict) -> dict:
+    ordered = {**arm, **{name: sorted(arm[name], key=_row_token)
+                         for name in ("per_query", "failed_queries", "evaluation_errors")}}
+    if "inspected_queries" in arm:
+        ordered["inspected_queries"] = {**arm["inspected_queries"], "ids": sorted(arm["inspected_queries"]["ids"])}
+    if "gold_removal_twins" in arm:
+        twins = arm["gold_removal_twins"]
+        ordered["gold_removal_twins"] = {
+            **twins, "possibly_still_answerable_ids": sorted(twins["possibly_still_answerable_ids"]),
+            "rows": sorted(twins["rows"], key=_row_token)}
+    return ordered
+
+
+def with_token_row_order(redacted: dict) -> dict:
+    """Sort the rows of a keyed or ephemeral report by their keyed id token (--redact-row-order token).
+
+    Runs on the printed copy only, after redact_report and after every paired
+    statistic and gate read the unredacted report, so temporal_decomposition
+    pairing and exit codes are unaffected. Every arm is sorted by the same
+    token, so arms stay aligned. A key-dependent order, reproducible with the
+    same key and fresh with --redact-ephemeral; no seed exists to leak. With
+    unkeyed sha256 ids the order would be recomputable, so that is refused.
+    """
+    if not isinstance(redacted, dict) or redacted.get("redaction_mode") not in ("keyed", "ephemeral"):
+        raise ValueError("token row order needs a keyed or ephemeral redaction")
+    if "per_query" in redacted:
+        ordered = _token_ordered_arm(redacted)
+    else:
+        ordered = {name: (_token_ordered_arm(value) if isinstance(value, dict) and "per_query" in value else value)
+                   for name, value in redacted.items()}
+    description = redacted["redaction"]
+    if _GOLD_ROW_ORDER_LIMIT not in description["limits"]:
+        raise ValueError("unexpected redaction limits text")
+    ordered["redaction"] = {**description,
+                            "limits": description["limits"].replace(_GOLD_ROW_ORDER_LIMIT, _TOKEN_ROW_ORDER_LIMIT)}
+    ordered["row_order"] = TOKEN_ROW_ORDER
+    return ordered
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -1546,6 +1962,11 @@ def _parser() -> argparse.ArgumentParser:
                         help='add one-sided 95%% lower bounds (Wilson, Clopper-Pearson) with numerator and '
                              'denominator for the share of answerable queries whose every expected source was '
                              'retrieved; not a bound of recall@k (descriptive; gates and exit code are unchanged)')
+    parser.add_argument('--gold-removal-twins', action='store_true',
+                        help='add gold_removal_twins to every evaluated arm: each answerable headline query runs '
+                             'again with its expected paths, every path graded above 0 and every note holding one of '
+                             'its required claims excluded, and an empty complete result counts as a refusal (one '
+                             'operating point, not a curve; observational, gates and exit code are unchanged)')
     goldset = parser.add_argument_group('in-place gold set (opt-in, local output only)')
     goldset.add_argument('--vault', type=Path,
                          help='real vault evaluated in place with --goldset; read through its '
@@ -1564,12 +1985,19 @@ def _parser() -> argparse.ArgumentParser:
                             'vault-relative path; the key and any fingerprint of it are never printed. Equal values '
                             'still get equal tokens, so repeats and frequencies inside one report stay visible; '
                             'without the key, tokens cannot be recomputed or a guess confirmed, but rows keep the '
-                            'gold-set order, so whoever holds the gold set can link them by position. Whole values '
-                            'are hashed, words are not hashed one by one')
+                            'gold-set order unless --redact-row-order token is given, so whoever holds the gold set '
+                            'can link them by position. Whole values are hashed, words are not hashed one by one')
     keyed.add_argument('--redact-ephemeral', action='store_true',
                        help='implies --redact: like --redact-key-file with a random 32-byte key drawn for this run '
                             'and never stored, so nobody can recompute the tokens and two runs cannot be compared; '
-                            'rows keep the gold-set order, and repeats and frequencies inside one report stay visible')
+                            'rows keep the gold-set order unless --redact-row-order token is given, and repeats and '
+                            'frequencies inside one report stay visible')
+    goldset.add_argument('--redact-row-order', choices=('gold', 'token'), default='gold',
+                         help='row order of a pseudonymised report: gold (default) keeps the gold-set order; token '
+                              'sorts per_query, failed_queries, evaluation_errors, inspected ids and twin rows of '
+                              'every arm by their keyed id token after all statistics and gates, so whoever holds '
+                              'the gold set but not the key cannot link rows by position. Needs --redact-key-file '
+                              'or --redact-ephemeral; row shape, repeats, per-scenario counts and timings remain')
     split = parser.add_argument_group('dev/held-out split (opt-in)')
     split.add_argument('--split', choices=SPLIT_NAMES,
                        help='evaluate only this side of the split definition and report n per split')
@@ -1588,6 +2016,8 @@ def _mode_error(args: argparse.Namespace) -> str | None:
         return "--vault and --goldset must be given together"
     if args.derive_split and (args.split is not None or args.redact):
         return "--derive-split cannot be combined with --split or --redact"
+    if args.derive_split and args.gold_removal_twins:
+        return "--derive-split cannot be combined with --gold-removal-twins"
     if args.split_file is not None and args.split is None and not args.derive_split:
         return "--split-file requires --split or --derive-split"
     if args.split is not None and args.goldset is not None and args.split_file is None:
@@ -1631,6 +2061,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.exact_paired and not args.compare:
         print("--exact-paired requires --compare", file=sys.stderr)
         return 2
+    if args.redact_row_order == 'token' and args.redact_key_file is None and not args.redact_ephemeral:
+        print("--redact-row-order token requires --redact-key-file or --redact-ephemeral; whoever holds the gold "
+              "set can recompute unkeyed sha256 ids and undo the order", file=sys.stderr)
+        return 2
     mode_error = _mode_error(args)
     if mode_error is not None:
         print(mode_error, file=sys.stderr)
@@ -1672,6 +2106,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.render_matched:
             report = with_render_matched(report, source, max_tokens=args.max_tokens,
                                          exact_paired=args.exact_paired, **options)
+        if args.gold_removal_twins:
+            report = with_gold_removal_twins(report, source)
         if args.rate_bounds:
             report = with_rate_bounds(report)
         if args.success_bounds:
@@ -1696,6 +2132,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     printed = (report if not args.redact else redact_report(report) if redaction_key is None else
                redact_report(report, key=redaction_key, ephemeral=args.redact_ephemeral))
+    if args.redact_row_order == 'token':
+        # Output order only: every paired statistic and gate above read the gold-order report.
+        printed = with_token_row_order(printed)
     print(json.dumps(printed, ensure_ascii=False, indent=2))
     if args.lexical_ngrams is not None and lexical_ngrams_ignored(report):
         print(LEXICAL_NGRAMS_IGNORED_NOTE, file=sys.stderr)
@@ -1717,6 +2156,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.rate_bounds:
         for note in rate_bound_gate_notes(gated):
             print(f"rate-bounds note (non-blocking): {note}", file=sys.stderr)
+    if args.gold_removal_twins:
+        for note in gold_removal_twin_notes(report):
+            print(note, file=sys.stderr)
     passed = (
         gate_gap is None
         and (gated["recall_at_3"] is None or gated["recall_at_3"] >= args.min_recall_at_3)

@@ -11,11 +11,13 @@ import hashlib
 import hmac
 import importlib.util
 import io
+import itertools
 import json
 import os
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -177,6 +179,8 @@ class DefaultOutputTests(unittest.TestCase):
             self.assertIsNone(getattr(args, name), name)
         self.assertFalse(args.redact)
         self.assertFalse(args.derive_split)
+        self.assertFalse(args.gold_removal_twins)
+        self.assertEqual(args.redact_row_order, "gold")
 
     def test_fixture_mode_ignores_a_committed_split_without_the_flag(self):
         # recall_hard now ships split.json; only --split reads it.
@@ -961,6 +965,8 @@ class PlainRedactionCompatibilityTests(unittest.TestCase):
         code, stdout, stderr = run_main(evaluator, [])
         self.assertEqual((code, stderr), (0, ""))
         self.assertFalse({"redaction", *ADDED_REDACTION_FIELDS}.intersection(json.loads(stdout)))
+        # Nor the opt-in row order or gold-removal twins, at any depth.
+        self.assertFalse({"row_order", "gold_removal_twins"}.intersection(dict_keys(json.loads(stdout))))
 
     def test_keyed_options_are_off_by_default(self):
         args = evaluator._parser().parse_args([])
@@ -1408,6 +1414,156 @@ class KeyedFixtureLeakTests(unittest.TestCase):
                     self.assertEqual(self.leaks(json.loads(stdout)), [])
                     self.assertNotIn(".md", stdout)
                     self.assertEqual([name for name in self.names if name in stderr.casefold()], [])
+
+
+# --- Row order of pseudonymised reports (--redact-row-order) ---------------
+# The v0.31.0 keyed limits text; without --redact-row-order token it must stay byte-identical.
+V0310_KEYED_LIMITS = (
+    "Pseudonymisation, not encryption or anonymisation. Equal values get equal tokens within this report, so "
+    "repeats and frequencies stay visible. Whole values are hashed, not single words. Rows keep the gold-set "
+    "order, so whoever holds the gold set, or part of it, can link rows, and the path tokens labelled in them, "
+    "by position; sort or shuffle rows before sharing to avoid that. The report never records the key or a "
+    "fingerprint of it.")
+ROW_LISTS = ("per_query", "failed_queries", "evaluation_errors")
+HARD_ARMS = ("baseline", "expansion_ablation", "improved")
+TOKEN_ORDER_ERROR = ("--redact-row-order token requires --redact-key-file or --redact-ephemeral; whoever holds the "
+                     "gold set can recompute unkeyed sha256 ids and undo the order")
+
+
+def frozen_main(module, argv) -> tuple[int, str, str]:
+    """run_main() with a frozen clock, so two runs print byte-identical JSON."""
+    counter = itertools.count()
+    with mock.patch.object(module.time, "perf_counter", new=lambda: next(counter) * 0.001):
+        return run_main(module, argv)
+
+
+def gold_ordered(report: dict) -> dict:
+    """The report with every row list sorted by id and the token-order fields left out."""
+    def arm(value: dict) -> dict:
+        return {**value, **{name: sorted(value[name], key=lambda row: row["id"]) for name in ROW_LISTS}}
+    ordered = {name: (arm(value) if isinstance(value, dict) and "per_query" in value else value)
+               for name, value in report.items() if name != "row_order"}
+    ordered["redaction"] = {key: value for key, value in report["redaction"].items() if key != "limits"}
+    return ordered
+
+
+class TokenRowOrderTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.key = Path(temporary.name) / "keys" / "k.bin"
+        self.key.parent.mkdir()
+        self.key.write_bytes(KEY_A)
+        self.queries = evaluator._load_queries(RECALL_HARD)
+
+    def run_hard(self, *extra) -> tuple[int, str, str]:
+        return frozen_main(evaluator, ["--fixture", RECALL_HARD, *HARD_CI, "--top-k", "3", *extra])
+
+    def run_legacy(self, *extra) -> tuple[int, str, str]:
+        """One legacy arm of the 64 recall_hard rows, with an optional gate that fails (exit 1)."""
+        return frozen_main(evaluator, ["--fixture", RECALL_HARD, "--min-recall-at-3", "0", "--min-mrr", "0",
+                                       "--max-no-answer-false-positive-rate", "0.25", *extra])
+
+    def test_token_order_sorts_every_arm_by_the_keyed_id_after_the_gates(self):
+        gold_code, gold_out, gold_err = self.run_hard("--redact-key-file", self.key)
+        code, stdout, stderr = self.run_hard("--redact-key-file", self.key, "--redact-row-order", "token")
+        self.assertEqual((code, stderr), (gold_code, gold_err))
+        self.assertEqual(code, 0)
+        gold, token = json.loads(gold_out), json.loads(stdout)
+        self.assertEqual(token["row_order"], "sorted_by_keyed_id_token")
+        self.assertNotIn("row_order", gold)
+        # Gold order is the queries.json order; token order is the sorted tokens, the same in every arm.
+        gold_ids = [hmac_hex(KEY_A, item["id"]) for item in self.queries]
+        self.assertEqual([row["id"] for row in gold["improved"]["per_query"]], gold_ids)
+        self.assertNotEqual(sorted(gold_ids), gold_ids)
+        for arm in HARD_ARMS:
+            with self.subTest(arm=arm):
+                self.assertEqual([row["id"] for row in token[arm]["per_query"]], sorted(gold_ids))
+                for name in ROW_LISTS:
+                    ids = [row["id"] for row in token[arm][name]]
+                    self.assertEqual(ids, sorted(ids))
+                    self.assertEqual(token[arm][name], sorted(gold[arm][name], key=lambda row: row["id"]))
+        self.assertTrue(token["baseline"]["failed_queries"])
+        # Gates, paired statistics and every other field are those of the gold-order run.
+        self.assertEqual(token["improved"]["optional_gates"], gold["improved"]["optional_gates"])
+        self.assertEqual(token["paired_randomization"], gold["paired_randomization"])
+        self.assertEqual(gold_ordered(token), gold_ordered(gold))
+        self.assertEqual(gold["redaction"]["limits"], evaluator.KEYED_REDACTION_DESCRIPTION["limits"])
+        limits = token["redaction"]["limits"]
+        self.assertIn("--redact-row-order token", limits)
+        self.assertIn("can no longer link rows by position", limits)
+        self.assertNotIn("sort or shuffle", limits)
+        self.assertTrue(limits.startswith("Pseudonymisation, not encryption or anonymisation."))
+        self.assertTrue(limits.endswith(evaluator.KEYED_REDACTION_DESCRIPTION["limits"][len(V0310_KEYED_LIMITS):]))
+
+    def test_same_key_repeats_the_order_and_ephemeral_keys_change_it(self):
+        argv = ["--redact-key-file", self.key, "--redact-row-order", "token"]
+        first = self.run_legacy(*argv)
+        self.assertEqual(first, self.run_legacy(*argv))
+        gold_code, gold_out, _ = self.run_legacy("--redact-key-file", self.key)
+        # The failing gate keeps its exit code and observed value under token order.
+        self.assertEqual((first[0], gold_code), (1, 1))
+        self.assertEqual(json.loads(first[1])["optional_gates"], json.loads(gold_out)["optional_gates"])
+        second = b"KEYMARK-second-ephemeral:" + bytes(range(64, 96))
+        orders = []
+        for key in (FIXED_EPHEMERAL, second):
+            with mock.patch.object(evaluator.secrets, "token_bytes", return_value=key):
+                code, stdout, stderr = self.run_legacy("--redact-ephemeral", "--redact-row-order", "token")
+            self.assertEqual(code, 1, stderr)
+            report = json.loads(stdout)
+            self.assertEqual((report["redaction_mode"], report["row_order"]), ("ephemeral", "sorted_by_keyed_id_token"))
+            plain = {hmac_hex(key, item["id"]): item["id"] for item in self.queries}
+            order = [plain[row["id"]] for row in report["per_query"]]
+            self.assertEqual(order, sorted(order, key=lambda query_id: hmac_hex(key, query_id)))
+            orders.append(order)
+        self.assertNotEqual(orders[0], orders[1])
+        self.assertEqual(sorted(orders[0]), sorted(orders[1]))
+
+    def test_row_shapes_still_group_the_sorted_rows(self):
+        # The residual leak docs/memory-evaluation.md measures: with positions hidden, a row's shape (language,
+        # expectation, scenario token, numbers of expected, claim, forbidden and stale paths, relevance grade
+        # multiset) still splits the 64 recall_hard rows into 14 classes, two of them a single row.
+        code, stdout, stderr = self.run_legacy("--redact-key-file", self.key, "--redact-row-order", "token")
+        self.assertEqual(code, 1, stderr)
+        rows = json.loads(stdout)["per_query"]
+        shapes = Counter((row["language"], row["expectation"], row["scenario"], len(row["expected_paths"]),
+                          len(row["required_claims"]), len(row["forbidden_paths"]), len(row["stale_paths"]),
+                          tuple(sorted(row["relevance"].values()))) for row in rows)
+        self.assertEqual(len(rows), 64)
+        self.assertEqual(sorted(shapes.values()), [1, 1, 3, 3, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6])
+        self.assertTrue(all(len(row["scenario"]) == 64 for row in rows))
+
+    def test_token_order_needs_a_keyed_or_ephemeral_redaction(self):
+        for argv in (["--redact-row-order", "token"], ["--redact", "--redact-row-order", "token"],
+                     ["--fixture", RECALL_HARD, "--derive-split", "--redact-row-order", "token"]):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = run_main(evaluator, argv)
+                self.assertEqual((code, stdout, stderr.strip()), (2, "", TOKEN_ORDER_ERROR))
+        error = io.StringIO()
+        with redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+            evaluator._parser().parse_args(["--redact-row-order", "shuffle"])
+        self.assertEqual(raised.exception.code, 2)
+        plain = evaluator.redact_report(evaluator.evaluate(RECALL_HARD))
+        with self.assertRaises(ValueError):
+            evaluator.with_token_row_order(plain)
+
+    def test_gold_order_is_the_default_and_leaves_output_byte_identical(self):
+        for mode in (["--redact-key-file", self.key], ["--redact"]):
+            with self.subTest(mode=mode[0]):
+                self.assertEqual(self.run_legacy(*mode, "--redact-row-order", "gold"), self.run_legacy(*mode))
+        self.assertEqual(frozen_main(evaluator, ["--redact-row-order", "gold"]), frozen_main(evaluator, []))
+        self.assertEqual(evaluator.KEYED_REDACTION_DESCRIPTION["limits"][:len(V0310_KEYED_LIMITS)],
+                         V0310_KEYED_LIMITS)
+        self.assertEqual(evaluator.EPHEMERAL_REDACTION_DESCRIPTION["limits"][:len(V0310_KEYED_LIMITS)],
+                         V0310_KEYED_LIMITS)
+        flat = " ".join(evaluator._parser().format_help().split())
+        for phrase in ("--redact-row-order {gold,token}", "keyed id token", "cannot link rows by position"):
+            self.assertIn(phrase, flat)
+        # Both keyed options name the exception to their gold-order sentence (wide enough not to wrap).
+        with mock.patch.dict(os.environ, {"COLUMNS": "1000"}):
+            wide = evaluator._parser().format_help()
+        self.assertEqual(wide.count("rows keep the gold-set order unless --redact-row-order token is given"), 2)
+        self.assertEqual(wide.count("rows keep the gold-set order"), 2)
 
 
 if __name__ == "__main__":

@@ -409,6 +409,104 @@ Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서
 - 경로·줄 번호도 볼트 메타데이터다. 표본·라벨 파일을 어디에 두고 git으로 추적할지는 골드셋과 같은 기준으로 정한다.
 - 게이트가 아니다. 상한마다 따로 계산한 값이라 여러 상한을 함께 볼 때의 동시 포함은 보장하지 않는다.
 
+## 답 없음 쌍둥이
+
+답 없는 질문은 만들기 어렵다. recall_hard도 64문항 중 8문항뿐이라 오탐 1건이 0.125를 움직인다. 소스에 더한
+선택형 `--gold-removal-twins`는 답 있는 질문마다 그 답을 담은 노트를 뺀 볼트에서 같은 질문을 한 번 더 실행한다.
+이 쌍둥이는 질문은 같고 답만 없는 문항이라, 답 있는 문항 수만큼 답 없음 표본이 생긴다(recall_hard 56개). 플래그가
+없으면 출력·표준 오류·종료 코드는 이전과 바이트 단위로 같다.
+
+```text
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --gold-removal-twins --min-recall-at-3 0 --min-mrr 0
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --gold-removal-twins
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --gold-removal-twins --redact-key-file KEY_PATH > RESULT.json
+```
+
+- 프로토콜: [Search Engines Never Say No](https://arxiv.org/abs/2610.05348)의 쌍둥이 실험을 따른다. 논문은 질문마다
+  원래 색인과, 정답 문서(gold article)의 모든 단락에 답 문자열이나 정답 별칭을 담은 단락까지 지운 색인에서 같은
+  질문을 실행한다. 출처는 동료 심사 전 arXiv v1(2026-10-04) 프리프린트이고 영어 위키백과 QA를 BM25로 검색한
+  실험이다. 가져온 것은 쌍둥이 절차와 아래 작동점 틀뿐이며, 거부 탐지기·거부 문구의 효과·수치는 가져오지 않았다.
+- 빼는 노트: `expected_paths`, `relevance` 등급이 0보다 큰 모든 경로, 그리고 정규화한 본문에 정규화한
+  `required_claims` 문장이 들어 있는 모든 노트다. 마지막 것이 논문의 답 문자열 안전망에 해당한다. 본문 검사는 recall과
+  같은 정책(deny zone·`exclude_dirs`·`.git`, 파일 수·바이트 한도)으로 노트를 한 번 나열해 읽는다. 파일 시스템을 따로
+  훑지 않으므로 deny zone과 제외 폴더는 나열하지도 읽지도 않는다. 주장 라벨이 있는 문항이 없으면 본문을 읽지 않는다.
+- 등급 경로까지 빼는 이유: recall_hard의 답 있는 56문항 중 48문항이 개요 노트를 등급 1로 매긴다. `expected_paths`만
+  빼면 legacy 쌍둥이 36개가 후보를 돌려주고, 그중 10개는 그 문항이 등급을 매긴 개요 노트를 돌려줘 아직 답할 수 있다
+  (측정값).
+- 실행: 각 팔(`--compare`의 baseline·improved, `--expand-query`의 expansion_ablation, `--render-matched`의
+  render_matched)마다 그 팔의 질의별 옵션·top_k·context 예산으로 `vault_retrieval.retrieve(..., excluded_sources=…)`를
+  직접 부른다. legacy 팔은 질의 옵션 없이 부른다. 없는 경로 하나만 빼고 부르면 legacy recall과 반환 경로가 같다
+  (recall_hard 56/56, 시험으로 고정). `evaluate()`는 질문의 `excluded_sources`를 고급 경로에서만 넘기므로, 골드셋에
+  쌍둥이 문항을 손으로 적으면 legacy 방식에서는 아무것도 빠지지 않는다.
+- inspected 문항과 답 없는 문항에는 쌍둥이가 없다. `--split`과 함께 쓰면 그 분할의 문항만, 골드셋 모드에서는 풀린
+  라벨 경로를 뺀다. `--derive-split`과는 함께 쓸 수 없다(종료 코드 2).
+
+**출력.** 각 팔에 `gold_removal_twins`가 붙는다. 쌍둥이마다 결과 하나를 고른다.
+
+| `outcome` | 뜻 |
+|---|---|
+| `refused_empty_complete` | 검색이 완전했고 아무것도 돌려주지 않았다. 지금 recall이 낼 수 있는 유일한 거부다 |
+| `stale_only` | 돌려준 경로가 모두 그 문항의 `stale_paths` 라벨이다 |
+| `returned_candidates` | 그 밖의 무엇이든 돌려줬다(답 없음 오탐) |
+| `twin_error` | 검색 상태가 ok가 아니거나 불완전했다. 뺄 경로가 문항 자신의 `excluded_sources`까지 합쳐 50개를 넘으면 엔진이 `invalid_options`로 거부한다. 주장 라벨이 있는 문항에서 본문 검사가 불완전해도 여기에 넣는다. 거부로 세지 않는다 |
+
+- 개수는 전체·`by_language`·`by_scenario`에 같은 키로 싣는다. `false_positive_query_count`는 `returned_candidates`에서
+  아래의 `possibly_still_answerable`을 뺀 수다. 모든 비율의 분모는 오류를 포함한 `twin_count`다.
+  `stale_exposed_query_count`는 오류가 아닌 쌍둥이 중 낡은 라벨을 하나라도 돌려준 수로, 결과 구분과 겹친다.
+- `excluded_path_count`·`removed_path_counts`(기대 경로, 그 밖의 등급 경로, 그 밖의 주장 포함 노트)는 쌍둥이가 뺀
+  규칙의 수이고 `removed_note_count`는 실제로 빠진 노트 수다. 고급 팔에서 함께 넘기는 문항 자신의 `excluded_sources`는
+  행의 `excluded_sources` 앞쪽에 적히지만 `excluded_path_count`에는 세지 않는다. 그래서 이 수가 50 이하여도 둘을 합친
+  목록(겹치는 경로는 한 번)이 50개를 넘으면 `invalid_options`가 된다. 제외는 엔진의 zone 규칙을 따른다. 그래서 한
+  단짜리 경로(볼트 루트의 노트, 풀리지 않은 파일 이름 라벨)는 같은 이름의 노트를 깊이와 상관없이 모두 뺀다. 두 수가
+  다르면 그 쌍둥이의 구멍이 의도보다 크거나 작다.
+- 행(`rows`)마다 결과, `excluded_sources`(엔진이 받는 50개보다 하나 많은 51개까지), 반환 경로, `residual_graded_paths`,
+  `covered_claims`, 진단 요약, 시간을 남기고 질문 원문은 넣지 않는다. `--redact`는 id·시나리오(`by_scenario` 키 포함)·
+  주장을 per_query와 같은 방식으로 바꾸고, 키 옵션은 경로까지 바꾼다.
+- 게이트와 종료 코드는 이 절을 읽지 않는다. `twin_error`가 있으면 표준 오류에 `gold-removal twins note
+  (non-blocking)`만 남긴다. 검색 호출이 팔마다 답 있는 문항 수만큼 늘고 본문 검사가 노트를 한 번 더 읽으므로, 큰
+  볼트에서는 실행 시간도 그만큼 늘어난다.
+
+**한 작동점뿐이다.** 논문은 거부 장치를 '거짓 거부 예산을 고정했을 때의 거부 재현율'로 평가한다. 따로 떼어 둔
+보정용 질문에서 답 있는 질문의 거짓 거부가 5%(높은 작동점은 10%) 이하가 되게 문턱을 맞춘 뒤, 쌍둥이가 거부된 비율을
+잰다. agentic-vault의 recall에는 보류 장치가 없어 움직일 문턱이 없다. `operating_point`는 빈 결과라는 한 점만
+싣는다. 쌍둥이 거부 재현율은 완전 검색에서 빈 결과인 쌍둥이 / 쌍둥이, 답 있는 문항의 거짓 거부율은 완전 검색에서
+빈 결과인 답 있는 문항 / 답 있는 문항이다. 곡선이나 보정한 문턱이 아니고, n=56에서 5% 예산은 거짓 거부 2건까지라
+문턱을 맞출 표본도 아니다. 거부 문턱이나 잡음을 섞은 개수는 더하지 않았다.
+
+**근접 중복 주의.** 실제 볼트에는 라벨하지 않은 비슷한 노트가 있다. 그런 노트가 남으면 쌍둥이는 여전히 답할 수 있어
+쌍둥이 오탐이 어휘 검색의 오탐을 부풀린다. 그래서 `returned_candidates` 가운데, 같은 주장을 요구하는 다른 문항이 등급을
+매긴 노트를 돌려줬거나(`residual_graded_paths`) 렌더링한 context에 그 문항의 주장이 들어 있으면(`covered_claims`)
+`possibly_still_answerable`로 따로 세고 `possibly_still_answerable_ids`에 적는다. 이 진단은 골드셋 라벨과 리터럴 주장만
+보므로 라벨도 주장도 없는 중복은 찾지 못한다. 겹치는 노트에도 `relevance` 등급을 매겨야 쌍둥이가 정직해진다. 쌍둥이
+결과는 원래 결과에서 골드 경로만 뺀 것도 아니다. 빈 top_k 자리는 다음 순위 노트가 채운다(legacy 팔 56개 중 15개, 남은
+노트끼리의 순서는 그대로). 별칭 기반 질의 확장이나 BM25 통계처럼 남은 노트에 기대는 순위는 남은 노트끼리의 순서도
+바꾼다(질의 확장 improved 팔 56개 중 33개). 두 수는 측정값이다.
+
+### 2026-10-27 측정
+
+로컬 Windows·Python 3.12.10에서 이 기능을 더한 소스로 recall_hard(답 있는 56문항, top3, 1,500 토큰)를 실행한
+값이다. 출처 보고값이 아닌 합성 fixture 측정이며 `tests/test_gold_removal_twins.py`가 같은 값을 고정한다.
+baseline·expansion_ablation·improved는 CI 옵션(`--compare --expand-query --query-mapping 00-meta/query-map.txt`)의
+각 팔이고, render_matched는 여기에 `--render-matched`를 더하면 붙는 팔이다. baseline은 `--gold-removal-twins`만 준
+legacy 실행과 같다.
+
+| 팔 | 거부(빈 결과) | 답 없음 오탐 | `stale_only` | 낡은 출처 노출 | 답 있는 문항의 빈 결과 |
+|---|---|---|---|---|---|
+| baseline (legacy) | 26/56 (0.464) | 30/56 (0.536) | 0 | 4 | 13/56 |
+| expansion_ablation | 26/56 | 30/56 | 0 | 0 | 13/56 |
+| improved (질의 확장) | 24/56 (0.429) | 32/56 (0.571) | 0 | 0 | 0/56 |
+| render_matched (`annotate_only`) | 24/56 | 32/56 | 0 | 4 | 0/56 |
+
+- baseline 오탐 30건은 spacing 11/12, mixed 6/12, short 6/12, update 4/8, particles 3/12이고 언어별로는 영어
+  19/28, 한국어 11/28이다. 뺀 경로는 기대 56개와 개요 등급 48개이며, 주장 문장을 담은 노트가 그 밖에는 없어 본문
+  검사로 더 빠진 노트는 0개다. `possibly_still_answerable`과 `twin_error`도 0이다.
+- update 네 쌍둥이(legacy)는 낡은 노트와 관련 없는 노트를 함께 돌려줘 `stale_only`가 아니라 `returned_candidates`로
+  세고, `stale_exposed_query_count`(4)에 따로 보인다. expansion_ablation·improved 팔은 문항의 `as_of`로 낡은 노트를
+  걸러 내므로(`temporal_filter` 기본값 `exclude`) 0이다. render_matched 팔은 같은 `as_of`를 쓰지만 낡은 노트를 빼지 않고
+  표시만 하므로(`annotate_only`) legacy처럼 4다.
+- 이 작동점에서 질의 확장은 답 있는 문항의 빈 결과를 13개에서 0개로 줄이는 대신 쌍둥이 오탐을 2개 늘린다. 한 점의 두
+  숫자일 뿐이며 곡선이나 문턱 비교가 아니다.
+
 ## 실제 볼트 골드셋 평가
 
 사용자가 손으로 라벨한 질문 묶음(골드셋)으로 실제 볼트의 검색을 제자리에서 잰다. 볼트를 복사하거나
@@ -421,6 +519,7 @@ Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서
 python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json
 python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact > RESULT.json
 python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact-key-file KEY_PATH > RESULT.json
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --compare --redact-key-file KEY_PATH --redact-row-order token > RESULT.json
 ```
 
 - 볼트는 엔진의 정책으로만 읽는다. `00-meta/vault-config.json`을 엔진 설정 검사기로 검증하고 빠진 키는
@@ -465,7 +564,9 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 
 위 예시는 두 문항만 보인다. 실제 골드셋은 12문항 이상이어야 한다. 답 없는 문항(`no_answer`)도 넣는다.
 2026-10-19 기준 검색 평가 fixture 네 개(recall·recall_advanced·recall_experience·recall_hard, 112문항)에서 답 없는
-질문은 14개(recall_hard 8개 포함)뿐이라 보류 판단을 잴 표본이 작다.
+질문은 14개(recall_hard 8개 포함)뿐이라 보류 판단을 잴 표본이 작다. `--gold-removal-twins`는 답 있는 문항마다 답
+노트를 뺀 쌍둥이를 하나씩 더한다([답 없음 쌍둥이](#답-없음-쌍둥이)). 쌍둥이를 정직하게 만들려면 답을 담은 노트에
+빠짐없이 `relevance` 등급을 매기고 주장 문장(`required_claims`)을 적는다.
 
 **라벨 일치.** 라벨은 검색 전에 한 번, 정책을 거친 노트 목록에 맞춰 푼다. 위에서부터 처음 맞는 규칙을 쓴다.
 
@@ -522,7 +623,7 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   01/2025(의견 수렴판, 2025-01-16 채택)도 요구한다.
 - `--redact-ephemeral`은 실행마다 `secrets.token_bytes(32)`로 키를 만들고 어디에도 저장하지 않는다. 운영자를 포함해
   아무도 토큰을 다시 계산하거나 추측을 확인할 수 없다. 두 실행의 값도 서로 비교할 수 없다. 다만 아래의 행 순서
-  한계는 그대로 남는다.
+  한계는 `--redact-row-order token`을 쓰지 않으면 그대로 남는다.
 - 보고서에는 `redaction_mode`(`unkeyed`·`keyed`·`ephemeral`)와 `redaction_algorithm`(`sha256`·`hmac-sha256`)이
   남는다. 키와 키의 지문(해시 등)은 보고서·표준 오류 어디에도 남기지 않는다. `--redact`만 쓴 보고서는 이 두 필드가
   더해진 것 말고 v0.25.0과 같다(`--expand-query`를 쓰면 hardening.md에 적은 `inventory_verification`
@@ -531,9 +632,30 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   드러난다. 말할 수 있는 것은 "키가 없는 사람은 토큰을 다시 계산하거나 추측을 확인할 수 없다"뿐이다. 키를 가진
   사람은 후보를 해시해 맞춰 볼 수 있다. 키를 볼트나 보고서 옆에 두면 효과가 없다. 값은 통째로 해시하며 단어(토큰)마다 따로 해시하지
   않는다. 검색 로그를 단어별로 해시하면 되돌릴 수 있다는 것이 알려져 있다(Kumar 외, WWW 2007).
-- `per_query`·`failed_queries`의 행은 골드셋 순서를 그대로 따른다. 그래서 골드셋을 가진 사람은 일부만 가졌더라도,
+- 기본값(`--redact-row-order gold`)에서는 각 팔의 `per_query`·`failed_queries`·`evaluation_errors` 행과
+  `inspected_queries.ids`, 쌍둥이 행이 골드셋 순서를 그대로 따른다. 그래서 골드셋을 가진 사람은 일부만 가졌더라도,
   운영자를 포함해, 행 순서로 문항을 맞추고 그 행의 경로 토큰이 어느 경로인지 알 수 있다. 그 토큰은 다른 행의 반환
-  경로에서도 알아볼 수 있다. 이를 막으려면 공유하기 전에 행을 토큰 순으로 정렬하거나 섞는다.
+  경로에서도 알아볼 수 있다. 보고서의 `redaction.limits`는 이때 공유하기 전에 행을 정렬하거나 섞으라고 적는다.
+- 소스에 더한 선택형 `--redact-row-order token`은 그 목록들(쌍둥이의 `possibly_still_answerable_ids` 포함)을 키로
+  해시한 `id` 토큰 순으로 안정 정렬한다. 가명화가 끝나고, 모든 짝 통계(`paired_randomization`,
+  `temporal_decomposition`)와 게이트·종료 코드 판정이 골드셋 순서의 보고서로 끝난 뒤 출력하는 사본에만 적용하므로
+  짝과 판정은 그대로다. 모든 팔을 같은 토큰으로 정렬하므로 팔끼리 행 순서도 같다. 보고서에는
+  `row_order: "sorted_by_keyed_id_token"`이 남고 `redaction.limits`의 행 순서 문장이 정렬 사실과 남는 누출로 바뀐다.
+  플래그가 없거나 `gold`이면 출력과 표준 오류가 바이트 단위로 같다.
+- `--redact-key-file`이나 `--redact-ephemeral`이 있어야 한다. 같은 키 파일이면 순서가 같아 두 보고서를 비교할 수
+  있고, `--redact-ephemeral`이면 실행마다 순서가 새로 정해진다. 키 없는 `--redact`나 가명화 없는 실행에 쓰면 종료
+  코드 2로 거부한다. 골드셋을 가진 사람은 `id`의 sha256을 다시 계산해 정렬을 그대로 되돌릴 수 있기 때문이다. 시드로
+  섞는 방식은 쓰지 않았다. 기록되거나 추측할 수 있는 시드는 순서를 되돌리는 두 번째 키가 되고, 시드 없는 무작위 섞기는
+  키 토큰 정렬보다 나을 것이 없으면서 재현성만 잃는다.
+- 정렬이 막는 것은 키 없이 골드셋만 가진 사람이 위치로 행을 맞추는 일뿐이다. 행 수, 원문으로 남는 언어·기대 유형,
+  `by_scenario`의 시나리오별 개수, 행의 모양(기대 경로·주장·관련 등급의 수), 같은 토큰의 반복과 빈도, 실행 시간 필드는
+  남는다. recall_hard에서는 모양만으로(언어·기대 유형·시나리오 토큰·기대·주장·금지·낡은 경로 수·등급 묶음) 64행이
+  14개 부류로 나뉘고, 그중 두 부류는 한 행뿐이라 2행이 하나로 특정된다. 나머지 62행은 3~6행씩 12개 부류다(측정값,
+  `tests/test_goldset_evaluation.py`가 고정한다). 순서도 모두 사라지지 않는다. `by_scenario` 키는 원문
+  시나리오 이름의 정렬 순서를 따르고, `goldset.warnings`와 표준 오류의 골드셋 경고는 문항 번호(`queries[3]`)를
+  남기며, 한 행 안의 목록은 원래 순서를 지킨다. 특히 고급 검색 행의 시간 진단(`diagnostics.temporal`)은 노트를 볼트
+  경로 순으로 최대 50개 나열하므로, 볼트의 노트 목록을 아는 사람은 그 순서로 경로 토큰을 풀 수 있다. 익명화가
+  아니며, 키를 가진 사람에게는 아무 효과가 없다.
 - 근거: ENISA 「Pseudonymisation techniques and best practices」(2019-11)는 키 없는 해시가 무차별 대입·사전 공격에
   열려 있고, 비밀 키를 쓴 MAC은 키 없이는 연결할 수 없지만 결정적이라 반복과 빈도를 드러낸다고 정리한다. Demir 외
   「The Pitfalls of Hashing for Privacy」(IEEE COMST, 2018)와 미국 FTC 기술국 글(2024-07-24)은 입력 집합이 작으면
@@ -746,6 +868,7 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 - [Position: Don't Use the CLT in LLM Evals With Fewer Than a Few Hundred Datapoints](https://arxiv.org/abs/2503.01747) (Bowyer·Aitchison·Ivanova, ICML 2025 Spotlight Position, arXiv v3 2025-05-28): 작은 N에서 CLT 구간이 불확실성을 크게 과소평가하며, 독립 질문 설정에서 Wilson·베이지안 구간을 권하는 근거. 저자 라이브러리(bayes_evals)는 사용하지 않았다.
 - [Statistical Significance Testing in Information Retrieval: An Empirical Analysis of Type I, Type II and Type III Errors](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
 - [Statistical stopping criteria for automated screening in systematic reviews](https://doi.org/10.1186/s13643-020-01521-4) (Callaghan·Müller-Hansen, Systematic Reviews 9:273, 2020, CC BY 4.0): 남은 문서의 무작위 표본과 초기하 검정(식 7·9·10)을 뒤집어 [실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)의 놓침 수 상한으로 썼다. 저자 코드는 사용하지 않았다.
+- [Search Engines Never Say No: How Frozen Agents React When the Retrieval Tool Refuses](https://arxiv.org/abs/2610.05348) (Chandradevan·Ghosh·Selvendran, arXiv v1 2026-10-04, cs.IR, CC BY 4.0): 골드 제거 쌍둥이와 '거짓 거부 예산을 고정한 거부 재현율'로 거부 장치를 평가하는 틀 참고. 동료 심사 전 v1 프리프린트이며 영어 위키백과 QA(NQ·HotpotQA, BM25 2,100만 단락) 실험이다. 탐지기·거부 문구 효과·수치는 가져오지 않았고 코드나 데이터 공개도 없다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
 - [obsidian-wiki `evaluate.py`](https://github.com/Ar9av/obsidian-wiki/blob/main/obsidian_wiki/evaluate.py) (MIT): 볼트마다 손으로 라벨한 골드셋(`_meta/eval.jsonl`), 경로나 파일 이름 슬러그로 기대 노트를 맞추는 방식, recall@k·MRR 최소 기준 검사를 참고했다. 코드는 사용하지 않았고, 여러 노트가 함께 쓰는 이름은 적중으로 세지 않도록 바꿨다.
