@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -1518,6 +1519,20 @@ class TokenRowOrderTests(unittest.TestCase):
         self.assertNotEqual(orders[0], orders[1])
         self.assertEqual(sorted(orders[0]), sorted(orders[1]))
 
+    def test_row_shapes_still_group_the_sorted_rows(self):
+        # The residual leak docs/memory-evaluation.md measures: with positions hidden, a row's shape (language,
+        # expectation, scenario token, numbers of expected, claim, forbidden and stale paths, relevance grade
+        # multiset) still splits the 64 recall_hard rows into 14 classes, two of them a single row.
+        code, stdout, stderr = self.run_legacy("--redact-key-file", self.key, "--redact-row-order", "token")
+        self.assertEqual(code, 1, stderr)
+        rows = json.loads(stdout)["per_query"]
+        shapes = Counter((row["language"], row["expectation"], row["scenario"], len(row["expected_paths"]),
+                          len(row["required_claims"]), len(row["forbidden_paths"]), len(row["stale_paths"]),
+                          tuple(sorted(row["relevance"].values()))) for row in rows)
+        self.assertEqual(len(rows), 64)
+        self.assertEqual(sorted(shapes.values()), [1, 1, 3, 3, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6])
+        self.assertTrue(all(len(row["scenario"]) == 64 for row in rows))
+
     def test_token_order_needs_a_keyed_or_ephemeral_redaction(self):
         for argv in (["--redact-row-order", "token"], ["--redact", "--redact-row-order", "token"],
                      ["--fixture", RECALL_HARD, "--derive-split", "--redact-row-order", "token"]):
@@ -1544,6 +1559,11 @@ class TokenRowOrderTests(unittest.TestCase):
         flat = " ".join(evaluator._parser().format_help().split())
         for phrase in ("--redact-row-order {gold,token}", "keyed id token", "cannot link rows by position"):
             self.assertIn(phrase, flat)
+        # Both keyed options name the exception to their gold-order sentence (wide enough not to wrap).
+        with mock.patch.dict(os.environ, {"COLUMNS": "1000"}):
+            wide = evaluator._parser().format_help()
+        self.assertEqual(wide.count("rows keep the gold-set order unless --redact-row-order token is given"), 2)
+        self.assertEqual(wide.count("rows keep the gold-set order"), 2)
 
 
 if __name__ == "__main__":

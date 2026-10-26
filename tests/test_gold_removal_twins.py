@@ -30,6 +30,13 @@ HARD_CI = ["--compare", "--expand-query", "--query-mapping", "00-meta/query-map.
            "--max-tokens", "1500", "--max-no-answer-false-positive-rate", "0.25", "--max-stale-top-1-rate", "0"]
 TWIN_KEY = "gold_removal_twins"
 KEY = b"TWINKEYMARK:" + bytes(range(40, 80))
+# Counts behind the 2026-10-27 table of docs/memory-evaluation.md (with the answerable false refusals).
+TABLE_COUNTS = ("complete_empty_query_count", "false_positive_query_count", "stale_only_query_count",
+                "stale_exposed_query_count", "twin_error_count")
+
+
+def table_counts(section: dict) -> tuple:
+    return tuple(section[key] for key in TABLE_COUNTS) + (section["operating_point"]["answerable_false_refusal_count"],)
 
 
 def _load(name: str, path: Path):
@@ -283,16 +290,28 @@ class RecallHardTwinTests(unittest.TestCase):
         code, stdout, stderr = run_main(["--fixture", RECALL_HARD, *HARD_CI, "--gold-removal-twins"])
         self.assertEqual((code, stderr), (0, ""))
         report = json.loads(stdout)
-        observed = {arm: tuple(report[arm][TWIN_KEY][key] for key in (
-            "complete_empty_query_count", "false_positive_query_count", "stale_exposed_query_count",
-            "twin_error_count")) + (report[arm][TWIN_KEY]["operating_point"]["answerable_false_refusal_count"],)
-            for arm in ("baseline", "expansion_ablation", "improved")}
-        self.assertEqual(observed, {"baseline": (26, 30, 4, 0, 13), "expansion_ablation": (26, 30, 0, 0, 13),
-                                    "improved": (24, 32, 0, 0, 0)})
+        observed = {arm: table_counts(report[arm][TWIN_KEY]) for arm in ("baseline", "expansion_ablation", "improved")}
+        self.assertEqual(observed, {"baseline": (26, 30, 0, 4, 0, 13), "expansion_ablation": (26, 30, 0, 0, 0, 13),
+                                    "improved": (24, 32, 0, 0, 0, 0)})
         # The advanced arms reuse each query's own options (as_of on the update queries).
         improved = by_id(report["improved"][TWIN_KEY])
         self.assertEqual(improved["en-update-01"]["outcome"], "returned_candidates")
         self.assertEqual(improved["en-update-01"]["stale_retrieved_paths"], [])
+
+    def test_render_matched_twins_expose_the_stale_notes_it_only_annotates(self):
+        # The render_matched arm of the same CI options (--render-matched) keeps as_of but sets
+        # temporal_filter='annotate_only', so unlike expansion_ablation and improved it does not drop stale
+        # notes: its update twins expose them as the legacy twins do.
+        arm = evaluator.evaluate(RECALL_HARD, max_tokens=1500, top_k=3, render_matched=True, expand_query=True,
+                                 query_mapping="00-meta/query-map.txt")
+        self.assertEqual({row["retrieval_options"]["temporal_filter"] for row in arm["per_query"]}, {"annotate_only"})
+        section = evaluator.with_gold_removal_twins(arm, RECALL_HARD)[TWIN_KEY]
+        self.assertEqual(table_counts(section), (24, 32, 0, 4, 0, 0))
+        exposed = {query_id: row for query_id, row in by_id(section).items() if row["stale_retrieved_paths"]}
+        self.assertEqual(sorted(exposed), [f"en-update-0{index}" for index in range(1, 5)])
+        self.assertEqual({row["outcome"] for row in exposed.values()}, {"returned_candidates"})
+        self.assertEqual(exposed["en-update-01"]["stale_retrieved_paths"],
+                         ["20-knowledge/history/Cedar recovery procedure old.md"])
 
     def test_split_twins_cover_the_evaluated_split_only(self):
         heldout = set(json.loads((RECALL_HARD / "split.json").read_text(encoding="utf-8"))["heldout"])
@@ -486,6 +505,32 @@ class TwinOutcomeTests(TwinFixtureCase):
         self.assertEqual((advanced_twin["excluded_sources"], advanced_twin["outcome"]),
                          ([RELAY_GLOSSARY, RELAY], "refused_empty_complete"))
         self.assertEqual(advanced_twin["excluded_path_count"], 1)
+
+    def test_the_fifty_path_limit_counts_the_query_own_excluded_sources(self):
+        # retrieve() takes at most 50 excluded_sources in all. The query's own 50 pass on the advanced base row,
+        # but its twin adds a gold path: invalid_options, while excluded_path_count counts the twin's path only.
+        own = [f"20-knowledge/none/Missing {index:02d}.md" for index in range(50)]
+        self.queries[4]["excluded_sources"] = own
+        self.save()
+        code, report, stderr = self.twins("--advanced")
+        self.assertEqual(code, 0, stderr)
+        base = next(row for row in report["per_query"] if row["id"] == "TWINID04")
+        self.assertEqual((base["diagnostics"]["status"], base["retrieved_paths"][0]), ("ok", RELAY))
+        twin = by_id(report[TWIN_KEY])["TWINID04"]
+        self.assertEqual((twin["outcome"], twin["twin_error_reason"], twin["diagnostics"]["status"]),
+                         ("twin_error", "retrieval_not_ok", "invalid_options"))
+        self.assertEqual((twin["excluded_sources"], twin["excluded_path_count"]), ([*own, RELAY], 1))
+        self.assertEqual(report[TWIN_KEY]["excluded_path_count"],
+                         sum(sum(row["removed_path_counts"].values()) for row in report[TWIN_KEY]["rows"]))
+        definitions = report[TWIN_KEY]["definitions"]
+        self.assertIn("the query's own excluded_sources are listed but not counted", definitions["removed_notes"])
+        self.assertIn("more than 50 excluded_sources in all, the query's own included, is invalid_options",
+                      definitions["outcomes"])
+        self.assertIn("1 of 9 twins could not be measured", stderr)
+        # The legacy arm forwards no query option, so the same twin is measured there.
+        _, legacy, _ = self.twins()
+        legacy_twin = by_id(legacy[TWIN_KEY])["TWINID04"]
+        self.assertEqual((legacy_twin["excluded_sources"], legacy_twin["outcome"]), ([RELAY], "returned_candidates"))
 
     def test_twin_rows_are_redacted_with_the_report(self):
         _, plain, _ = self.twins()

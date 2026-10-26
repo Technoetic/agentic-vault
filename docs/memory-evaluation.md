@@ -345,15 +345,17 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 | `refused_empty_complete` | 검색이 완전했고 아무것도 돌려주지 않았다. 지금 recall이 낼 수 있는 유일한 거부다 |
 | `stale_only` | 돌려준 경로가 모두 그 문항의 `stale_paths` 라벨이다 |
 | `returned_candidates` | 그 밖의 무엇이든 돌려줬다(답 없음 오탐) |
-| `twin_error` | 검색 상태가 ok가 아니거나 불완전했다. 뺄 경로가 50개를 넘으면 엔진이 `invalid_options`로 거부한다. 주장 라벨이 있는 문항에서 본문 검사가 불완전해도 여기에 넣는다. 거부로 세지 않는다 |
+| `twin_error` | 검색 상태가 ok가 아니거나 불완전했다. 뺄 경로가 문항 자신의 `excluded_sources`까지 합쳐 50개를 넘으면 엔진이 `invalid_options`로 거부한다. 주장 라벨이 있는 문항에서 본문 검사가 불완전해도 여기에 넣는다. 거부로 세지 않는다 |
 
 - 개수는 전체·`by_language`·`by_scenario`에 같은 키로 싣는다. `false_positive_query_count`는 `returned_candidates`에서
   아래의 `possibly_still_answerable`을 뺀 수다. 모든 비율의 분모는 오류를 포함한 `twin_count`다.
   `stale_exposed_query_count`는 오류가 아닌 쌍둥이 중 낡은 라벨을 하나라도 돌려준 수로, 결과 구분과 겹친다.
-- `excluded_path_count`·`removed_path_counts`(기대 경로, 그 밖의 등급 경로, 그 밖의 주장 포함 노트)는 뺀 규칙의 수이고
-  `removed_note_count`는 실제로 빠진 노트 수다. 제외는 엔진의 zone 규칙을 따른다. 그래서 한 단짜리 경로(볼트 루트의
-  노트, 풀리지 않은 파일 이름 라벨)는 같은 이름의 노트를 깊이와 상관없이 모두 뺀다. 두 수가 다르면 그 쌍둥이의 구멍이
-  의도보다 크거나 작다.
+- `excluded_path_count`·`removed_path_counts`(기대 경로, 그 밖의 등급 경로, 그 밖의 주장 포함 노트)는 쌍둥이가 뺀
+  규칙의 수이고 `removed_note_count`는 실제로 빠진 노트 수다. 고급 팔에서 함께 넘기는 문항 자신의 `excluded_sources`는
+  행의 `excluded_sources` 앞쪽에 적히지만 `excluded_path_count`에는 세지 않는다. 그래서 이 수가 50 이하여도 둘을 합친
+  목록(겹치는 경로는 한 번)이 50개를 넘으면 `invalid_options`가 된다. 제외는 엔진의 zone 규칙을 따른다. 그래서 한
+  단짜리 경로(볼트 루트의 노트, 풀리지 않은 파일 이름 라벨)는 같은 이름의 노트를 깊이와 상관없이 모두 뺀다. 두 수가
+  다르면 그 쌍둥이의 구멍이 의도보다 크거나 작다.
 - 행(`rows`)마다 결과, `excluded_sources`(엔진이 받는 50개보다 하나 많은 51개까지), 반환 경로, `residual_graded_paths`,
   `covered_claims`, 진단 요약, 시간을 남기고 질문 원문은 넣지 않는다. `--redact`는 id·시나리오(`by_scenario` 키 포함)·
   주장을 per_query와 같은 방식으로 바꾸고, 키 옵션은 경로까지 바꾼다.
@@ -380,21 +382,25 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 ### 2026-10-27 측정
 
 로컬 Windows·Python 3.12.10에서 이 기능을 더한 소스로 recall_hard(답 있는 56문항, top3, 1,500 토큰)를 실행한
-값이다. 출처 보고값이 아닌 합성 fixture 측정이며 `tests/test_gold_removal_twins.py`가 같은 값을 고정한다. 아래
-세 팔은 CI 옵션(`--compare --expand-query --query-mapping 00-meta/query-map.txt`)의 각 팔이고, baseline은
-`--gold-removal-twins`만 준 legacy 실행과 같다.
+값이다. 출처 보고값이 아닌 합성 fixture 측정이며 `tests/test_gold_removal_twins.py`가 같은 값을 고정한다.
+baseline·expansion_ablation·improved는 CI 옵션(`--compare --expand-query --query-mapping 00-meta/query-map.txt`)의
+각 팔이고, render_matched는 여기에 `--render-matched`를 더하면 붙는 팔이다. baseline은 `--gold-removal-twins`만 준
+legacy 실행과 같다.
 
 | 팔 | 거부(빈 결과) | 답 없음 오탐 | `stale_only` | 낡은 출처 노출 | 답 있는 문항의 빈 결과 |
 |---|---|---|---|---|---|
 | baseline (legacy) | 26/56 (0.464) | 30/56 (0.536) | 0 | 4 | 13/56 |
 | expansion_ablation | 26/56 | 30/56 | 0 | 0 | 13/56 |
 | improved (질의 확장) | 24/56 (0.429) | 32/56 (0.571) | 0 | 0 | 0/56 |
+| render_matched (`annotate_only`) | 24/56 | 32/56 | 0 | 4 | 0/56 |
 
 - baseline 오탐 30건은 spacing 11/12, mixed 6/12, short 6/12, update 4/8, particles 3/12이고 언어별로는 영어
   19/28, 한국어 11/28이다. 뺀 경로는 기대 56개와 개요 등급 48개이며, 주장 문장을 담은 노트가 그 밖에는 없어 본문
   검사로 더 빠진 노트는 0개다. `possibly_still_answerable`과 `twin_error`도 0이다.
 - update 네 쌍둥이(legacy)는 낡은 노트와 관련 없는 노트를 함께 돌려줘 `stale_only`가 아니라 `returned_candidates`로
-  세고, `stale_exposed_query_count`(4)에 따로 보인다. `as_of`를 쓰는 고급 팔은 낡은 노트를 빼므로 0이다.
+  세고, `stale_exposed_query_count`(4)에 따로 보인다. expansion_ablation·improved 팔은 문항의 `as_of`로 낡은 노트를
+  걸러 내므로(`temporal_filter` 기본값 `exclude`) 0이다. render_matched 팔은 같은 `as_of`를 쓰지만 낡은 노트를 빼지 않고
+  표시만 하므로(`annotate_only`) legacy처럼 4다.
 - 이 작동점에서 질의 확장은 답 있는 문항의 빈 결과를 13개에서 0개로 줄이는 대신 쌍둥이 오탐을 2개 늘린다. 한 점의 두
   숫자일 뿐이며 곡선이나 문턱 비교가 아니다.
 
@@ -540,8 +546,9 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   키 토큰 정렬보다 나을 것이 없으면서 재현성만 잃는다.
 - 정렬이 막는 것은 키 없이 골드셋만 가진 사람이 위치로 행을 맞추는 일뿐이다. 행 수, 원문으로 남는 언어·기대 유형,
   `by_scenario`의 시나리오별 개수, 행의 모양(기대 경로·주장·관련 등급의 수), 같은 토큰의 반복과 빈도, 실행 시간 필드는
-  남는다. recall_hard에서는 모양만으로(언어·기대 유형·시나리오 토큰·기대·주장·금지·낡은 경로 수·등급 묶음) 64행 중
-  2행이 하나로 특정되고 나머지는 14개 부류로 나뉜다(측정값). 순서도 모두 사라지지 않는다. `by_scenario` 키는 원문
+  남는다. recall_hard에서는 모양만으로(언어·기대 유형·시나리오 토큰·기대·주장·금지·낡은 경로 수·등급 묶음) 64행이
+  14개 부류로 나뉘고, 그중 두 부류는 한 행뿐이라 2행이 하나로 특정된다. 나머지 62행은 3~6행씩 12개 부류다(측정값,
+  `tests/test_goldset_evaluation.py`가 고정한다). 순서도 모두 사라지지 않는다. `by_scenario` 키는 원문
   시나리오 이름의 정렬 순서를 따르고, `goldset.warnings`와 표준 오류의 골드셋 경고는 문항 번호(`queries[3]`)를
   남기며, 한 행 안의 목록은 원래 순서를 지킨다. 특히 고급 검색 행의 시간 진단(`diagnostics.temporal`)은 노트를 볼트
   경로 순으로 최대 50개 나열하므로, 볼트의 노트 목록을 아는 사람은 그 순서로 경로 토큰을 풀 수 있다. 익명화가

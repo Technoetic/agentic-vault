@@ -806,15 +806,18 @@ TWIN_DEFINITIONS = {
     'removed_notes': "expected_paths, every relevance path graded above 0, and every listed note whose normalised "
                      "text contains a normalised required claim (read once through recall's policy-checked note "
                      "walk, so deny zones and exclude_dirs are never read). They reach vault_retrieval.retrieve as "
-                     "excluded_sources together with the arm's own per-query options (none on the legacy arm) and "
-                     "the query's own excluded_sources. Engine zone rules apply: a one-segment path (a note at the "
-                     "vault root, or an unresolved filename label) removes every note of that name at any depth, and "
-                     "removed_note_count counts the listed notes a twin removed. A row lists at most 51 "
-                     "excluded_sources, one more than retrieve accepts; excluded_path_count counts them all.",
+                     "excluded_sources after the query's own excluded_sources, with the arm's own per-query options "
+                     "(the legacy arm forwards neither, as evaluate() does). Engine zone rules apply: a one-segment "
+                     "path (a note at the vault root, or an unresolved filename label) removes every note of that "
+                     "name at any depth, and removed_note_count counts the listed notes a twin removed. "
+                     "excluded_path_count counts every path the twin removed (the sum of removed_path_counts); the "
+                     "query's own excluded_sources are listed but not counted. retrieve accepts at most 50 "
+                     "excluded_sources in all, so a row lists at most 51, one more than that.",
     'outcomes': 'refused_empty_complete: complete search, nothing returned. stale_only: every returned path is a '
                 'stale_paths label of the query. returned_candidates: anything else returned. twin_error: retrieval '
-                'status not ok or search incomplete (more than 50 excluded paths is invalid_options), or an '
-                'incomplete note scan for a query with required claims. A twin_error is never a refusal.',
+                "status not ok or search incomplete (more than 50 excluded_sources in all, the query's own "
+                'included, is invalid_options), or an incomplete note scan for a query with required claims. A '
+                'twin_error is never a refusal.',
     'possibly_still_answerable': 'A returned_candidates twin that returned a note graded above 0 by another query '
                                  'sharing one of its required claims (residual_graded_paths), or whose rendered '
                                  'context contains one of its required claims (covered_claims). An unlabelled '
@@ -1982,12 +1985,13 @@ def _parser() -> argparse.ArgumentParser:
                             'vault-relative path; the key and any fingerprint of it are never printed. Equal values '
                             'still get equal tokens, so repeats and frequencies inside one report stay visible; '
                             'without the key, tokens cannot be recomputed or a guess confirmed, but rows keep the '
-                            'gold-set order, so whoever holds the gold set can link them by position. Whole values '
-                            'are hashed, words are not hashed one by one')
+                            'gold-set order unless --redact-row-order token is given, so whoever holds the gold set '
+                            'can link them by position. Whole values are hashed, words are not hashed one by one')
     keyed.add_argument('--redact-ephemeral', action='store_true',
                        help='implies --redact: like --redact-key-file with a random 32-byte key drawn for this run '
                             'and never stored, so nobody can recompute the tokens and two runs cannot be compared; '
-                            'rows keep the gold-set order, and repeats and frequencies inside one report stay visible')
+                            'rows keep the gold-set order unless --redact-row-order token is given, and repeats and '
+                            'frequencies inside one report stay visible')
     goldset.add_argument('--redact-row-order', choices=('gold', 'token'), default='gold',
                          help='row order of a pseudonymised report: gold (default) keeps the gold-set order; token '
                               'sorts per_query, failed_queries, evaluation_errors, inspected ids and twin rows of '
