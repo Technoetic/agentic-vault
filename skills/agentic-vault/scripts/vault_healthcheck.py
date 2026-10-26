@@ -793,9 +793,6 @@ def estimate_tokens(text: str) -> int:
     return int(hangul * 1.375 + other * 0.3)
 
 
-WIKILINK_RE = re.compile(
-    r"\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]"
-)
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
 UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
 # 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
@@ -1285,6 +1282,48 @@ def parse_simple_yaml_keys(fm: str) -> dict[str, str]:
     return keys
 
 
+# 위키링크도 선형 시간으로 찾는다. 예전 WIKILINK_RE(r"\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]")는 '[['마다
+# 대상 문자 클래스(줄바꿈과 '['도 받는다)를 멈출 자리까지 다시 훑고 한 글자씩 되돌아갔고, '#'·'|' 뒤 꼬리도 '[['마다
+# 첫 ']'까지 다시 훑었다. 그래서 '['만 이어진 줄이나 '[[a'만 있는 줄이 이어진 노트에서 이차 시간이었다.
+# _wikilink_matches는 줄바꿈·CR이 어디 있든 그 식의 finditer와 같은 매치를 내며, 예전 식은
+# tests/test_linear_line_parsers.py에 대조용으로만 남는다.
+_WIKILINK_STOP_RE = re.compile(r"[|#]|\]\]")
+
+
+def _wikilink_matches(text: str) -> list[tuple[int, int, str]]:
+    """예전 WIKILINK_RE.finditer(text)의 매치마다 (시작, 끝, group(1))을 순서대로 반환한다."""
+    # 대상은 '[[' 뒤에서 처음 나오는 '|'·'#'·']]' 앞까지다(바로 뒤에 ']'가 없는 ']'는 대상에 든다). 그 자리가
+    # ']]'이면 거기서 닫히고, '|'·'#'이면 꼬리가 그 뒤 첫 ']'까지 이어져 거기서 ']]'로 닫혀야 한다. 대상을 줄여
+    # 되돌아가도 다른 자리에서는 닫히지 않으므로, 실패한 '[['와 그 자리 앞의 다른 '[['는 모두 같은 자리에서 멈춰
+    # 실패하고, 그 자리 뒤에서 다시 찾는다.
+    found: list[tuple[int, int, str]] = []
+    search, close = 0, -1  # close: 마지막으로 찾은 꼬리 끝 ']'. 뒤로만 옮기므로 같은 구간을 다시 훑지 않는다.
+    while True:
+        start = text.find("[[", search)
+        if start < 0:
+            return found
+        stop = _WIKILINK_STOP_RE.search(text, start + 2)
+        if stop is None:
+            return found  # 대상이 끝까지 이어져 이 '[['도 뒤의 '[['도 닫히지 않는다
+        target_end = end = stop.start()
+        if text[end] != "]":  # '#'·'|': 꼬리 끝
+            if close <= end:
+                close = text.find("]", end + 1)
+                if close < 0:
+                    return found  # 뒤에 ']'가 없으면 어느 '[['도 닫히지 않는다
+            end = close
+        if target_end > start + 2 and text.startswith("]]", end):
+            found.append((start, end + 2, text[start + 2:target_end]))
+            search = end + 2
+        else:
+            search = target_end + 1
+
+
+def wikilink_targets(text: str) -> list[str]:
+    """예전 WIKILINK_RE.findall(text)와 같은 위키링크 대상(group(1)) 목록."""
+    return [target for _start, _end, target in _wikilink_matches(text)]
+
+
 def normalize_link_target(raw: str) -> str | None:
     """위키링크 대상을 노트 이름(stem)으로 정규화한다.
     - 경로형 [[folder/note]] → 'note'
@@ -1383,7 +1422,7 @@ def _index_blob_wikilink_targets(
     text = read_index_text(vault, path)
     clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
     targets: set[str] = set()
-    for raw_target in WIKILINK_RE.findall(clean_text):
+    for raw_target in wikilink_targets(clean_text):
         raw_stem = raw_target.split("/")[-1].strip()
         if raw_stem.lower().endswith(".md"):
             raw_stem = raw_stem[:-3].strip()
@@ -1939,7 +1978,7 @@ def main() -> int:
         clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
 
         links: set[str] = set()
-        for raw_target in WIKILINK_RE.findall(clean_text):
+        for raw_target in wikilink_targets(clean_text):
             base = normalize_link_target(raw_target)
             if base is None:
                 continue  # 자산 임베드([[img.png]] 등) — 노트 그래프 밖
@@ -2015,7 +2054,7 @@ def main() -> int:
             print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
             return 1
         idx_links = set()
-        for raw_target in WIKILINK_RE.findall(idx_text):
+        for raw_target in wikilink_targets(idx_text):
             base = normalize_link_target(raw_target)
             if base:
                 idx_links.add(base)
