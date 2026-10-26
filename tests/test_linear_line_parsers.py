@@ -43,6 +43,7 @@ import vault_lint_extensions as lint  # noqa: E402
 import vault_provenance  # noqa: E402
 import vault_query_expansion  # noqa: E402
 import vault_recall  # noqa: E402
+import vault_retrieval  # noqa: E402
 import vault_ssot  # noqa: E402
 import vault_state  # noqa: E402
 import vault_warning_policy  # noqa: E402
@@ -814,6 +815,34 @@ class CallerPreconditionTests(unittest.TestCase):
         self.assertGreater(len(calls), len(BOUNDARIES))
         with recorded(self, PAIR['recall heading label']):
             vault_query_expansion.rank_expanded('n.md', plain + body + 'alpha body\n', 'alpha', ['alpha'])
+        # Advanced recall titles a candidate without a lexical match, or a note reached through a link,
+        # in vault_retrieval._fallback; --expand-query titles alias replacements in _expand_documents
+        # (without a mapping it reads no file, so the vault argument is unused).
+        for name, text in (('recall title value', front + body), ('recall heading label', plain + body)):
+            doc = {'path': 'n.md', 'text': text, 'sha256': '0' * 64}
+            with self.subTest(pair=name, caller='_fallback'), recorded(self, PAIR[name]) as calls:
+                vault_retrieval._fallback(doc, 'alpha', ['alpha'])
+            self.assertGreater(len(calls), len(BOUNDARIES))
+            with self.subTest(pair=name, caller='_expand_documents'), recorded(self, PAIR[name]) as calls:
+                vault_query_expansion._expand_documents(ROOT, 'alpha', {'n.md': doc})
+            self.assertGreater(len(calls), len(BOUNDARIES))
+        driven = {('vault_recall', '_rank_document'), ('vault_query_expansion', 'rank_expanded'),
+                  ('vault_retrieval', '_fallback'), ('vault_query_expansion', '_expand_documents')}
+        # Every shipped function that names a recall title helper is one of the callers driven above,
+        # so a new caller fails here until it is driven through recorded() too.
+        callers = set()
+        for path in (*sorted(SCRIPTS.glob('*.py')), *sorted((ROOT / 'hooks').glob('*.py'))):
+            stack = [(ast.parse(path.read_text(encoding='utf-8')), None)]
+            while stack:
+                node, function = stack.pop()
+                for child in ast.iter_child_nodes(node):
+                    spelled = (child.id if isinstance(child, ast.Name) else
+                               child.attr if isinstance(child, ast.Attribute) else None)
+                    if spelled in ('_title', '_title_value', '_heading_label'):
+                        callers.add((path.stem, function))
+                    stack.append((child, child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                  else function))
+        self.assertEqual(callers, driven | {('vault_recall', '_title')})
 
     def test_lint_scanners_are_reached_by_the_default_lint(self):
         # The scanners equal their oracles with line feeds too, so their callers

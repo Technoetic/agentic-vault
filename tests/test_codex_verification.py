@@ -73,6 +73,7 @@ class CodexVerificationTests(unittest.TestCase):
             "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
             "skills/agentic-vault/scripts/vault_adapters.py",
             "assets/adapters/deny-guard/deny-guard.py", "assets/adapters/deny-guard/ps-parse.ps1",
+            "assets/adapters/aside/aside-up.ps1",
         )
         for relative in resources:
             resource = source / relative
@@ -141,10 +142,12 @@ class CodexVerificationTests(unittest.TestCase):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 
     def test_installed_adapter_resources_must_exist_and_match(self) -> None:
-        # doctor's adapter report compares an installed deny-zone guard with these bundled copies.
+        # doctor's adapter report compares an installed Aside helper and deny-zone guard with these
+        # bundled copies.
         for relative in ("skills/agentic-vault/scripts/vault_adapters.py",
                          "assets/adapters/deny-guard/deny-guard.py",
-                         "assets/adapters/deny-guard/ps-parse.ps1"):
+                         "assets/adapters/deny-guard/ps-parse.ps1",
+                         "assets/adapters/aside/aside-up.ps1"):
             for mutation in ("changed", "missing"):
                 with self.subTest(resource=relative, mutation=mutation), \
                      tempfile.TemporaryDirectory() as temporary:

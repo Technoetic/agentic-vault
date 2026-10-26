@@ -325,7 +325,8 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
 
 - 일반 형식은 `{"population_id": "...", "items": [{"id": "r01", "path": "notes/대장.md", "line": 12, "match": "none"}]}`다.
   볼트 판을 묶으려면 `source_sha256`(64자리 16진)을 함께 적는다. 항목에는 `id`(필수)·`path`(볼트 상대 경로)·`line`·
-  `match`만 둔다. 값·본문 같은 다른 필드와 같은 `id`는 거부한다. 그래서 노트 본문이 표본 파일에 들어가지 않는다.
+  `match`만 둔다. 값·본문 같은 다른 필드와 같은 `id`는 거부한다. 다만 `id`(1,040자까지)와 `population_id`(200자까지)는
+  받은 그대로 표본 파일에 옮겨 적으므로, 노트 문장이 표본에 들어가지 않게 하려면 `id`를 `경로:줄` 같은 참조로 짓는다.
 - `path`는 `/`로 나눈 볼트 상대 경로다. 절대 경로, 역슬래시, `:*?"<>|`, 비었거나 `.`·`..`인 마디, 점이나 공백으로 끝나는
   마디는 거부한다(`evaluate_recall.py`의 골드셋 경로 규칙에서 `.md` 조건만 뺐다). 같은 노트가 `20-knowledge\노트.md`와
   `20-knowledge/노트.md`처럼 두 표기로 두 항목이 되지 않게 하려는 것이다. 도구는 볼트를 열지 않으므로 대소문자나 유니코드
@@ -381,7 +382,8 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
   K_U(x) = max{K ∈ [x, N] : P(X ≤ x | N, K, k) ≥ α}, α = 1 − confidence다. P(X ≤ x)는 K가 커질수록 줄어들므로
   이분법으로 찾는다. 실제 K가 K_U보다 클 확률은 많아야 α다.
 - 비교는 정확한 정수로 한다: Σ_{i≤x} C(K, i)·C(N − K, k − i) × q ≥ p × C(N, k). α = p/q는 confidence의 십진 표기에서
-  만든 분수다(0.95 → 1/20). `math.lgamma`나 부동소수 누적분포를 쓰지 않으며, 정수의 크기는 N이 아니라 k에 따라 자란다.
+  만든 분수다(0.95 → 1/20). `math.lgamma`나 부동소수 누적분포를 쓰지 않는다. 각 항은 C(N, k) 이하이고 C(N, k) ≤ N^k이므로
+  정수의 비트 수는 많아야 약 k·log2(N)이다. k에는 비례해 늘지만 N에는 로그로만 는다.
   N=60·k=15에서 모든 K에 대한 정확 포함 확률의 최솟값은 0.9503이다(계산값).
 - N=500, k=20, x=0이면 K_U=68(모집단의 13.6%), k=40이면 34(6.8%), k=20·x=1이면 106이다(계산값). 같은 표본을 이항
   Clopper-Pearson 상한으로 읽고 N을 곱하면 69.55·36.08이다. 표본이 모집단의 큰 몫이면 차이가 커진다(N=100, k=40,
@@ -461,7 +463,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   다르면 그 쌍둥이의 구멍이 의도보다 크거나 작다.
 - 행(`rows`)마다 결과, `excluded_sources`(엔진이 받는 50개보다 하나 많은 51개까지), 반환 경로, `residual_graded_paths`,
   `covered_claims`, 진단 요약, 시간을 남기고 질문 원문은 넣지 않는다. `--redact`는 id·시나리오(`by_scenario` 키 포함)·
-  주장을 per_query와 같은 방식으로 바꾸고, 키 옵션은 경로까지 바꾼다.
+  주장을 per_query와 같은 방식으로 바꾸고, 키 옵션은 경로까지 바꾼다. 이 절이 있는 보고서의 `redaction.replaced` 끝에는
+  쌍둥이 항목이 하나 더 붙는다(절이 없는 보고서의 설명은 그대로다).
 - 게이트와 종료 코드는 이 절을 읽지 않는다. `twin_error`가 있으면 표준 오류에 `gold-removal twins note
   (non-blocking)`만 남긴다. 검색 호출이 팔마다 답 있는 문항 수만큼 늘고 본문 검사가 노트를 한 번 더 읽으므로, 큰
   볼트에서는 실행 시간도 그만큼 늘어난다.
@@ -651,10 +654,17 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   `by_scenario`의 시나리오별 개수, 행의 모양(기대 경로·주장·관련 등급의 수), 같은 토큰의 반복과 빈도, 실행 시간 필드는
   남는다. recall_hard에서는 모양만으로(언어·기대 유형·시나리오 토큰·기대·주장·금지·낡은 경로 수·등급 묶음) 64행이
   14개 부류로 나뉘고, 그중 두 부류는 한 행뿐이라 2행이 하나로 특정된다. 나머지 62행은 3~6행씩 12개 부류다(측정값,
-  `tests/test_goldset_evaluation.py`가 고정한다). 순서도 모두 사라지지 않는다. `by_scenario` 키는 원문
+  `tests/test_goldset_evaluation.py`가 고정한다). 더 강한 연결 경로는 행마다 원문으로 남는 결정적 결과와 진단이다.
+  지표 값(`source_recall_at_3`·`reciprocal_rank_at_3`·`ndcg_at_5` 등), 반환·금지·낡은 경로 수,
+  `estimated_returned_context_tokens`, 진단의 `bytes_read`·`files_read`·`query_terms_used`, 질의 확장 진단의 용어·확장
+  수는 같은 볼트에서 다시 실행하면 그대로 나온다. `query_terms_used`는 질의 확장이 없으면 질문 문장만으로 정해진다.
+  그래서 골드셋을 가지고 그 볼트에서 다시 실행할 수 있는 사람(보통 골드셋 작성자)은 값이 유일한 행을 모두 맞출 수 있다.
+  recall_hard top3에서 모양에 이 값들을 더하면 baseline 팔만으로 64행 중 37행이, `--compare --render-matched`의 네 팔
+  값을 함께 보면 60행이 하나로 특정된다(측정값, 같은 시험 파일이 고정한다). 순서도 모두 사라지지 않는다. `by_scenario` 키는 원문
   시나리오 이름의 정렬 순서를 따르고, `goldset.warnings`와 표준 오류의 골드셋 경고는 문항 번호(`queries[3]`)를
   남기며, 한 행 안의 목록은 원래 순서를 지킨다. 특히 고급 검색 행의 시간 진단(`diagnostics.temporal`)은 노트를 볼트
-  경로 순으로 최대 50개 나열하므로, 볼트의 노트 목록을 아는 사람은 그 순서로 경로 토큰을 풀 수 있다. 익명화가
+  경로 순으로 최대 50개 나열하므로, 볼트의 노트 목록을 아는 사람은 그 순서로 경로 토큰을 풀 수 있다. 쌍둥이 행의
+  `excluded_sources`도 문항 자신의 제외 뒤에 뺀 노트를 볼트 경로 순으로 적으므로 같은 방법이 통한다. 익명화가
   아니며, 키를 가진 사람에게는 아무 효과가 없다.
 - 근거: ENISA 「Pseudonymisation techniques and best practices」(2019-11)는 키 없는 해시가 무차별 대입·사전 공격에
   열려 있고, 비밀 키를 쓴 MAC은 키 없이는 연결할 수 없지만 결정적이라 반복과 빈도를 드러낸다고 정리한다. Demir 외

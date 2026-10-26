@@ -1517,6 +1517,12 @@ _KEYED_REPLACED = [
     "the keyed hash of their sha256 hex",
     "candidate paths inside gold-set warnings; a warning of an unknown shape is hashed whole",
 ]
+# One more "replaced" entry, added only to a report that carries a gold_removal_twins section
+# (--gold-removal-twins), so a report without one keeps its description byte for byte.
+_TWIN_REPLACED = ("gold-removal twin section: row id, scenario and covered_claims as in per_query rows (ids also in "
+                  "possibly_still_answerable_ids, scenarios also as its by_scenario keys)")
+_KEYED_TWIN_REPLACED = (_TWIN_REPLACED + "; its rows' excluded_sources, retrieved, stale and residual graded paths "
+                        "like other vault-relative paths")
 # The default (--redact-row-order gold) row-order sentence; --redact-row-order
 # token replaces only this sentence in the printed limits.
 _GOLD_ROW_ORDER_LIMIT = (
@@ -1527,9 +1533,15 @@ _TOKEN_ROW_ORDER_LIMIT = (
     "evaluation_errors, inspected ids and gold-removal twin rows of every arm, after all statistics and gates. "
     "Whoever holds the gold set but not the key can no longer link rows by position, but row counts, languages "
     "and expectations (kept in clear), per-scenario counts, each row's shape (numbers of expected paths, claims "
-    "and relevance grades), equal-token repeats and timing fields remain and can still single out rows; "
-    "by_scenario keys keep the order of the plain scenario names, gold-set warnings name query positions, and "
-    "lists inside a row keep their own order (temporal diagnostics list notes in vault path order).")
+    "and relevance grades), equal-token repeats and timing fields remain and can still single out rows. Each "
+    "row's deterministic results and diagnostics also stay in clear, such as metric values, retrieved, forbidden "
+    "and stale path counts, estimated_returned_context_tokens, bytes_read, files_read, query_terms_used (without "
+    "query expansion it follows from the query text alone) and query-expansion counts; a rerun on the same vault "
+    "gives the same values, so whoever holds the gold set and can rerun it there can match each row whose values "
+    "are unique. In addition, by_scenario keys keep the order of the plain scenario names, gold-set "
+    "warnings name query positions, and lists inside a row keep their own order (temporal diagnostics list "
+    "notes in vault path order, and gold-removal twin excluded_sources list removed notes in vault path order "
+    "after the query's own exclusions).")
 _KEYED_LIMITS = (
     "Pseudonymisation, not encryption or anonymisation. Equal values get equal tokens within this report, so "
     "repeats and frequencies stay visible. Whole values are hashed, not single words. " + _GOLD_ROW_ORDER_LIMIT
@@ -1766,6 +1778,12 @@ def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = F
         redacted = _keyed_paths(redacted, digest)
         redacted["redaction"] = EPHEMERAL_REDACTION_DESCRIPTION if ephemeral else KEYED_REDACTION_DESCRIPTION
         mode, algorithm = ("ephemeral" if ephemeral else "keyed"), "hmac-sha256"
+    arms = [report] if "per_query" in report else [
+        value for value in report.values() if isinstance(value, dict) and "per_query" in value]
+    if any("gold_removal_twins" in arm for arm in arms):
+        description = redacted["redaction"]
+        redacted["redaction"] = {**description, "replaced": [
+            *description["replaced"], _TWIN_REPLACED if key is None else _KEYED_TWIN_REPLACED]}
     redacted["redaction_mode"] = mode
     redacted["redaction_algorithm"] = algorithm
     return redacted

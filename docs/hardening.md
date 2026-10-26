@@ -423,7 +423,7 @@ Markdown 링크, frontmatter 블록을 찾던 다른 꼴의 정규식 일곱 개
 | `vault_lint_extensions.py:141`·`143`·`194`·`197` | `'^ {0,3}#{1,6}\s+(.+?)\s*$'`, `re.sub(r'\s+#+\s*$', …)`, `'^(created\|updated):\s*(.*?)\s*$'`, `re.split(r'\s+#', …)` | 기본 lint의 제목 anchor와 `created`·`updated` 날짜 |
 | `vault_provenance.py:436` | `'^([a-z_]+)\s*:\s*(.*?)\s*$'` | 기본 lint의 출처 frontmatter |
 | `vault_healthcheck.py:1561`·`1570`·`1571` | `'^#{1,3}\s+(.+?)\s*$'`, `_norm_heading`의 `\s*\([^)]*\)`·`\s*[—-]\s.*$` | healthcheck full 모드의 rules 제목 중복 검사 |
-| `vault_recall.py:40`·`41`, `vault_query_expansion.py:478` | `'^\s*title\s*:\s*(.*?)\s*$'`, `'^\s*#{1,6}\s+(.+?)\s*#*\s*$'` | `/vault-recall`의 제목, `--expand-query`의 제목 줄 건너뛰기(기본 훅 밖) |
+| `vault_recall.py:40`·`41`, `vault_query_expansion.py:478` | `'^\s*title\s*:\s*(.*?)\s*$'`, `'^\s*#{1,6}\s+(.+?)\s*#*\s*$'` | `/vault-recall`의 제목(고급 검색 `vault_retrieval.py`가 어휘 일치 없는 후보와 링크로 더한 노트의 제목을 정하는 `_fallback` 포함), `--expand-query`의 별칭 대체어(파일 이름과 제목)와 제목 줄 건너뛰기(기본 훅 밖) |
 
 **원인과 바꾼 방법.** 게으른 `(.+?)`는 한 글자 늘 때마다 꼬리 `\s*#*$`를 처음부터 다시 맞춘다. 제목 글자 사이에 긴 공백이 있으면(`# a` + 공백 N개 + `b`)
 자리마다 그 공백을 다시 훑어 이차 시간이 되고, 꼬리에 `\s*`가 둘인 `vault_recall.py`의 제목 식은 삼차 시간이었다. 새 처리는 길이가 정해진 머리

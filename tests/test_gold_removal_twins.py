@@ -557,6 +557,13 @@ class TwinOutcomeTests(TwinFixtureCase):
             self.assertEqual(twin[name], plain_twin[name], name)
         self.assertEqual(section["definitions"], plain[TWIN_KEY]["definitions"])
         self.assertEqual(section["operating_point"], plain[TWIN_KEY]["operating_point"])
+        # The report's own description names the twin section in one more "replaced" entry; a report
+        # without the section keeps the constant description (tests/test_goldset_evaluation.py).
+        replaced = json.loads(stdout)["redaction"]["replaced"]
+        self.assertEqual(replaced[:-1], evaluator.KEYED_REDACTION_DESCRIPTION["replaced"])
+        for name in ("gold-removal twin section", "covered_claims", "possibly_still_answerable_ids", "by_scenario",
+                     "excluded_sources", "residual graded paths"):
+            self.assertIn(name, replaced[-1])
         # Unkeyed --redact hashes ids, scenarios and claims; paths stay readable, as in per_query rows.
         code, stdout, _ = run_main(["--fixture", self.fixture, "--min-recall-at-3", "0", "--min-mrr", "0",
                                     "--gold-removal-twins", "--redact"])
@@ -564,6 +571,10 @@ class TwinOutcomeTests(TwinFixtureCase):
         twin = by_id(unkeyed)[hashlib.sha256(b"TWINID00").hexdigest()]
         self.assertEqual(twin["residual_graded_paths"], [PUMP_CHECKLIST])
         self.assertNotIn("TWINID", json.dumps(unkeyed))
+        replaced = json.loads(stdout)["redaction"]["replaced"]
+        self.assertEqual(replaced[:-1], evaluator.REDACTION_DESCRIPTION["replaced"])
+        self.assertIn("possibly_still_answerable_ids", replaced[-1])
+        self.assertNotIn("residual graded paths", replaced[-1])
 
     def test_token_row_order_also_sorts_inspected_ids_and_twin_rows(self):
         for index in (3, 9, 10):

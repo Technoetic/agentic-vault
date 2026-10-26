@@ -1533,6 +1533,44 @@ class TokenRowOrderTests(unittest.TestCase):
         self.assertEqual(sorted(shapes.values()), [1, 1, 3, 3, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6])
         self.assertTrue(all(len(row["scenario"]) == 64 for row in rows))
 
+    def test_deterministic_row_values_link_most_sorted_rows(self):
+        # The stronger channel docs/memory-evaluation.md measures: each row's results and diagnostics stay in
+        # clear and repeat on a rerun. With the shape they single out 37 of the 64 recall_hard rows in the
+        # baseline arm, and 60 when the four --compare --render-matched arms of a row are read together.
+        code, stdout, stderr = self.run_hard("--render-matched", "--redact-key-file", self.key,
+                                             "--redact-row-order", "token")
+        self.assertEqual(code, 0, stderr)
+        report = json.loads(stdout)
+
+        def values(row):
+            diagnostics, expansion = row["diagnostics"], row["diagnostics"].get("query_expansion")
+            return (row["language"], row["expectation"], row["scenario"], len(row["expected_paths"]),
+                    len(row["required_claims"]), len(row["forbidden_paths"]), len(row["stale_paths"]),
+                    tuple(sorted(row["relevance"].values())), row["source_recall_at_3"],
+                    row["reciprocal_rank_at_3"], row["ndcg_at_5"], len(row["retrieved_paths"]),
+                    len(row["forbidden_retrieved_paths"]), len(row["stale_retrieved_paths"]),
+                    row["estimated_returned_context_tokens"], diagnostics["bytes_read"], diagnostics["files_read"],
+                    diagnostics["query_terms_used"], None if expansion is None else len(expansion["terms"]))
+
+        def unique(keys) -> int:
+            return sum(count == 1 for count in Counter(keys).values())
+
+        arms = [report[arm]["per_query"] for arm in (*HARD_ARMS, "render_matched")]
+        self.assertTrue(all([row["id"] for row in rows] == [row["id"] for row in arms[0]] for rows in arms))
+        self.assertEqual(len(arms[0]), 64)
+        self.assertEqual(unique(values(row) for row in report["baseline"]["per_query"]), 37)
+        self.assertEqual(unique(tuple(values(rows[index]) for rows in arms) for index in range(64)), 60)
+        # The token-order limits name this channel and the twin exclusion lists that keep vault path order.
+        limits = report["redaction"]["limits"]
+        for phrase in ("metric values", "retrieved, forbidden and stale path counts",
+                       "estimated_returned_context_tokens", "bytes_read, files_read",
+                       "query_terms_used (without query expansion it follows from the query text alone)",
+                       "query-expansion counts", "a rerun on the same vault gives the same values",
+                       "can match each row whose values are unique",
+                       "gold-removal twin excluded_sources list removed notes in vault path order"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, limits)
+
     def test_token_order_needs_a_keyed_or_ephemeral_redaction(self):
         for argv in (["--redact-row-order", "token"], ["--redact", "--redact-row-order", "token"],
                      ["--fixture", RECALL_HARD, "--derive-split", "--redact-row-order", "token"]):
