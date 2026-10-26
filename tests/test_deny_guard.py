@@ -474,8 +474,14 @@ class BashDecisionTests(GuardCase):
                         "mv -n notes/a.md 90-assets/ 2\\>x"):  # an escaped > is no redirect: '2>x' is the destination
             with self.subTest(command=command):
                 self.assertEqual(self.decide("Bash", {"command": command}), "deny")
-        marked = "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2" + chr(1) + " > out.txt"
-        self.assertEqual(self.decide("Bash", {"command": marked}), "ask")  # the mark character itself
+        # The mark character itself: no exceptions apply, so a zone name still denies and a control name asks.
+        for command in ("mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2" + chr(1) + " > out.txt",
+                        "echo " + chr(1) + " 90-assets", "cat 90-assets/x.png " + chr(1),
+                        "mv -n notes/a.md 90-assets/ " + chr(1)):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        self.assertEqual(self.decide("Bash", {"command": "cat .claude/settings.local.json " + chr(1)}), "ask")
+        self.assertIsNone(self.decide("Bash", {"command": "echo " + chr(1) + " notes/a.md"}))
 
     def test_moves_that_may_replace_a_file_in_a_zone_ask(self) -> None:
         for command in ("mv notes/b 90-assets/x.png", "mv -t 90-assets notes/a.md",

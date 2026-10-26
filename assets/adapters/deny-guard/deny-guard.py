@@ -1323,8 +1323,10 @@ class Guard:
         stripped = _strip_comments(command)
         verdicts.extend(self.code_verdicts(stripped))
         if _IO_MARK in stripped:  # the character that marks descriptor numbers (_mark_io_numbers)
-            return verdicts + [(ASK, _ask_unchecked(zones[0] if zones else None,
-                                                    "holds the control character U+0001"))]
+            # No exceptions apply, so the character cannot lower a zone's deny to ask.
+            if zones:
+                return verdicts + [(DENY, _deny_shell(zones[0]))]
+            return verdicts + [(ASK, _ask_unchecked(None, "holds the control character U+0001"))]
         try:
             words = _words(_mark_io_numbers(stripped))
         except ValueError:
