@@ -27,8 +27,15 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
 6. 도구 어댑터 상태도 함께 본다:
    `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault "<현재 볼트 절대 경로>" --format json`.
    이 진단도 읽기 전용이다. `adapters.aside`의 `actions`는 제안으로만 보고하고 설치·교체는
-   `/vault-upgrade`(Codex `$agentic-vault:agentic-vault upgrade`)로 안내한다. `cli_on_path`가 false이고
-   설치된 것이 없으면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
+   `/vault-upgrade`(Codex `$agentic-vault:agentic-vault upgrade`)로 안내한다.
+   `adapters.deny_guard`는 선택형 deny zone 가드(Claude Code 전용 PreToolUse 훅 템플릿)의 설치 상태다:
+   `state`(`absent`·`installed`·`incomplete`·`needs_review`), 볼트에 복사한 두 스크립트(`guard`·`parser`)의
+   스탬프 상태, 훅의 `problems`(`"onFailure": "block"` 없음, `if` 필터, 중괄호 없는 `$CLAUDE_PROJECT_DIR`,
+   대상 도구를 빠뜨린 `matcher`). Doctor는 가드를 제안하지 않는다. `--offer-deny-guard`를 붙이지 않으므로
+   `offer_deny_guard`는 나오지 않고, 설치 제안은 `/vault-init`만 한다. `incomplete`·`needs_review`와 다른
+   `actions`(`offer_guard_update`·`review_guard`·`review_settings`)는 그대로 보고하고 교체·수정은
+   `/vault-upgrade`(Claude Code)로 안내한다. `cli_on_path`가 false이고 Aside로 설치된 것이 없으며
+   `deny_guard.state`가 `absent`면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
 7. 사용자가 Jev/Jarvis 연결 준비 상태도 요청하면 [단계별 연결 진단](../docs/tower-reliability.md)의
    `vault_connectors.py --vault PATH --format json`을 추가로 사용한다. 기본은 오프라인이며
    키 존재를 인증 성공으로 해석하지 않는다. live probe는 명시한 지원 연결과 기존 승인

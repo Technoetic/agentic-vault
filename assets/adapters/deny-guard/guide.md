@@ -78,6 +78,9 @@
 
 ## 켜는 법 (수동 병합)
 
+새 볼트는 Claude Code의 `/vault-init`이 Aside 단계 뒤에 따로 물어(4-2단계) 아래 1–3을 대신 한다. 답이 없으면 설치하지 않는다.
+기존 볼트는 아래처럼 직접 병합한다. `/vault-doctor`와 `/vault-upgrade`는 가드를 제안하지 않는다.
+
 1. Claude Code가 보는 PATH의 `python`이 Python 3.10 이상인지 확인한다: `python -c "import sys; print(sys.version)"`. Windows 스토어 별칭만
    있거나 `py` 런처만 있으면 아래 `command`를 python.exe 절대 경로로 바꾸거나 `"command": "py"`로 두고 `args` 맨 앞에 `"-3"`을 넣는다.
 2. 이 폴더의 `deny-guard.py`와 `ps-parse.ps1`을 볼트의 `00-meta/scripts/deny-guard.py`, `00-meta/scripts/ps-parse.ps1`로 바이트
@@ -106,6 +109,36 @@
 - `"onFailure": "block"`은 가드가 시작되지 못하거나(경로·python 오류), 0·2가 아닌 코드로 끝나거나, 시간을 넘기면 도구 호출을 막는다(Claude Code v2.1.295 이상).
 
 **끄기(되돌리기):** `.claude/settings.local.json`에서 `deny-guard.py`를 부르는 그룹을 지운다. 스크립트 파일은 남아 있어도 실행되지 않는다.
+
+## 상태 보고 (`vault_adapters.py`)
+
+플러그인의 읽기 전용 어댑터 진단이 가드의 설치 상태를 `adapters.deny_guard`로 보고한다. `/vault-doctor`가 이 보고를 보여 주고,
+`/vault-upgrade`(Claude Code)가 그 `actions`를 처리한다. 진단은 가드를 실행하거나 파일·설정을 바꾸지 않는다.
+
+```text
+python "<플러그인 루트>/skills/agentic-vault/scripts/vault_adapters.py" --vault <볼트> --format json [--offer-deny-guard]
+```
+
+| 키 | 뜻 |
+|---|---|
+| `state` | `absent`(스크립트도 가드 훅도 없음), `installed`(두 스크립트와 문제 없는 훅), `incomplete`(일부만 있음: 스크립트만, 훅만, `ps-parse.ps1` 없이), `needs_review`(훅 문제, 스크립트는 있는데 설정 파일을 읽지 못함, 읽을 수 없거나 링크·정션 뒤에 있는 스크립트) |
+| `guard`·`parser` | `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`의 `path`, `installed_stamp`, `bundled_stamp`, `state`(`missing`·`current`·`outdated`·`newer`·`modified`·`unstamped`·`unreadable`·`unsafe_path`). Aside 도우미와 같은 규칙으로 첫 줄 `engine=` 스탬프를 비교하고, 스탬프가 같으면 줄바꿈과 BOM을 접은 내용이 번들과 같은지로 로컬 수정을 가린다 |
+| `hook` | `.claude/settings.json`·`.claude/settings.local.json`에서 `command`나 `args`로 `deny-guard.py`를 부르는 PreToolUse 핸들러: `state`(`absent`·`configured`·`needs_review`·`unreadable`), `configured_in`, `unreadable`(읽지 못했거나 링크·정션을 거친 설정 파일), `problems` |
+| `actions` | `offer_guard_update`(설치본 스탬프가 번들보다 낮음), `review_guard`(로컬 수정·스탬프 없음·더 높음·읽기 실패·링크, 또는 일부만 설치), `review_settings`(훅 문제나 읽지 못한 설정, 가드가 `absent`가 아닐 때만), `offer_deny_guard`(아래) |
+
+- **`problems`가 잡는 것:** 가드를 소리 없이 약하게 만드는 설정 네 가지다. `"onFailure": "block"`이 없음(가드가 실패하면 호출이
+  그대로 진행된다), `if` 필터가 있음(best-effort라 가드를 건너뛸 수 있다), 중괄호 없는 `$CLAUDE_PROJECT_DIR`(훅 셸에 따라 달라지고
+  PowerShell에서는 빈 값이다), 정확한 도구 이름 목록인 `matcher`가 대상 도구 여덟 개 가운데 하나라도 빠뜨림(`*`·빈 값·생략은
+  모든 도구에 맞는다. 정규식 matcher는 판정하지 않는다). 실행기(`python`·`py -3`·절대 경로)와 `timeout`은 보지 않는다.
+- **제안은 `/vault-init`만:** `offer_deny_guard`는 `--offer-deny-guard`를 줄 때만, 그리고 `state`가 `absent`이고
+  `.claude/settings.local.json`을 읽을 수 있을(또는 아직 없을) 때만 나온다. 이 플래그는 `/vault-init` 4-2만 쓰고, 다른 보고 내용은
+  바꾸지 않는다. 볼트로 확인된 보고(`status: ok`)에는 플래그 없이도 `adapters.deny_guard`가 들어 있고(가드가 없으면
+  `state: absent`), `adapters.aside`와 종료 코드는 그대로다.
+- **한계:** 파일과 설정만 읽는다. Claude Code가 훅을 실제로 불러왔는지, 이 기기의 `python`이 3.10 이상인지, 가드가 판정을 제대로
+  내는지는 보지 않는다(위 4의 시험 입력으로 확인한다). `.claude/` 밖의 사용자 설정(`~/.claude/settings.json`)과 Codex 설정도 보지 않는다.
+- **출처:** Aside 어댑터 보고의 스탬프 상태와 훅 명령 검사를 두 스크립트와 가드 훅으로 넓혔다. 훅 검사 항목은 Claude Code hooks
+  문서의 `onFailure: "block"`(v2.1.295 이상), `if` 필터가 best-effort라는 설명, PowerShell 훅에서 중괄호 없는 `$CLAUDE_PROJECT_DIR`가
+  빈 값이 된다는 주의와 matcher 규칙(글자·숫자·`_`·`-`·공백·`,`·`|`만 있으면 정확한 이름 목록)에서 왔다.
 
 ## 지연 (엔진 개발 기기 실측)
 

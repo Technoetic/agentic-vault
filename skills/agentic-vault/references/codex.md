@@ -92,6 +92,7 @@ Jev-first 선호가 적용되는 현재 요청은 볼트 존재 검사나 일반
 `<플러그인 루트>/skills/agentic-vault/scripts/vault_doctor.py --vault <볼트 루트> --format json`으로 보낸다.
 도구 어댑터 상태는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_adapters.py --vault <볼트 루트> --format json`으로 함께 확인한다(v0.17.0, 읽기 전용).
 Aside 자동 기동 훅은 Claude Code 설정에만 병합한다. Codex는 CLAUDE.md의 Aside 조항에 적힌 기동 절차를 직접 따른다.
+deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다. Codex의 `init`·`upgrade`는 그 단계를 건너뛰고 `doctor`는 상태만 보고한다.
 `proposals`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_proposals.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
 인자는 각각 별도 argv로 전달한다. `inspect`·`check`·`preserve-check`·`rollback-preview`는 읽기 전용이고, `apply --approve`는
 현재 사용자에게 이미 승인받은 정확한 수정안에만 사용한다. `stale`이면 최신 diff를 다시 검토하며,

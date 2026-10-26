@@ -190,6 +190,10 @@ Claude에서 인계를 저장한 뒤 Codex에서 복원하거나 그 반대로 �
 끝의 생략 표시에는 들어가는 한 원문 경로·생략된 제목과 주제 검색용 `recall` 안내가 붙는다.
 Claude의 `.claude/settings.json` 권한을 Codex 권한으로 자동 변환하지 않는다.
 이 접근 검증은 OS나 Codex의 권한 샌드박스를 대체하지 않는다.
+선택형 [deny zone 가드 템플릿](../assets/adapters/deny-guard/guide.md)(PreToolUse 훅)은 Claude Code 전용이다.
+Codex는 훅 모델이 달라 `init`·`upgrade`가 이 가드를 제안·설치·갱신하지 않고, `doctor`는
+`vault_adapters.py`의 `adapters.deny_guard` 상태를 보고만 한다. Claude Code에서 켠 가드도 Codex 세션의
+도구 호출은 검사하지 않는다.
 [공식 플러그인 구조](https://developers.openai.com/plugins/build/plugins),
 [스킬](https://learn.chatgpt.com/docs/build-skills),
 [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
@@ -218,7 +222,8 @@ python scripts/evaluate_memory_workflows.py --backend deterministic
 경험 fixture는 정답 없음과 오래된·오염된 근거의 검색 노출을 추가로 기록한다.
 해당 노출 지표는 최종 답변 오류나 공격 성공률이 아니며, 기존 어휘 검색의
 한계를 관찰하는 용도다. [연결 제안 helper](link-proposals.md)는 후보·해시·diff만
-반환한다. 검증기는 이 helper와 사용 문서의 설치본도 원본과 대조한다.
+반환한다. 검증기는 이 helper와 사용 문서의 설치본도 원본과 대조한다. `doctor`의 어댑터 보고가 비교
+기준으로 읽는 `vault_adapters.py`와 번들 deny zone 가드 스크립트 두 개도 대조한다.
 
 실제 모델이 초기화·마감을 수행하는 대화, 신뢰 후 자동 훅 실행, Codex의 출력
 축약 동작은 통합 실세션으로 검증하지 않았다. Telegram Jarvis는 계속 Claude CLI를
