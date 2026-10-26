@@ -10,12 +10,14 @@ the real app.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,49 @@ def _manifest_core() -> tuple[int, ...]:
     match = re.match(r"(\d+)\.(\d+)\.(\d+)", data["version"])
     assert match, data["version"]
     return tuple(int(part) for part in match.groups())
+
+
+# Strings the shipped adapter assets must not contain: the maintainer's personal and company
+# identifiers. Only SHA-256 digests are kept, taken after _fold_like_ignorecase and keyed by
+# length in characters, so this public test no longer spells the strings out. Earlier
+# revisions of this file did spell them out, and those revisions remain in git history.
+FORBIDDEN_ASSET_SHA256 = {
+    3: frozenset({"7e35922d6cf34e0374d8c0d5f427967f3f5aa9cb093dc3fbc62d217aa6a6725d"}),
+    4: frozenset({"f29cc5e0e2e3ede69556cf4185b633da4a4c43945c7c9b3f86137cd5c6f638be"}),
+    5: frozenset({"7f6d4d643c6f6b1c64530119c5ce6a41287efe680e4a5520499f9c930732f0f1",
+                  "a94c244a52267c909e305da4ef109716db11d7dfb5900260a13e93b7f2232534",
+                  "d24d6661afa04235f6ba8d5b462fe5cbe77076a2ff43f383c87ad673fd6f4f4b"}),
+    7: frozenset({"748371a1ce9a7f237750d8c8cea7e9540e3178a8aa8db3edcf10d8774d133eef"}),
+    11: frozenset({"c4e88a3640098dd5ae1cef7edac5fa46ce2eff38e6b25012a4c7df83d6ec985e"}),
+}
+# re.IGNORECASE matches dotless i and dotted capital I against i; str.casefold() keeps the
+# first and turns the second into two characters.
+_IGNORECASE_I = {"\N{LATIN SMALL LETTER DOTLESS I}": "i", "\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}": "i"}
+
+
+def _fold_like_ignorecase(text: str) -> str:
+    """Case-fold each character to one character, equating what re.IGNORECASE equates.
+
+    The forbidden strings use only ASCII and Hangul syllables. For those characters this
+    fold equates exactly the code points that re.IGNORECASE matches (pinned by a test
+    below), so a window matches where the case-insensitive pattern used to. A character
+    whose fold is longer, such as sharp s, stays as it is: re.IGNORECASE matches it
+    against none of them, and one character per character keeps windows at text offsets.
+    """
+    folded = []
+    for char in text:
+        fold = _IGNORECASE_I.get(char, char.casefold())
+        folded.append(fold if len(fold) == 1 else char)
+    return "".join(folded)
+
+
+def _forbidden_spans(text: str,
+                     digests: dict[int, frozenset[str]] = FORBIDDEN_ASSET_SHA256) -> list[tuple[int, int]]:
+    """Return (offset, length) of every window of the folded text whose digest is listed."""
+    folded = _fold_like_ignorecase(text)
+    return [(start, length) for length, listed in sorted(digests.items())
+            for start in range(len(folded) - length + 1)
+            if hashlib.sha256(folded[start:start + length].encode("utf-8")).hexdigest() in listed]
 
 
 class AdapterAssetTests(unittest.TestCase):
@@ -111,10 +156,43 @@ class AdapterAssetTests(unittest.TestCase):
         self.assertRegex(body, r"\[\[[^\]]+\]\]")  # at least one wikilink: no orphan note
 
     def test_assets_carry_no_personal_or_vault_specific_data(self) -> None:
-        forbidden = re.compile(r"corei|D:[\\/]NS|ns-electric|jmj@|엔에스|\\Users\\", re.IGNORECASE)
         for path in sorted(ASSETS.iterdir()):
             with self.subTest(asset=path.name):
-                self.assertIsNone(forbidden.search(path.read_text(encoding="utf-8")))
+                # Offsets and lengths only, so a failure never prints the matched text.
+                self.assertEqual(_forbidden_spans(path.read_text(encoding="utf-8")), [])
+
+    def test_digest_matcher_reports_what_ignorecase_search_finds(self) -> None:
+        # A public stand-in list: the matcher finds every overlapping window at text offsets,
+        # exactly where a re.IGNORECASE search for the same word matches.
+        word = "aside"
+        stand_in = {len(word): frozenset({hashlib.sha256(word.encode("utf-8")).hexdigest()})}
+        samples = ("ASIDE", "x AsIdE y", "as\N{LATIN SMALL LETTER DOTLESS I}de",
+                   "AS\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}DE", "a\N{LATIN SMALL LETTER LONG S}ide",
+                   "\N{LATIN SMALL LETTER SHARP S}Aside", "asideaside", "asid", "a side", "")
+        for sample in samples:
+            with self.subTest(sample=sample):
+                expected = [(match.start(), len(word))
+                            for match in re.finditer(f"(?={word})", sample, re.IGNORECASE)]
+                self.assertEqual(_forbidden_spans(sample, stand_in), expected)
+        self.assertEqual(_forbidden_spans("\N{LATIN SMALL LETTER SHARP S}Aside", stand_in), [(1, len(word))])
+
+    def test_fold_equates_exactly_what_ignorecase_equates(self) -> None:
+        # Run on every interpreter, since each carries its own Unicode tables. Every code point
+        # folds to an ASCII letter exactly when re.IGNORECASE matches it to that letter, and the
+        # uncased ASCII characters and Hangul syllables equal only themselves under both.
+        every = "".join(map(chr, range(sys.maxunicode + 1)))
+        folded = _fold_like_ignorecase(every)
+        self.assertEqual(len(folded), len(every))
+        for letter in string.ascii_lowercase:
+            with self.subTest(letter=letter):
+                matched = [match.start() for match in re.finditer(letter, every, re.IGNORECASE)]
+                self.assertEqual([match.start() for match in re.finditer(letter, folded)], matched)
+        uncased = "[ -@\\[-`{-~" + chr(0xAC00) + "-" + chr(0xD7A3) + "]"
+        members = [match.start() for match in re.finditer(uncased, every)]
+        self.assertEqual(len(members), 43 + 11172)  # printable ASCII other than letters, Hangul syllables
+        self.assertEqual([match.start() for match in re.finditer(uncased, every, re.IGNORECASE)], members)
+        self.assertEqual([match.start() for match in re.finditer(uncased, folded)], members)
+        self.assertEqual([folded[index] for index in members], [every[index] for index in members])
 
 
 class AdapterReportTests(unittest.TestCase):
