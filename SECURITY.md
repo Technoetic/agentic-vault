@@ -125,8 +125,10 @@ them being bypassed in a way the documentation does not describe is still welcom
   a script opens by itself, paths assembled at run time that never spell a zone
   name (for example `Get-Content (Join-Path 90 -assets)`, string concatenation,
   aliases or variables defined earlier), Grep or Glob calls without a path that
-  start at the vault root and walk through a zone, or a junction swapped after
-  the check. Claude Code older than v2.1.295 does not know
+  start at the vault root and walk through a zone, a junction swapped after
+  the check, tools outside its hook matcher (MCP tools, for example) or commands
+  that run without a tool call (other hooks, monitors that a plugin starts by
+  itself). Claude Code older than v2.1.295 does not know
   `"onFailure": "block"`: there a guard that crashes, times out or finds no
   `python` lets the tool call run (fail-open). On newer hosts such a failure
   blocks the call instead, so a broken `python` blocks every matched call until
@@ -146,7 +148,7 @@ them being bypassed in a way the documentation does not describe is still welcom
   Output that an `aside repl` script prints goes back to the calling agent and its
   model provider.
 - **The deny-zone guard lives in the vault.** Once merged, every Read, Grep, Glob,
-  Edit, Write, NotebookEdit, Bash and PowerShell call runs
+  Edit, Write, NotebookEdit, Bash, PowerShell and Monitor call runs
   `00-meta/scripts/deny-guard.py` with the `python` found on PATH, a PowerShell
   command that names a zone or a guard control also starts
   `00-meta/scripts/ps-parse.ps1` with `-ExecutionPolicy Bypass`, and the guard
@@ -215,8 +217,8 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
-- deny zone 가드 훅은 사용자가 따로 승인해 병합한 경우에만 존재한다(기본 `.claude/settings.local.json`, `/vault-init`은 답이 없으면 설치하지 않는다). 병합하면 Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell 호출마다 `00-meta/scripts/deny-guard.py`를 PATH의 `python`으로 실행하고, 구역 이름이나 가드 제어 파일 이름이 보이는 PowerShell 명령에는 `00-meta/scripts/ps-parse.ps1`도 `-ExecutionPolicy Bypass`로 실행한다. `deny`·`ask`만 내고 `allow`는 내지 않는다.
-- 가드이지 샌드박스가 아니다. 실행된 프로그램·스크립트가 스스로 여는 파일, 구역 이름을 쓰지 않고 실행 중에 조립한 경로(`Join-Path 90 -assets` 등), 볼트 루트에서 경로 없이 도는 Grep·Glob, 확인 뒤의 정션 바꿔치기는 보지 못한다. Claude Code v2.1.295 미만에서는 가드가 충돌하거나 시간을 넘기거나 python이 없으면 호출이 그대로 진행된다(fail-open). v2.1.295 이상에서는 반대로 호출이 막히므로, python이 깨지면 그 훅 그룹을 지워 되돌린다. 가드 스크립트·`00-meta/vault-config.json`·볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, Codex 세션, 동기화 상대) 가드를 끄거나 구역을 바꾸거나 매 호출 전에 실행될 코드를 바꿀 수 있다. Claude Code에서 이 파일들을 이름으로 가리키는 편집·명령은 확인(ask)만 받고, 이름을 쓰지 않고 닿는 명령(상위 폴더, 스크립트)과 Claude Code 밖의 변경은 보지 못한다.
+- deny zone 가드 훅은 사용자가 따로 승인해 병합한 경우에만 존재한다(기본 `.claude/settings.local.json`, `/vault-init`은 답이 없으면 설치하지 않는다). 병합하면 Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell·Monitor 호출마다 `00-meta/scripts/deny-guard.py`를 PATH의 `python`으로 실행하고, 구역 이름이나 가드 제어 파일 이름이 보이는 PowerShell 명령에는 `00-meta/scripts/ps-parse.ps1`도 `-ExecutionPolicy Bypass`로 실행한다. `deny`·`ask`만 내고 `allow`는 내지 않는다.
+- 가드이지 샌드박스가 아니다. 실행된 프로그램·스크립트가 스스로 여는 파일, 구역 이름을 쓰지 않고 실행 중에 조립한 경로(`Join-Path 90 -assets` 등), 볼트 루트에서 경로 없이 도는 Grep·Glob, 확인 뒤의 정션 바꿔치기, 훅 matcher 밖의 도구(MCP 도구 등)와 도구 호출 없이 실행되는 명령(다른 훅, 플러그인이 저절로 시작하는 monitor)은 보지 못한다. Claude Code v2.1.295 미만에서는 가드가 충돌하거나 시간을 넘기거나 python이 없으면 호출이 그대로 진행된다(fail-open). v2.1.295 이상에서는 반대로 호출이 막히므로, python이 깨지면 그 훅 그룹을 지워 되돌린다. 가드 스크립트·`00-meta/vault-config.json`·볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, Codex 세션, 동기화 상대) 가드를 끄거나 구역을 바꾸거나 매 호출 전에 실행될 코드를 바꿀 수 있다. Claude Code에서 이 파일들을 이름으로 가리키는 편집·명령은 확인(ask)만 받고, 이름을 쓰지 않고 닿는 명령(상위 폴더, 스크립트)과 Claude Code 밖의 변경은 보지 못한다.
 - 0.18.0의 Jarvis는 호스트가 허용 경로에서 선택한 제한된 근거만 보내며 모델 도구는 없다.
   `--bare`로 자동 CLAUDE.md·자동 기억·OAuth/키체인 읽기를 끄고, 설정·스킬·MCP·훅·세션 저장도 제한한다.
   이 모드는 API 인증이 필요하고 구독 로그인만으로는 실행되지 않는다. 0.17.1 이하의 넓은 읽기 권한을 대체한다.

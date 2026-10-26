@@ -668,9 +668,12 @@ class DenyGuardReportTests(_VaultCase):
             "bare_variable_in_shell_form": ({"command": f'python -X utf8 -I "{bare}"', "args": None},
                                             "bare $CLAUDE_PROJECT_DIR"),
             "narrowed_matcher": ({"matcher": "Read|Edit|Write|Bash"},
-                                 "leaves out Grep, Glob, NotebookEdit, PowerShell"),
-            "comma_matcher_without_powershell": ({"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash"},
+                                 "leaves out Grep, Glob, NotebookEdit, PowerShell, Monitor,"),
+            "comma_matcher_without_powershell": ({"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash, Monitor"},
                                                  "leaves out PowerShell,"),
+            # Monitor runs shell commands like Bash; a matcher of the other eight tools skips them.
+            "matcher_without_monitor": ({"matcher": "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell"},
+                                        "leaves out Monitor,"),
         }
         for name, (changes, fragment) in cases.items():
             with self.subTest(case=name):
@@ -692,7 +695,7 @@ class DenyGuardReportTests(_VaultCase):
         variants = {
             "match_all": {"matcher": "*"},
             "no_matcher": {"matcher": None},
-            "wider_list": {"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash, PowerShell, WebFetch"},
+            "wider_list": {"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash, PowerShell, Monitor, WebFetch"},
             "regular_expression_not_judged": {"matcher": "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|Power.*"},
             "py_launcher": {"command": "py", "args": ["-3", "-X", "utf8", "-I", guard_path]},
             "shell_form": {"command": f'python -X utf8 -I "{guard_path}"', "args": None},

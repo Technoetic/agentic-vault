@@ -3,10 +3,11 @@
 assets/adapters/deny-guard/deny-guard.py is a standalone script that a user
 copies into a vault and runs from a Claude Code PreToolUse hook. These tests
 load it from the plugin assets and give it synthetic hook inputs only, against
-a temporary vault: the decision table per tool, case folding, MSYS paths, a
-junction into a zone, the guard's own controls, code inside exempt shell words,
-and the process contract (exit 0, only deny or ask and never allow, nothing
-without CLAUDE_PROJECT_DIR). The
+a temporary vault: the decision table per tool (Monitor commands as Bash), case
+folding, MSYS paths, Windows 8.3 short names, git REV:PATH words, a junction
+into a zone, the guard's own controls, code inside exempt shell words, moves
+that may replace a zone file, and the process contract (exit 0, only deny or
+ask and never allow, nothing without CLAUDE_PROJECT_DIR). The
 PowerShell branch is tested twice: with a stand-in for its parser on every
 system, and on Windows with the real ps-parse.ps1 child process. The last
 class pins that the default install does not change: no PreToolUse hook in
@@ -40,7 +41,7 @@ PARSER = ASSETS / "ps-parse.ps1"
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 TEMPLATE_ZONES = ("10-inbox/_processed", "20-knowledge/_archive", "50-projects/_completed",
                   "90-assets", ".obsidian")
-HOOK_MATCHER = "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell"
+HOOK_MATCHER = "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell|Monitor"
 # SHA-256 of the v0.31.0 blobs (21c4b47) with LF line ends. A Windows checkout
 # may write them with CRLF, so the test hashes the file with CRLF folded to LF.
 V0310_TEMPLATE_SHA256 = {
@@ -281,11 +282,11 @@ class BashDecisionTests(GuardCase):
     NONE = (
         "git status", "ls", "cat notes/a.md", "cat notes/90-assets-old.md", "ls 90-assets-old",
         "cat .claude/rules/vault-workflow.md",
-        # The vault rules quarantine processed files into a zone with a shell move.
+        # The vault rules quarantine processed files into a zone with a shell move that keeps files.
         "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/",
         "mkdir -p 10-inbox/_processed/2026-10 && mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/",
-        "mv -t 10-inbox/_processed/2026-10 10-inbox/a.md 10-inbox/b.md",
-        "mv --target-directory=20-knowledge/_archive 20-knowledge/old.md",
+        "mv -n -t 10-inbox/_processed/2026-10 10-inbox/a.md 10-inbox/b.md",
+        "mv --no-clobber --target-directory=20-knowledge/_archive 20-knowledge/old.md",
         "git mv 20-knowledge/old.md 20-knowledge/_archive/",
         'for f in 10-inbox/*.md; do mv -n "$f" 10-inbox/_processed/2026-10/; done',
         'if [ -f a.md ]; then mv -n a.md 10-inbox/_processed/2026-10/; fi',
@@ -419,6 +420,220 @@ class BashDecisionTests(GuardCase):
         self.assertIsNone(self.decide("Bash", {"command": "git add 10-inbox"}))
         payload["tool_input"]["command"] = "cat 10-inbox/_processed/2026-10/a.md"
         self.assertNotIn("git mv, which stages", self.guard.evaluate(payload, str(self.vault))[1])
+
+    def test_git_tree_paths_after_a_colon_are_checked(self) -> None:
+        # git REV:PATH, :PATH and :N:PATH read a file from a commit or the index, and pathspec magic
+        # (:/PATH, :(top)PATH) names a path from the top of the repository.
+        for command in ("git show HEAD:90-assets/x.png", "git show HEAD:10-inbox/_processed/2026-10/a.md",
+                        "git cat-file -p HEAD:10-inbox/_processed/a.md", "git show :90-assets/x",
+                        "git show :0:90-assets/x", "git show :2:10-inbox/_processed/a.md", "git grep x HEAD:90-assets",
+                        "git diff HEAD~1 HEAD:20-knowledge/_archive/old.md", "git archive HEAD:.obsidian",
+                        "git show 'HEAD@{2026-10-27 10:00}:90-assets/x'", "git log -p -- ':/10-inbox/_processed'",
+                        "git log -p -- ':(top,icase)10-inbox/_processed'", 'git show "$REV:90-assets/x"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        for command in ("git show HEAD:notes/a.md", "git show HEAD:90-assets-old/x", "git log -- ':!90-assets'",
+                        "git log -- ':^10-inbox/_processed'", "git status -- ':(exclude)20-knowledge/_archive'",
+                        "git diff HEAD~1 HEAD -- notes"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+        # git reads the path from the top of the repository, not from the working directory.
+        self.assertEqual(self.decide("Bash", {"command": "git show HEAD:10-inbox/_processed/a.md"},
+                                     self.path("notes")), "deny")
+        self.assertIsNone(self.decide("Bash", {"command": "git show HEAD:./10-inbox/_processed/a.md"},
+                                      self.path("notes")))  # ./ follows the working directory
+
+    def test_git_tree_paths_start_at_the_repository_root_above_the_vault(self) -> None:
+        (self.base / ".git").mkdir()  # the vault is a folder of a larger repository
+        self.assertEqual(self.decide("Bash", {"command": "git show HEAD:vault/10-inbox/_processed/a.md"}), "deny")
+        self.assertIsNone(self.decide("Bash", {"command": "git show HEAD:vault/notes/_processed/a.md"}))
+
+    def test_a_bare_ignore_takes_a_value_only_for_ls_and_ag(self) -> None:
+        # ripgrep's --ignore is a flag (it turns --no-ignore off), so the next word is a search path.
+        for command in ("rg -e secret --ignore 90-assets/", "rg --files --ignore 90-assets",
+                        "rg --ignore -e x 10-inbox/_processed"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        for command in ("ls --ignore 90-assets", "ag --ignore 90-assets foo", "ag --ignore=90-assets foo",
+                        "ack --ignore-dir 90-assets foo"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+
+    def test_descriptor_redirects_are_not_move_operands(self) -> None:
+        # 2>&1 and 2>/dev/null redirect a stream; they do not change the move's destination.
+        for command in ("mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2>&1",
+                        "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2>/dev/null",
+                        "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ >/dev/null 2>&1",
+                        "git mv 10-inbox/a.md 90-assets/ 2>/dev/null",
+                        "git mv 20-knowledge/a.md 20-knowledge/_archive/a.md 2>&1 | tail -n 1",
+                        "echo 90-assets/x 2 > notes/list.txt"):  # '2 >' writes the argument 2 and stdout to the file
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+        for command in ("cat 90-assets/x 2>&1", "mv -n 90-assets/x notes/ 2>&1",
+                        "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2 > out.txt",  # moves both into '2'
+                        "mv -n notes/a.md 90-assets/ 2\\>x"):  # an escaped > is no redirect: '2>x' is the destination
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        marked = "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/ 2" + chr(1) + " > out.txt"
+        self.assertEqual(self.decide("Bash", {"command": marked}), "ask")  # the mark character itself
+
+    def test_moves_that_may_replace_a_file_in_a_zone_ask(self) -> None:
+        for command in ("mv notes/b 90-assets/x.png", "mv -t 90-assets notes/a.md",
+                        "mv -t 10-inbox/_processed/2026-10 10-inbox/a.md 10-inbox/b.md",
+                        "mv --target-directory=20-knowledge/_archive 20-knowledge/old.md",
+                        "mv -n -f notes/a.md 90-assets/", "mv -i notes/a.md 90-assets/", "mv -b notes/a.md 90-assets/x",
+                        "mv --exchange notes/a.md 90-assets/x.png", "git mv -f notes/a.md 90-assets/a.md",
+                        "git mv --force notes/a.md 20-knowledge/_archive/",
+                        'mv notes/a.md "10-inbox/_processed/$(date +%Y-%m)/"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+        for command in ("mv -n notes/a.md 90-assets/", "mv -fn notes/a.md 90-assets/", "mv -vn notes/a.md 90-assets/",
+                        "mv --no-clobber notes/a.md 90-assets/", "mv --update=none notes/a.md 90-assets/",
+                        "mv -n -t 90-assets notes/a.md", "git mv -k notes/a.md 90-assets/", "git mv -v notes/a.md 90-assets/"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+        decision, reason = self.guard.evaluate({"tool_name": "Bash", "tool_input": {"command": "mv a.md 90-assets/"}},
+                                               str(self.vault))
+        self.assertEqual(decision, "ask")
+        for literal in ("'90-assets'", "replace", "mv -n", "git mv"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, reason)
+
+    def test_dotclaude_counts_as_the_folder_or_a_name_right_inside_it(self) -> None:
+        # The plugin cache under ~/.claude/plugins and rule files under .claude/rules are not controls.
+        for command in ('python "C:/Users/u/.claude/plugins/cache/x/1.0/vault_recall.py" --vault "$PWD" --query x',
+                        'cp "${CLAUDE_PLUGIN_ROOT}/assets/templates/rules/vault-core.md" .claude/rules/vault-core.md',
+                        "ls ~/.claude/plugins/cache $HOME", "cat .claude/rules/*.md"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+        for command in ("rm -rf .claude/", "tar -czf b.tgz .claude", "mv .claude .claude-old", "cat .claude/*",
+                        'rm -rf "$HOME/.claude"',
+                        # A path that climbs back to the folder names it too.
+                        "tar -xf x.tar -C .claude/rules/..", "cp -r notes/. .claude/.", "unzip x.zip -d .claude/rules/x/../.."):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+
+
+class MonitorDecisionTests(GuardCase):
+    """Monitor runs its command in the Bash tool's shell, so it gets the Bash decision; a WebSocket watch runs none."""
+
+    @staticmethod
+    def monitor(**fields) -> dict:
+        return {"description": "watch", "timeout_ms": 60000, **fields}
+
+    def test_commands_get_the_bash_decision(self) -> None:
+        for command in ("tail -f 90-assets/log.txt", "cat 10-inbox/_processed/a.md | grep --line-buffered x",
+                        "git show HEAD:90-assets/x", "while true; do ls 90-assets; sleep 30; done",
+                        "cat 00-meta/vault-config.json", "tail -f notes/log.txt",
+                        "mv -n 10-inbox/a.md 10-inbox/_processed/2026-10/"):
+            with self.subTest(command=command):
+                bash = self.guard.evaluate({"tool_name": "Bash", "tool_input": {"command": command}}, str(self.vault))
+                monitor = self.guard.evaluate({"tool_name": "Monitor", "tool_input": self.monitor(command=command)},
+                                              str(self.vault))
+                self.assertEqual(monitor, bash)
+        self.assertEqual(self.decide("Monitor", self.monitor(command="tail -f 90-assets/log.txt")), "deny")
+        self.assertEqual(self.decide("Monitor", self.monitor(command="ls"), self.path("90-assets")), "ask")
+
+    def test_a_websocket_watch_runs_no_command(self) -> None:
+        self.assertIsNone(self.decide("Monitor", self.monitor(ws={"url": "wss://example.com/90-assets"})))
+        self.assertIsNone(self.decide("Monitor", self.monitor(ws={"url": "wss://example.com"}), self.path("90-assets")))
+        for tool_input in (self.monitor(), self.monitor(command=None), self.monitor(command=["cat", "90-assets/x"])):
+            with self.subTest(tool_input=tool_input):
+                self.assertEqual(self.decide("Monitor", tool_input), "ask")
+
+
+class ShortNameRuleTests(unittest.TestCase):
+    """Which Windows 8.3 short names can stand for a zone or a control; pure rules, on every system."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.guard = load_guard()
+
+    def test_stems_and_aliases(self) -> None:
+        for name, stem in (("90-assets", "90-ASSETS"), (".obsidian", "OBSIDIAN"), ("_processed", "_PROCESSED"),
+                           ("settings.local.json", "SETTINGSLOCAL"), ("deny-guard.py", "DENY-GUARD"),
+                           ("a+b c", "A_BC"), ("보관", None)):
+            with self.subTest(name=name):
+                self.assertEqual(self.guard._short_stem(name), stem)
+        for base, stem, expected in (("90-ASS", "90-ASSETS", True), ("90-as", "90-ASSETS", True),
+                                     ("90A1B2", "90-ASSETS", True), ("HEAD", "90-ASSETS", False),
+                                     ("90DAYS", "90-ASSETS", False), ("OBSIDI", "OBSIDIAN", True), ("X", None, True),
+                                     ("A1B2C", "A", True), ("AB", "A", False)):
+            with self.subTest(base=base, stem=stem):
+                self.assertEqual(self.guard._short_alias(base, stem), expected)
+
+    def test_only_windows_reads_short_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(self.guard, "_WINDOWS", True):
+                guard = self.guard.Guard(temporary, TEMPLATE_ZONES)
+                self.assertEqual(guard.short_names("cat 90-ASS~1/x.png"), (["90-assets"], False))
+                self.assertEqual(guard.short_names("cat '10-inbox/_proce~1/a.md'"), (["10-inbox/_processed"], False))
+                self.assertEqual(guard.short_names("echo x > CLAUDE~1/SETTIN~1.JSO"), ([], True))
+                self.assertEqual(guard.short_names("git log HEAD~3..HEAD main~2 develop~1"), ([], False))
+                self.assertEqual(guard.mentions("cat OBSIDI~1/app.json"), ([".obsidian"], False))
+            with mock.patch.object(self.guard, "_WINDOWS", False):
+                guard = self.guard.Guard(temporary, TEMPLATE_ZONES)
+                self.assertEqual(guard.short_names("cat 90-ASS~1/x.png"), ([], False))
+
+
+def _short_name(path: Path) -> str | None:
+    """The last segment of the Windows 8.3 short form of an existing path, or None."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer))
+    return Path(buffer.value).name if 0 < size < len(buffer) else None
+
+
+@unittest.skipUnless(os.name == "nt", "8.3 short names are a Windows form")
+class ShortNameTests(GuardCase):
+    """Real 8.3 short names on the test volume: 90-ASS~1 stands for 90-assets without spelling it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.vault / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
+        (self.vault / "90-assets-old").mkdir()  # created later, so it gets the next short name
+        self.short: dict[str, str] = {}
+        for rel in ("90-assets", ".obsidian", "10-inbox/_processed", ".claude", ".claude/settings.local.json",
+                    "90-assets-old"):
+            name = _short_name(self.vault / rel)
+            if not name or name.casefold() == rel.split("/")[-1].casefold():
+                self.skipTest("8.3 short names are off on this volume")
+            self.short[rel] = name
+
+    def test_shell_words_with_short_names_resolve_into_zones(self) -> None:
+        assets, obsidian = self.short["90-assets"], self.short[".obsidian"]
+        processed, old = self.short["10-inbox/_processed"], self.short["90-assets-old"]
+        claude, settings = self.short[".claude"], self.short[".claude/settings.local.json"]
+        absolute = str(self.vault / assets / "x.png")
+        for command in (f"cat {assets}/x.png", f"cat {obsidian}/app.json", f"cat 10-inbox/{processed}/a.md",
+                        f"ls {assets}", f"cat {assets}/*.png", f"cd {assets}", f"cat {assets}/$X",
+                        f"cat '{absolute}'", f"cat {msys_form(self.vault / assets / 'x.png')}"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "deny")
+        for command in (f'echo "$(cat {assets}/x)" > out.txt', f"cd notes && cat ../{assets}/x",
+                        f"echo '{{}}' > {claude}/{settings}", f"rm -rf {claude}"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+        for command in (f"cat {old}/x", "git diff HEAD~1 -- notes/a.md", "git log --oneline HEAD~3..HEAD"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decide("Bash", {"command": command}))
+        self.assertEqual(self.decide("Read", {"file_path": self.path(assets, "x.png")}), "deny")
+
+    def test_powershell_starts_the_parser_for_short_names(self) -> None:
+        assets = self.short["90-assets"]
+        command = f"Get-Content {assets}/x.png"
+        calls: list[str] = []
+
+        def parse(text: str):
+            calls.append(text)
+            return facts(commands=["Get-Content"], strings=["Get-Content", f"{assets}/x.png"]), ""
+
+        with mock.patch.object(self.guard, "parse_powershell", parse):
+            self.assertEqual(self.decide("PowerShell", {"command": command}), "deny")
+            self.assertIsNone(self.decide("PowerShell", {"command": "git diff HEAD~1"}))
+        self.assertEqual(calls, [command])
 
 
 class PowerShellDecisionTests(GuardCase):
@@ -568,6 +783,31 @@ class PowerShellDecisionTests(GuardCase):
         self.assertEqual(self.decide_with("Get-Content 90-ass`ets/a.png", answer),
                          ("deny", ["Get-Content 90-ass`ets/a.png"]))
 
+    def test_git_tree_paths_and_scoped_variables(self) -> None:
+        # :PATH is a path in the git index; HEAD:PATH stays a provider-shaped string that asks.
+        command = "git show :90-assets/x"
+        self.assertEqual(self.decide_with(command, facts(commands=["git"], strings=["git", "show", ":90-assets/x"])),
+                         ("deny", [command]))
+        command = "git show HEAD:90-assets/x"
+        answer = facts(commands=["git"], strings=["git", "show", "HEAD:90-assets/x"], flags=["provider_path"])
+        self.assertEqual(self.decide_with(command, answer), ("ask", [command]))
+        # In PowerShell the ':' of $env:X belongs to the variable: the text after it is no path of its own.
+        for command, answer in (
+                ('Get-Content "$env:X\\90-assets"',
+                 facts(strings=["Get-Content"], expandable=1, expandable_strings=["$env:X\\90-assets"],
+                       flags=["expression", "provider_path"])),
+                ('git show "${rev}:90-assets/x"',
+                 facts(commands=["git"], strings=["git", "show"], expandable=1, expandable_strings=["${rev}:90-assets/x"],
+                       flags=["expression"]))):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, answer), ("ask", [command]))
+
+    def test_the_plugin_path_under_dotclaude_starts_no_parser(self) -> None:
+        command = 'python "$env:USERPROFILE\\.claude\\plugins\\cache\\x\\vault_recall.py" --query x'
+        self.assertEqual(self.decide_with(command, facts()), (None, []))
+        self.assertEqual(self.decide_with("Remove-Item .claude -Recurse", facts(strings=["Remove-Item", ".claude"])),
+                         ("ask", ["Remove-Item .claude -Recurse"]))
+
     def test_text_that_only_contains_a_zone_name_decides_nothing(self) -> None:
         for command, answer in (
                 ("Write-Output 'see 90-assets in the guide'", facts(strings=["Write-Output", "see 90-assets in the guide"])),
@@ -689,6 +929,7 @@ class PowerShellParserTests(GuardCase):
         'Get-Content "90-assets/$name.png"', "Move-Item 10-inbox/a.md 10-inbox/_processed/2026-10/",
         # Windows PowerShell 5.1 rejects &&, but the literal path is still in the parse.
         "Get-Content notes/a.md && Get-Content 90-assets/a.png",
+        "git show :90-assets/a.png",  # a path in the git index
     )
     ASK = (
         "iex 'Get-Content 90-assets-old/a'", 'Get-Content "$env:X\\90-assets"', 'Get-Content "unterminated 90-assets',
@@ -983,6 +1224,15 @@ class ProcessContractTests(unittest.TestCase):
                     decision = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
                     self.assertIn(decision, ("deny", "ask"))
 
+    def test_monitor_commands_reach_the_hook_decision(self) -> None:
+        result = self.run_guard(self.payload("Monitor", {"command": "tail -f 90-assets/log.txt",
+                                                         "description": "log", "timeout_ms": 60000}))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        result = self.run_guard(self.payload("Monitor", {"ws": {"url": "wss://example.com/x"},
+                                                         "description": "feed", "timeout_ms": 60000}))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
+
     def test_unreadable_input_asks(self) -> None:
         for stdin in (b"not json", b"\xff\xfe\x00", b"[]", b'{"tool_input": {}}'):
             with self.subTest(stdin=stdin):
@@ -1103,10 +1353,17 @@ class HookTemplateTests(unittest.TestCase):
                         "-EncodedCommand", "5초(`PARSE_TIMEOUT`)", "expandable_strings",
                         # Code inside exempt words, the exclude options, the limits found in review.
                         "**코드는 예외가 아니다:**", "`$(cat <<'EOF'`", "2.7.4 Here-Document", "`/dev/stdout`",
-                        "`--exclude`·`--exclude-dir`·`--ignore`·`--ignore-dir`", "`--exclude-vcs`", "`9?-assets`",
+                        "`--ignore-dir`의 값(`--exclude-dir=90-assets`, `--exclude-dir 90-assets`)과 `--ignore=값`",
+                        "`ls`·`ag`의 `--ignore 값`",
+                        "ripgrep의 `--ignore`", "`--exclude-vcs`", "`9?-assets`",
                         "`90-asset[s]`", "`$'...'`", "`echo 90-assets/x > list; xargs cat < list`",
                         "`git add 10-inbox`", "`Move-Item`",
-                        "종료 코드 2", "`casefold`"):
+                        "종료 코드 2", "`casefold`",
+                        # Release-candidate review: Monitor, git REV:PATH, 8.3 names, overwriting moves, .claude, lint.
+                        "| Bash·Monitor |", "`ws`", "git `REV:경로`·`:경로`·`:N:경로`", "`GIT_DIR`", "`90-ASS~1`",
+                        "**8.3 짧은 이름(Windows):**", "**덮어쓸 수 있는 이동은 ask:**", "`mv -n`·`mv --no-clobber`",
+                        "**리디렉션 번호:**", "`2>&1`", "`~/.claude/plugins/...`", "대상 도구 아홉 개", "아홉 도구의 호출만",
+                        "`/vault-lint`의 노화 문서 아카이브 이동", "code.claude.com/docs/en/tools-reference", "`gitrevisions`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
         self.assertIsNone(re.search(r"\]\((?!https?:)[^)]+\)", text))  # no repository links to keep in sync
@@ -1122,9 +1379,16 @@ class HookTemplateTests(unittest.TestCase):
         session = read("vault-session-end.md")
         self.assertIn("구역 안 경로를 이름으로 스테이징하면 `deny`된다", session)
         self.assertIn("구역 밖 상위 폴더(예: `git add 10-inbox`)", session)
+        lint = read("vault-lint.md")
+        archive = lint[lint.index("- **노화 문서 (7"):lint.index("- **SSOT 사실 모순 (8")]
+        for literal in ("deny zone 가드(`00-meta/scripts/deny-guard.py` 훅)를 켠 볼트는 `Move-Item`이 막히므로",
+                        "Bash 도구의 `mv -n`을 쓴다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, archive)
         init = read("vault-init.md")
         step = init[init.index("## 4-2. deny zone 가드"):init.index("## 5. 권한 병합")]
-        for literal in ("PowerShell `Move-Item`이 막히므로", "`git mv`로 옮기거나 구역 밖 상위 폴더(`git add 10-inbox`)"):
+        for literal in ("PowerShell `Move-Item`이 막히므로", "`git mv`로 옮기거나 구역 밖 상위 폴더(`git add 10-inbox`)",
+                        "엔진 작업 흐름 세 곳", "`/vault-lint`", "Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell·Monitor"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, step)
 
