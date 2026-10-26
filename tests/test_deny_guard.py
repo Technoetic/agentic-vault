@@ -6,8 +6,10 @@ load it from the plugin assets and give it synthetic hook inputs only, against
 a temporary vault: the decision table per tool, case folding, MSYS paths, a
 junction into a zone, the guard's own controls, and the process contract (exit
 0, only deny or ask and never allow, nothing without CLAUDE_PROJECT_DIR). The
-last class pins that the default install does not change: no PreToolUse hook
-in hooks/hooks.json and the permission and config templates as in v0.31.0.
+PowerShell branch is tested twice: with a stand-in for its parser on every
+system, and on Windows with the real ps-parse.ps1 child process. The last
+class pins that the default install does not change: no PreToolUse hook in
+hooks/hooks.json and the permission and config templates as in v0.31.0.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,6 +35,7 @@ except ImportError:  # run as tests.<module> from the repository root
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "assets" / "adapters" / "deny-guard"
 GUARD = ASSETS / "deny-guard.py"
+PARSER = ASSETS / "ps-parse.ps1"
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 TEMPLATE_ZONES = ("10-inbox/_processed", "20-knowledge/_archive", "50-projects/_completed",
                   "90-assets", ".obsidian")
@@ -59,6 +63,24 @@ def msys_form(path: Path) -> str:
     """D:\\x\\y -> /d/x/y, the form Git Bash commands use."""
     text = str(path).replace("\\", "/")
     return "/" + text[0].lower() + text[2:]
+
+
+def _windows_powershell() -> str | None:
+    """powershell.exe in the Windows folder, the only place the guard starts it from; else None."""
+    if os.name != "nt":
+        return None
+    root = os.environ.get("SystemRoot") or os.environ.get("windir")
+    if not root:
+        return None
+    path = Path(root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return str(path) if path.is_file() else None
+
+
+def facts(**fields) -> dict:
+    """A ps-parse.ps1 answer with nothing in it; keyword fields replace the empty values."""
+    answer = {"errors": 0, "commands": [], "strings": [], "expandable": 0, "expandable_strings": [], "flags": []}
+    answer.update(fields)
+    return answer
 
 
 class GuardCase(unittest.TestCase):
@@ -189,6 +211,17 @@ class PathToolDecisionTests(GuardCase):
         self.assert_table("NotebookEdit", [({"notebook_path": self.path("00-meta", "vault-config.json")}, "ask")])
         self.assert_table("Read", [({"file_path": self.path(".claude", "settings.local.json")}, None)])
 
+    def test_the_powershell_parser_is_a_guard_control(self) -> None:
+        # ps-parse.ps1 decides what PowerShell commands contain, so changing it can switch the guard off.
+        parser = self.path("00-meta", "scripts", "ps-parse.ps1")
+        self.assert_table("Write", [({"file_path": parser, "content": ""}, "ask")])
+        self.assert_table("Edit", [({"file_path": parser, "old_string": "a", "new_string": "b"}, "ask")])
+        self.assert_table("Read", [({"file_path": parser}, None)])
+        for command in ("cat 00-meta/scripts/ps-parse.ps1", "echo x > 00-meta/scripts/PS-Parse.ps1",
+                        "cp notes/x.ps1 00-meta/scripts/ps-parse.ps1"):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide("Bash", {"command": command}), "ask")
+
     def test_case_is_folded_for_zones(self) -> None:
         self.assert_table("Read", [
             ({"file_path": self.path("90-ASSETS", "a.png")}, "deny"),
@@ -280,15 +313,405 @@ class BashDecisionTests(GuardCase):
 
 
 class PowerShellDecisionTests(GuardCase):
-    def test_a_pre_filter_hit_asks_until_powershell_is_parsed(self) -> None:
-        self.assert_table("PowerShell", [
-            ({"command": "Get-Content 90-assets/a.png"}, "ask"),
-            ({"command": "Move-Item 10-inbox/a.md 10-inbox/_processed/2026-10/"}, "ask"),
-            ({"command": "Get-Content 00-meta/vault-config.json"}, "ask"),
-            ({"command": "Get-ChildItem"}, None),
-            ({"command": "Get-Content notes/a.md"}, None),
-        ])
-        self.assertEqual(self.decide("PowerShell", {"command": "Get-ChildItem"}, self.path(".obsidian")), "ask")
+    """The PowerShell branch with a stand-in for ps-parse.ps1, so the mapping is tested on every system."""
+
+    def stand_in(self, answer: dict | str, calls: list):
+        """A parse_powershell that records its input and returns answer (facts, or a failure text)."""
+        def parse(command: str):
+            calls.append(command)
+            return (answer, "") if isinstance(answer, dict) else (None, answer)
+        return parse
+
+    def decide_with(self, command: str, answer: dict | str, cwd: str | None = None) -> tuple[str | None, list]:
+        calls: list[str] = []
+        with mock.patch.object(self.guard, "parse_powershell", self.stand_in(answer, calls)):
+            return self.decide("PowerShell", {"command": command}, cwd), calls
+
+    def reason_with(self, command: str, answer: dict | str) -> str:
+        with mock.patch.object(self.guard, "parse_powershell", self.stand_in(answer, [])):
+            payload = {"tool_name": "PowerShell", "tool_input": {"command": command}}
+            return self.guard.evaluate(payload, str(self.vault))[1]
+
+    def test_commands_without_zone_or_control_names_start_no_parser(self) -> None:
+        for command in ("Get-ChildItem", "Get-Content notes/a.md", "Get-ChildItem -Recurse -Filter *.md",
+                        "Get-Content (Join-Path 90 -assets)"):  # the measured pre-filter bypass
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, facts()), (None, []))
+        # A working directory inside a zone asks without a parser run.
+        self.assertEqual(self.decide_with("Get-ChildItem", facts(), self.path(".obsidian")), ("ask", []))
+
+    def test_literal_zone_paths_deny(self) -> None:
+        target = self.path("90-assets", "a.png")
+        cases = [
+            ("Get-Content 90-assets/a.png", facts(commands=["Get-Content"], strings=["Get-Content", "90-assets/a.png"])),
+            ("Get-Content 10-inbox/_processed/a.md", facts(strings=["Get-Content", "10-inbox/_processed/a.md"])),
+            (f"Get-Content '{target}'", facts(strings=["Get-Content", target])),
+            (f"Get-Content FileSystem::{target}", facts(strings=["Get-Content", f"FileSystem::{target}"])),
+            (f"Get-Content Microsoft.PowerShell.Core\\FileSystem::{target}",
+             facts(strings=["Get-Content", f"Microsoft.PowerShell.Core\\FileSystem::{target}"])),
+            # The literal folders in front of a variable are enough.
+            ('Get-Content "90-assets/$n.png"',
+             facts(strings=["Get-Content"], expandable=1, expandable_strings=["90-assets/$n.png"], flags=["expression"])),
+            # A literal zone path wins over the run-time parts and over a parse error.
+            ("& { Get-Content 90-assets/a.png }",
+             facts(commands=[None, "Get-Content"], strings=["Get-Content", "90-assets/a.png"],
+                   flags=["expression", "script_block_call"])),
+            ("Get-Content notes/a.md && Get-Content 90-assets/a.png",
+             facts(errors=1, strings=["Get-Content", "notes/a.md", "Get-Content", "90-assets/a.png"])),
+            # None of the Bash exceptions: a move into a zone and an exclude value are denied too.
+            ("Move-Item 10-inbox/a.md 10-inbox/_processed/2026-10/",
+             facts(commands=["Move-Item"], strings=["Move-Item", "10-inbox/a.md", "10-inbox/_processed/2026-10/"])),
+            ("Get-ChildItem -Recurse -Exclude 90-assets", facts(strings=["Get-ChildItem", "90-assets"])),
+            ("tool --exclude=90-assets", facts(strings=["tool", "--exclude=90-assets"])),
+        ]
+        for command, answer in cases:
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, answer), ("deny", [command]))
+        # A drive-qualified path stays fixed when the command also changes the location.
+        moved = facts(commands=["Set-Location", "Get-Content"], strings=["Set-Location", "notes", "Get-Content", target])
+        self.assertEqual(self.decide_with(f"Set-Location notes; Get-Content '{target}'", moved)[0], "deny")
+        # Relative paths start in the hook's working directory.
+        relative = facts(strings=["Get-Content", "_processed/a.md"])
+        self.assertEqual(self.decide_with("Get-Content _processed/a.md", relative, self.path("10-inbox"))[0], "deny")
+        self.assertIsNone(self.decide_with("Get-Content _processed/a.md", relative)[0])
+
+    def test_deny_reason_names_the_zone_and_the_bash_and_grep_tools(self) -> None:
+        reason = self.reason_with("Get-Content 90-assets/a", facts(strings=["Get-Content", "90-assets/a"]))
+        for literal in ("PowerShell", "'90-assets'", "deny_zones", "00-meta/vault-config.json", "mv", "Bash tool",
+                        "Grep tool"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, reason)
+
+    def test_unclear_commands_ask_and_say_why(self) -> None:
+        cases = [  # (command, parser answer, words in the ask reason)
+            ('Get-Content "unterminated 90-assets', facts(errors=1, strings=["Get-Content", "unterminated 90-assets"]),
+             "does not parse"),
+            ("iex 'gc 90-assets-old/a'",
+             facts(commands=["iex"], strings=["iex", "gc 90-assets-old/a"], flags=["invoke_expression"]),
+             "Invoke-Expression"),
+            ("Start-Process notepad 90-assets-old/a",
+             facts(strings=["Start-Process", "notepad", "90-assets-old/a"], flags=["start_process"]), "Start-Process"),
+            ("icm { gci } 90-assets-old", facts(strings=["icm", "gci", "90-assets-old"],
+                                                flags=["expression", "invoke_command"]), "Invoke-Command"),
+            ("& $tool 90-assets-old", facts(commands=[None], strings=["90-assets-old"],
+                                            flags=["expression", "script_block_call"]), "& or ."),
+            (". ./x.ps1 90-assets-old", facts(commands=["./x.ps1"], strings=["./x.ps1", "90-assets-old"],
+                                              flags=["dot_source"]), "dot-sourcing"),
+            ("powershell -enc AA== 90-assets-old", facts(commands=["powershell"],
+                                                         strings=["powershell", "AA==", "90-assets-old"],
+                                                         flags=["encoded_command"]), "-EncodedCommand"),
+            ('cmd /c "type 90-assets-old\\a"', facts(commands=["cmd"], strings=["cmd", "/c", "type 90-assets-old\\a"]),
+             "another shell or interpreter"),
+            ('Write-Output "$x 90-assets-old"',
+             facts(strings=["Write-Output"], expandable=1, expandable_strings=["$x 90-assets-old"], flags=["expression"]),
+             "at run time"),
+            ("Get-Content Env:90-assets", facts(strings=["Get-Content", "Env:90-assets"], flags=["provider_path"]),
+             "provider path"),
+            ("Get-Item Registry::HKLM\\x\\90-assets",
+             facts(strings=["Get-Item", "Registry::HKLM\\x\\90-assets"], flags=["provider_path"]), "provider path"),
+            # Set-Location before or after a relative path: loops and blocks can run it first.
+            ("Set-Location notes; Get-Content ../90-assets/a.png",
+             facts(commands=["Set-Location", "Get-Content"],
+                   strings=["Set-Location", "notes", "Get-Content", "../90-assets/a.png"]), "Set-Location"),
+            ("Get-Content ../90-assets/a.png; cd notes",
+             facts(commands=["Get-Content", "cd"], strings=["Get-Content", "../90-assets/a.png", "cd", "notes"]),
+             "Set-Location"),
+            # \x follows the current drive, which Set-Location can change too.
+            ("Set-Location E:/; Get-Content \\vault\\90-assets\\a.png",
+             facts(commands=["Set-Location", "Get-Content"],
+                   strings=["Set-Location", "E:/", "Get-Content", "\\vault\\90-assets\\a.png"]), "Set-Location"),
+            ("<# 90-assets #> Get-Date", facts(commands=["Get-Date"], strings=["Get-Date"]), "not as a literal path"),
+            ("Get-Item ${C:\\x\\90-assets}", facts(strings=["Get-Item"], flags=["expression", "provider_path"]),
+             "only known when it runs"),
+            ("Get-Item 90-assets-old -New", facts(strings=["Get-Item", "90-assets-old"], flags=["flag_from_a_newer_parser"]),
+             "flag_from_a_newer_parser"),
+        ]
+        for command, answer, words in cases:
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, answer), ("ask", [command]))
+                self.assertIn(words, self.reason_with(command, answer))
+
+    def test_parser_failures_ask_and_say_why(self) -> None:
+        for problem in ("did not answer within 5 seconds", "failed (exit code 1)",
+                        "was not found (ps-parse.ps1 next to the guard)",
+                        "needs Windows PowerShell (powershell.exe), which was not found"):
+            with self.subTest(problem=problem):
+                self.assertEqual(self.decide_with("Get-Content 90-assets/a.png", problem)[0], "ask")
+                self.assertIn("the PowerShell parser " + problem, self.reason_with("Get-Content 90-assets/a.png", problem))
+
+    def test_guard_controls_ask(self) -> None:
+        for command, answer in (
+                ("Get-Content 00-meta/vault-config.json", facts(strings=["Get-Content", "00-meta/vault-config.json"])),
+                ("Set-Content .claude/settings.local.json '{}'",
+                 facts(strings=["Set-Content", ".claude/settings.local.json", "{}"])),
+                ("Copy-Item x.ps1 00-meta/scripts/ps-parse.ps1",
+                 facts(strings=["Copy-Item", "x.ps1", "00-meta/scripts/ps-parse.ps1"])),
+                ("Remove-Item 00-meta/scripts/deny-guard.py", facts(strings=["Remove-Item", "00-meta/scripts/deny-guard.py"])),
+                ("Get-Content 00-meta/vault-con`fig.json", facts(strings=["Get-Content", "00-meta/vault-config.json"]))):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, answer), ("ask", [command]))
+        answer = facts(strings=["Get-Content", ".claude/rules/vault-workflow.md"])
+        self.assertIsNone(self.decide_with("Get-Content .claude/rules/vault-workflow.md", answer)[0])
+
+    def test_a_backtick_does_not_hide_a_zone_name(self) -> None:
+        # The backtick is PowerShell's escape character: 90-ass`ets is the bare word 90-assets.
+        answer = facts(strings=["Get-Content", "90-assets/a.png"])
+        self.assertEqual(self.decide_with("Get-Content 90-ass`ets/a.png", answer),
+                         ("deny", ["Get-Content 90-ass`ets/a.png"]))
+
+    def test_text_that_only_contains_a_zone_name_decides_nothing(self) -> None:
+        for command, answer in (
+                ("Write-Output 'see 90-assets in the guide'", facts(strings=["Write-Output", "see 90-assets in the guide"])),
+                ("Get-Content notes/90-assets-old.md", facts(strings=["Get-Content", "notes/90-assets-old.md"])),
+                ("git commit -m 'note: 20-knowledge/_archive-old'",
+                 facts(strings=["git", "commit", "note: 20-knowledge/_archive-old"]))):
+            with self.subTest(command=command):
+                self.assertEqual(self.decide_with(command, answer), (None, [command]))
+
+
+class PowerShellParserRunTests(unittest.TestCase):
+    """parse_powershell: how the guard starts ps-parse.ps1 and reads its answer, without PowerShell."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.guard = load_guard()
+
+    def run_with(self, outcome, command: str = "Get-Content 90-assets/도면.png"):
+        """parse_powershell with subprocess.run replaced: outcome is its return value or an exception."""
+        calls: list = []
+
+        def run(argv, **options):
+            calls.append((argv, options))
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        with mock.patch.object(self.guard, "_powershell_executable", return_value="C:/Windows/powershell.exe"), \
+                mock.patch.object(self.guard.subprocess, "run", run):
+            return self.guard.parse_powershell(command), calls
+
+    @staticmethod
+    def answered(stdout: bytes, code: int = 0) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess([], code, stdout, b"")
+
+    def test_the_child_is_windows_powershell_with_the_command_on_stdin(self) -> None:
+        (result, problem), calls = self.run_with(self.answered(json.dumps(facts(strings=["x"])).encode("ascii")))
+        self.assertEqual((result, problem), (facts(strings=["x"]), ""))
+        self.assertEqual(len(calls), 1)
+        argv, options = calls[0]
+        self.assertEqual(argv, ["C:/Windows/powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                                "Bypass", "-File", str(PARSER)])
+        self.assertEqual(options["input"], "Get-Content 90-assets/도면.png".encode("utf-8"))
+        self.assertTrue(options["capture_output"])
+        self.assertEqual(options["timeout"], 5.0)
+
+    def test_the_answer_is_the_last_json_line(self) -> None:
+        stdout = b"a warning line\r\n" + json.dumps(facts(strings=["a"])).encode("ascii") + b"\r\n"
+        (result, problem), _ = self.run_with(self.answered(stdout))
+        self.assertEqual((result, problem), (facts(strings=["a"]), ""))
+
+    def test_failures_are_reported_not_raised(self) -> None:
+        cases = [
+            (subprocess.TimeoutExpired(["powershell"], 5.0), "did not answer within 5 seconds"),
+            (OSError("blocked by policy"), "could not be started (OSError)"),
+            (self.answered(b"", code=1), "failed (exit code 1)"),
+            (self.answered(b""), "gave no answer"),
+            (self.answered(b"not json"), "gave no answer"),
+            (self.answered(b"{not json"), "gave no answer"),
+            (self.answered(b"\xff{"), "gave no answer"),
+            (self.answered(b'{"errors": 0}'), "gave no answer"),
+            (self.answered(json.dumps(facts(errors=True)).encode("ascii")), "gave no answer"),
+            (self.answered(json.dumps(facts(errors=-1)).encode("ascii")), "gave no answer"),
+            (self.answered(json.dumps(facts(strings=[1])).encode("ascii")), "gave no answer"),
+            (self.answered(json.dumps(facts(commands=[1])).encode("ascii")), "gave no answer"),
+            (self.answered(json.dumps([facts()]).encode("ascii")), "gave no answer"),
+        ]
+        for outcome, expected in cases:
+            with self.subTest(outcome=outcome):
+                (result, problem), _ = self.run_with(outcome)
+                self.assertIsNone(result)
+                self.assertIn(expected, problem)
+
+    def test_text_that_cannot_be_sent_is_reported(self) -> None:
+        (result, problem), calls = self.run_with(self.answered(b""), command="Get-Content 90-assets/" + chr(0xD800))
+        self.assertEqual((result, calls), (None, []))
+        self.assertIn("could not be started", problem)
+
+    def test_nothing_starts_without_the_parser_file_or_windows_powershell(self) -> None:
+        with mock.patch.object(self.guard, "PARSER_NAME", "missing-parser.ps1"), \
+                mock.patch.object(self.guard.subprocess, "run") as run:
+            result, problem = self.guard.parse_powershell("Get-Content 90-assets/a")
+        self.assertIsNone(result)
+        self.assertIn("missing-parser.ps1", problem)
+        run.assert_not_called()
+        with mock.patch.object(self.guard, "_powershell_executable", return_value=None), \
+                mock.patch.object(self.guard.subprocess, "run") as run:
+            result, problem = self.guard.parse_powershell("Get-Content 90-assets/a")
+        self.assertIsNone(result)
+        self.assertIn("powershell.exe", problem)
+        run.assert_not_called()
+
+    def test_powershell_comes_only_from_the_windows_folder(self) -> None:
+        with mock.patch.object(self.guard, "_WINDOWS", False):
+            self.assertIsNone(self.guard._powershell_executable())
+        with mock.patch.object(self.guard, "_WINDOWS", True), \
+                mock.patch.dict(os.environ, {"SystemRoot": "", "windir": ""}):
+            self.assertIsNone(self.guard._powershell_executable())
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(self.guard, "_WINDOWS", True), \
+                mock.patch.dict(os.environ, {"SystemRoot": temporary}):
+            self.assertIsNone(self.guard._powershell_executable())  # not installed there
+            target = Path(temporary) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"")
+            self.assertEqual(self.guard._powershell_executable(), str(target))
+
+
+@unittest.skipUnless(_windows_powershell(), "Windows PowerShell is required")
+class PowerShellParserTests(GuardCase):
+    """The real ps-parse.ps1 in a Windows PowerShell child process (about 0.5 s per start).
+
+    PowerShellDecisionTests pins the decision for each kind of parser answer;
+    the table here is a sample that proves the real answers lead there.
+    """
+
+    DENY = (
+        "Get-Content 90-assets/a.png", "Get-Content 10-inbox/_processed/a.md", "'90-assets/a.png' | Get-Content",
+        "Get-Content notes/a.md > 90-assets/x.txt", "Get-Content 90-ass`ets/a.png", "Get-Content @'\n90-assets/a.png\n'@",
+        'Get-Content "90-assets/$name.png"', "Move-Item 10-inbox/a.md 10-inbox/_processed/2026-10/",
+        # Windows PowerShell 5.1 rejects &&, but the literal path is still in the parse.
+        "Get-Content notes/a.md && Get-Content 90-assets/a.png",
+    )
+    ASK = (
+        "iex 'Get-Content 90-assets-old/a'", 'Get-Content "$env:X\\90-assets"', 'Get-Content "unterminated 90-assets',
+        "powershell -enc ZQBjAGgAbwA= # 90-assets", "Get-Item Registry::HKLM\\x\\90-assets",
+        "Get-ChildItem notes | ForEach-Object { $_.Name } # 90-assets", "Set-Location notes; Get-Content ../90-assets/a.png",
+        "Get-Content 00-meta/scripts/ps-parse.ps1", "[scriptblock]::Create('gc 90-assets/a').Invoke()",
+        "Get-Item ${C:\\x\\90-assets-old\\a.png}",
+    )
+    NONE = (
+        "Get-ChildItem", "Get-Content notes/90-assets-old.md", "Write-Output 'see 90-assets in the guide'",
+        "Get-Content -Raw:$true notes/90-assets-old.md",
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.run_parser_raw("")  # the first start after boot is the slowest; the tests time the later ones
+
+    @staticmethod
+    def run_parser_raw(command: str) -> subprocess.CompletedProcess:
+        argv = [_windows_powershell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                str(PARSER)]
+        return subprocess.run(argv, input=command.encode("utf-8"), capture_output=True, timeout=120,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    def run_parser(self, command: str) -> dict:
+        result = self.run_parser_raw(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        line = result.stdout.decode("ascii")  # every other character arrives as a \u escape
+        self.assertEqual(line.count("\n"), 1)
+        answer = json.loads(line)
+        self.assertEqual(list(answer), ["errors", "commands", "strings", "expandable", "expandable_strings", "flags"])
+        return answer
+
+    def test_parser_script_parses(self) -> None:
+        check = ("$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("
+                 f"'{PARSER}', [ref]$null, [ref]$e); $e.Count")
+        out = subprocess.run([_windows_powershell(), "-NoProfile", "-NonInteractive", "-Command", check],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "0")
+
+    def test_the_guard_starts_this_powershell(self) -> None:
+        self.assertEqual(self.guard._powershell_executable(), _windows_powershell())
+
+    def test_answers_for_the_measured_probes(self) -> None:
+        # The probes recorded when the design was verified, and PowerShell's escape and quote forms.
+        self.assertEqual(self.run_parser("iex (gc x)"),
+                         facts(commands=["iex", "gc"], strings=["iex", "gc", "x"],
+                               flags=["expression", "invoke_expression"]))
+        self.assertEqual(self.run_parser('gc "$env:X\\90-assets"'),
+                         facts(commands=["gc"], strings=["gc"], expandable=1, expandable_strings=["$env:X\\90-assets"],
+                               flags=["expression", "provider_path"]))
+        self.assertEqual(self.run_parser('Get-Content "unterminated')["errors"], 1)
+        answer = self.run_parser("& { gc 90-assets/a }")
+        self.assertEqual(answer["commands"], [None, "gc"])
+        self.assertIn("90-assets/a", answer["strings"])
+        self.assertIn("script_block_call", answer["flags"])
+        # The bypass the guide documents: no string names the zone, so the pre-filter never runs this.
+        self.assertEqual(self.run_parser("Get-Content (Join-Path 90 -assets)")["strings"], ["Get-Content", "Join-Path"])
+        self.assertEqual(self.run_parser("Get-Content 90-ass`ets/a.png")["strings"], ["Get-Content", "90-assets/a.png"])
+        self.assertEqual(self.run_parser("Get-Content 90-ass'ets'/a.png")["strings"], ["Get-Content", "90-assets/a.png"])
+        self.assertEqual(self.run_parser("Get-Content -Force:$true $null a.txt")["flags"], [])
+
+    def test_non_ascii_text_and_control_characters_round_trip(self) -> None:
+        answer = self.run_parser("Get-Content '90-assets/도면 1.png'; Write-Output \"a`tb\" '\"q\"' 'c\\d'")
+        self.assertEqual(answer["strings"], ["Get-Content", "90-assets/도면 1.png", "Write-Output", "a\tb", '"q"', "c\\d"])
+
+    def test_flags_name_each_run_time_construct(self) -> None:
+        cases = (
+            ("Microsoft.PowerShell.Utility\\Invoke-Expression x", "invoke_expression"),
+            ("saps x", "start_process"), ("icm x", "invoke_command"), ("& $x", "script_block_call"),
+            (". ./x.ps1", "dot_source"), ("powershell -e x", "encoded_command"),
+            ("Get-Item HKLM:\\x", "provider_path"), ("Get-Item ${C:\\x\\a.txt}", "provider_path"),
+            ("Get-Item ('a' + 'b')", "expression"), ("'a'.Length", "expression"),
+            ("foreach ($i in 1) { }", "expression"),
+        )
+        for command, flag in cases:
+            with self.subTest(command=command):
+                self.assertIn(flag, self.run_parser(command)["flags"])
+        for command in ("Get-Content a.txt | Out-File b.txt 2>&1", "& 'C:\\tools\\x.exe' -Encoding utf8 -EA Stop 'a$b'"):
+            with self.subTest(quiet=command):
+                self.assertEqual(self.run_parser(command)["flags"], [])
+
+    def test_provider_paths_agree_with_the_guard(self) -> None:
+        # ps-parse.ps1 flags them and deny-guard.py skips them as file paths: one rule in two files.
+        for text in ("Registry::HKLM\\x", "Env:X", "Env:", "https://example.com/x", "FileSystem::C:\\x",
+                     "Microsoft.PowerShell.Core\\FileSystem::C:\\x", "C:\\x", "notes/a.md", "$x:y",
+                     "note: 20-knowledge/_archive"):
+            with self.subTest(text=text):
+                flagged = "provider_path" in self.run_parser(f"Write-Output '{text}'")["flags"]
+                self.assertEqual(flagged, self.guard._ps_file_path(text) is None)
+
+    def test_decision_table(self) -> None:
+        target = self.path("90-assets", "a.png")
+        deny = (*self.DENY, f"Get-Content '{target}'", f"Get-Content FileSystem::{target}")
+        with mock.patch.object(self.guard, "PARSE_TIMEOUT", 60):  # a busy test machine must not turn deny into ask
+            for expected, commands in (("deny", deny), ("ask", self.ASK), (None, self.NONE)):
+                for command in commands:
+                    with self.subTest(command=command):
+                        self.assertEqual(self.decide("PowerShell", {"command": command}), expected)
+            self.assertEqual(self.decide("PowerShell", {"command": "Get-Content _processed/a.md"}, self.path("10-inbox")),
+                             "deny")
+
+    def test_a_parser_that_does_not_answer_in_time_asks(self) -> None:
+        payload = {"tool_name": "PowerShell", "tool_input": {"command": "Get-Content 90-assets/a.png"}}
+        with mock.patch.object(self.guard, "PARSE_TIMEOUT", 0.001):
+            decision, reason = self.guard.evaluate(payload, str(self.vault))
+        self.assertEqual(decision, "ask")
+        self.assertIn("did not answer within 0.001 seconds", reason)
+
+    def test_an_installed_copy_runs_the_parser_next_to_it(self) -> None:
+        scripts = self.vault / "00-meta" / "scripts"
+        shutil.copyfile(GUARD, scripts / "deny-guard.py")
+        shutil.copyfile(PARSER, scripts / "ps-parse.ps1")
+        env = {key: value for key, value in os.environ.items() if key != "CLAUDE_PROJECT_DIR"}
+        env["CLAUDE_PROJECT_DIR"] = str(self.vault)
+
+        def hook(command: str) -> dict | None:
+            stdin = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "PowerShell",
+                                "tool_input": {"command": command}}, ensure_ascii=False).encode("utf-8")
+            result = subprocess.run([sys.executable, "-X", "utf8", "-I", str(scripts / "deny-guard.py")],
+                                    input=stdin, capture_output=True, env=env, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)["hookSpecificOutput"] if result.stdout else None
+
+        self.assertEqual(hook("Get-Content 90-assets/도면.png")["permissionDecision"], "deny")
+        self.assertIsNone(hook("Get-ChildItem notes"))
+        (scripts / "ps-parse.ps1").unlink()
+        output = hook("Get-Content 90-assets/a.png")
+        self.assertEqual(output["permissionDecision"], "ask")
+        self.assertIn("ps-parse.ps1", output["permissionDecisionReason"])
 
 
 class ConfigTests(GuardCase):
@@ -545,7 +968,9 @@ class HookTemplateTests(unittest.TestCase):
         text = (ASSETS / "guide.md").read_text(encoding="utf-8")
         for literal in ("00-meta/scripts/deny-guard.py", "settings.local.json", "onFailure", "v2.1.295",
                         "fail-open", "allow", "샌드박스", "Codex", "끄기", "지연", "PowerShell", "mv", "mkdir",
-                        "vault_paths.zone_matches", "code.claude.com/docs/en/hooks", "shlex"):
+                        "vault_paths.zone_matches", "code.claude.com/docs/en/hooks", "shlex",
+                        "00-meta/scripts/ps-parse.ps1", "Parser.ParseInput", "Join-Path 90 -assets",
+                        "-EncodedCommand", "5초(`PARSE_TIMEOUT`)", "expandable_strings"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
         self.assertIsNone(re.search(r"\]\((?!https?:)[^)]+\)", text))  # no repository links to keep in sync
@@ -558,6 +983,7 @@ class DefaultInstallUnchangedTests(unittest.TestCase):
         text = (ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
         self.assertNotIn("PreToolUse", json.loads(text)["hooks"])
         self.assertNotIn("deny-guard", text)
+        self.assertNotIn("ps-parse", text)  # the PowerShell parser runs only under the opt-in guard
 
     def test_permission_and_config_templates_are_unchanged_since_v0310(self) -> None:
         for rel_path, expected in V0310_TEMPLATE_SHA256.items():

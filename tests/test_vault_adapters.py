@@ -35,6 +35,7 @@ ADAPTERS = ROOT / "assets" / "adapters"
 ASSETS = ADAPTERS / "aside"
 HELPER = ASSETS / "aside-up.ps1"
 DENY_GUARD = ADAPTERS / "deny-guard" / "deny-guard.py"
+DENY_GUARD_PARSER = ADAPTERS / "deny-guard" / "ps-parse.ps1"
 MISSING_EXE = "C:/missing/Aside.exe"
 
 sys.path.insert(0, str(SCRIPTS))
@@ -83,6 +84,22 @@ class AdapterAssetTests(unittest.TestCase):
         for literal in ("BEGIN SHARED ZONE RULE", "END SHARED ZONE RULE", "CLAUDE_PROJECT_DIR",
                         "hookSpecificOutput", "permissionDecisionReason", "shlex.shlex", "punctuation_chars",
                         "whitespace_split", "os.path.realpath", "os.path.normcase"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+
+    def test_deny_guard_parser_is_ascii_and_stamped_like_the_guard(self) -> None:
+        # Windows PowerShell 5.1 reads a file without a BOM in the ANSI code page, so it stays ASCII.
+        raw = DENY_GUARD_PARSER.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM: the file must stay ASCII")
+        text = raw.decode("ascii")  # raises if a non-ASCII byte slipped in
+        match = re.fullmatch(r"# agentic-vault:adapter ps-parse engine=(\S+)", text.splitlines()[0])
+        self.assertIsNotNone(match)
+        guard = re.fullmatch(r"# agentic-vault:adapter deny-guard engine=(\S+)",
+                             DENY_GUARD.read_text(encoding="ascii").splitlines()[0])
+        self.assertEqual(match.group(1), guard.group(1))  # the two files ship and are copied together
+        for literal in ("[System.Management.Automation.Language.Parser]::ParseInput", "FindAll", "GetCommandName",
+                        "InvocationOperator", "IsDriveQualified", "OpenStandardInput", "UTF8Encoding",
+                        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ps-parse.ps1"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
 
@@ -135,6 +152,7 @@ class AdapterAssetTests(unittest.TestCase):
         forbidden = re.compile(r"corei|D:[\\/]NS|ns-electric|jmj@|엔에스|\\Users\\", re.IGNORECASE)
         assets = sorted(path for path in ADAPTERS.glob("*/*") if path.is_file())
         self.assertIn(DENY_GUARD, assets)  # every adapter folder, the deny-zone guard included
+        self.assertIn(DENY_GUARD_PARSER, assets)
         for path in assets:
             with self.subTest(asset=path.relative_to(ADAPTERS).as_posix()):
                 self.assertIsNone(forbidden.search(path.read_text(encoding="utf-8")))

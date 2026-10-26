@@ -2,10 +2,11 @@
 """deny-guard.py - opt-in deny-zone guard for Claude Code PreToolUse hooks.
 
 ASCII only, Python 3.10+ standard library only. The plugin ships this file in
-assets/adapters/deny-guard/. Nothing installs it by default: a user who wants
-it copies it byte for byte to 00-meta/scripts/deny-guard.py in the vault and
-merges settings-hooks.json into .claude/settings.local.json (guide.md). The
-hook runs it as python -X utf8 -I <file>, so it needs no shebang line.
+assets/adapters/deny-guard/ with ps-parse.ps1, its PowerShell parser. Nothing
+installs them by default: a user who wants the guard copies both byte for
+byte to 00-meta/scripts/ in the vault and merges settings-hooks.json into
+.claude/settings.local.json (guide.md). The hook runs this file as
+python -X utf8 -I <file>, so it needs no shebang line.
 
 Contract:
   - Input: one PreToolUse hook input (JSON) on stdin. The vault root is
@@ -32,10 +33,21 @@ What it checks:
     which the vault rules use to quarantine files, echo or printf text, a git
     commit or tag message, and exclude patterns. Paths built at run time
     return ask.
-  - PowerShell: a pre-filter hit returns ask; PowerShell is not parsed yet.
+  - PowerShell: the same pre-filter (a backtick, PowerShell's escape
+    character, does not hide a zone name). Only on a hit, ps-parse.ps1 next
+    to this file parses the command in a Windows PowerShell child process
+    (PARSE_TIMEOUT seconds) without running it. A literal string, redirection
+    target or pipeline input that resolves into a zone returns deny. A parse
+    error, a parser failure or timeout, a construct evaluated at run time
+    (Invoke-Expression, Start-Process, Invoke-Command, & or . on a script
+    block, dot-sourcing, -EncodedCommand, a provider path outside the file
+    system, variables, operators, method calls, expandable strings, another
+    shell), a relative path in a command that also changes the location
+    (Set-Location, cd), or a zone name that is no literal path returns ask.
+    PowerShell has none of the Bash exceptions.
   - Edit, Write and NotebookEdit on the guard's own controls
-    (00-meta/vault-config.json, .claude/settings*.json, this script), and
-    shell words that name them, return ask.
+    (00-meta/vault-config.json, .claude/settings*.json, this script and
+    ps-parse.ps1), and shell words that name them, return ask.
 
 A guard, not a sandbox: it does not see files that a started program opens by
 itself, paths assembled at run time that never spell a zone name, searches
@@ -48,6 +60,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 from typing import Sequence
 
@@ -60,7 +73,10 @@ DEFAULT_DENY_ZONES = (
 )
 CONFIG_REL = "00-meta/vault-config.json"
 GUARD_REL = "00-meta/scripts/deny-guard.py"
-CONTROL_NAMES = ("settings.json", "settings.local.json", "vault-config.json", "deny-guard.py")
+PARSER_REL = "00-meta/scripts/ps-parse.ps1"
+PARSER_NAME = "ps-parse.ps1"  # looked up next to this file, wherever it is installed
+PARSE_TIMEOUT = 5.0  # seconds for the PowerShell parser child; the hook allows 10
+CONTROL_NAMES = ("settings.json", "settings.local.json", "vault-config.json", "deny-guard.py", "ps-parse.ps1")
 PATH_TOOLS = ("Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep")
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 SHELL_TOOLS = ("Bash", "PowerShell")
@@ -74,7 +90,7 @@ _WILDCARD_RE = re.compile(r"[*?\[{]")
 _RUNTIME_RE = re.compile(r"[$`]")
 _RUNTIME_TEXT_RE = re.compile(r"`|\$\S")
 _ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_CONTROL_TEXT_RE = re.compile(r"vault-config\.json|deny-guard\.py|\.claude|settings[^\s/\\'\"]*\.json")
+_CONTROL_TEXT_RE = re.compile(r"vault-config\.json|deny-guard\.py|ps-parse\.ps1|\.claude|settings[^\s/\\'\"]*\.json")
 _OPTION_NAME_RE = re.compile(r"--?[a-z][a-z-]*")
 _SHELL_FLAG_RE = re.compile(r"-[a-z]*c")
 
@@ -96,6 +112,33 @@ _INLINE_FLAGS = frozenset({
     "-c", "-e", "--eval", "-p", "--print", "-r", "-command", "-encodedcommand",
     "-enc", "-ec", "/c", "/k",
 })
+
+# PowerShell. Cmdlets resolve relative paths against the location, which these
+# commands (and their aliases) change.
+_PS_LOCATION_COMMANDS = frozenset({
+    "set-location", "sl", "cd", "chdir", "push-location", "pushd", "pop-location", "popd",
+})
+# After a location change only these stay fixed on Windows: \x and ~ follow the
+# current drive and provider, which Set-Location also changes.
+_PS_FIXED_PATH_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|[\\/]{2})")
+# The same test as Test-ProviderPath in ps-parse.ps1: FileSystem::path (with or
+# without a module name) is a file path; any other Provider::path, or a drive
+# name longer than one letter (HKLM:, Env:, a PSDrive) not followed by a space
+# ("note: x" is text), is not. A $ starts a variable ("$env:X\a"), not a drive.
+_PS_FILESYSTEM_RE = re.compile(r"^\s*(?:[^\s:\\/$]+\\)?filesystem::", re.IGNORECASE)
+_PS_PROVIDER_RE = re.compile(r"^\s*(?:[^\s:\\/$]+\\)?[^\s:\\/$]+::|^\s*[^\s:\\/$]{2,}:(?!\s)")
+_PS_FLAG_LABELS = {
+    "invoke_expression": "Invoke-Expression",
+    "start_process": "Start-Process",
+    "invoke_command": "Invoke-Command",
+    "script_block_call": "& or . on a script block or a value",
+    "dot_source": "dot-sourcing",
+    "encoded_command": "-EncodedCommand",
+    "provider_path": "a provider path outside the file system",
+    "expression": "variables, operators, method calls or script blocks",
+}
+_PS_COUNT_KEYS = ("errors", "expandable")
+_PS_TEXT_KEYS = ("strings", "expandable_strings", "flags")
 
 
 # This file is copied into vaults and run alone by the hook, so it cannot
@@ -188,6 +231,13 @@ def _deny_shell(zone: str) -> str:
             f"{CONFIG_REL}). Shell commands do not read or change deny zones; mv or git mv "
             "into a zone, mkdir, echo or printf text, commit messages and exclude options are "
             "the exceptions. To search notes for the zone name, use the Grep tool.")
+
+
+def _deny_powershell(zone: str) -> str:
+    return (f"this PowerShell command names a path inside the deny zone '{_label(zone)}' (deny_zones in "
+            f"{CONFIG_REL}). PowerShell commands do not read or change deny zones and have none of the "
+            "Bash exceptions: to move a file into a zone, use mv or git mv in the Bash tool; to search "
+            "notes for the zone name, use the Grep tool.")
 
 
 def _ask_wildcard(what: str, zone: str) -> str:
@@ -464,6 +514,103 @@ def _candidates(word: str) -> list[str]:
     return [candidate for candidate in candidates if candidate]
 
 
+# -- PowerShell parser ---------------------------------------------------------
+
+def _powershell_executable() -> str | None:
+    """Windows PowerShell 5.1 in the Windows folder; never looked up in PATH or the working folder."""
+    if not _WINDOWS:
+        return None
+    root = os.environ.get("SystemRoot") or os.environ.get("windir")
+    if not root:
+        return None
+    path = os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    return path if os.path.isfile(path) else None
+
+
+def _valid_facts(facts: object) -> bool:
+    if not isinstance(facts, dict):
+        return False
+    for key in _PS_COUNT_KEYS:
+        value = facts.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return False
+    for key in _PS_TEXT_KEYS:
+        value = facts.get(key)
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            return False
+    commands = facts.get("commands")
+    return isinstance(commands, list) and all(item is None or isinstance(item, str) for item in commands)
+
+
+def _read_facts(raw: bytes) -> dict | None:
+    """The parser's JSON line (the last line that starts with '{'), or None."""
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return None
+    for line in reversed(lines):
+        if line.strip().startswith("{"):
+            try:
+                facts = json.loads(line)
+            except ValueError:
+                return None
+            return facts if _valid_facts(facts) else None
+    return None
+
+
+def parse_powershell(command: str) -> tuple[dict | None, str]:
+    """Parse one command with ps-parse.ps1 next to this file, without running it.
+
+    Returns (facts, "") or (None, why there are none). The child is Windows
+    PowerShell 5.1 (-NoProfile -NonInteractive -ExecutionPolicy Bypass -File)
+    with the command on stdin as UTF-8 and PARSE_TIMEOUT seconds to answer.
+    """
+    parser = os.path.join(os.path.dirname(os.path.abspath(__file__)), PARSER_NAME)
+    if not os.path.isfile(parser):
+        return None, f"was not found ({PARSER_NAME} next to the guard)"
+    executable = _powershell_executable()
+    if executable is None:
+        return None, "needs Windows PowerShell (powershell.exe), which was not found"
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", parser],
+            input=command.encode("utf-8"), capture_output=True, timeout=PARSE_TIMEOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return None, f"did not answer within {PARSE_TIMEOUT:g} seconds"
+    except (OSError, ValueError) as error:  # ValueError: text that UTF-8 cannot encode
+        return None, f"could not be started ({type(error).__name__})"
+    if result.returncode != 0:
+        return None, f"failed (exit code {result.returncode})"
+    facts = _read_facts(result.stdout)
+    if facts is None:
+        return None, "gave no answer the guard can read"
+    return facts, ""
+
+
+def _ps_fixed(path: str) -> bool:
+    """True for a path that Set-Location cannot move: X:\\ or UNC on Windows, /x elsewhere."""
+    return bool(_PS_FIXED_PATH_RE.match(path)) if _WINDOWS else path.startswith("/")
+
+
+def _ps_file_path(text: str) -> str | None:
+    """The file-system path a PowerShell string names, or None for another provider's path."""
+    stripped = _PS_FILESYSTEM_RE.sub("", text, count=1)
+    if stripped != text:
+        return stripped  # FileSystem::D:\x is D:\x
+    return None if _PS_PROVIDER_RE.match(text) else text
+
+
+def _ps_run_time(facts: dict, names: list[str]) -> str:
+    """Plain words for the run-time constructs in the parser facts, or ''."""
+    labels = [_PS_FLAG_LABELS.get(flag, _label(flag)) for flag in facts["flags"]]
+    if facts["expandable"]:
+        labels.append("an expandable string")
+    if any(_command_name(text) in _INTERPRETERS for text in (*names, *facts["strings"])):
+        labels.append("another shell or interpreter")
+    return ", ".join(dict.fromkeys(labels))
+
+
 class Guard:
     """Decisions for one hook call: vault roots, zones and working directory."""
 
@@ -532,7 +679,7 @@ class Guard:
         """Name the guard control that the path is, or None."""
         for parts in location.views:
             folded = "/".join(part.casefold() for part in parts)
-            if folded in (CONFIG_REL, GUARD_REL):
+            if folded in (CONFIG_REL, GUARD_REL, PARSER_REL):
                 return folded
         for path in location.paths:  # .claude or .claude/settings*.json, in or outside the vault
             parts = [_fold_part(part).casefold() for part in re.split(r"[\\/]+", path) if part]
@@ -681,8 +828,9 @@ class Guard:
             return []
         return [(ASK, f"the shell's working directory is inside the deny zone '{_label(zone)}'.")]
 
-    def shell_candidate(self, text: str, *, exempt: bool, cwd_known: bool) -> list[tuple[str, str]]:
-        """Verdicts for one literal piece of a shell word."""
+    def shell_candidate(self, text: str, *, exempt: bool, cwd_known: bool,
+                        deny=_deny_shell) -> list[tuple[str, str]]:
+        """Verdicts for one literal piece of a shell word; deny(zone) words a deny reason."""
         named = None if exempt else self.zone_named_in(text)
         if named is None and not _CONTROL_TEXT_RE.search(text.casefold()):
             return []
@@ -698,7 +846,7 @@ class Guard:
                 return [(ASK, _ask_unchecked(named, "uses a path it cannot resolve (a ~user home or "
                                                     "an invalid name)"))]
             if zone is not None and not exempt:
-                verdicts.append((DENY, _deny_shell(zone)))
+                verdicts.append((DENY, deny(zone)))
             if control is not None:
                 verdicts.append((ASK, _ask_control("this command names", control)))
             return verdicts
@@ -708,13 +856,13 @@ class Guard:
             if literal and not exempt:
                 zone = self.path_hit(literal)[0]
                 if zone is not None:
-                    verdicts.append((DENY, _deny_shell(zone)))
+                    verdicts.append((DENY, deny(zone)))
             verdicts.append((ASK, _ask_unchecked(named, "builds this path at run time")))
             return verdicts
         if not exempt:
             hit = self.glob_hit(self.cwd, native)
             if hit is not None and hit[0] == DENY:
-                verdicts.append((DENY, _deny_shell(hit[1])))
+                verdicts.append((DENY, deny(hit[1])))
             elif hit is not None:
                 verdicts.append((ASK, _ask_wildcard("this command", hit[1])))
         if _CONTROL_TEXT_RE.search(text.casefold()) and _may_match_control(native):
@@ -778,11 +926,53 @@ class Guard:
         return verdicts
 
     def powershell(self, command: str) -> list[tuple[str, str]]:
+        """The Bash pre-filter, then ps-parse.ps1: literal zone paths deny, anything unclear asks."""
         verdicts = self.cwd_verdicts()
         zones, controls = self.mentions(command)
-        if zones or controls:
-            verdicts.append((ASK, _ask_unchecked(zones[0] if zones else None,
-                                                 "PowerShell commands are not parsed yet")))
+        if "`" in command:  # PowerShell's escape character: 90-ass`ets is 90-assets
+            unescaped, more = self.mentions(command.replace("`", ""))
+            zones = [zone for zone in self.zones if zone in zones or zone in unescaped]
+            controls = controls or more
+        if not zones and not controls:
+            return verdicts  # no parser process: such a call costs only the Python start
+        first = zones[0] if zones else None
+        facts, problem = parse_powershell(command)
+        if facts is None:
+            return verdicts + [(ASK, _ask_unchecked(first, f"the PowerShell parser {problem}"))]
+        names = [name for name in facts["commands"] if name]
+        moved = any(_command_name(name) in _PS_LOCATION_COMMANDS for name in names)
+        texts = facts["strings"] + facts["expandable_strings"]
+        for text in texts:
+            path = _ps_file_path(text)
+            if path is None:  # Registry::, Env:, HKLM:, another PSDrive
+                named = self.zone_named_in(text)
+                if named or _CONTROL_TEXT_RE.search(text.casefold()):
+                    verdicts.append((ASK, _ask_unchecked(named, "only in a provider path outside the file "
+                                                                "system (Registry::, Env:, a PSDrive)")))
+                continue
+            for candidate in _candidates(path):
+                if moved and not _ps_fixed(_native(candidate)):
+                    # Set-Location may run before or after this word (loops, blocks).
+                    named = self.zone_named_in(candidate)
+                    if named or _CONTROL_TEXT_RE.search(candidate.casefold()):
+                        verdicts.append((ASK, _ask_unchecked(named, "changes the location (Set-Location, cd) "
+                                                                    "in the same command")))
+                    continue
+                verdicts.extend(self.shell_candidate(candidate, exempt=False, cwd_known=True,
+                                                     deny=_deny_powershell))
+        if facts["errors"]:
+            verdicts.append((ASK, _ask_unchecked(first, "does not parse as Windows PowerShell 5.1")))
+        run_time = _ps_run_time(facts, names)
+        if run_time:
+            verdicts.append((ASK, _ask_unchecked(first, f"has parts that are only known when it runs "
+                                                        f"({run_time})")))
+        folded = [text.casefold() for text in texts]
+        missing = [zone for zone in zones if not any(zone.split("/")[-1].casefold() in text for text in folded)]
+        if missing:
+            verdicts.append((ASK, _ask_unchecked(missing[0], "not as a literal path it can resolve (a comment, "
+                                                             "a variable or function name, or joined text)")))
+        elif controls and not any(_CONTROL_TEXT_RE.search(text) for text in folded):
+            verdicts.append((ASK, _ask_unchecked(None, "not as a literal path it can resolve")))
         return verdicts
 
 
