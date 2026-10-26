@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.31.0-10B981?style=for-the-badge)](docs/releases/v0.31.0.md)
+[![Version](https://img.shields.io/badge/v0.32.0-10B981?style=for-the-badge)](docs/releases/v0.32.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -81,41 +81,59 @@ Apart from this section, the README is in Korean, and so are the commands, rule 
 
 For Codex, register the release tag and add the plugin as described in [the Codex guide](docs/codex.md).
 
-Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) lists "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume", and this plugin registers an async health-check SessionStart hook for startup, clear and resume. `hooks/hooks.json` is unchanged and `onFailure` is not adopted; `vault_doctor.py --host-version` reports the local `claude --version` only when asked.
+Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) lists "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume", and this plugin registers an async health-check SessionStart hook for startup, clear and resume. `hooks/hooks.json` is unchanged and does not adopt `onFailure` (only the opt-in deny-zone guard template described below sets it, in its own settings fragment); `vault_doctor.py --host-version` reports the local `claude --version` only when asked.
 
 **Core commands** (all 15 are in [commands/](commands/)):
 
-**v0.31.0, opt-in:** `vault_runs.py flips` counts per-assertion pass-to-fail flips between two compatible
-completed runs, and an optional assertion `role` (`correction` or `retention`) adds FULL/PARTIAL/NO grades;
-compare scores, eligibility and improvement decisions are unchanged ([reliability tools](docs/tower-reliability.md)).
-Ledger `check-support` marks rows whose value appears only in another ledger's fact table
-(`rows_supported_ledger_table_only`, `ledger_table_only`: the only default-output change), `--primary-text-only`
-counts them as unsupported, and `--normalize-periods` compares date, quarter, half-year and fiscal-year
-expressions as date intervals. It abstains on periods it cannot resolve and on the listed qualifiers, range marks
-and list forms; text outside those fixed lists is not read, so a period can still be compared whole, by one range
-end or by one list item and give a wrong `equal` or `contained` ([usage and limits](docs/hardening.md)).
-`vault_doctor.py --session-evidence` reads one named Claude Code transcript and reports whether SessionStart
-hooks ran, failed or were truncated without printing transcript content ([reliability](docs/reliability.md)).
-Loopback test servers now read request bodies, and an ast check flags `tests/*.py` body handlers (`do_POST`,
-`do_PUT`, `do_PATCH`) that never read the request body.
-Warning-promotion certificates: v0.31.0 changes `vault_ssot.py`, one of the seven files that `checker_sha256`
-binds (`84cf5235…` in v0.26.0 to v0.30.0, now `d8f9559a…`). In a vault that promoted a warning to `fatal`, a
-certificate from the other version stops the healthcheck (exit 1), the SessionStart hook injects nothing, the
-staged pre-commit check blocks commits and `vault_doctor.py` reports `invalid_config` (exit 2). Other tools that
-validate the whole vault configuration stop as well, for example `/vault-recall` reports `invalid_config` and
-`vault_ssot.py`, `check-support` included, reports `ssot_operation_unavailable`. Before upgrading
-or rolling back, return promoted levels to `warning`; bring every engine copy that checks the vault to the same
-version (the Claude Code and Codex installations and, in a git vault, the copy under `00-meta/scripts/` that the
-pre-commit hook runs); then run `vault_warning_policy.py --certificate` on the installation you switched to and
-promote again; see the [upgrade section](docs/releases/v0.31.0.md#하위호환업그레이드). v0.30.0 and older refuse fixtures with `role`
-and cannot inspect or compare runs prepared with it.
+**v0.32.0:** the default lint (run by the async SessionStart healthcheck and the staged pre-commit check),
+`check-support`, the healthcheck's full mode and `/vault-recall` ran heading, frontmatter, inline-code and link regular
+expressions that took quadratic or cubic time on crafted lines (one ledger heading with 64,000 spaces took 21.15 s, now
+1.4 µs; measured 2026-10-27 on one Windows PC). Linear scans replace them and give the same results as the old
+expressions in bounded exhaustive tests; no option or output field is added
+([linear-time parsing](docs/hardening.md#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)).
+<!-- TODO(host, item 1e): feat/r6-regex4-20261027 had no commits when this was written. After merging it, describe its linear-time jev_client.SENSITIVE scan (default lint) and Jarvis wiki-link substitution here; if it is not merged, drop jev_client.py from the changed-file lists in this README. -->
+`check-support` now reads cited bodies alike at three edges, and only these cases change its default output: text above
+and below a removed fact table is no longer read as one value or period, notes with frontmatter break lines only at CR
+and LF, and a self-cited ledger's leading BOM is dropped before its frontmatter is found
+([table cuts and line breaks](docs/hardening.md#표를-뺀-자리와-줄-나눔)). Opt-in `--normalize-periods` abstains on more
+misread forms (English `late` or `mid` prefixes, month lists, a narrowing word after `중`, `내` or `동안`, `말` followed
+by `은`, `는`, `이`, `가` or `도`, other joiners between a fiscal year and its mark, a mark between two fiscal years)
+and compares a few forms that v0.31.0 abstained on as whole periods (`초과`, `2주 차질`, a time or count after a list
+separator); a generated metamorphic suite pins the remaining known failures by count
+([known failures](docs/hardening.md#기간-정규화의-알려진-실패-목록)).
+New opt-in tools: `evaluate_recall.py --gold-removal-twins` reruns each answerable query with the notes that hold its
+answer removed and reports one operating point, the empty result (on the recall_hard fixture the legacy arm still
+returned candidates for 30 of 56 twins; measured 2026-10-27 and pinned by tests), and `--redact-row-order token` sorts
+keyed pseudonymised report rows by token instead of gold-set order
+([no-answer twins](docs/memory-evaluation.md#답-없음-쌍둥이)). The repository tool `scripts/real_vault_audit.py` draws a
+seeded random sample of real-vault references and turns complete human labels into an exact hypergeometric upper bound
+on misses: 0 misses in 20 of 500 references bounds them at 68 with 95% confidence
+([sample audit](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)). It is not wired into hooks, CI or
+default runs. A Claude Code-only deny-zone PreToolUse guard template (`assets/adapters/deny-guard/`) is never installed
+by default: `/vault-init` offers it in a separate step, and `vault_adapters.py` and `/vault-doctor` report it as
+`adapters.deny_guard`. Once merged it answers only deny or ask for Read, Grep, Glob, Edit, Write, NotebookEdit, Bash and
+PowerShell calls that point into a deny zone, and each matched call waits for a Python start (medians of 0.37 to 0.52 s
+on the measured Windows PC, about 1 s when a PowerShell command names a zone or a guard control and the parser also
+starts). It is a guard, not a sandbox ([guide](assets/adapters/deny-guard/guide.md), [limits](SECURITY.md)).
+Warning-promotion certificates: v0.32.0 changes `vault_ssot.py`, `vault_lint_extensions.py`, `vault_provenance.py`,
+`jev_client.py` and `vault_paths.py`, five of the seven files that `checker_sha256` binds (`84cf5235…` in v0.26.0 to
+v0.30.0, `d8f9559a…` in v0.31.0, now `⟦CHECKER_SHA256⟧`). In a vault that promoted a warning to `fatal`, a certificate
+from the other version stops the healthcheck (exit 1), the SessionStart hook injects nothing, the staged pre-commit check
+blocks commits and `vault_doctor.py` reports `invalid_config` (exit 2). Other tools that validate the whole vault
+configuration stop as well, for example `/vault-recall` reports `invalid_config` and `vault_ssot.py`, `check-support`
+included, reports `ssot_operation_unavailable`. Before upgrading or rolling back, return promoted levels to `warning`;
+bring every engine copy that checks the vault to the same version (the Claude Code and Codex installations and, in a git
+vault, the copy under `00-meta/scripts/` that the pre-commit hook runs); then run `vault_warning_policy.py --certificate`
+on the installation you switched to and promote again; see the [upgrade section](docs/releases/v0.32.0.md#하위호환업그레이드).
+The certificate corpus file is now checked out with LF line endings even where `core.autocrlf=true`; an existing CRLF
+checkout keeps its copy until the file is deleted and checked out again ([details](docs/hardening.md#수집과-경고)).
 
 v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs below target v0.31.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.31.0.md);
+budgets; new findings warn first. The installation refs below target v0.32.0.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.32.0.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
@@ -185,6 +203,20 @@ v0.30.0 adds opt-in [evaluator and improvement-cost evidence](docs/improvement-a
 selected grader code/configuration to native runs and records source-bound resource reports, including
 discarded attempts and unknown values. Reports do not authenticate metering or establish cost-effectiveness;
 no model/command execution or automatic application is added.
+v0.31.0 adds `vault_runs.py flips`, which counts per-assertion pass-to-fail flips between two compatible completed
+runs, and an optional assertion `role` (`correction` or `retention`) with FULL/PARTIAL/NO grades; compare scores,
+eligibility and improvement decisions are unchanged ([reliability tools](docs/tower-reliability.md)). Ledger
+`check-support` marks rows whose value appears only in another ledger's fact table (`rows_supported_ledger_table_only`,
+`ledger_table_only`), `--primary-text-only` counts them as unsupported, and `--normalize-periods` compares date, quarter,
+half-year and fiscal-year expressions as date intervals. It abstains on periods it cannot resolve and on the listed
+qualifiers, range marks and list forms; text outside those fixed lists is not read, so a period can still be compared
+whole, by one range end or by one list item and give a wrong `equal` or `contained` ([usage and limits](docs/hardening.md)).
+`vault_doctor.py --session-evidence` reads one named Claude Code transcript, and this plugin installation's
+`hooks/hooks.json` (read-only) to recognise its own SessionStart status labels, and reports whether SessionStart hooks
+ran, failed or were truncated without printing transcript content ([reliability](docs/reliability.md)). Loopback test
+servers read request bodies, and an ast check flags `tests/*.py` body handlers (`do_POST`, `do_PUT`, `do_PATCH`) that
+never read the request body. v0.30.0 and older refuse fixtures with `role` and cannot inspect or compare runs prepared
+with it.
 
 v0.27.0 adds opt-in [improvement experiments](docs/improvement-experiments.md): baseline, general,
 specialized and composed candidate lineage bound to compatible native execution receipts, keep-base or
@@ -217,7 +249,7 @@ Windows contention can fail closed and receipts do not certify external effects.
 <details>
 <summary><b>Full feature summary (English)</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 15 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), and 15 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 15 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), an opt-in deny-zone PreToolUse guard template for Claude Code that answers only deny or ask and is never installed by default (a guard, not a sandbox), and 15 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -295,7 +327,7 @@ v0.17.0에는 선택형 **도구 어댑터**가 추가됐다. 첫 어댑터는 A
 | `/vault-recall 질의` | 출처 경로·행 번호가 있는 어휘 검색, 추정 컨텍스트 예산 적용 (읽기 전용) |
 | `/vault-judge 의미 질문` | 승인된 원문 발췌의 고정 선택지 판단 + 확률/확신도 + 로컬 출처 (외부 API, 참고용) |
 | `/jev-ask 1+1은?` | 볼트 없이 직접 질문·선택한 인라인 문맥을 native Noul·Choice·Score로 평가 (승인 범위 내) |
-| `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 + 도구 어댑터(Aside) 상태 (읽기 전용) |
+| `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 + 도구 어댑터(Aside)와 선택형 deny zone 가드의 설치 상태 (읽기 전용) |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
 | `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
@@ -483,7 +515,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.31.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.32.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -527,10 +559,10 @@ agentic-vault/
 │       ├── jev_ask.py                 ← 인라인 Noul·Choice·Score · prepare/run --input -
 │       ├── jev_client.py              ← Jev 고정 선택지 API (stdlib-only, 한 번 호출) · 비밀 필터 단일 출처
 │       ├── vault_doctor.py            ← 설정·파일·예산 원인별 진단
-│       ├── vault_adapters.py          ← 선택형 도구 어댑터(Aside) 상태 읽기 전용 진단
+│       ├── vault_adapters.py          ← 선택형 도구 어댑터(Aside·deny zone 가드) 상태 읽기 전용 진단
 │       ├── vault_proposals.py         ← 교훈 제안 이력 + 대상 해시 확인 후 적용
 │       ├── vault_evidence.py          ← 파일 버전·검증 근거 연결 + 현재 상태에 따른 인계
-│       ├── vault_paths.py             ← 경로·deny zone·링크 규칙 단일 출처 (healthcheck는 테스트로 고정한 사본)
+│       ├── vault_paths.py             ← 경로·deny zone·링크 규칙 단일 출처 (healthcheck·deny zone 가드는 테스트로 고정한 사본)
 │       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
 │
 ├── assets/templates/                  ← 노트·시스템 템플릿 + 엔진 rules
@@ -549,6 +581,12 @@ agentic-vault/
 │   ├── operations-guide.md            ← 운영 가이드 노트 뼈대
 │   └── settings-hooks.json            ← aside 명령에만 걸리는 PreToolUse 훅
 │
+├── assets/adapters/deny-guard/        ← 선택형 deny zone 가드, Claude Code 전용 (/vault-init이 따로 묻고 승인 후 설치)
+│   ├── deny-guard.py                  ← PreToolUse 훅 스크립트 (deny·ask만 내고 allow는 내지 않음)
+│   ├── ps-parse.ps1                   ← PowerShell 명령 구문 분석용 자식 프로세스
+│   ├── guide.md                       ← 판정표·켜는 법·상태 보고·지연 실측·한계
+│   └── settings-hooks.json            ← 8개 도구에 걸리는 PreToolUse 훅 조각 (onFailure: block)
+│
 └── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️
     ├── pre-commit                     ← 커밋 시점 fail-closed 검증 (프런트매터·YAML 위키링크)
     └── pre-push                       ← 원격 push 차단 (로컬 전용 기계 강제)
@@ -562,17 +600,21 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.31.0**이며 **Claude Code, Codex 겸용**이다. `vault_runs.py flips`는 호환되는 두 완료 실행을 사례·assertion별로 맞대어 개선 뒤 실패로 뒤집힌 검사를 따로 세고, assertion의 선택 키 `role`(`correction`·`retention`)로 정정·유지 등급을 낸다([사용법](docs/tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)). `role`이 있는 fixture는 v0.30.0 이하가 거절하며, 그런 fixture로 준비한 실행은 v0.30.0 이하에서 조회·비교할 수 없다. 시간 대장의 `check-support`는 다른 대장의 사실 표에만 있는 값을 두 필드로 표시하고, 선택형 `--primary-text-only`는 그 행을 뒷받침되지 않은 것으로 센다([사용법](docs/hardening.md#다른-대장의-사실-표에만-있는-값)). 선택형 `--normalize-periods`는 날짜·분기·반기·회계연도 표현을 날짜 구간으로 따로 대조한다. 해석하지 못한 기간과 고정 목록에 있는 수식어·범위 기호·나열 표기는 보류하지만, 목록 밖의 말이나 표기는 읽지 않으므로 기간 전체나 범위의 한쪽 끝, 나열의 한 항목으로 비교되어 틀린 `equal`·`contained`가 나올 수 있다([사용법과 한계](docs/hardening.md#기간-표현-정규화---normalize-periods)). 선택형 `vault_doctor.py --session-evidence`는 지정한 Claude Code 세션 기록 하나에서 SessionStart 훅의 실행·실패·잘림을 내용 없이 보고한다([읽는 값과 한계](docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)). 시험용 루프백 서버는 요청 본문을 읽고, ast 검사는 `tests/*.py`의 `do_POST`·`do_PUT`·`do_PATCH` 처리기 가운데 요청 본문을 읽는 호출이 없는 것을 찾아낸다. 기본 출력에서 바뀌는 것은 `check-support` 결과의 두 필드뿐이다. **경고를 `fatal`로 승격한 볼트는 `checker_sha256`가 바뀌므로 갱신·되돌리기 전에 [업그레이드 안내](docs/releases/v0.31.0.md#하위호환업그레이드)를 따른다.** [이번 변경·검증 범위](docs/releases/v0.31.0.md)를 함께 본다. 기본 훅·검색·15명령·Python 3.10+ 표준 라이브러리를 유지하며 모델·네트워크 호출이나 자동 적용을 추가하지 않는다.
+현재 버전은 **v0.32.0**이며 **Claude Code, Codex 겸용**이다. 기본 lint(SessionStart 비동기 healthcheck·pre-commit `--staged`)·`check-support`·healthcheck full 모드·`/vault-recall`이 노트마다 돌리던 제목·frontmatter·인라인 코드·링크 정규식은 꾸민 한 줄에서 이차·삼차 시간이 걸렸다(공백 64,000개가 든 대장 제목 한 줄에 21.15초, 새 처리는 1.4 µs. 2026-10-27 한 Windows PC 측정). 한정된 전수 비교에서 예전 식과 같은 결과를 내는 선형 처리로 바꿨고, 켜는 옵션이나 출력 필드는 없다([바꾼 곳과 근거의 범위](docs/hardening.md#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)).
+<!-- TODO(host, item 1e): feat/r6-regex4-20261027 had no commits when this was written. After merging it, describe its jev_client.SENSITIVE scan and Jarvis wiki-link substitution here in Korean; if it is not merged, drop jev_client.py from the file list in the v0.26.0 paragraph below. -->
+`check-support`는 인용 본문을 세 곳에서 같게 읽도록 고쳐 그 경우에만 기본 출력이 바뀐다. 사실 표를 뺀 자리의 위아래 글을 한 값·기간으로 잇지 않고, frontmatter가 있는 노트도 CR·LF에서만 줄을 나누며, 자기 인용 대장 맨 앞의 BOM을 떼고 frontmatter를 정한다([표를 뺀 자리와 줄 나눔](docs/hardening.md#표를-뺀-자리와-줄-나눔)). 선택형 `--normalize-periods`는 잘못 읽던 꼴(영문 `late`·`mid` 같은 앞말, 기간 안의 달 목록, `중`·`내`·`동안` 뒤의 좁히는 말, `은`·`는`·`이`·`가`·`도`가 이어진 `말`, 회계연도와 표시 사이의 다른 이음 문자, 두 회계연도 사이의 표시)을 더 보류하고, v0.31.0이 지나치게 보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패는 생성한 사례로 수를 고정한다([알려진 실패 목록](docs/hardening.md#기간-정규화의-알려진-실패-목록)). 새 선택형 도구도 있다. `evaluate_recall.py --gold-removal-twins`는 답 있는 질문마다 답을 담은 노트를 뺀 볼트에서 다시 검색해 답 없음 표본을 만들고 빈 결과라는 한 작동점만 보고한다(recall_hard의 legacy 팔은 쌍둥이 56개 중 30개에서 후보를 돌려줬다. 2026-10-27 측정, 시험으로 고정). `--redact-row-order token`은 키 가명화 보고서의 행을 골드셋 순서 대신 가명 토큰 순으로 정렬한다([답 없음 쌍둥이](docs/memory-evaluation.md#답-없음-쌍둥이)). 저장소 도구 `scripts/real_vault_audit.py`는 실제 볼트 참조의 무작위 표본을 뽑고, 사람이 빠짐없이 라벨하면 놓친 수의 초기하 정확 상한을 낸다(500개 중 20개를 봐서 0건이면 신뢰수준 95%에서 많아야 68개, [사용법과 한계](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)). 훅·CI·기본 실행에는 연결하지 않는다. Claude Code 전용 [deny zone 가드 템플릿](assets/adapters/deny-guard/guide.md)(`assets/adapters/deny-guard/`)은 기본으로 설치하지 않으며 `/vault-init`이 따로 묻고, `vault_adapters.py`와 `/vault-doctor`가 `adapters.deny_guard`로 상태를 보고한다. 병합하면 Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell 호출이 deny zone을 가리킬 때 `deny`나 `ask`만 내고, 대상 호출마다 Python 시작을 기다린다(측정한 Windows PC에서 중앙값 0.37~0.52초, 구역이나 가드 제어 파일 이름이 보이는 PowerShell 명령은 구문 분석기를 더 띄워 약 1초). 가드이지 샌드박스가 아니다([한계](SECURITY.md)). **경고를 `fatal`로 승격한 볼트는 `checker_sha256`가 바뀌므로 갱신·되돌리기 전에 [업그레이드 안내](docs/releases/v0.32.0.md#하위호환업그레이드)를 따른다.** [이번 변경·검증 범위](docs/releases/v0.32.0.md)를 함께 본다. 기본 훅(`hooks/hooks.json`)·검색·15명령·Python 3.10+ 표준 라이브러리를 유지하며 모델·네트워크 호출이나 자동 적용을 추가하지 않는다.
+
+v0.31.0의 읽기 전용 `vault_runs.py flips`와 assertion의 선택 키 `role`(`correction`·`retention`, [사용법](docs/tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)), 시간 대장 `check-support`의 다른 대장 사실 표 표시와 선택형 `--primary-text-only`([사용법](docs/hardening.md#다른-대장의-사실-표에만-있는-값)), 선택형 `--normalize-periods`와 `vault_doctor.py --session-evidence`를 유지한다. `role`이 있는 fixture는 v0.30.0 이하가 거절하며, 그런 fixture로 준비한 실행은 v0.30.0 이하에서 조회·비교할 수 없다. `--normalize-periods`는 날짜·분기·반기·회계연도 표현을 날짜 구간으로 따로 대조한다. 해석하지 못한 기간과 고정 목록에 있는 수식어·범위 기호·나열 표기는 보류하지만, 목록 밖의 말이나 표기는 읽지 않으므로 기간 전체나 범위의 한쪽 끝, 나열의 한 항목으로 비교되어 틀린 `equal`·`contained`가 나올 수 있다([사용법과 한계](docs/hardening.md#기간-표현-정규화---normalize-periods)). `--session-evidence`는 지정한 Claude Code 세션 기록 하나와, 상태 표시 문구를 확인하려고 이 플러그인 설치본의 `hooks/hooks.json`(읽기 전용)을 읽어 SessionStart 훅의 실행·실패·잘림을 내용 없이 보고한다([읽는 값과 한계](docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)). 시험용 루프백 서버는 요청 본문을 읽고, ast 검사는 `tests/*.py`의 `do_POST`·`do_PUT`·`do_PATCH` 처리기 가운데 요청 본문을 읽는 호출이 없는 것을 찾아낸다.
 
 v0.30.0의 [평가기 식별·개선 비용 근거](docs/improvement-accounting.md)(선택한 평가기 코드·설정 스냅샷 연결, 실패·버린 시도까지 합산하는 비용 근거, 미측정 값 `null`)와 v0.29.0의 선택형 응답률·조용한 오류율(`--answer-rates`)·회수 성공률 하한(`--success-bounds`)·`preserve-check`를 유지한다. 평가기를 지정하지 않은 기존 manifest·ID는 그대로다. 응답률·하한은 고른 평가 결과의 서술 값이며 실제 모델·업무 성능을 측정하지 않는다. `preserve-check`는 위치를 보지 않고 등장 횟수만 세므로 맞바꾸거나 같은 값을 다른 곳에 더해 가린 변경은 잡지 못하고, 선언한 문구 뒤에 띄어 쓴 부정(`필요 없음`)도 문구가 그대로 남아 잡히지 않으며, 리터럴 일치는 의미 보존이 아니다. AgentOnto(arXiv 2610.23317)에서는 설계 원리만 가져왔고 논문 수치는 근거로 쓰지 않는다. v0.28.0의 [기억 형성 오염 대조시험](docs/memory-formation.md)·[현재 값 근거 조립](docs/memory-assembly.md)·[실행 근거에 연결된 절차 검색](docs/procedural-recall.md)을 유지한다. 형성 대조시험은 고정 합성 자료이며 실제 모델 내성을 측정하지 않는다. 현재 값 조립은 명시 scope/polarity가 없는 대장을 보류하고 자동 이행하지 않는다. 절차 검색의 원문·영수증 연결은 전체 절차 실행이나 권한의 인증이 아니다. 기존 [Harness² 기반 개선 실험](docs/improvement-experiments.md)의 후보 계보·현행 유지/보류·수정별 근거·NO_ENTRY를 유지한다. v0.28.0 [구현 검증 기록](docs/verification/memory-reliability-20261022.md)에 최초 문서 오류와 수정 후 재검증을 보존한다. 공개 배포·활성 설치·운영 볼트 반영은 별도다.
 
-v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단의 디렉터리 이름 목록 대조, [골드셋 보고서 키 가명화](docs/memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](docs/release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 분류와 반복 측정](docs/evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)을 유지한다. v0.26.0에서 `checker_sha256`가 묶는 `vault_provenance.py`가 바뀌었으므로 v0.25.0 이하에서 만든 경고 승격 인증서는 맞지 않는다. 해당 볼트는 갱신 전에 [v0.26.0 업그레이드 안내](docs/releases/v0.26.0.md#하위호환업그레이드)를 따른다. v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 볼트를 읽는 Claude Code·Codex 설치본을 함께 갱신한다. v0.31.0은 검사기 일곱 파일 가운데 `vault_ssot.py`를 바꿨으므로 `checker_sha256`가 v0.26.0~v0.30.0의 `84cf5235…`에서 `d8f9559a…`로 바뀐다(corpus `38efaabd…`는 같다). 그래서 v0.30.0 이하에서 만든 경고 승격 인증서는 새 설치본에서, 새 설치본에서 만든 인증서는 이전 설치본에서 맞지 않는다. 경고를 `fatal`로 승격한 볼트에서 맞지 않는 인증서는 healthcheck를 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않게 하며, staged 검사(`--staged`)로 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를 보고하게 한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, `check-support`를 포함한 `vault_ssot.py`는 `ssot_operation_unavailable`). 갱신하거나 되돌리기 전에 승격 단계를 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다([v0.31.0 업그레이드 안내](docs/releases/v0.31.0.md#하위호환업그레이드)). 인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등이 다른 설치본에서도 맞지 않을 수 있다.
+v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단의 디렉터리 이름 목록 대조, [골드셋 보고서 키 가명화](docs/memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](docs/release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 분류와 반복 측정](docs/evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)을 유지한다. v0.26.0에서 `checker_sha256`가 묶는 `vault_provenance.py`가 바뀌었으므로 v0.25.0 이하에서 만든 경고 승격 인증서는 맞지 않는다. 해당 볼트는 갱신 전에 [v0.26.0 업그레이드 안내](docs/releases/v0.26.0.md#하위호환업그레이드)를 따른다. v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 볼트를 읽는 Claude Code·Codex 설치본을 함께 갱신한다. v0.31.0은 검사기 일곱 파일 가운데 `vault_ssot.py`를 바꿨으므로 `checker_sha256`가 v0.26.0~v0.30.0의 `84cf5235…`에서 `d8f9559a…`로 바뀐다. v0.32.0은 그 가운데 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`·`vault_paths.py`를 바꿨으므로 `checker_sha256`가 v0.31.0의 `d8f9559a…`에서 `⟦CHECKER_SHA256⟧`로 바뀐다(corpus `38efaabd…`는 같다). 그래서 v0.31.0 이하에서 만든 경고 승격 인증서는 v0.32.0 설치본에서, v0.32.0 설치본에서 만든 인증서는 이전 설치본에서 맞지 않는다. 경고를 `fatal`로 승격한 볼트에서 맞지 않는 인증서는 healthcheck를 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않게 하며, staged 검사(`--staged`)로 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를 보고하게 한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, `check-support`를 포함한 `vault_ssot.py`는 `ssot_operation_unavailable`). 갱신하거나 되돌리기 전에 승격 단계를 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다([v0.32.0 업그레이드 안내](docs/releases/v0.32.0.md#하위호환업그레이드)). 인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등이 다른 설치본에서도 맞지 않을 수 있다. 인증서가 묶는 corpus 파일(`lint-benign-v1.json`)은 이제 `core.autocrlf=true`인 Windows git checkout에서도 LF로 받는다. 이미 CRLF로 받은 checkout은 그 파일을 지우고 다시 받아야 corpus 해시가 `38efaabd…`가 된다([수집과 경고](docs/hardening.md#수집과-경고)).
 
 v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md), v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.31.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.32.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.31.0) 경로는 v0.31.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.31.0 검증 기록](docs/verification/v0.31.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.32.0) 경로는 v0.32.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.32.0 검증 기록](docs/verification/v0.32.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -615,7 +657,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.31.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.32.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -628,7 +670,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 
 Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). Windows에서 훅 실행은 `sh`(Git Bash)를 요구한다(Claude Code Windows가 이미 요구하는 구성). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
 
-**Claude Code는 2.1.295 이상을 권장한다.** 그 이전 버전은 이 플러그인이 `startup|clear|resume`에 등록한 비동기 건강 검사 SessionStart 훅의 바뀌지 않은 컨텍스트를 resume할 때마다 대화에 다시 붙일 수 있다. 근거는 [Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)의 2.1.295 항목 "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume"이다(2026-10-19 원문 확인, 이 저장소에서는 재현하지 않았다). handoff·hot을 넣는 `session_start.py`는 동기 훅이라 이 수정 항목의 대상이 아니다. 권장일 뿐 낮은 버전의 설치나 훅 실행을 막지 않으며 `hooks/hooks.json`은 바꾸지 않았다. 같은 버전에 추가된 `onFailure: "block"`은 훅이 시작하지 못하거나 시간 초과·예상 밖 종료 코드로 끝날 때 동작을 막도록 실패 동작을 바꾸므로 채택하지 않았고, Codex에서는 대응 필드가 확인되지 않았다. 설치된 버전은 `vault_doctor.py --host-version`으로 확인하고, 훅 소요 시간과 resume 동작은 [실측 절차(아직 실행하지 않음)](docs/reliability.md#호스트-버전과-sessionstart-실측)를 따른다.
+**Claude Code는 2.1.295 이상을 권장한다.** 그 이전 버전은 이 플러그인이 `startup|clear|resume`에 등록한 비동기 건강 검사 SessionStart 훅의 바뀌지 않은 컨텍스트를 resume할 때마다 대화에 다시 붙일 수 있다. 근거는 [Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)의 2.1.295 항목 "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume"이다(2026-10-19 원문 확인, 이 저장소에서는 재현하지 않았다). handoff·hot을 넣는 `session_start.py`는 동기 훅이라 이 수정 항목의 대상이 아니다. 권장일 뿐 낮은 버전의 설치나 훅 실행을 막지 않으며 `hooks/hooks.json`은 바꾸지 않았다. 같은 버전에 추가된 `onFailure: "block"`은 훅이 시작하지 못하거나 시간 초과·예상 밖 종료 코드로 끝날 때 동작을 막도록 실패 동작을 바꾸므로 `hooks/hooks.json`에는 채택하지 않았고(v0.32.0의 선택형 deny zone 가드 템플릿만 자기 설정 조각에서 쓴다), Codex에서는 대응 필드가 확인되지 않았다. 설치된 버전은 `vault_doctor.py --host-version`으로 확인하고, 훅 소요 시간과 resume 동작은 [실측 절차(아직 실행하지 않음)](docs/reliability.md#호스트-버전과-sessionstart-실측)를 따른다.
 
 ---
 

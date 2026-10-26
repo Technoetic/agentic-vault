@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.31.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.30.0 and earlier | No. Upgrade to 0.31.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. |
+| 0.32.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.31.0 and earlier | No. Upgrade to 0.32.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -209,7 +209,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.31.0 소스다. 0.30.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.31.0으로 갱신한다.
+- 보안 수정 대상은 최신 0.32.0 소스다. 0.31.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.32.0으로 갱신한다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.

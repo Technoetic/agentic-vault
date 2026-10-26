@@ -26,13 +26,14 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [procedural-recall.md](procedural-recall.md) | 현재 native 실행 근거·재사용 조건과 명시적 단계 의존성을 검증하는 읽기 전용 절차 후보 검색 |
 | [link-proposals.md](link-proposals.md) | 관련 노트 후보·해시·검토용 diff를 반환하는 읽기 전용 연결 제안 |
 | [memory-patterns.md](memory-patterns.md) | 아홉 논문/공식 코드의 적용 범위, 시간·연결·BM25/RRF·qmd·기억 단위·교훈 관측·연속 작업 평가, 선택형 한글 음절 bigram BM25 |
-| [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가와 실패 진단, 시간 유효성 render-matched 대조군, 선택형 소표본 정확 부호 검정·비율 상한, 선택형 실제 볼트 골드셋 제자리 평가·dev/held-out 분할·키 기반 가명화(v0.26.0), 선택형 응답률·조용한 오류율(`--answer-rates`)·회수 성공률 하한(`--success-bounds`)(v0.29.0), 선택형 답 없음 쌍둥이(`--gold-removal-twins`)·가명화 보고서 행 토큰 정렬(`--redact-row-order token`)(소스) |
+| [memory-evaluation.md](memory-evaluation.md) | 한국어 근거·구조화 답변 분리 평가, 생성된 상태 변경 순서, 선택형 합성 도구 호출 평가와 실패 진단, 시간 유효성 render-matched 대조군, 선택형 소표본 정확 부호 검정·비율 상한, 선택형 실제 볼트 골드셋 제자리 평가·dev/held-out 분할·키 기반 가명화(v0.26.0), 선택형 응답률·조용한 오류율(`--answer-rates`)·회수 성공률 하한(`--success-bounds`)(v0.29.0), 선택형 답 없음 쌍둥이(`--gold-removal-twins`)·키 가명화 보고서의 행 토큰 정렬(`--redact-row-order token`)과 저장소 도구 `scripts/real_vault_audit.py`의 실제 볼트 표본 감사(초기하 정확 상한)(v0.32.0) |
 | [evaluation-stability.md](evaluation-stability.md) | v0.24.0의 선택형 언어·문자열 보존 매트릭스, 공개 fixture Kiwi/qmd 순위 비교, Windows 편집 보강과 실제 관측의 한계, v0.25.0의 선택형 측정 조건 기록(프롬프트 캐시·슬롯 부하·반복 일치), v0.26.0의 간헐 실패 테스트의 실패 분류와 반복 측정(x/N·정확 상한) 규칙, v0.31.0의 요청 본문을 읽는 루프백 시험 서버와 ast 검사 |
-| [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0), 다른 대장의 사실 표에만 있는 값 표시(`ledger_table_only`)·선택형 `--primary-text-only`와 기간 표현 정규화(`--normalize-periods`)(v0.31.0) |
+| [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0), 다른 대장의 사실 표에만 있는 값 표시(`ledger_table_only`)·선택형 `--primary-text-only`와 기간 표현 정규화(`--normalize-periods`)(v0.31.0), 기본 경로 정규식(제목·frontmatter 줄, 인라인 코드·링크 등)의 선형 시간 처리, `check-support`의 표를 뺀 자리·줄 나눔·자기 인용 BOM 처리, 기간 정규화의 보류 보강·과잉 보류 해소와 생성 시험으로 고정한 알려진 실패 목록, 인증서 corpus 파일의 LF checkout(v0.32.0) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
-| [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차 |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.31.0](releases/v0.31.0.md); [검증 기록](verification/v0.31.0.md) |
-| [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계 |
+| [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차, 고정한 action 커밋의 정확한 태그 주석(v0.32.0) |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.32.0](releases/v0.32.0.md); [검증 기록](verification/v0.32.0.md) |
+| [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계(선택형 deny zone 가드 포함, v0.32.0) |
+| [../assets/adapters/deny-guard/guide.md](../assets/adapters/deny-guard/guide.md) | 선택형 deny zone 가드(Claude Code 전용 PreToolUse 훅 템플릿, 기본 설치 안 함)의 판정표·PowerShell 구문 분석·켜는 법·상태 보고(`adapters.deny_guard`)·지연 실측·한계(v0.32.0) |
 
 ## 내부 작업 기록 / Internal work records
 

@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.31.0",
+  "version": "0.32.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.31.0: vault_runs flips counts per-assertion pass-to-fail flips between compatible completed runs; an optional assertion role adds FULL/PARTIAL/NO grades without changing scores or decisions. Ledger check-support marks rows backed only by another ledger's fact table (the only default-output change); --primary-text-only counts them as unsupported and --normalize-periods compares period expressions as date intervals or abstains. vault_doctor --session-evidence reports from one named Claude Code transcript whether SessionStart hooks ran, failed or were truncated, without content. checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again. No model/network call, default hook/search change or automatic vault migration is added.",
+    "longDescription": "Release v0.32.0: default-path heading, frontmatter, code-span and wiki-link parsing runs in linear time with the same results on tested inputs. check-support no longer joins text across a removed fact table, splits cited bodies only at CR/LF and drops a self-cited ledger's BOM; only these cases change its default output. Opt-in --normalize-periods abstains on more misread forms. New opt-in tools: evaluate_recall --gold-removal-twins and keyed --redact-row-order token, a real-vault sample audit with an exact hypergeometric miss bound, and a Claude Code-only deny-zone PreToolUse guard template, never installed by default. checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again. No model/network call, default hook change or automatic vault migration is added.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

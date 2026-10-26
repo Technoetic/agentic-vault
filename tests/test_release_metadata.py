@@ -21,15 +21,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.31.0"
-EXPECTED_PUBLIC_REF = "0.31.0"
+EXPECTED = "0.32.0"
+EXPECTED_PUBLIC_REF = "0.32.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.31.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.31.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.32.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.32.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.31.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.32.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -345,9 +345,14 @@ REQUIRED_V0230_RELEASE_LITERALS = (
 RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
 CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
 CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3fbfcbeb9c"
+# v0.32.0 changes five of the seven bound files again (vault_ssot.py, vault_lint_extensions.py,
+# vault_provenance.py, jev_client.py and the vault_paths.py docstring). The release host writes the
+# final digest in place of the placeholder once the last bound file has changed; until then the
+# shipped-hash test below fails on purpose.
+CHECKER_SHA256_V0320 = "⟦CHECKER_SHA256⟧"
 # checker_sha256 of the seven bound files as shipped now. A change to any of them invalidates
 # promoted vaults' certificates: update this pin together with a release note upgrade section.
-CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0310
+CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0320
 REQUIRED_V0310_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
 REQUIRED_V0310_RELEASE_LITERALS = (
     # Per-assertion flips and correction/retention roles (vault_runs.py).
@@ -379,12 +384,15 @@ REQUIRED_V0310_RELEASE_LITERALS = (
 )
 SESSION_EVIDENCE_SCRIPT = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_session_evidence.py"
 # Each file states the current checker hash this many times (README in English and Korean), so a
-# stale second statement fails as well as a missing one. The 169d8a6 digest is history and may
-# appear only in the verification record's phrase below.
+# stale second statement fails as well as a missing one. README, the Codex guide and the hardening
+# lead state the v0.32.0 digest in full; earlier digests keep their eight-character form there.
 CURRENT_CHECKER_HASH_COUNTS = {
     "README.md": 2, "docs/codex.md": 1, "docs/hardening.md": 1,
-    "docs/releases/v0.31.0.md": 1, "docs/verification/v0.31.0.md": 1,
+    "docs/releases/v0.32.0.md": 1, "docs/verification/v0.32.0.md": 1,
 }
+# Records of v0.31.0 that state its digests as history. The 169d8a6 digest may appear only in the
+# v0.31.0 verification record's phrase below.
+CHECKER_HISTORY_RECORDS = ("docs/releases/v0.31.0.md", "docs/verification/v0.31.0.md")
 CHECKER_SHA256_V0240_TO_V0250_PREFIX = "2ef4b9d4"
 CHECKER_SHA256_AT_169D8A6_PREFIX = "832a86f9"
 CHECKER_HISTORY_AT_169D8A6 = (
@@ -392,22 +400,39 @@ CHECKER_HISTORY_AT_169D8A6 = (
     "before the pre-release cleanup edited `vault_ssot.py` again)"
 )
 _OLD_HASH = f"`{CHECKER_SHA256_V0260_TO_V0300[:8]}…`"
-_NEW_HASH = f"`{CHECKER_SHA256_V0310[:8]}…`"
+_V031_HASH = f"`{CHECKER_SHA256_V0310[:8]}…`"
 _V025_HASH = f"`{CHECKER_SHA256_V0240_TO_V0250_PREFIX}…`"
-# Old-to-new hash statements. Prose is compared with whitespace runs folded to one space, so
-# rewrapping a Markdown paragraph does not matter but a changed hash or version range does.
+_V032_HASH = f"`{CHECKER_SHA256_V0320}`"
+# Old-to-new hash statements of v0.31.0 that still hold as history. Prose is compared with
+# whitespace runs folded to one space, so rewrapping a Markdown paragraph does not matter but a
+# changed hash or version range does.
 REQUIRED_V0310_HASH_STATEMENTS = (
     ("docs/releases/v0.31.0.md",
      f"v0.26.0~v0.30.0의 `{CHECKER_SHA256_V0260_TO_V0300}`에서 `{CHECKER_SHA256_V0310}`로 바뀐다"),
     ("docs/verification/v0.31.0.md",
      f"`{CHECKER_SHA256_V0260_TO_V0300}` at v0.26.0 to v0.30.0, `{CHECKER_SHA256_V0310}` in v0.31.0 "
      + CHECKER_HISTORY_AT_169D8A6),
-    ("README.md", f"binds ({_OLD_HASH} in v0.26.0 to v0.30.0, now {_NEW_HASH})"),
-    ("README.md", f"`checker_sha256`가 v0.26.0~v0.30.0의 {_OLD_HASH}에서 {_NEW_HASH}로 바뀐다"),
-    ("docs/codex.md", f"`vault_ssot.py`를 바꿨다({_OLD_HASH}에서 {_NEW_HASH}로"),
+    ("README.md", f"`checker_sha256`가 v0.26.0~v0.30.0의 {_OLD_HASH}에서 {_V031_HASH}로 바뀐다"),
+    ("docs/codex.md", f"`vault_ssot.py`를 바꿨다({_OLD_HASH}에서 {_V031_HASH}로"),
     ("docs/codex.md", f"`vault_provenance.py`를 바꿨다({_V025_HASH}에서 {_OLD_HASH}로"),
+)
+# The v0.32.0 statements: the v0.31.0 digest as history, then the full v0.32.0 digest.
+REQUIRED_V0320_HASH_STATEMENTS = (
+    ("README.md",
+     f"binds ({_OLD_HASH} in v0.26.0 to v0.30.0, {_V031_HASH} in v0.31.0, now {_V032_HASH})"),
+    ("README.md", f"`checker_sha256`가 v0.31.0의 {_V031_HASH}에서 {_V032_HASH}로 바뀐다"),
+    ("docs/codex.md", f"`vault_paths.py`를 바꿨다({_V031_HASH}에서 {_V032_HASH}로"),
     ("docs/hardening.md",
-     f"v0.24.0·v0.25.0의 `checker_sha256`는 {_V025_HASH}, v0.26.0~v0.30.0은 {_OLD_HASH}, v0.31.0은 {_NEW_HASH}."),
+     f"v0.24.0·v0.25.0의 `checker_sha256`는 {_V025_HASH}, v0.26.0~v0.30.0은 {_OLD_HASH}, "
+     f"v0.31.0은 {_V031_HASH}, v0.32.0은 {_V032_HASH}."),
+)
+# Statements that would present the v0.31.0 digest, upgrade note or description as current.
+FORBIDDEN_V0320_STALE_STATEMENTS = (
+    ("README.md", f"now {_V031_HASH}"),
+    ("README.md", "[upgrade section](docs/releases/v0.31.0.md"),
+    ("docs/codex.md", "v0.30.0 이하에서 만든 인증서는 새 설치본에서"),
+    ("docs/hardening.md", f"v0.31.0은 {_V031_HASH}. corpus"),
+    (".codex-plugin/plugin.json", "Release v0.31.0"),
 )
 # The release note's upgrade order: which engine copies a certificate must match, that rollback
 # follows the same order, then steps 1-4 as consecutive list lines.
@@ -427,6 +452,7 @@ V0310_UPGRADE_STEPS = (
     "4. 단계를 다시 `fatal`로 올린다.",
 )
 # Every shorter statement of the order keeps the vault's engine copy, rollback and promoting again.
+# The v0.32.0 surfaces repeat these sentences unchanged, and so does the Codex long description.
 REQUIRED_V0310_UPGRADE_SENTENCES = (
     ("README.md",
      "Before upgrading or rolling back, return promoted levels to `warning`; bring every engine copy that "
@@ -617,14 +643,15 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checker_sha256"], CURRENT_CHECKER_SHA256)
         texts = {rel_path: (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-                 for rel_path in (*CURRENT_CHECKER_HASH_COUNTS, ".codex-plugin/plugin.json",
-                                  "SECURITY.md", "docs/README.md")}
-        for rel_path in ("docs/releases/v0.31.0.md", "docs/verification/v0.31.0.md"):
+                 for rel_path in (*CURRENT_CHECKER_HASH_COUNTS, *CHECKER_HISTORY_RECORDS,
+                                  ".codex-plugin/plugin.json", "SECURITY.md", "docs/README.md")}
+        for rel_path in CURRENT_CHECKER_HASH_COUNTS:
             with self.subTest(path=rel_path):
                 self.assertIn(CURRENT_CHECKER_SHA256, texts[rel_path])
+        # README, the Codex guide and the hardening lead give the current digest in full, as code.
         for rel_path in ("README.md", "docs/codex.md", "docs/hardening.md"):
-            with self.subTest(path=rel_path):
-                self.assertIn(f"`{CURRENT_CHECKER_SHA256[:8]}…`", texts[rel_path])
+            with self.subTest(path=rel_path, form="full"):
+                self.assertIn(f"`{CURRENT_CHECKER_SHA256}`", texts[rel_path])
         # Exact counts: every statement of the hash is current, not only one of them.
         for rel_path, expected in CURRENT_CHECKER_HASH_COUNTS.items():
             with self.subTest(path=rel_path, count=expected):
@@ -634,9 +661,12 @@ class ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(path=rel_path, digest_at_169d8a6=expected):
                 self.assertEqual(text.count(CHECKER_SHA256_AT_169D8A6_PREFIX), expected)
         self.assertIn(CHECKER_HISTORY_AT_169D8A6, _folded(texts["docs/verification/v0.31.0.md"]))
-        for rel_path, statement in REQUIRED_V0310_HASH_STATEMENTS:
+        for rel_path, statement in (*REQUIRED_V0310_HASH_STATEMENTS, *REQUIRED_V0320_HASH_STATEMENTS):
             with self.subTest(path=rel_path, statement=statement):
                 self.assertIn(statement, _folded(texts[rel_path]))
+        for rel_path, stale in FORBIDDEN_V0320_STALE_STATEMENTS:
+            with self.subTest(path=rel_path, stale=stale):
+                self.assertNotIn(stale, _folded(texts[rel_path]))
 
     def test_v0230_release_note_covers_the_contract(self) -> None:
         self.assertTrue(RELEASE_NOTE_V0230.is_file())

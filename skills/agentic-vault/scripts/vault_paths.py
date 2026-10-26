@@ -4,11 +4,17 @@ This module is the single source of three rules: which relative path segments
 are allowed, how a deny/exclude zone matches a path, and that no symlink or
 Windows reparse point (junction) is traversed. Plugin scripts import it.
 
-vault_healthcheck.py is the one exception. It is installed into each vault as a
-standalone file (00-meta/scripts/vault_healthcheck.py, run by the pre-commit
-hook without the plugin on sys.path), so it cannot import this module. It keeps
-a verbatim copy of the block between the SHARED PATH RULE markers below, and
+vault_healthcheck.py is the one exception among the plugin scripts. It is
+installed into each vault as a standalone file
+(00-meta/scripts/vault_healthcheck.py, run by the pre-commit hook without the
+plugin on sys.path), so it cannot import this module. It keeps a verbatim copy
+of the block between the SHARED PATH RULE markers below, and
 tests/test_rule_sources.py fails when the two copies differ.
+
+The opt-in deny-zone guard (assets/adapters/deny-guard/deny-guard.py) is copied
+into a vault the same way and run alone by a Claude Code PreToolUse hook. It
+keeps a verbatim copy of zone_matches between its SHARED ZONE RULE markers, and
+tests/test_rule_sources.py fails when that copy differs from the source here.
 """
 from __future__ import annotations
 

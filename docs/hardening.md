@@ -1,5 +1,13 @@
 # 출처와 공유 상태 보강
 
+v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
+Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
+바꿨다(켜는 옵션·출력 필드는 없다). `check-support`는 [표를 뺀 자리와 줄 나눔](#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을
+다르게 읽어 그 경우에만 기본 출력이 바뀌고, 선택형 기간 표현 정규화는 잘못 읽던 꼴을 더 보류하고 v0.31.0이 지나치게
+보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패를
+[생성한 사례로 센다](#기간-정규화의-알려진-실패-목록). 인증서가 묶는 corpus 파일은 `core.autocrlf=true`인 checkout에서도
+[LF로 받는다](#수집과-경고).
+<!-- TODO(host, item 1e): feat/r6-regex4-20261027 had no commits when this lead was written. Describe its linear-time jev_client.SENSITIVE scan and Jarvis wiki-link substitution here after merging it, or drop jev_client.py from the v0.32.0 file list below if it is not merged. -->
 v0.31.0은 시간 대장의 [`check-support`](#대장-값의-출처-노트-대조-vault_ssotpy-check-support)에 다른 대장의 사실 표에만
 있는 값을 표시하는 [두 필드](#다른-대장의-사실-표에만-있는-값)(기본 출력)와 선택형 `--primary-text-only`,
 선택형 [기간 표현 정규화](#기간-표현-정규화---normalize-periods)(`--normalize-periods`)를 더한다.
@@ -9,16 +17,19 @@ v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기�
 기본값이 꺼진 경고 전용 검사로 더했다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
 실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
 기존 설치 캐시와 볼트의 갱신은 별도 작업이다. `checker_sha256`가 묶는 일곱 파일 가운데 v0.26.0은
-[via_bot 수집 출처](#수집과-경고)를 위해 `vault_provenance.py`를, v0.31.0은 위 대장 기능을 위해 `vault_ssot.py`를
-바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는 v0.26.0 이후 설치본에서, v0.30.0 이하에서 만든 인증서는
-v0.31.0 설치본에서 맞지 않고, 그 반대 방향도 맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0~v0.30.0은 `84cf5235…`,
-v0.31.0은 `d8f9559a…`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
+[via_bot 수집 출처](#수집과-경고)를 위해 `vault_provenance.py`를, v0.31.0은 위 대장 기능을 위해 `vault_ssot.py`를,
+v0.32.0은 위 선형 처리와 본문 읽기를 위해 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`와
+설명만 고친 `vault_paths.py`를 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는 v0.26.0 이후 설치본에서, v0.30.0
+이하에서 만든 인증서는 v0.31.0 설치본에서, v0.31.0 이하에서 만든 인증서는 v0.32.0 설치본에서 맞지 않고, 그 반대 방향도
+맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0~v0.30.0은 `84cf5235…`,
+v0.31.0은 `d8f9559a…`, v0.32.0은 `⟦CHECKER_SHA256⟧`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
 `warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을
 모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다. 그러지 않으면 healthcheck가
 `promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,
 SessionStart 훅이 주입하지 않으며, staged 검사(`--staged`)가 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를
 보고한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, 아래 `vault_ssot.py`는
-`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)와
+`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.32.0 업그레이드 안내](releases/v0.32.0.md#하위호환업그레이드)·
+[v0.31.0 업그레이드 안내](releases/v0.31.0.md#하위호환업그레이드)와
 [v0.26.0 업그레이드 안내](releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
 [v0.25.0 업그레이드 안내](releases/v0.25.0.md#하위호환업그레이드)에 있다.
 
