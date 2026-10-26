@@ -325,7 +325,11 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
 
 - 일반 형식은 `{"population_id": "...", "items": [{"id": "r01", "path": "notes/대장.md", "line": 12, "match": "none"}]}`다.
   볼트 판을 묶으려면 `source_sha256`(64자리 16진)을 함께 적는다. 항목에는 `id`(필수)·`path`(볼트 상대 경로)·`line`·
-  `match`만 둔다. 값·본문 같은 다른 필드, 같은 `id`, 절대 경로는 거부한다. 그래서 노트 본문이 표본 파일에 들어가지 않는다.
+  `match`만 둔다. 값·본문 같은 다른 필드와 같은 `id`는 거부한다. 그래서 노트 본문이 표본 파일에 들어가지 않는다.
+- `path`는 `/`로 나눈 볼트 상대 경로다. 절대 경로, 역슬래시, `:*?"<>|`, 비었거나 `.`·`..`인 마디, 점이나 공백으로 끝나는
+  마디는 거부한다(`evaluate_recall.py`의 골드셋 경로 규칙에서 `.md` 조건만 뺐다). 같은 노트가 `20-knowledge\노트.md`와
+  `20-knowledge/노트.md`처럼 두 표기로 두 항목이 되지 않게 하려는 것이다. 도구는 볼트를 열지 않으므로 대소문자나 유니코드
+  정규형만 다른 두 경로가 같은 노트인지는 가리지 못한다.
 - 저장한 `vault_ssot.py check-support --normalize-periods` 결과도 받는다. `normalized_periods`에서 `normalized_match`가
   `none`인 행이 모집단이고, 항목은 `id`(`경로:줄`)·`path`·`line`·`match`(`none`)다. 결과의 `source_sha256`도 기록하고,
   경고·인용 노트 같은 다른 필드는 읽지 않는다. 이 모집단의 놓침(`miss`)은 인용 노트가 실제로는 같은(또는 안에 드는)
@@ -337,19 +341,33 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
 - 항목마다 UTF-8 텍스트 `<seed>:<항목의 정규 JSON>`(키 정렬·압축)의 SHA-256 16진 값으로 순위를 매기고(동률은 `id`)
   앞의 k개를 표본으로 한다. seed가 무작위이면 비복원 균등 추출이다(SHA-256을 무작위 함수로 보는 가정). `random.sample`과
   달리 Python 판에 따라 결과가 바뀌지 않고, 파일 안의 항목 순서도 결과를 바꾸지 않는다.
-- `--seed`(16진 1~128자리)를 주지 않으면 `secrets.token_hex(16)`으로 만든다.
-- 표본 파일에는 seed·`N`·`k`·`population_sha256`(모집단 정규 JSON의 SHA-256, 항목은 `id` 순)·`source_sha256`(있으면)과
-  순위 순의 항목 참조만 남는다. 라벨은 넣지 않는다. 이미 있는 파일은 덮어쓰지 않는다. k는 1 이상이고 5,000과 N 이하여야
-  하며, 모집단은 항목 200,000개까지 받는다.
+- 실제 감사에서는 `--seed`를 주지 않는다. 그러면 `secrets.token_hex(16)`으로 128비트 seed를 만든다. `--seed`(16진
+  1~128자리)는 기록해 둔 추출을 다시 만들 때(잃어버린 표본 파일 복구, 시험)만 쓴다. 사람이 고른 seed는 무작위가 아니고,
+  짧은 seed는 여러 개를 시험해 보고 고르기 쉽다. 그렇게 고르면 보장이 사라진다.
+- `--confidence`(기본 0.95, 0.5 초과 1 미만)는 `bound`가 쓸 단측 신뢰 수준이다. seed·k와 함께 라벨하기 전에 정해
+  표본 파일에 기록한다.
+- 표본 파일에는 seed·`N`·`k`·`confidence`·`population_sha256`(모집단 정규 JSON의 SHA-256, 항목은 `id` 순)·
+  `source_sha256`(있으면)과 순위 순의 항목 참조만 남는다. 라벨은 넣지 않는다. 이미 있는 파일은 덮어쓰지 않는다. k는 1
+  이상이고 5,000과 N 이하여야 하며, 모집단은 항목 200,000개까지 받는다.
+- `draw`의 출력에는 `sample_sha256`(표본 내용의 정규 JSON의 SHA-256)이 있다. 줄 끝·들여쓰기·인코딩과 무관하므로 git의
+  줄 끝 변환이나 UTF-16 저장으로는 바뀌지 않는다. 라벨하기 전에 이 값을 표본 파일과 따로 적어 두거나(작업 기록·커밋
+  메시지) 표본 파일을 커밋한다.
 
 **상한** (`bound`)
 
 - 라벨 파일은 `{"labels": {"<id>": "miss" 또는 "ok"}}`다. 표본의 모든 `id`를 한 번씩 라벨해야 한다. 빠지거나 남는 라벨,
   다른 값은 거부한다. `miss`의 수가 x다.
+- 신뢰 수준은 표본 파일의 `confidence`다. `bound --confidence`는 확인용이며 기록된 값과 다르면 거부한다
+  (`confidence_mismatch`). 라벨을 본 뒤 수준을 고를 수 없게 하려는 것이다(N=30, k=5, x=1이면 0.9에서 16, 0.95에서 18).
 - `--population`을 주면 모집단 파일로 `population_sha256`과 같은 seed·k의 추출을 다시 계산해, 표본과 다르면 거부한다
-  (`population_verified: true`). 손으로 바꾼 표본을 이렇게 찾는다.
-- 출력 JSON은 `N`·`k`·`x`·`confidence`(`--confidence`, 기본 0.95, 0.5 초과 1 미만)·`alpha`·`seed`·`population_sha256`·`source_sha256`(있으면)·
-  `population_verified`·`upper_misses`(K_U)·`upper_miss_share`(K_U/N)·`method`
+  (`population_verified: true`). 손으로 고르거나 바꾼 항목을 이렇게 찾는다. `--population` 없이 계산하면 표본 파일을
+  적힌 그대로 믿는다(`population_verified: false`). 항목을 빼고 `k`를 고친 표본도 받아들이므로, 결과는
+  `population_verified`가 `true`일 때만 읽는다.
+- `--population`의 재계산은 표본 항목이 기록된 seed·k의 추출인지만 확인한다. 라벨을 본 뒤 `k`를 줄여 순위 끝의 항목을
+  빼거나 `k`를 늘려 다음 순위의 항목을 더한 표본, `confidence`를 고친 표본도 통과한다. 이런 수정은 출력의
+  `sample_sha256`이 `draw`가 낸 값과 다른 것으로만 드러난다.
+- 출력 JSON은 `N`·`k`·`x`·`confidence`(표본에 기록된 값)·`alpha`·`seed`·`sample_sha256`(읽은 표본의 값)·
+  `population_sha256`·`source_sha256`(있으면)·`population_verified`·`upper_misses`(K_U)·`upper_miss_share`(K_U/N)·`method`
   (`hypergeometric_exact_inversion; integer bisection over K`)·`authority`(`human_judgement_input_not_gate`)다. `id`·라벨·
   노트 내용은 출력하지 않는다. 성공하면 x와 관계없이 종료 코드 0, 사용 오류는 내용 없는 오류 코드와 함께 2다.
 - `--flagged-true-positives T`: 검사기가 표시한 항목 전체를 라벨해 센 진양성 수 T를 주면 `lower_recall` = T/(T+K_U)와
@@ -377,9 +395,11 @@ Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서
 
 **한계**
 
-- 진짜 무작위 추출일 때만 성립한다. seed와 신뢰 수준은 라벨하기 전에 정하고 표본 파일을 먼저 남긴다. 결과가 마음에 들 때까지
-  다시 뽑거나 seed를 고르면 보장이 사라진다(논문도 다중 검정을 정식으로 다루지 않았다고 밝힌다). 손으로 고르거나 일부만 라벨한
-  표본도 같다. 도구는 기존 표본 파일을 덮어쓰지 않을 뿐 다시 뽑기를 막지는 못한다.
+- 진짜 무작위 추출일 때만 성립한다. seed·k·신뢰 수준은 라벨하기 전에 `draw`가 표본 파일에 기록하고, 사용자는 `draw`가 낸
+  `sample_sha256`을 따로 적어 둔다. 결과가 마음에 들 때까지 다시 뽑거나 seed·k·신뢰 수준을 고르면 보장이 사라진다(논문도
+  다중 검정을 정식으로 다루지 않았다고 밝힌다). 손으로 고르거나 일부만 라벨한 표본도 같다. 도구는 기존 표본 파일을
+  덮어쓰지 않고 기록과 다른 신뢰 수준을 거부할 뿐, 다시 뽑기나 표본 파일 수정은 막지 못한다. 수정은 `sample_sha256`을 적어
+  둔 값과 비교해야 드러난다.
 - 라벨이 맞다고 가정한다. 실제 놓침을 `ok`로 라벨하면 상한이 낙관적이 된다. 논문도 라벨 오류를 모형에 넣지 않는다.
 - 결과는 그 볼트의 그 시점, 한 번 고정한 모집단(`population_sha256`·`source_sha256`)에만 해당한다. 대장이 바뀌면 줄 번호도
   바뀌므로 같은 판을 보고 라벨한다. 도구는 볼트를 다시 읽어 판을 확인하지 않는다.

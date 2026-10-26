@@ -2,7 +2,7 @@
 """Draw a seeded audit sample from a real-vault population and bound the misses from its labels.
 
     python scripts/real_vault_audit.py draw --population POPULATION.json --k 20 --out SAMPLE.json
-    python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.json [--population POPULATION.json]
+    python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.json --population POPULATION.json
 
 A repository evaluation tool like flaky_repeat.py: not a plugin resource, never
 run by hooks, CI gates or default runs. It makes no network or model calls and
@@ -13,20 +13,33 @@ population is either {"population_id": ..., "items": [{"id", "path", "line",
 "match"}], "source_sha256"?} or a saved `vault_ssot.py check-support
 --normalize-periods` JSON, whose rows with normalized_match none become items
 (id "path:line"). Items may carry only those four fields, so note text never
-enters the sample. Each item is ranked by the lowercase SHA-256 hex of the
-UTF-8 text '<seed>:<canonical item JSON>' (ties by id) and the first k form the
-sample: a uniform draw without replacement when the seed is random, and the
-same draw on every Python version. Without --seed the seed comes from
-secrets.token_hex(16). The sample file records the seed, N, k, the population
+enters the sample. A path is a vault-relative POSIX path, so one note has one
+spelling: backslashes, the characters :*?"<>|, and empty, '.' or '..'
+segments or segments ending in a dot or space are refused (the goldset path
+rule of evaluate_recall.py without its .md suffix). Each item is ranked by the
+lowercase SHA-256 hex of the UTF-8 text '<seed>:<canonical item JSON>' (ties
+by id) and the first k form the sample: a uniform draw without replacement
+when the seed is random, and the same draw on every Python version. Without
+--seed the seed comes from secrets.token_hex(16), which a real audit should
+use: --seed reproduces a recorded draw, and a seed a person picks, or tries
+several of, is not random. The sample file records the seed, N, k, the
+confidence that bound will use (--confidence, default 0.95), the population
 digest, source_sha256 when present and the sampled references in rank order,
-never labels, and is never overwritten.
+never labels, and is never overwritten. draw also prints sample_sha256, the SHA-256
+of the canonical sample JSON, to note down before labelling.
 
 bound reads the sample and a labels file {"labels": {"<id>": "miss" | "ok"}}
 that labels every sampled id exactly once. x is the number of misses and the
-bound is eval_stats.hypergeometric_upper_bound(x, k, N): the largest number of
-misses K among the N items with P(X <= x | N, K, k) >= alpha. With
+bound is eval_stats.hypergeometric_upper_bound(x, k, N) at the confidence the
+sample records: the largest number of misses K among the N items with
+P(X <= x | N, K, k) >= alpha. A --confidence that differs from the recorded
+one is refused, so the level is never chosen after the labels are seen. With
 --population the population digest and the draw are recomputed and must match
-the sample. With --flagged-true-positives T, the exact count of true positives
+the sample; without it the sample is trusted as written and
+population_verified is false. The report carries the sample_sha256 of the
+sample as read, which equals the value draw printed only while the sample is
+unchanged (the recomputed draw does not cover k or the confidence). With
+--flagged-true-positives T, the exact count of true positives
 from labelling the whole flagged set, it adds lower_recall = T / (T + K) and
 upper_missed_share = K / (T + K) at the bound K. The output carries only counts,
 the seed and digests: no ids, labels or note text. It is an input for human
@@ -65,7 +78,7 @@ ITEM_FIELDS = ('id', 'path', 'line', 'match')
 LABELS = ('miss', 'ok')
 GENERIC_FIELDS = ('population_id', 'items', 'source_sha256')
 SAMPLE_FIELDS = ('tool', 'kind', 'version', 'population_id', 'population_kind', 'population_sha256',
-                 'seed', 'N', 'k', 'draw_method', 'items')
+                 'seed', 'N', 'k', 'confidence', 'draw_method', 'items')
 POPULATION_KINDS = ('generic', 'check_support_normalized_periods')
 # vault_ssot check-support output: its method names the format, and every
 # normalized_periods entry has one of these classes (vault_period.MATCHES + abstain).
@@ -82,8 +95,10 @@ SEED_RE = re.compile(r'[0-9a-f]{1,128}')
 SHA256_RE = re.compile(r'[0-9a-f]{64}')
 MATCH_RE = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
 _CONTROL_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
-# References are vault-relative: a rooted, UNC or drive path would put local directory names in a sample.
-_ABSOLUTE_RE = re.compile(r'[/\\]|[A-Za-z]:')
+# References are vault-relative POSIX paths, as vault_ssot.py writes them. A rooted, UNC or drive path would
+# put local directory names in a sample, and a backslash, '.' or '..' would give one note two spellings and
+# two digests. evaluate_recall.py refuses the same for goldset paths.
+_PATH_CHARS_REFUSED = '\\:*?"<>|'
 
 
 class UsageError(Exception):
@@ -100,6 +115,14 @@ def _load_eval_stats():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _alpha(stats, confidence, code: str):
+    """1 - confidence as an exact fraction; eval_stats.exact_alpha decides which levels are valid."""
+    try:
+        return stats.exact_alpha(confidence)
+    except ValueError as exc:
+        raise UsageError(code) from exc
 
 
 def canonical(value) -> str:
@@ -161,7 +184,8 @@ def _text(value, limit: int, code: str) -> str:
 
 def _relative_path(value, code: str) -> str:
     path = _text(value, MAX_PATH_CHARS, code)
-    if _ABSOLUTE_RE.match(path):
+    if any(char in path for char in _PATH_CHARS_REFUSED) or any(
+            part in ('', '.', '..') or part.rstrip(' .') != part for part in path.split('/')):
         raise UsageError(code)
     return path
 
@@ -265,6 +289,11 @@ def population_digest(population: dict) -> str:
     return _sha256(canonical(body))
 
 
+def sample_digest(sample: dict) -> str:
+    """SHA-256 of the canonical sample JSON, so line endings, indentation and encoding do not change it."""
+    return _sha256(canonical(sample))
+
+
 def draw_items(items, k: int, seed: str) -> list:
     """The k items with the smallest SHA-256 of '<seed>:<canonical item JSON>', ties by id."""
     ranked = sorted((_sha256(seed + ':' + canonical(item)), item['id'], index)
@@ -318,6 +347,7 @@ def _labels_from(data, ids) -> int:
 def draw(args) -> dict:
     if not 1 <= args.k <= MAX_SAMPLE:
         raise UsageError('invalid_sample_size')
+    _alpha(_load_eval_stats(), args.confidence, 'invalid_confidence')
     if args.seed is None:
         seed = secrets.token_hex(16)
     else:
@@ -335,7 +365,8 @@ def draw(args) -> dict:
               'population_sha256': population_digest(population)}
     if 'source_sha256' in population:
         sample['source_sha256'] = population['source_sha256']
-    sample.update({'seed': seed, 'N': size, 'k': args.k, 'draw_method': DRAW_METHOD,
+    # The confidence is fixed here with the seed and k, before any label exists; bound refuses another level.
+    sample.update({'seed': seed, 'N': size, 'k': args.k, 'confidence': args.confidence, 'draw_method': DRAW_METHOD,
                    'items': draw_items(population['items'], args.k, seed)})
     text = json.dumps(sample, ensure_ascii=False, indent=2) + '\n'
     try:
@@ -348,7 +379,8 @@ def draw(args) -> dict:
     except OSError as exc:
         raise UsageError('output_unwritable') from exc
     summary = {'tool': TOOL, 'command': 'draw', 'version': VERSION, 'population_kind': population['kind'],
-               'N': size, 'k': args.k, 'seed': seed, 'population_sha256': sample['population_sha256']}
+               'N': size, 'k': args.k, 'confidence': args.confidence, 'seed': seed,
+               'population_sha256': sample['population_sha256'], 'sample_sha256': sample_digest(sample)}
     if 'source_sha256' in sample:
         summary['source_sha256'] = sample['source_sha256']
     return summary
@@ -356,14 +388,17 @@ def draw(args) -> dict:
 
 def bound(args) -> dict:
     stats = _load_eval_stats()
-    try:
-        alpha = stats.exact_alpha(args.confidence)
-    except ValueError as exc:
-        raise UsageError('invalid_confidence') from exc
+    if args.confidence is not None:
+        _alpha(stats, args.confidence, 'invalid_confidence')
     true_positives = args.flagged_true_positives
     if true_positives is not None and not 0 <= true_positives <= MAX_TRUE_POSITIVES:
         raise UsageError('invalid_true_positives')
     sample = _sample_from(read_json(args.sample, MAX_SAMPLE_BYTES, 'sample'))
+    confidence = sample['confidence']
+    alpha = _alpha(stats, confidence, 'invalid_sample')
+    # The level was fixed by draw before labelling; choosing another one after seeing x voids the bound.
+    if args.confidence is not None and args.confidence != confidence:
+        raise UsageError('confidence_mismatch')
     ids = [item['id'] for item in sample['items']]
     misses = _labels_from(read_json(args.labels, MAX_LABELS_BYTES, 'labels'), ids)
     verified = False
@@ -374,11 +409,12 @@ def bound(args) -> dict:
         if draw_items(population['items'], sample['k'], sample['seed']) != sample['items']:
             raise UsageError('sample_mismatch')
         verified = True
-    result = stats.hypergeometric_upper_bound(misses, sample['k'], sample['N'], confidence=args.confidence)
+    result = stats.hypergeometric_upper_bound(misses, sample['k'], sample['N'], confidence=confidence)
     upper = result['upper_misses']
     report = {'tool': TOOL, 'command': 'bound', 'version': VERSION,
               'N': sample['N'], 'k': sample['k'], 'x': misses,
-              'confidence': args.confidence, 'alpha': float(alpha), 'seed': sample['seed'],
+              'confidence': confidence, 'alpha': float(alpha), 'seed': sample['seed'],
+              'sample_sha256': sample_digest(sample),
               'population_sha256': sample['population_sha256'], 'population_verified': verified,
               'upper_misses': upper, 'upper_miss_share': result['upper_miss_share'],
               'method': result['method'], 'authority': AUTHORITY}
@@ -403,18 +439,23 @@ def _parser():
                          help='generic population JSON or a saved check-support --normalize-periods result')
     sampler.add_argument('--k', type=int, required=True,
                          help='sample size, 1-%d and at most the population size' % MAX_SAMPLE)
-    sampler.add_argument('--seed', help='hex seed (default: secrets.token_hex(16)); fix it before labelling')
+    sampler.add_argument('--seed', help='hex seed that reproduces a recorded draw; leave it out for a real audit '
+                                        '(default: a fresh secrets.token_hex(16))')
+    sampler.add_argument('--confidence', type=float, default=CONFIDENCE,
+                         help='one-sided confidence that bound will use, strictly between 0.5 and 1 '
+                              '(default %.2f); recorded in the sample before labelling' % CONFIDENCE)
     sampler.add_argument('--out', required=True, help='new sample file; an existing file is never replaced')
     bounder = commands.add_parser('bound', help='exact upper bound on the misses from a fully labelled sample')
     bounder.add_argument('--sample', required=True, help='sample file written by draw')
     bounder.add_argument('--labels', required=True,
                          help='JSON {"labels": {"<id>": "miss" or "ok"}} covering every sampled id')
     bounder.add_argument('--population',
-                         help='population file to recompute the population digest and the draw from')
+                         help='population file to recompute the population digest and the draw from; without it '
+                              'the sample is trusted as written and population_verified is false')
     bounder.add_argument('--flagged-true-positives', type=int, metavar='T',
                          help='exact true positives from labelling the whole flagged set; adds recall bounds')
-    bounder.add_argument('--confidence', type=float, default=CONFIDENCE,
-                         help='one-sided confidence, strictly between 0.5 and 1 (default %.2f)' % CONFIDENCE)
+    bounder.add_argument('--confidence', type=float,
+                         help='check only: must equal the confidence the sample records (draw --confidence)')
     return parser
 
 

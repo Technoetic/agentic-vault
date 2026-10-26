@@ -2,9 +2,10 @@
 
 A repository evaluation tool like flaky_repeat.py. draw writes item
 references only (path, line, id, match) and records the commitment made
-before labelling; bound needs every sampled id labelled and prints counts, the
-seed and digests, never ids, labels or note text. Every population here is
-synthetic; nothing reads a real vault.
+before labelling (seed, k and confidence, with a digest of the whole sample);
+bound needs every sampled id labelled and prints counts, the seed and digests,
+never ids, labels or note text. Every population here is synthetic; nothing
+reads a real vault.
 """
 from __future__ import annotations
 
@@ -32,9 +33,9 @@ PERIOD_VALUES = ('2026-10-07', '2026년 1분기', '2026년 2분기', '2025년 4�
                  '당기 출하', '2026-06-30')
 NONE_LINES = [4, 5, 6, 8, 10]
 SAMPLE_KEYS = {'tool', 'kind', 'version', 'population_id', 'population_kind', 'population_sha256', 'seed', 'N',
-               'k', 'draw_method', 'items'}
-BOUND_KEYS = {'tool', 'command', 'version', 'N', 'k', 'x', 'confidence', 'alpha', 'seed', 'population_sha256',
-              'population_verified', 'upper_misses', 'upper_miss_share', 'method', 'authority'}
+               'k', 'confidence', 'draw_method', 'items'}
+BOUND_KEYS = {'tool', 'command', 'version', 'N', 'k', 'x', 'confidence', 'alpha', 'seed', 'sample_sha256',
+              'population_sha256', 'population_verified', 'upper_misses', 'upper_miss_share', 'method', 'authority'}
 
 
 def _load(name, path):
@@ -50,6 +51,11 @@ stats = _load('real_vault_audit_eval_stats_under_test', ROOT / 'scripts' / 'eval
 def canonical(value):
     """Independent restatement of the documented canonical JSON."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def digest(path):
+    """The documented sample_sha256: SHA-256 of the canonical JSON of the sample file's content."""
+    return hashlib.sha256(canonical(json.loads(path.read_bytes())).encode('utf-8')).hexdigest()
 
 
 def rows(count, prefix='r', path='notes/ledger.md'):
@@ -90,9 +96,9 @@ class AuditCase(unittest.TestCase):
         return subprocess.run([sys.executable, '-B', str(TOOL), *[str(arg) for arg in args]],
                               capture_output=True, text=True, encoding='utf-8', timeout=120)
 
-    def draw(self, population, k, seed, name='sample.json'):
+    def draw(self, population, k, seed, name='sample.json', extra=()):
         out = self.dir / name
-        code, summary = self.main('draw', '--population', population, '--k', k, '--seed', seed, '--out', out)
+        code, summary = self.main('draw', '--population', population, '--k', k, '--seed', seed, '--out', out, *extra)
         self.assertEqual(code, 0, summary)
         return out, summary
 
@@ -114,7 +120,7 @@ class DrawTests(AuditCase):
         sample = json.loads(out.read_text(encoding='utf-8'))
         self.assertEqual(set(sample), SAMPLE_KEYS | {'source_sha256'})
         self.assertEqual((sample['tool'], sample['kind'], sample['version']), ('real_vault_audit', 'sample', 1))
-        self.assertEqual((sample['N'], sample['k'], sample['seed']), (50, 10, 'c0ffee'))
+        self.assertEqual((sample['N'], sample['k'], sample['seed'], sample['confidence']), (50, 10, 'c0ffee', 0.95))
         self.assertEqual((sample['population_kind'], sample['source_sha256']), ('generic', 'a' * 64))
         self.assertEqual(len(sample['items']), 10)
         by_id = {item['id']: item for item in rows(50)}
@@ -125,8 +131,10 @@ class DrawTests(AuditCase):
                 'source_sha256': 'a' * 64}
         self.assertEqual(sample['population_sha256'], hashlib.sha256(canonical(body).encode('utf-8')).hexdigest())
         self.assertEqual(summary, {'tool': 'real_vault_audit', 'command': 'draw', 'version': 1,
-                                   'population_kind': 'generic', 'N': 50, 'k': 10, 'seed': 'c0ffee',
-                                   'population_sha256': sample['population_sha256'], 'source_sha256': 'a' * 64})
+                                   'population_kind': 'generic', 'N': 50, 'k': 10, 'confidence': 0.95,
+                                   'seed': 'c0ffee', 'population_sha256': sample['population_sha256'],
+                                   'sample_sha256': hashlib.sha256(canonical(sample).encode('utf-8')).hexdigest(),
+                                   'source_sha256': 'a' * 64})
         self.assertNotIn('labels', out.read_text(encoding='utf-8'))
 
     def test_the_rank_is_the_documented_sha256_order_on_every_python(self):
@@ -213,6 +221,25 @@ class DrawTests(AuditCase):
                 self.assertEqual((code, report), (2, {'ok': False, 'error': label.split(':')[0]}))
                 self.assertFalse(out.exists())
                 self.assertNotIn(sentinel, json.dumps(report))
+
+    def test_paths_are_plain_vault_relative_posix_paths(self):
+        # One note, one spelling: a backslash spelling of '20-knowledge/노트.md' would be a second item with its
+        # own digest, and '..' leaves the vault.
+        refused = ('..\\x', '../x.md', 'notes/../x.md', './a.md', 'notes/./a.md', 'notes//a.md', 'notes/a.md/',
+                   'notes\\a.md', '20-knowledge\\노트.md', 'notes/a.md.', 'notes /a.md', '.', '..', 'a.md:stream',
+                   'notes/a?.md', 'notes/a*.md', 'notes/<a>.md', 'notes/a|b.md', 'notes/"a".md')
+        for index, path in enumerate(refused):
+            with self.subTest(path=path):
+                population = self.population([{'id': 'a', 'path': path}], name='path-%d.json' % index)
+                out = self.dir / ('never-%d.json' % index)
+                self.refused('invalid_item', 'draw', '--population', population, '--k', 1, '--seed', '1707',
+                             '--out', out)
+                self.assertFalse(out.exists())
+        accepted =('a.md', 'notes/sub/a b.md', '20-knowledge/노트.md', '.hidden/a.md', 'notes/a..b.md')
+        items = [{'id': 'p%d' % index, 'path': path} for index, path in enumerate(accepted)]
+        out, _ = self.draw(self.population(items, name='accepted.json'), len(items), '1707')
+        self.assertEqual(sorted(item['path'] for item in json.loads(out.read_text(encoding='utf-8'))['items']),
+                         sorted(accepted))
 
     def test_unreadable_and_malformed_files_are_refused(self):
         cases = {
@@ -312,14 +339,20 @@ class CheckSupportPopulationTests(AuditCase):
             'invalid_check_support:line': self.check_support([{'line': '3', 'normalized_match': 'none'}])[1],
             'invalid_check_support:path': self.check_support([{'line': 3, 'normalized_match': 'none'}],
                                                              path='/abs/facts.md')[1],
+            'invalid_check_support:backslash': self.check_support([{'line': 3, 'normalized_match': 'none'}],
+                                                                  path='notes\\facts.md')[1],
+            'invalid_check_support:parent': self.check_support([{'line': 3, 'normalized_match': 'none'}],
+                                                               path='../facts.md')[1],
             'invalid_source_sha256': self.check_support([{'line': 3, 'normalized_match': 'none'}],
                                                         source_sha256=None)[1],
             'duplicate_item_id': self.check_support([{'line': 3, 'normalized_match': 'none'}] * 2)[1],
         }
         for label, data in cases.items():
             with self.subTest(case=label):
+                out = self.dir / ('never-%s.json' % label.replace(':', '-'))
                 self.refused(label.split(':')[0], 'draw', '--population', self.write('support.json', data),
-                             '--k', 1, '--out', self.dir / 'never.json')
+                             '--k', 1, '--out', out)
+                self.assertFalse(out.exists())
 
     def test_end_to_end_from_a_vault_ssot_check_support_run(self):
         vault = self.dir / 'vault'
@@ -380,6 +413,7 @@ class BoundTests(AuditCase):
                          (stats.HYPERGEOMETRIC_METHOD, 'human_judgement_input_not_gate'))
         self.assertEqual((report['seed'], report['population_verified']), ('1707', False))
         self.assertEqual(report['population_sha256'], json.loads(out.read_text(encoding='utf-8'))['population_sha256'])
+        self.assertEqual(report['sample_sha256'], digest(out))
         result = self.cli('bound', '--sample', out, '--labels', labels, '--population', population)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         verified = json.loads(result.stdout)
@@ -390,11 +424,11 @@ class BoundTests(AuditCase):
             self.assertNotIn(word, result.stdout)
 
     def test_misses_and_the_confidence_level_move_the_bound(self):
-        _, out = self.sample()
+        population, out = self.sample()
         code, report = self.main('bound', '--sample', out, '--labels', self.labels(out, misses={5}))
         self.assertEqual((code, report['x'], report['upper_misses']), (0, 1, 106))
-        code, report = self.main('bound', '--sample', out, '--labels', self.labels(out, name='ok.json'),
-                                 '--confidence', '0.9')
+        lower, _ = self.draw(population, 20, '1707', name='sample-0.9.json', extra=('--confidence', '0.9'))
+        code, report = self.main('bound', '--sample', lower, '--labels', self.labels(lower, name='ok.json'))
         self.assertEqual((code, report['confidence'], report['alpha']), (0, 0.9, 0.1))
         self.assertEqual(report['upper_misses'],
                          stats.hypergeometric_upper_bound(0, 20, 500, confidence=0.9)['upper_misses'])
@@ -403,6 +437,71 @@ class BoundTests(AuditCase):
         code, report = self.main('bound', '--sample', everything, '--labels',
                                  self.labels(everything, misses={0, 1, 2}, name='all.json'))
         self.assertEqual((code, report['x'], report['upper_misses'], report['upper_miss_share']), (0, 3, 3, 0.075))
+
+    def test_the_confidence_is_fixed_by_draw_before_labelling(self):
+        population = self.population(rows(30))
+        out, summary = self.draw(population, 5, '1707', extra=('--confidence', '0.9'))
+        sample = json.loads(out.read_text(encoding='utf-8'))
+        self.assertEqual((summary['confidence'], sample['confidence']), (0.9, 0.9))
+        labels = self.labels(out, misses={0})
+        code, report = self.main('bound', '--sample', out, '--labels', labels)
+        self.assertEqual((code, report['confidence'], report['alpha'], report['x']), (0, 0.9, 0.1, 1))
+        self.assertEqual(report['upper_misses'],
+                         stats.hypergeometric_upper_bound(1, 5, 30, confidence=0.9)['upper_misses'])
+        # --confidence only checks: the recorded level passes however it is written.
+        self.assertEqual(self.main('bound', '--sample', out, '--labels', labels, '--confidence', '0.90'), (0, report))
+        # A level chosen once x is known is refused, in either direction (here 16 misses at 0.9, 18 at 0.95).
+        self.assertEqual((report['upper_misses'], stats.hypergeometric_upper_bound(1, 5, 30)['upper_misses']), (16, 18))
+        self.refused('confidence_mismatch', 'bound', '--sample', out, '--labels', labels, '--confidence', '0.95')
+        default, _ = self.draw(population, 5, '1707', name='default.json')
+        self.refused('confidence_mismatch', 'bound', '--sample', default, '--labels',
+                     self.labels(default, misses={0}, name='default-labels.json'), '--confidence', '0.9')
+        for value in ('0.5', '1', '1.5', '-0.95', 'nan', 'inf'):
+            with self.subTest(draw_confidence=value):
+                self.refused('invalid_confidence', 'draw', '--population', population, '--k', 5,
+                             '--confidence', value, '--out', self.dir / 'never.json')
+        self.refused('invalid_arguments', 'draw', '--population', population, '--k', 5, '--confidence', 'high',
+                     '--out', self.dir / 'never.json')
+        self.assertFalse((self.dir / 'never.json').exists())
+        cases = [{key: value for key, value in sample.items() if key != 'confidence'}]
+        cases += [{**sample, 'confidence': value} for value in (0.5, 1, 1.0, '0.9', None, True)]
+        for index, data in enumerate(cases):
+            with self.subTest(sample_confidence=data.get('confidence', 'missing')):
+                self.refused('invalid_sample', 'bound', '--sample', self.write('confidence-%d.json' % index, data),
+                             '--labels', labels)
+
+    def test_an_edited_sample_is_trusted_as_written_and_shows_in_its_digest(self):
+        population = self.population(rows(30))
+        out, summary = self.draw(population, 5, '1707')
+        sample = json.loads(out.read_text(encoding='utf-8'))
+        self.assertEqual(summary['sample_sha256'], digest(out))
+        labels = self.labels(out, misses={0})
+        code, report = self.main('bound', '--sample', out, '--labels', labels, '--population', population)
+        self.assertEqual((code, report['x'], report['population_verified']), (0, 1, True))
+        self.assertEqual(report['sample_sha256'], summary['sample_sha256'])
+        # The digest covers the content, so a copy saved as UTF-16 with CRLF (PowerShell '>', git autocrlf) matches.
+        copy = self.write('copy.json', '﻿'.encode('utf-16-le')
+                          + out.read_text(encoding='utf-8').replace('\n', '\r\n').encode('utf-16-le'))
+        self.assertEqual(self.main('bound', '--sample', copy, '--labels', labels),
+                         (0, {**report, 'population_verified': False}))
+        # Without --population the sample is trusted as written: dropping the missed item and lowering k gives x = 0.
+        dropped = self.write('dropped.json', {**sample, 'k': 4, 'items': sample['items'][1:]})
+        dropped_labels = self.labels(dropped, name='dropped-labels.json')
+        code, trusted = self.main('bound', '--sample', dropped, '--labels', dropped_labels)
+        self.assertEqual((code, trusted['x'], trusted['population_verified']), (0, 0, False))
+        self.assertNotEqual(trusted['sample_sha256'], summary['sample_sha256'])
+        self.refused('sample_mismatch', 'bound', '--sample', dropped, '--labels', dropped_labels,
+                     '--population', population)
+        # The recomputed draw covers the seed and the items, not k or the confidence: cutting the last-ranked item
+        # or relaxing the level passes --population, and only the digest differs from the one draw printed.
+        cut = self.write('cut.json', {**sample, 'k': 4, 'items': sample['items'][:4]})
+        relaxed = self.write('relaxed.json', {**sample, 'confidence': 0.9})
+        for edited, edited_labels in ((cut, self.labels(cut, misses={0}, name='cut-labels.json')), (relaxed, labels)):
+            with self.subTest(sample=edited.name):
+                code, passed = self.main('bound', '--sample', edited, '--labels', edited_labels,
+                                         '--population', population)
+                self.assertEqual((code, passed['population_verified']), (0, True))
+                self.assertNotEqual(passed['sample_sha256'], summary['sample_sha256'])
 
     def test_flagged_true_positives_add_recall_bounds_with_their_basis(self):
         _, out = self.sample()
@@ -503,6 +602,7 @@ class IsolationTests(AuditCase):
                 result = self.cli(*args)
                 self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('--flagged-true-positives', self.cli('bound', '--help').stdout)
+        self.assertIn('--confidence', self.cli('draw', '--help').stdout)
 
     def test_not_wired_into_hooks_ci_skills_or_plugin_resources(self):
         watched = [ROOT / '.github' / 'workflows' / 'tests.yml', ROOT / 'scripts' / 'verify_codex_plugin.py',
