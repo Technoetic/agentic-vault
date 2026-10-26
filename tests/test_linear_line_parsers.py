@@ -800,7 +800,9 @@ class DefaultOutputUnchangedTests(unittest.TestCase):
 
 
 TIMING_SIZES = (8_000, 16_000, 32_000, 64_000)
-TIMING_BUDGET = 0.25  # seconds for every shape and size of one helper (measured: under 2 ms)
+# Seconds for every shape and size of one helper (measured on this PC: under 2 ms
+# for a line parser, up to about 20 ms for a scanner).
+TIMING_BUDGET = 0.25
 SHAPES = {
     'ssot ATX heading': (lambda n: '# a' + ' ' * n + 'b', lambda n: '# ' + ' ' * n,
                          lambda n: '# a' + ' #' * n, lambda n: '#' + '\u3000' * n + 'x'),
@@ -824,10 +826,14 @@ SHAPES = {
     'recall heading label': (lambda n: '# a' + ' ' * n + 'b', lambda n: '# a' + ' #' * n,
                              lambda n: '#' + '\u3000' * n + 'x', lambda n: ' ' * n + '# x'),
     # The first shape of each scanner is the one the former regex was slowest on.
+    # Links that fail or match one after another run a link scanner's loop once
+    # per link, on each of its two paths.
     'lint code removal': (lambda n: '`' * n, lambda n: '``a' * (n // 3),
                           lambda n: '`' * (n // 2) + 'a' + '`' * (n // 2 - 1)),
-    'lint link texts': (lambda n: '[' * n, lambda n: '[[a' * (n // 3), lambda n: '![[a]]' * (n // 6)),
-    'lint heading link text': (lambda n: '[' * n, lambda n: '[a](' * (n // 4), lambda n: '[' * (n - 2) + ']x'),
+    'lint link texts': (lambda n: '[' * n, lambda n: '[[a' * (n // 3), lambda n: '![[a]]' * (n // 6),
+                        lambda n: '[[a]x' * (n // 5)),
+    'lint heading link text': (lambda n: '[' * n, lambda n: '[a](' * (n // 4), lambda n: '[' * (n - 2) + ']x',
+                               lambda n: '[a]x' * (n // 4), lambda n: '[a](b)' * (n // 6)),
     'healthcheck frontmatter': (lambda n: '---' + '\n' * n, lambda n: '---' + ' \n' * (n // 2),
                                 lambda n: '---\n' + '\n' * n + '---\n'),
     'ssot code spans': (lambda n: '`' * n, lambda n: '``a' * (n // 3),
