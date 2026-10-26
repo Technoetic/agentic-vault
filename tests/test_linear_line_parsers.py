@@ -1171,6 +1171,41 @@ def shipped_code_strings():
                     yield f'{path.name}:{node.lineno}', node.value
 
 
+PYTHON_DIRECTORIES = ('skills/agentic-vault/scripts', 'hooks', 'scripts', 'tests')
+
+
+def repository_python_files(root=ROOT):
+    """The Python files git tracks in the checkout at root, or else those in its shipped and test directories.
+
+    Not root.rglob('*.py'): a main checkout also holds ignored trees
+    (.worktrees/, .superpowers/) with older copies of the scripts and scratch
+    files that do not parse. The git listing counts only at the top of a work
+    tree, so a copy unpacked inside another repository reads its directories.
+    """
+    try:
+        top = not subprocess.run(['git', 'rev-parse', '--show-prefix'], cwd=root, check=True,
+                                 capture_output=True).stdout.strip()
+        listed = subprocess.run(['git', 'ls-files', '-z', '--', '*.py'], cwd=root, check=True,
+                                capture_output=True).stdout.decode('utf-8')
+    except (OSError, subprocess.CalledProcessError):
+        top = False
+    paths = ([root / name for name in listed.split('\0') if name] if top else
+             [path for directory in PYTHON_DIRECTORIES for path in (root / directory).glob('*.py')])
+    return sorted(path for path in paths if path.is_file())
+
+
+def name_uses(paths, name, root=ROOT):
+    """'file:line' of each name, attribute or import alias spelled name in the Python files at paths."""
+    found = []
+    for path in paths:
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            spelled = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute)
+                       else node.name if isinstance(node, ast.alias) else None)
+            if spelled == name:
+                found.append(f'{path.relative_to(root).as_posix()}:{node.lineno}')
+    return found
+
+
 class NoLazySuffixLeftTests(unittest.TestCase):
     def test_no_shipped_regex_keeps_a_lazy_group_before_an_optional_whitespace_tail(self):
         # Docstrings and comments may quote the former patterns; code may not.
@@ -1191,16 +1226,49 @@ class NoLazySuffixLeftTests(unittest.TestCase):
         # vault_links imported WIKILINK_RE; every importer now calls
         # wikilink_targets(), and no module keeps the name for another to import.
         self.assertFalse(hasattr(vault_healthcheck, 'WIKILINK_RE'))
-        users = []
-        for path in sorted(ROOT.rglob('*.py')):
-            if '.git' in path.parts:
-                continue
-            for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
-                name = (node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute)
-                        else node.name if isinstance(node, ast.alias) else None)
-                if name == 'WIKILINK_RE':
-                    users.append(f'{path.relative_to(ROOT)}:{node.lineno}')
-        self.assertEqual(users, [])
+        files = repository_python_files()
+        self.assertLessEqual({SCRIPTS / 'vault_healthcheck.py', SCRIPTS / 'vault_links.py'}, set(files))
+        self.assertEqual(name_uses(files, 'WIKILINK_RE'), [])
+
+
+class RepositoryPythonFilesTests(unittest.TestCase):
+    # A main checkout keeps ignored worktrees and release probes with older
+    # copies that still name WIKILINK_RE, and scratch files that do not parse.
+    LAYOUT = {
+        '.gitignore': '.worktrees/\n.superpowers/\nunpacked/\n',
+        'hooks/hook.py': 'from vault_healthcheck import WIKILINK_RE\n',
+        'ci/check.py': 'vault_healthcheck.WIKILINK_RE\n',
+        '.worktrees/old/skills/agentic-vault/scripts/vault_links.py': 'from vault_healthcheck import WIKILINK_RE\n',
+        '.superpowers/probe/review.py': 'def broken(:\n',
+        'unpacked/skills/agentic-vault/scripts/vault_links.py': 'from vault_healthcheck import WIKILINK_RE\n',
+        'unpacked/tests/probe/review.py': 'def broken(:\n',
+    }
+
+    def layout(self, root):
+        for name, text in self.LAYOUT.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text, encoding='utf-8')
+        return root
+
+    def uses(self, root):
+        return name_uses(repository_python_files(root), 'WIKILINK_RE', root)
+
+    def test_a_checkout_reads_only_the_files_git_tracks(self):
+        if shutil.which('git') is None:
+            self.skipTest('git is not available')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.layout(Path(tmp).resolve() / 'repo')
+            for args in (('init', '-q'), ('add', '--', '.')):
+                git(root, *args)
+            (root / 'scripts').mkdir()
+            (root / 'scripts' / 'draft.py').write_text('def broken(:\n', encoding='utf-8')  # untracked
+            self.assertEqual(self.uses(root), ['ci/check.py:1', 'hooks/hook.py:1'])
+            # A copy unpacked inside a repository that ignores it reads its own directories.
+            self.assertEqual(self.uses(root / 'unpacked'), ['skills/agentic-vault/scripts/vault_links.py:1'])
+
+    def test_without_a_checkout_it_reads_the_shipped_and_test_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.uses(self.layout(Path(tmp).resolve() / 'plain')), ['hooks/hook.py:1'])
 
 
 @unittest.skipUnless(SLOW, 'set AGENTIC_VAULT_SLOW_TESTS=1 for the larger runs')

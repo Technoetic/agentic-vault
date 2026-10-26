@@ -507,8 +507,15 @@ CommonMark 0.31.2 4.2절 예제 62~79를 다른 말로 바꿔 쓴 시험 사례�
   다시 훑어 이차 시간이다. `a-`를 N/2번 이은 줄에 N = 4,000/8,000/16,000/32,000에서 0.027/0.107/0.408/1.65초였고, 그런 한 줄짜리 노트에 `scan_text`는
   16,000자에 0.83초, 32,000자에 3.25초였다(이 PC에서 세 번 가운데 가장 빠른 값, N = 32,000과 `scan_text`는 한 번). 이 작업의 범위 밖이라 그대로 두었다.
 
+기본 경로 밖에서 따로 재 본 식 하나도 비선형이다.
+
+- `jarvis_bridge.py:1237`의 `\[\[([^\]]+)\]\]`(`re.sub`): `/vault-jarvis-setup`으로 켜는 Telegram 브리지가 보내는 메시지(답·브리핑 등)의 줄마다
+  위키링크를 기울임 태그로 바꾼다. `[`만 이어진 줄에서 이차 시간이다(N = 2,000/4,000/8,000에 0.0064/0.025/0.10초). 브리지는 메시지를 4,000자 이하
+  조각으로 나눈 뒤 바꾸므로 긴 메시지의 시간은 조각 수만큼 늘어난다. `[`만 32,000자인 줄은 조각 여덟 개에 0.20초였고, 조각 하나에서는 escape가 늘리는
+  `&`(`&amp;`)를 `[` 뒤에 이은 모양이 잰 것 가운데 가장 느려 약 0.07초였다(이 PC에서 세 번 가운데 가장 빠른 값). 이 작업의 범위 밖이라 그대로 두었다.
+
 반복 입력으로 찾는 방법이라 남은 것이 이것뿐이라는 증명은 아니다. 실행 중에 만드는 식(`_support_pattern`, 설정의 사실 패턴, `session_start.py`의 이름표 식)은
-재지 않았고, 기본 경로 밖의 모듈도 재지 않았다.
+재지 않았고, 기본 경로 밖의 모듈은 위 식 하나만 재 보았다.
 
 **한계.**
 
@@ -521,8 +528,9 @@ CommonMark 0.31.2 4.2절 예제 62~79를 다른 말로 바꿔 쓴 시험 사례�
 - 위키링크 스캔도 링크마다 한 번씩 돈다. 이 PC에서 링크 9개가 든 1 KB 노트 하나에 healthcheck는 4.2 µs(예전 식 2.0 µs), 특권 노트는 3.2 µs(1.7 µs)였고,
   `[[a]] `를 10,666번 이은 64,000자 노트에 healthcheck는 4.0 ms(0.97 ms), `[[a]x`를 12,800번 이은 64,000자 특권 노트에 3.3 ms(0.19 ms)였다. 특권 노트
   스캔은 128개를 채우면 멈춰, 링크가 많은 노트에서는 오히려 빠르다(`[[a]] ` 10,666번에 0.04 ms 대 0.73 ms).
-- `vault_healthcheck.WIKILINK_RE`는 없앴다. 저장소 안에서 이 이름을 쓰던 곳은 `vault_links.py` 하나였고, 어떤 Python 파일도 이 이름을 쓰지 않는지 시험이
-  확인한다. 볼트 쪽 코드가 이 이름을 import했다면 실패한다.
+- `vault_healthcheck.WIKILINK_RE`는 없앴다. 저장소 안에서 이 이름을 쓰던 곳은 `vault_links.py` 하나였고, git이 추적하는 Python 파일(git이 없거나
+  git 작업 트리의 맨 위가 아니면 `skills/agentic-vault/scripts`·`hooks`·`scripts`·`tests` 바로 아래 파일) 어디에도 이 이름이 없는지 시험이 확인한다.
+  git이 무시하는 `.worktrees/`·`.superpowers/` 아래의 이전 사본과 작업 파일은 읽지 않는다. 볼트 쪽 코드가 이 이름을 import했다면 실패한다.
 
 **출처.** Python [`re` 문서](https://docs.python.org/3/library/re.html)의 `\s`(str 패턴은 `str.isspace()`가 정하는 유니코드 공백)와
 atomic group·possessive quantifier("Added in version 3.11"). [VULCANBOOST](https://www.usenix.org/conference/usenixsecurity25/presentation/li-yeting)
