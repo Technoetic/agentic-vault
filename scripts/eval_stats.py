@@ -10,12 +10,22 @@ proportion: the Wilson score bound and the exact Clopper-Pearson bound
 (bisection on the binomial CDF whose log coefficients come from math.lgamma;
 zero events use the closed form 1 - alpha^(1/n)).
 
-Both describe uncertainty for human judgement. Callers report them next to the
-existing metrics and never turn them into gates.
+hypergeometric_upper_bound() gives the exact one-sided upper bound on the
+number of misses K in a finite population of N items from x misses in a
+uniform random sample of k items drawn without replacement: the largest K with
+P(X <= x | N, K, k) >= alpha (Callaghan and Mueller-Hansen, Systematic Reviews
+9:273, 2020, inverted from a test into a bound). It compares exact integers
+against alpha taken from the decimal text of the confidence, so no float CDF
+is involved. scripts/real_vault_audit.py uses it; evaluate_recall.py and
+flaky_repeat.py do not.
+
+All of them describe uncertainty for human judgement. Callers report them next
+to the existing metrics and never turn them into gates.
 """
 from __future__ import annotations
 
 import bisect
+from fractions import Fraction
 import math
 from statistics import NormalDist
 
@@ -24,6 +34,7 @@ EXACT_PAIRED_MAX_NONZERO = 20
 TIE_TOLERANCE = 1e-12
 EXACT_PAIRED_METHOD = ('paired sign-flip; two-sided; exact enumeration of all 2^k sign patterns '
                        'of the k non-zero differences')
+HYPERGEOMETRIC_METHOD = 'hypergeometric_exact_inversion; integer bisection over K'
 
 
 def paired_differences(baseline, improved) -> list:
@@ -177,3 +188,67 @@ def rate_upper_bounds(events: int, trials: int, *, confidence: float = 0.95) -> 
             'clopper_pearson_upper': clopper_pearson,
             'clopper_pearson_method': ('all_events' if events == trials else
                                        'zero_event_closed_form' if not events else 'binomial_cdf_bisection')}
+
+
+def exact_alpha(confidence) -> Fraction:
+    """Validate a confidence like confidence_alpha and return 1 - confidence as an exact fraction.
+
+    The fraction comes from the decimal text of the float (0.95 -> 1/20).
+    1 - Fraction(0.95) would carry the binary error of the float instead
+    (0.050000000000000044 as a float).
+    """
+    confidence_alpha(confidence)
+    return 1 - Fraction(repr(confidence))
+
+
+def _check_population_counts(misses, sample, population) -> None:
+    if type(misses) is not int or type(sample) is not int or type(population) is not int:
+        raise ValueError('misses, sample and population must be integers')
+    if population < 1 or not 0 <= misses <= sample <= population:
+        raise ValueError('hypergeometric bounds need population >= 1 and 0 <= misses <= sample <= population')
+
+
+def _hypergeometric_cdf_numerator(misses: int, sample: int, population: int, total: int) -> int:
+    """C(N, k) * P(X <= misses) for X ~ Hypergeometric(N, total, k), as an exact integer.
+
+    The sum of C(K, i) * C(N - K, k - i) over the feasible i <= misses. Each
+    term after the first comes from the one before it; the division is exact
+    because both terms are integers. Terms grow with k, not with N.
+    """
+    first = max(0, sample - (population - total))
+    last = min(misses, total)
+    if first > last:
+        return 0
+    term = math.comb(total, first) * math.comb(population - total, sample - first)
+    numerator = term
+    for i in range(first, last):
+        term = term * (total - i) * (sample - i) // ((i + 1) * (population - total - sample + i + 1))
+        numerator += term
+    return numerator
+
+
+def hypergeometric_upper_bound(misses: int, sample: int, population: int, *,
+                               confidence: float = 0.95) -> dict:
+    """Exact one-sided upper bound on the misses K among N items from x misses in k sampled.
+
+    Returns the largest K in [x, N] with P(X <= x | N, K, k) >= alpha, where
+    X ~ Hypergeometric(N, K, k) and alpha = exact_alpha(confidence). The CDF
+    never increases as K grows, so a bisection finds it; K = x always passes,
+    and every K above N - (k - x) fails because the CDF is 0 there. The bound
+    is below the true K with probability at most alpha when the k items are a
+    uniform random draw without replacement. x = k gives N, k = N gives x, and
+    k = 0 gives N (no information). upper_miss_share is upper_misses / N.
+    """
+    _check_population_counts(misses, sample, population)
+    alpha = exact_alpha(confidence)
+    # P(X <= x) >= p/q, compared as C(N, k) * P(X <= x) * q >= p * C(N, k).
+    threshold = alpha.numerator * math.comb(population, sample)
+    low, high = misses, population - (sample - misses) + 1
+    while high - low > 1:
+        middle = (low + high) // 2
+        if _hypergeometric_cdf_numerator(misses, sample, population, middle) * alpha.denominator >= threshold:
+            low = middle
+        else:
+            high = middle
+    return {'misses': misses, 'sample': sample, 'population': population, 'confidence': confidence,
+            'upper_misses': low, 'upper_miss_share': low / population, 'method': HYPERGEOMETRIC_METHOD}

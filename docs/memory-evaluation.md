@@ -23,7 +23,9 @@ v0.29.0은 한국어 평가의 응답률·조용한 오류율(`--answer-rates`)�
 모델 호출이나 새 런타임 의존성을 추가하지 않는다. 기본 실행은 실제 사용자 볼트나 업무 자료를
 평가 입력으로 받지 않으며, 가상의 조직·사실·메시지함만 사용한다. 예외는 v0.25.0에서 더한
 선택형 `--vault --goldset`([실제 볼트 골드셋 평가](#실제-볼트-골드셋-평가))뿐이다. 사용자가 지정한
-볼트를 제자리에서 읽고, 결과는 표준 출력으로만 낸다.
+볼트를 제자리에서 읽고, 결과는 표준 출력으로만 낸다. 저장소 도구 `scripts/real_vault_audit.py`
+([실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한))는 볼트를 읽지 않고, 사용자가 실제 볼트에서 뽑아 준 항목 참조(경로·줄 번호)와
+사람의 라벨만 받는다.
 
 ## 한국어 근거와 구조화 답변
 
@@ -261,7 +263,8 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
   Clopper-Pearson은 100%, 99.1%다(정확 이항 합으로 계산한 값). 그래서 두 상한을 함께 싣는다.
 - **이항 모형의 가정.** 두 상한 모두 질의가 서로 독립이고 한 비율을 공유한다고 가정한다. fixture 질의는
   일부러 만든 사례이지 실제 사용에서 뽑은 표본이 아니다. 상한은 "이런 사례를 반복한다면"이라는 가정
-  아래의 서술이며 실제 볼트의 오탐률이나 노출률의 추정치가 아니다.
+  아래의 서술이며 실제 볼트의 오탐률이나 노출률의 추정치가 아니다. 실제 볼트에서 결정적 검사기가 놓친
+  항목 수는 무작위 표본의 라벨로 따로 잰다([실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)).
 - **정확 검정의 근거.** Urbano 외는 TREC 자료 기반 시뮬레이션에서 순열 검정과 t 검정이 주제 25·50·100개,
   양측·단측 모두에서 1종 오류율을 유의수준에 맞게 유지했다고 보고한다(순열은 100만 회 몬테카를로, 출처
   보고). 저자들의 첫 권고는 더 단순한 t 검정이다. 이 fixture의 k ≤ 20은 그 연구 범위보다 작고, 정확 열거는
@@ -305,6 +308,106 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
 - 0건 게이트 네 행의 통과는 이 fixture에서 해당 비율이 0.26~0.78보다 작다는 데까지만 보여 준다.
 - 플래그 없는 명령줄 11개(CI의 recall 단계 4개, render-matched 2개, hangul2, experience, `--advanced`, 사용
   오류 2개)의 stdout·stderr·종료 코드는 기준 커밋 `d2b9315`와 바이트 단위로 같았다(시계를 고정해 같은 날 측정).
+
+### 실제 볼트 표본 감사(초기하 정확 상한)
+
+위 비율 상한은 합성 fixture를 반복한다는 가정 아래의 서술이다. 실제 볼트에서 결정적 검사기가 놓친 항목 수는
+사람이 라벨한 무작위 표본으로 따로 잰다. `scripts/real_vault_audit.py`는 `flaky_repeat.py`와 같은 저장소 평가
+도구다. 플러그인 리소스가 아니며 훅·CI 게이트·기본 실행에 연결하지 않는다. 볼트를 열지 않고 주어진 JSON 파일만
+읽으며, 네트워크·모델 호출이 없다.
+
+```text
+python scripts/real_vault_audit.py draw --population POPULATION.json --k 20 --out SAMPLE.json
+python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.json --population POPULATION.json
+```
+
+**모집단** (`draw --population`)
+
+- 일반 형식은 `{"population_id": "...", "items": [{"id": "r01", "path": "notes/대장.md", "line": 12, "match": "none"}]}`다.
+  볼트 판을 묶으려면 `source_sha256`(64자리 16진)을 함께 적는다. 항목에는 `id`(필수)·`path`(볼트 상대 경로)·`line`·
+  `match`만 둔다. 값·본문 같은 다른 필드와 같은 `id`는 거부한다. 그래서 노트 본문이 표본 파일에 들어가지 않는다.
+- `path`는 `/`로 나눈 볼트 상대 경로다. 절대 경로, 역슬래시, `:*?"<>|`, 비었거나 `.`·`..`인 마디, 점이나 공백으로 끝나는
+  마디는 거부한다(`evaluate_recall.py`의 골드셋 경로 규칙에서 `.md` 조건만 뺐다). 같은 노트가 `20-knowledge\노트.md`와
+  `20-knowledge/노트.md`처럼 두 표기로 두 항목이 되지 않게 하려는 것이다. 도구는 볼트를 열지 않으므로 대소문자나 유니코드
+  정규형만 다른 두 경로가 같은 노트인지는 가리지 못한다.
+- 저장한 `vault_ssot.py check-support --normalize-periods` 결과도 받는다. `normalized_periods`에서 `normalized_match`가
+  `none`인 행이 모집단이고, 항목은 `id`(`경로:줄`)·`path`·`line`·`match`(`none`)다. 결과의 `source_sha256`도 기록하고,
+  경고·인용 노트 같은 다른 필드는 읽지 않는다. 이 모집단의 놓침(`miss`)은 인용 노트가 실제로는 같은(또는 안에 드는)
+  기간을 적고 있어 정규화가 일치를 놓친 행이다.
+- 두 형식 모두 UTF-8(BOM 허용)·UTF-16 파일을 읽는다(Windows PowerShell 5.1의 `>`는 UTF-16으로 저장한다).
+
+**추출** (`draw`)
+
+- 항목마다 UTF-8 텍스트 `<seed>:<항목의 정규 JSON>`(키 정렬·압축)의 SHA-256 16진 값으로 순위를 매기고(동률은 `id`)
+  앞의 k개를 표본으로 한다. seed가 무작위이면 비복원 균등 추출이다(SHA-256을 무작위 함수로 보는 가정). `random.sample`과
+  달리 Python 판에 따라 결과가 바뀌지 않고, 파일 안의 항목 순서도 결과를 바꾸지 않는다.
+- 실제 감사에서는 `--seed`를 주지 않는다. 그러면 `secrets.token_hex(16)`으로 128비트 seed를 만든다. `--seed`(16진
+  1~128자리)는 기록해 둔 추출을 다시 만들 때(잃어버린 표본 파일 복구, 시험)만 쓴다. 사람이 고른 seed는 무작위가 아니고,
+  짧은 seed는 여러 개를 시험해 보고 고르기 쉽다. 그렇게 고르면 보장이 사라진다.
+- `--confidence`(기본 0.95, 0.5 초과 1 미만)는 `bound`가 쓸 단측 신뢰 수준이다. seed·k와 함께 라벨하기 전에 정해
+  표본 파일에 기록한다.
+- 표본 파일에는 seed·`N`·`k`·`confidence`·`population_sha256`(모집단 정규 JSON의 SHA-256, 항목은 `id` 순)·
+  `source_sha256`(있으면)과 순위 순의 항목 참조만 남는다. 라벨은 넣지 않는다. 이미 있는 파일은 덮어쓰지 않는다. k는 1
+  이상이고 5,000과 N 이하여야 하며, 모집단은 항목 200,000개까지 받는다.
+- `draw`의 출력에는 `sample_sha256`(표본 내용의 정규 JSON의 SHA-256)이 있다. 줄 끝·들여쓰기·인코딩과 무관하므로 git의
+  줄 끝 변환이나 UTF-16 저장으로는 바뀌지 않는다. 라벨하기 전에 이 값을 표본 파일과 따로 적어 두거나(작업 기록·커밋
+  메시지) 표본 파일을 커밋한다.
+
+**상한** (`bound`)
+
+- 라벨 파일은 `{"labels": {"<id>": "miss" 또는 "ok"}}`다. 표본의 모든 `id`를 한 번씩 라벨해야 한다. 빠지거나 남는 라벨,
+  다른 값은 거부한다. `miss`의 수가 x다.
+- 신뢰 수준은 표본 파일의 `confidence`다. `bound --confidence`는 확인용이며 기록된 값과 다르면 거부한다
+  (`confidence_mismatch`). 라벨을 본 뒤 수준을 고를 수 없게 하려는 것이다(N=30, k=5, x=1이면 0.9에서 16, 0.95에서 18).
+- `--population`을 주면 모집단 파일로 `population_sha256`과 같은 seed·k의 추출을 다시 계산해, 표본과 다르면 거부한다
+  (`population_verified: true`). 손으로 고르거나 바꾼 항목을 이렇게 찾는다. `--population` 없이 계산하면 표본 파일을
+  적힌 그대로 믿는다(`population_verified: false`). 항목을 빼고 `k`를 고친 표본도 받아들이므로, 결과는
+  `population_verified`가 `true`일 때만 읽는다.
+- `--population`의 재계산은 표본 항목이 기록된 seed·k의 추출인지만 확인한다. 라벨을 본 뒤 `k`를 줄여 순위 끝의 항목을
+  빼거나 `k`를 늘려 다음 순위의 항목을 더한 표본, `confidence`를 고친 표본도 통과한다. 이런 수정은 출력의
+  `sample_sha256`이 `draw`가 낸 값과 다른 것으로만 드러난다.
+- 출력 JSON은 `N`·`k`·`x`·`confidence`(표본에 기록된 값)·`alpha`·`seed`·`sample_sha256`(읽은 표본의 값)·
+  `population_sha256`·`source_sha256`(있으면)·`population_verified`·`upper_misses`(K_U)·`upper_miss_share`(K_U/N)·`method`
+  (`hypergeometric_exact_inversion; integer bisection over K`)·`authority`(`human_judgement_input_not_gate`)다. `id`·라벨·
+  노트 내용은 출력하지 않는다. 성공하면 x와 관계없이 종료 코드 0, 사용 오류는 내용 없는 오류 코드와 함께 2다.
+- `--flagged-true-positives T`: 검사기가 표시한 항목 전체를 라벨해 센 진양성 수 T를 주면 `lower_recall` = T/(T+K_U)와
+  `upper_missed_share` = K_U/(T+K_U)를 더한다. K/(T+K)는 K가 클수록 커지므로 같은 신뢰 수준의 재현율 하한·놓친 몫
+  상한이 된다. T를 추정치로 넣으면 이 해석이 깨진다(두 불확실성을 함께 묶는 구간은 주지 않는다). T가 없으면 K_U와
+  K_U/N만 읽는다.
+
+**식과 예**
+
+- N개 중 실제 놓침이 K개이면 비복원 무작위 표본 k개의 놓침 수 X는 Hypergeometric(N, K, k)를 따른다. 상한은
+  K_U(x) = max{K ∈ [x, N] : P(X ≤ x | N, K, k) ≥ α}, α = 1 − confidence다. P(X ≤ x)는 K가 커질수록 줄어들므로
+  이분법으로 찾는다. 실제 K가 K_U보다 클 확률은 많아야 α다.
+- 비교는 정확한 정수로 한다: Σ_{i≤x} C(K, i)·C(N − K, k − i) × q ≥ p × C(N, k). α = p/q는 confidence의 십진 표기에서
+  만든 분수다(0.95 → 1/20). `math.lgamma`나 부동소수 누적분포를 쓰지 않으며, 정수의 크기는 N이 아니라 k에 따라 자란다.
+  N=60·k=15에서 모든 K에 대한 정확 포함 확률의 최솟값은 0.9503이다(계산값).
+- N=500, k=20, x=0이면 K_U=68(모집단의 13.6%), k=40이면 34(6.8%), k=20·x=1이면 106이다(계산값). 같은 표본을 이항
+  Clopper-Pearson 상한으로 읽고 N을 곱하면 69.55·36.08이다. 표본이 모집단의 큰 몫이면 차이가 커진다(N=100, k=40,
+  x=0: 5 대 7.22). 2026-10-27 로컬 Windows·Python 3.12.10에서 N=1,000,000·k=400·x=3(K_U=19,266)은 0.01초 안에 끝났다.
+
+**출처.** Callaghan·Müller-Hansen, 「Statistical stopping criteria for automated screening in systematic reviews」,
+Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서에서 비복원 무작위 표본을 뽑아, 초기하분포의 누적확률로
+'재현율이 목표에 못 미친다'는 귀무가설을 검정한다(식 7·9·10). 여기서는 그 검정을 뒤집어 놓침 수 K의 단측 신뢰 상한으로
+쓴다. 논문도 K의 신뢰구간 상한으로 같은 기준을 만들 수 있다고 적는다. 논문의 n은 이 도구의 k, 논문의 k는 이 도구의 x이고,
+논문은 α를 신뢰 수준의 뜻으로 쓴다. 저자 코드는 쓰지 않았다.
+
+**한계**
+
+- 진짜 무작위 추출일 때만 성립한다. seed·k·신뢰 수준은 라벨하기 전에 `draw`가 표본 파일에 기록하고, 사용자는 `draw`가 낸
+  `sample_sha256`을 따로 적어 둔다. 결과가 마음에 들 때까지 다시 뽑거나 seed·k·신뢰 수준을 고르면 보장이 사라진다(논문도
+  다중 검정을 정식으로 다루지 않았다고 밝힌다). 손으로 고르거나 일부만 라벨한 표본도 같다. 도구는 기존 표본 파일을
+  덮어쓰지 않고 기록과 다른 신뢰 수준을 거부할 뿐, 다시 뽑기나 표본 파일 수정은 막지 못한다. 수정은 `sample_sha256`을 적어
+  둔 값과 비교해야 드러난다.
+- 라벨이 맞다고 가정한다. 실제 놓침을 `ok`로 라벨하면 상한이 낙관적이 된다. 논문도 라벨 오류를 모형에 넣지 않는다.
+- 결과는 그 볼트의 그 시점, 한 번 고정한 모집단(`population_sha256`·`source_sha256`)에만 해당한다. 대장이 바뀌면 줄 번호도
+  바뀌므로 같은 판을 보고 라벨한다. 도구는 볼트를 다시 읽어 판을 확인하지 않는다.
+- 라벨이 적으면 상한이 넓다. 20개 중 0건이어도 모집단의 13.6%까지 놓쳤을 수 있다. 추정치로 읽지 않는다.
+- `check-support` 결과는 지원 행(`rows_supported`)의 줄 번호를 내지 않아, 그 행들은 아직 모집단으로 열거할 수 없다. 지금은
+  `none` 행과 사용자가 일반 형식으로 만든 모집단(경고 줄 등)만 감사할 수 있다.
+- 경로·줄 번호도 볼트 메타데이터다. 표본·라벨 파일을 어디에 두고 git으로 추적할지는 골드셋과 같은 기준으로 정한다.
+- 게이트가 아니다. 상한마다 따로 계산한 값이라 여러 상한을 함께 볼 때의 동시 포함은 보장하지 않는다.
 
 ## 실제 볼트 골드셋 평가
 
@@ -455,6 +558,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
   최소 p는 2^(1−k)다([위 절](#시간-유효성-표시-효과와-기전-잔차) 참조).
 - 골드셋·`--split` 실행에도 `--exact-paired`(정확 p)와 `--rate-bounds`(0건·소수 건 비율의 단측 상한)를 붙일 수 있다.
   두 값 모두 그 실행에 들어간 문항만으로 계산하며 `--redact`와 함께 써도 된다([소표본 통계](#소표본-통계-정확-부호-검정과-비율-상한)).
+- 실제 볼트에서 결정적 검사기가 놓친 항목 수의 상한은 무작위 표본의 라벨로 잰다([실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)).
+  표본 20개에서 놓침이 0건이어도 모집단 500개의 13.6%(68개)까지 놓쳤을 수 있다.
 
 **2026-10-19 측정.** 로컬 Windows·Python 3.12.10에서 이 분할을 담은 소스로 recall_hard에 CI top3 옵션
 (`--compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500
@@ -640,6 +745,7 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 - [Presentation, Not Mechanism](https://arxiv.org/abs/2607.16019) (Jiang 외, arXiv v1 2026-07-17): 표시 방식을 고정한 대조군으로 시간 유효성 기전의 몫을 분리하는 방법 참고. 코드나 데이터는 사용하지 않았다.
 - [Position: Don't Use the CLT in LLM Evals With Fewer Than a Few Hundred Datapoints](https://arxiv.org/abs/2503.01747) (Bowyer·Aitchison·Ivanova, ICML 2025 Spotlight Position, arXiv v3 2025-05-28): 작은 N에서 CLT 구간이 불확실성을 크게 과소평가하며, 독립 질문 설정에서 Wilson·베이지안 구간을 권하는 근거. 저자 라이브러리(bayes_evals)는 사용하지 않았다.
 - [Statistical Significance Testing in Information Retrieval: An Empirical Analysis of Type I, Type II and Type III Errors](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
+- [Statistical stopping criteria for automated screening in systematic reviews](https://doi.org/10.1186/s13643-020-01521-4) (Callaghan·Müller-Hansen, Systematic Reviews 9:273, 2020, CC BY 4.0): 남은 문서의 무작위 표본과 초기하 검정(식 7·9·10)을 뒤집어 [실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)의 놓침 수 상한으로 썼다. 저자 코드는 사용하지 않았다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
 - [obsidian-wiki `evaluate.py`](https://github.com/Ar9av/obsidian-wiki/blob/main/obsidian_wiki/evaluate.py) (MIT): 볼트마다 손으로 라벨한 골드셋(`_meta/eval.jsonl`), 경로나 파일 이름 슬러그로 기대 노트를 맞추는 방식, recall@k·MRR 최소 기준 검사를 참고했다. 코드는 사용하지 않았고, 여러 노트가 함께 쓰는 이름은 적중으로 세지 않도록 바꿨다.
