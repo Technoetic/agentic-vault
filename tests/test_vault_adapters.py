@@ -53,8 +53,10 @@ def _manifest_core() -> tuple[int, ...]:
 
 # Strings the shipped adapter assets must not contain: the maintainer's personal and company
 # identifiers. Only SHA-256 digests are kept, taken after _fold_like_ignorecase and keyed by
-# length in characters, so this public test no longer spells the strings out. Earlier
-# revisions of this file did spell them out, and those revisions remain in git history.
+# length in characters, so this public test no longer spells the strings out. The digests
+# only avoid printing the strings and do not protect them: they are unsalted and the strings
+# are short, so a dictionary or exhaustive search can recover them. Earlier revisions of this
+# file did spell them out, and those revisions remain in git history.
 FORBIDDEN_ASSET_SHA256 = {
     3: frozenset({"7e35922d6cf34e0374d8c0d5f427967f3f5aa9cb093dc3fbc62d217aa6a6725d"}),
     4: frozenset({"f29cc5e0e2e3ede69556cf4185b633da4a4c43945c7c9b3f86137cd5c6f638be"}),
