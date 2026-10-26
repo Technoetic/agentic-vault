@@ -5,3 +5,6 @@ hooks/*.sh text eol=lf
 *.yml text eol=lf
 # Literal LF-line quotes bind these fixtures; platform conversion changes proof bytes.
 tests/fixtures/memory_units/** text eol=lf
+# Promotion certificates bind corpus_sha256, the SHA-256 of these bytes, and the release ZIP
+# carries LF; a CRLF checkout (core.autocrlf=true) would compute a different hash.
+skills/agentic-vault/scripts/resources/lint-benign-v1.json text eol=lf

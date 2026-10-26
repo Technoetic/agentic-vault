@@ -42,7 +42,8 @@ GATE_MARKERS = (
     "git diff --check",
     "test_stateful_memory_lifecycle",
 )
-PINNED_USES = re.compile(r"uses: ([\w.-]+/[\w.-]+)@([0-9a-f]{40}) # v\d+(?:\.\d+)*")
+# A full commit SHA and, as its comment, the exact vX.Y.Z tag that points at it.
+PINNED_USES = re.compile(r"uses: ([\w.-]+/[\w.-]+)@([0-9a-f]{40}) # (v\d+\.\d+\.\d+)")
 # Release cool-down (cut 2026-10-17): pin releases published at least 14 days earlier.
 # zizmor-action v0.7.0 and v0.7.1 were both published 2026-10-15, so the job stays on
 # v0.6.4 (published 2026-09-09; lightweight tag -> commit below, resolved with gh api).
@@ -52,6 +53,18 @@ PINNED_USES = re.compile(r"uses: ([\w.-]+/[\w.-]+)@([0-9a-f]{40}) # v\d+(?:\.\d+
 # installed pip-audit from PyPI without hashes; the cool-down for the hashed file is
 # its pip-compile --uploaded-prior-to cutoff (see the requirements tests below).
 COOL_DOWN_PINS = {
+    "zizmorcore/zizmor-action": ("cc914d7f3750a2d13d75c7f184a1060aa0e9d482", "v0.6.4"),
+}
+# Every pinned action in the workflow and the tag that points at its commit, resolved on
+# 2026-10-27 with read-only `gh api repos/OWNER/REPO/git/matching-refs/tags` (annotated tags
+# dereferenced; no other tag points at these commits). zizmor's ref-version-mismatch audit
+# checks the comment against the SHA, and a major tag moves: actions/setup-python moved v7
+# from v7.0.0 to v7.1.0 (6d4fd22b, published 2026-10-22), so the "# v7" comments became three
+# medium findings. The commit stays on v7.0.0 because v7.1.0 is younger than the 14-day
+# cool-down. checkout's v7 still pointed at v7.0.1, but would go stale the same way.
+PINNED_RELEASE_TAGS = {
+    "actions/checkout": ("3d3c42e5aac5ba805825da76410c181273ba90b1", "v7.0.1"),
+    "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
     "zizmorcore/zizmor-action": ("cc914d7f3750a2d13d75c7f184a1060aa0e9d482", "v0.6.4"),
 }
 ZIZMOR_VERSION = "'1.30.1'"
@@ -306,6 +319,22 @@ class SupplyChainAuditJobTests(unittest.TestCase):
                 self.assertTrue(any(line.strip() == f"uses: {action}@{sha} # {tag}" for line in step))
         zizmor = step_using(audit, "zizmorcore/zizmor-action")
         self.assertEqual(scalars(zizmor, 10).get("version"), ZIZMOR_VERSION)
+
+    def test_every_pin_comment_names_the_exact_tag_of_its_commit(self) -> None:
+        # Every job, not only the audit job: zizmor audits the whole workflow. A moving major
+        # tag such as "# v7" fails here, and so does a SHA or tag the gh api lookup did not record.
+        pinned = set()
+        for line in self.text.splitlines():
+            if "uses:" not in line:
+                continue
+            match = PINNED_USES.fullmatch(line.strip().removeprefix("- "))
+            with self.subTest(line=line.strip()):
+                self.assertIsNotNone(match, "pin a full commit SHA with a '# vX.Y.Z' comment")
+                if match:
+                    action, sha, tag = match.groups()
+                    self.assertEqual((sha, tag), PINNED_RELEASE_TAGS.get(action))
+                    pinned.add(action)
+        self.assertEqual(pinned, set(PINNED_RELEASE_TAGS))
 
     def test_pip_audit_installs_from_hash_checked_wheels_only(self) -> None:
         audit = self.audit()
