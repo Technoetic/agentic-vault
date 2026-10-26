@@ -1247,14 +1247,32 @@ def checkpoint_drift_warnings(vault: Path, config: dict) -> list[dict]:
     return findings
 
 
+# 프런트매터 경계는 선형 시간으로 찾는다. 예전 re.match(r"^---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)은
+# 여는 '---' 뒤 공백 런 안의 줄바꿈마다 게으른 (.*?)로 닫는 줄을 끝까지 다시 찾아, 닫는 줄 없이 빈 줄만
+# 이어지는 노트에서 이차 시간이었다. split_frontmatter는 줄바꿈·CR이 어디 있든 그 식과 같은 값을 내며, 예전
+# 식은 tests/test_linear_line_parsers.py에 대조용으로만 남는다. full 모드는 텍스트 모드로 읽어 CR이 '\n'으로
+# 바뀌고, --staged는 index blob을 그대로 디코드해 CR이 남는다. 어느 쪽이든 결과는 예전과 같다.
+_SPACE_RUN_RE = re.compile(r"\s*")
+
+
 def split_frontmatter(text: str) -> tuple[str | None, str]:
     """(frontmatter 원문, 본문)을 반환. 프런트매터가 없으면 (None, 전체)."""
     if not text.startswith("---"):
         return None, text
-    m = re.match(r"^---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
-    if not m:
+    head = _SPACE_RUN_RE.match(text, 3).end()  # 여는 '---' 뒤 공백 런의 끝
+    # 예전 식은 그 런의 마지막 줄바꿈부터 앞쪽으로 열기를 시도하고, 연 자리 뒤의 첫 '\n---'에서 닫았다.
+    opening = text.rfind("\n", 3, head)
+    if opening < 0:
         return None, text
-    return m.group(1), text[m.end():]
+    closing = text.find("\n---", opening + 1)
+    if closing < 0:
+        # 더 앞 줄바꿈에서 열면 런 끝의 줄바꿈과 바로 뒤의 '---'만 닫는 줄이 될 수 있다(공백뿐인
+        # 프런트매터). 런 안은 공백뿐이라 '---'가 없고, 런 뒤에는 '\n---'가 없음을 위에서 확인했다.
+        previous = text.rfind("\n", 3, opening)
+        if previous < 0 or opening != head - 1 or not text.startswith("---", head):
+            return None, text
+        opening, closing = previous, opening
+    return text[opening + 1:closing], text[_SPACE_RUN_RE.match(text, closing + 4).end():]
 
 
 def parse_simple_yaml_keys(fm: str) -> dict[str, str]:

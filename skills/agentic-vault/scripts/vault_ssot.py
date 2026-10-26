@@ -67,7 +67,6 @@ MAX_INVENTORY_ENTRIES = 20_000
 MAX_CANDIDATES = 16
 MAX_REFERENCE_CHARS = 256
 WIKI_REF_RE = re.compile(r'!?\[\[([^\[\]\n]{0,512})\]\]')
-CODE_SPAN_RE = re.compile(r'(`+)(.+?)\1')
 ATTACHMENT_RE = re.compile(r'\.[A-Za-z][A-Za-z0-9]{0,7}$')
 _ASCII_ALNUM = frozenset('0123456789abcdefghijklmnopqrstuvwxyz')
 
@@ -456,6 +455,50 @@ def _support_pattern(literal):
     return re.compile(prefix + re.escape(literal) + suffix)
 
 
+_BACKTICK_RUN_RE = re.compile(r'`+')
+
+
+def _code_spans(cell):
+    """(start, end, group 2) of each former re.finditer(r'(`+)(.+?)\\1', cell) match.
+
+    The same matches, line feeds included, in linear time; the regex
+    (CODE_SPAN_RE) was cubic on a cell of backticks and stays in
+    tests/test_linear_line_parsers.py as an oracle.
+    """
+    # From each backtick the regex tried the opening lengths from the rest of
+    # its run down to one, each with the nearest later run of exactly that many
+    # backticks after at least one character ('.+?' stops at a line feed). An
+    # opening of at least half the rest can close only at the start of a later
+    # run on the same line that is at least that long; failing that, a rest of
+    # three or more closes on itself around one backtick.
+    runs = [match.span() for match in _BACKTICK_RUN_RE.finditer(cell)]
+    later, longest = [0] * len(runs), 0  # the longest later run before a line feed
+    for j in range(len(runs) - 1, -1, -1):
+        if j + 1 < len(runs) and cell.find('\n', runs[j][1], runs[j + 1][0]) >= 0:
+            longest = 0
+        later[j], longest = longest, max(longest, runs[j][1] - runs[j][0])
+    spans, cursor, j = [], 0, 0
+    while j < len(runs):
+        start = max(cursor, runs[j][0])
+        size = runs[j][1] - start  # backticks left in this run
+        close = min(size, later[j])
+        if 2 * close >= size:
+            j += 1
+            while runs[j][1] - runs[j][0] < close:
+                j += 1
+            spans.append((start, runs[j][0] + close, cell[start + close:runs[j][0]]))
+        elif size >= 3:
+            half = (size - 1) // 2
+            spans.append((start, start + 2 * half + 1, '`'))
+        else:
+            j += 1  # no later run on its line and too short to close on itself
+            continue
+        cursor = spans[-1][1]
+        if cursor == runs[j][1]:
+            j += 1
+    return spans
+
+
 def _references(cell):
     """Return (target, strict) note references in one source cell, in order.
 
@@ -464,12 +507,15 @@ def _references(cell):
     or a whole cell that is one whitespace-free .md path, is a plain reference;
     an invalid plain path is ignored rather than reported.
     """
-    found = []
-    for match in CODE_SPAN_RE.finditer(cell):
-        content = match[2].strip()
+    found, outside, cursor = [], [], 0
+    for start, end, content in _code_spans(cell):
+        content = content.strip()
         if content.casefold().endswith('.md'):
             found.append((content, False))
-    text = CODE_SPAN_RE.sub(' ', cell)
+        outside.append(cell[cursor:start])
+        cursor = end
+    # Each code span becomes one space, as the former CODE_SPAN_RE.sub(' ', cell).
+    text = ' '.join([*outside, cell[cursor:]])
     for match in WIKI_REF_RE.finditer(text):
         link = match[1].split('|', 1)[0].strip()
         target = link.split('#', 1)[0].strip()

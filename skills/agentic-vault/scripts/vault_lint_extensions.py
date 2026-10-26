@@ -119,7 +119,7 @@ def _clean_lines(text):
 
 def _heading_key(text):
     text = re.sub(r'\\([\\|#*_`])', r'\1', text)
-    text = re.sub(r'\[([^]]+)\]\([^)]*\)', r'\1', text)
+    text = _without_link_targets(text)
     text = text.replace('`', '')
     text = re.sub(r'(\*\*|__|\*|_)(.*?)\1', r'\2', text)
     return ' '.join(unicodedata.normalize('NFC', text).split()).casefold()
@@ -178,6 +178,95 @@ def _before_comment(value):
     # The first '#' after whitespace; the split dropped that whole whitespace run.
     mark = _COMMENT_MARK_RE.search(value)
     return value if mark is None else value[:mark.end() - 1].rstrip()
+
+
+# Linear forms of three more regexes. Each returns what the old one did, line
+# feeds included. The inline-code removal tried every opening length against
+# every later position (cubic on a line of backticks); the two link scans ran
+# their character class to the end of the line again from each '[' (quadratic
+# on a run of '['). The old patterns stay in tests/test_linear_line_parsers.py
+# as oracles.
+_BACKTICK_RUN_RE = re.compile(r'`+')
+_LINK_END_RE = re.compile(r'[]\n]')
+
+
+def _without_code_spans(line):
+    """Former re.sub(r'(`+).*?\\1', '', line), line feeds included."""
+    # From each backtick the regex tried the opening lengths from the rest of
+    # its run down to one, each with the nearest later run of exactly that many
+    # backticks ('.*?' stops at a line feed). An opening longer than half the
+    # rest can close only at the start of a later run on the same line that is
+    # at least that long; failing that, the rest closes on itself in two
+    # halves, and an odd last backtick starts the next try.
+    runs = [match.span() for match in _BACKTICK_RUN_RE.finditer(line)]
+    later, longest = [0] * len(runs), 0  # the longest later run before a line feed
+    for j in range(len(runs) - 1, -1, -1):
+        if j + 1 < len(runs) and line.find('\n', runs[j][1], runs[j + 1][0]) >= 0:
+            longest = 0
+        later[j], longest = longest, max(longest, runs[j][1] - runs[j][0])
+    kept, cursor, j = [], 0, 0
+    while j < len(runs):
+        start = max(cursor, runs[j][0])
+        size = runs[j][1] - start  # backticks left in this run
+        close = min(size, later[j])
+        if 2 * close > size:
+            j += 1
+            while runs[j][1] - runs[j][0] < close:
+                j += 1
+            end = runs[j][0] + close
+        elif size >= 2:
+            end = start + size // 2 * 2
+        else:
+            j += 1  # one backtick and no later run on its line: no match
+            continue
+        kept.append(line[cursor:start])
+        cursor = end
+        if cursor == runs[j][1]:
+            j += 1
+    kept.append(line[cursor:])
+    return ''.join(kept)
+
+
+def _wiki_link_texts(line):
+    """Former link texts of re.finditer(r'(?<!!)\\[\\[([^]\\n]+)\\]\\]|!\\[\\[([^]\\n]+)\\]\\]', line).
+
+    Each match captured, in group 1 or for an embed in group 2, the text from
+    one '[[' to the first ']' or line feed after it, and needed ']]' there. A
+    match ends with ']]', so the '!' of an embed is never inside the one before.
+    """
+    texts, search = [], 0
+    while True:
+        opening = line.find('[[', search)
+        if opening < 0:
+            return texts
+        stop = _LINK_END_RE.search(line, opening + 2)
+        end = stop.start() if stop else len(line)
+        if end > opening + 2 and line.startswith(']]', end):
+            texts.append(line[opening + 2:end])
+            search = end + 2
+        else:
+            search = end + 1  # every '[[' before this stop stops there too and fails
+
+
+def _without_link_targets(text):
+    """Former re.sub(r'\\[([^]]+)\\]\\([^)]*\\)', r'\\1', text)."""
+    kept, cursor, search = [], 0, 0
+    while True:
+        opening = text.find('[', search)
+        closing = text.find(']', opening + 1) if opening >= 0 else -1
+        if closing < 0:
+            break  # no '[' with a later ']' is left
+        if closing == opening + 1 or not text.startswith('(', closing + 1):
+            search = closing + 1  # every '[' before this ']' stops there too and fails
+            continue
+        end = text.find(')', closing + 2)
+        if end < 0:
+            break  # no ')' is left for this or any later '['
+        kept.append(text[cursor:opening])
+        kept.append(text[opening + 1:closing])
+        cursor = search = end + 1
+    kept.append(text[cursor:])
+    return ''.join(kept)
 
 
 def _anchors(lines, start):
@@ -301,9 +390,8 @@ def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[st
             continue
         results.extend(_date_warnings(path, lines, fm_ends[path], config))
         for line_number, line in enumerate(lines, 1):
-            line = re.sub(r'(`+).*?\1', '', line)
-            for match in re.finditer(r'(?<!!)\[\[([^]\n]+)\]\]|!\[\[([^]\n]+)\]\]', line):
-                raw = match[1] if match[1] is not None else match[2]
+            line = _without_code_spans(line)
+            for raw in _wiki_link_texts(line):
                 target, anchor = _link_parts(raw, line.lstrip().startswith('|'))
                 if re.search(r'\.[^./]+$', target) and not target.lower().endswith('.md'):
                     continue
