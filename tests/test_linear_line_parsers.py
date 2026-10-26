@@ -1,7 +1,9 @@
-"""Linear line parsers that replaced super-linear lazy-suffix regexes.
+"""Linear line parsers and scanners that replaced super-linear regexes.
 
-The former patterns live only here, as oracles. The acceptance gates borrow the
-two tiers of VULCANBOOST (Li et al., "VULCANBOOST: Boosting ReDoS Fixes through
+The former patterns live only here, as oracles: the lazy-suffix heading and
+frontmatter-line patterns, and the backtick code-span, wiki-link, Markdown-link
+and frontmatter-block patterns that the scanners replaced. The acceptance gates
+borrow the two tiers of VULCANBOOST (Li et al., "VULCANBOOST: Boosting ReDoS Fixes through
 Symbolic Representation and Feature Normalization", USENIX Security 2025), not
 its DFA machinery: tier A, fixed cases (CommonMark-derived and vault lines)
 agree with the oracle; tier B, bounded-exhaustive equivalence with the oracle
@@ -13,7 +15,7 @@ timings.
 from __future__ import annotations
 
 import ast
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, redirect_stderr, redirect_stdout
 import io
 import itertools
 import json
@@ -21,6 +23,8 @@ import os
 from pathlib import Path
 import random
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -55,6 +59,11 @@ OLD_RULE_PAREN = re.compile(r'\s*\([^)]*\)')                         # vault_hea
 OLD_RULE_DASH = re.compile(r'\s*[—-]\s.*$')                          # vault_healthcheck.py:1571 (re.sub)
 OLD_TITLE = re.compile(r'^\s*title\s*:\s*(.*?)\s*$', re.IGNORECASE)  # vault_recall.py:40
 OLD_RECALL_HEADING = re.compile(r'^\s*#{1,6}\s+(.+?)\s*#*\s*$')      # vault_recall.py:41, vault_query_expansion.py:478
+OLD_LINT_CODE = re.compile(r'(`+).*?\1')                                    # vault_lint_extensions.py:257 (re.sub)
+OLD_LINT_LINKS = re.compile(r'(?<!!)\[\[([^]\n]+)\]\]|!\[\[([^]\n]+)\]\]')  # vault_lint_extensions.py:258 (finditer)
+OLD_KEY_LINK = re.compile(r'\[([^]]+)\]\([^)]*\)')                          # vault_lint_extensions.py:122 (re.sub)
+OLD_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)       # vault_healthcheck.py:1254
+OLD_CODE_SPAN = re.compile(r'(`+)(.+?)\1')                                  # vault_ssot.py:70 (CODE_SPAN_RE)
 
 
 def oracle_atx(text):
@@ -108,11 +117,40 @@ def oracle_heading_label(line):
     return match.group(1) if match else None
 
 
+def oracle_code_removed(line):
+    return OLD_LINT_CODE.sub('', line)
+
+
+def oracle_link_texts(line):
+    return [match[1] if match[1] is not None else match[2] for match in OLD_LINT_LINKS.finditer(line)]
+
+
+def oracle_link_text(text):
+    return OLD_KEY_LINK.sub(r'\1', text)
+
+
+def oracle_split_frontmatter(text):
+    # The whole former split_frontmatter, its startswith guard included.
+    if not text.startswith('---'):
+        return None, text
+    match = OLD_FRONTMATTER.match(text)
+    return (match.group(1), text[match.end():]) if match else (None, text)
+
+
+def oracle_code_spans(cell):
+    return [(match.start(), match.end(), match[2]) for match in OLD_CODE_SPAN.finditer(cell)]
+
+
 # One code point of each kind of whitespace a split line can still hold: ASCII
 # space and tab, vertical tab, file separator, NEL, no-break space, line
 # separator and ideographic space (bytes.splitlines splits only on CR and LF).
 WHITESPACE = ' \t\x0b\x1c\x85\xa0\u2028\u3000'
 RECORD = WHITESPACE + '#a가'  # the 11-symbol alphabet of the deep verification
+# The scanners' 11-symbol alphabet: what the five scanned patterns treat
+# specially (backtick, brackets, parentheses, '!', line feed, '-'), a space, a
+# letter and a Hangul syllable. Every other character acts in these patterns
+# like the letter, or for the frontmatter pattern's \s like the space.
+SCAN = '`[]()!\n- a가'
 
 
 class Pair(NamedTuple):
@@ -149,8 +187,22 @@ PAIRS = (
     Pair('recall title value', vault_recall, '_title_value', oracle_title_value, ((RECORD + ':', 5),),
          prefixes=('', 'title', ' TITLE :', 'Title\t:', 't\u0131tle:', 't\u0130tle:'), special='#a:'),
     Pair('recall heading label', vault_recall, '_heading_label', oracle_heading_label, ((RECORD, 6),)),
+    # The scanners have no line-feed precondition, and each also runs longer
+    # over just the characters its pattern distinguishes.
+    Pair('lint code removal', lint, '_without_code_spans', oracle_code_removed,
+         ((SCAN, 6), ('`a\n', 11)), newline_free=False, special='`a'),
+    Pair('lint link texts', lint, '_wiki_link_texts', oracle_link_texts,
+         ((SCAN, 6), ('[]!a\n', 8)), newline_free=False, special='[]!a'),
+    Pair('lint heading link text', lint, '_without_link_targets', oracle_link_text,
+         ((SCAN, 6), ('[]()a\n', 8)), newline_free=False, special='[]()a'),
+    Pair('healthcheck frontmatter', vault_healthcheck, 'split_frontmatter', oracle_split_frontmatter,
+         (('-\n\r \ta가', 6),), prefixes=('', '---', '---\n', '---\r\n'), newline_free=False, special='-a'),
+    Pair('ssot code spans', vault_ssot, '_code_spans', oracle_code_spans,
+         ((SCAN, 6), ('`a\n', 11)), newline_free=False, special='`a'),
 )
 PAIR = {pair.name: pair for pair in PAIRS}
+SCANNERS = ('lint code removal', 'lint link texts', 'lint heading link text', 'healthcheck frontmatter',
+            'ssot code spans')
 
 
 def strings(alphabet, length, prefixes=('',)):
@@ -261,6 +313,95 @@ LINES = tuple(line for case in COMMONMARK_CASES for line in case['lines']) + tup
     line for line, _ in VAULT_CASES) + tuple(generated_lines())
 
 
+def scan_lines(count=400, seed=20261027):
+    """Deterministic lines of code spans, links and link-like text for the scanner comparisons."""
+    rng = random.Random(seed)
+    pieces = ('`', '`', '``', '```', '[[', ']]', '![[', '[', ']', '(', ')', '!', ' ', ' ', 'b', 'b#Alpha one',
+              'b#^blk', 'b#x z', 'b#Nope', 'c', 'x/c', 'z/q', '|', '\\', 'a.png', '[Alpha](u)', '가', '\t')
+    return [''.join(rng.choice(pieces) for _ in range(rng.randint(0, 10))) for _ in range(count)]
+
+
+SCAN_LINES = tuple(scan_lines())
+
+
+def scan_notes(lines):
+    """Lint input whose links, code spans and headings reach the three lint scanners."""
+    headings = ''.join(f'# {line}\n' for line in lines) + (
+        '# [Alpha](u) one\n## `b` [x](y) z\n### [[c]](d)\nSetext [s](t)\n===\nblock ^blk\n')
+    links = '[[b#Alpha one]] [[b#^blk]] [[b#x z]] [[b#Nope]] [[c]] [[x/c]] [[z/q]] `[[b#Nope]]`\n'
+    return {'a.md': '\n'.join(lines) + '\n' + links, 'b.md': headings, 'x/c.md': 'x\n', 'y/c.md': 'y\n'}
+
+
+def frontmatter_texts(count=200, seed=20261027):
+    """Deterministic note texts around the frontmatter fences, CR and CRLF included."""
+    rng = random.Random(seed)
+    heads = ('---', '---', '---\n', '---\r\n', '--- \n', '-', '')
+    pieces = ('---', '---', '\n', '\n', '\r\n', '\r', ' ', '\t', '\xa0', 'title: "A"', 'type: note', 'type: x',
+              'tags: [[y]]', 'a', '-', '...', '[[z]]')
+    return [rng.choice(heads) + ''.join(rng.choice(pieces) for _ in range(rng.randint(0, 12)))
+            for _ in range(count)]
+
+
+FRONTMATTER_TEXTS = (
+    '---\ntitle: "A"\ntype: note\n---\nbody\n', '---\r\ntitle: "A"\r\n---\r\n\r\nbody\r\n',
+    '---\n' + '\n' * 40, '---\n\n---\n', '---\n---\n', '--- \n title: "A"\n---  \n\n\nbody',
+    '---\ntitle: "A"\ntags: [[y]]\n---\n', '---\ntype: x\n----\nbody', '---\rtitle: "A"\r---\r',
+) + tuple(frontmatter_texts())
+HEALTH_CONFIG = {'vault_name': 'Scan vault', 'required_keys': ['title'], 'enums': {'type': ['note']},
+                 'deny_zones': [], 'exclude_dirs': ['.git'], 'index_note': '', 'log_note': '', 'log_tags': [],
+                 'hot_note': '', 'handoff_note': '', 'ssot_note': '', 'health_report': '00-meta/health.md',
+                 'rules_dir': '', 'frontmatter_roots': ['notes']}
+
+
+def health_vault(root, texts):
+    """A vault whose notes/ holds each text with its bytes and line ends as given."""
+    (root / '00-meta').mkdir(parents=True)
+    (root / '00-meta' / 'vault-config.json').write_text(json.dumps(HEALTH_CONFIG), encoding='utf-8')
+    (root / 'notes').mkdir()
+    for number, text in enumerate(texts):
+        (root / 'notes' / f'n{number}.md').write_bytes(text.encode('utf-8'))
+    return root
+
+
+def full_healthcheck(vault):
+    """Run the full-mode healthcheck in process: (exit code, stdout, stderr, report)."""
+    out, err = io.StringIO(), io.StringIO()
+    with mock.patch.object(sys, 'argv', ['vault_healthcheck.py', '--vault', str(vault)]), \
+            redirect_stdout(out), redirect_stderr(err):
+        code = vault_healthcheck.main()
+    return code, out.getvalue(), err.getvalue(), (vault / '00-meta' / 'health.md').read_text(encoding='utf-8')
+
+
+# Source cells of check-support rows: code spans around paths and wiki links,
+# openings the regex shortened, and backtick runs without a partner.
+SOURCE_CELLS = (
+    '`notes/Evidence.md`', '``notes/Evidence.md``', '```notes/Evidence.md``', '`` notes/Evidence.md ``',
+    '[[Evidence]] `x`', '`[[Evidence]]`', '`` ` `` [[Evidence]]', '`a`b`notes/Evidence.md`',
+    '`' * 9 + 'notes/Evidence.md', '`notes/Missing.md` [[Evidence]]', '`notes/Missing.md`', '````',
+    '`notes/Evidence.md', 'notes/Evidence.md', '``[[Evidence]]`', '` `[[Evidence]]` `',
+)
+
+
+def support_vault(root, cells):
+    """A vault with one evidence note and a ledger citing it through each source cell twice.
+
+    The source column comes last without a closing pipe, so a cell whose
+    backticks leave a code span open still ends at the line end.
+    """
+    rows = ''.join(f'| Atlas | retention {number} | {value} | 2025-01-01 |  | 2026-10-07 |  | confirmed | {cell}\n'
+                   for number, cell in enumerate(cells) for value in ('12개월', '24개월'))
+    files = {
+        '00-meta/vault-config.json': '{"deny_zones": [], "exclude_dirs": []}',
+        'notes/Evidence.md': '---\ntitle: Evidence\n---\n보존 기간은 12개월이다.\n',
+        'notes/facts.md': ('| subject | relation | value | valid_from | valid_until | recorded | superseded_by | '
+                           'status | source |\n' + '| --- ' * 9 + '|\n' + rows),
+    }
+    for relative, text in files.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_bytes(text.encode('utf-8'))
+    return root
+
+
 @contextmanager
 def recorded(test, pair):
     """Record what a caller passes to the new helper and hold it to the oracle."""
@@ -363,6 +504,44 @@ class TierACasesTests(unittest.TestCase):
                 with self.subTest(pair=name, value=value):
                     self.assertEqual(pair.new()(value), pair.oracle(value))
 
+    def test_scanners_keep_their_fixed_cases(self):
+        # The code-span regexes shortened an opening run that no run of the same
+        # length closed: '```a``' closes on two of its three backticks, which
+        # neither CommonMark nor a scan that pairs whole runs would do.
+        cases = {
+            'lint code removal': (
+                ('a `b` c', 'a  c'), ('``a`b``', ''), ('```a``', ''), ('`a``', '`'), ('````', ''), ('```', '`'),
+                ('`` `a` ``', ''), ('x ``` y', 'x ` y'), ('`a` ``b`` `', '  `'), ('`a\n`', '`a\n`'),
+                ('[[x]] `[[y]]`', '[[x]] ')),
+            'lint link texts': (
+                ('[[a]] ![[b]] [[c#d|e]]', ['a', 'b', 'c#d|e']), ('[[[a]]', ['[a']), ('![[[a]]', ['[a']),
+                ('!![[a]]', ['a']), ('[[a]]]', ['a']), ('[[a]][[b]]', ['a', 'b']), ('[[]] [[a]b]]', []),
+                ('[[a\n]]', []), ('[[a\n[[b]]', ['b'])),
+            'lint heading link text': (
+                ('[text](https://x.test/a) tail', 'text tail'), ('[a](b) [c](d)', 'a c'), ('[a]()', 'a'),
+                ('[[a](b)', '[a'), ('[a]((b))', 'a)'), ('[a](b\n)', 'a'), ('[a](b', '[a](b'),
+                ('[[a]](b)', '[[a]](b)'), ('[](x)', '[](x)'), ('[a] (x)', '[a] (x)')),
+            'healthcheck frontmatter': (
+                ('---\ntitle: x\n---\nbody', ('title: x', 'body')),
+                ('---\r\ntitle: x\r\n---\r\n\r\nbody\r\n', ('title: x\r', 'body\r\n')),
+                ('--- \n a\n---  \n\n\nbody', (' a', 'body')), ('---\n\n---\n', ('', '')), ('---\n \n---', (' ', '')),
+                ('---\na\n---b', ('a', 'b')), ('---\na\n----\nb', ('a', '-\nb')), ('---\n---\n', (None, '---\n---\n')),
+                ('---\n\n\n\n\n', (None, '---\n\n\n\n\n')), ('----\nx\n---\n', (None, '----\nx\n---\n')),
+                ('x\n---\n---\n', (None, 'x\n---\n---\n'))),
+            'ssot code spans': (
+                ('`notes/a.md`', [(0, 12, 'notes/a.md')]), ('`` notes/a.md ``', [(0, 16, ' notes/a.md ')]),
+                ('```notes/a.md``', [(0, 15, '`notes/a.md')]), ('`a``b`', [(0, 3, 'a'), (3, 6, 'b')]),
+                ('``a`', [(0, 4, '`a')]), ('```', [(0, 3, '`')]), ('````', [(0, 3, '`')]), ('``', []),
+                ('`` `x` ``', [(0, 9, ' `x` ')]), ('`a\nb`', [])),
+        }
+        self.assertEqual(tuple(cases), SCANNERS)
+        for name, values in cases.items():
+            pair = PAIR[name]
+            for value, expected in values:
+                with self.subTest(pair=name, value=value):
+                    self.assertEqual(pair.oracle(value), expected)
+                    self.assertEqual(pair.new()(value), expected)
+
 
 class TierBEquivalenceTests(unittest.TestCase):
     """Tier B: bounded-exhaustive equality with the former regexes."""
@@ -460,6 +639,41 @@ class CallerPreconditionTests(unittest.TestCase):
         with recorded(self, PAIR['recall heading label']):
             vault_query_expansion.rank_expanded('n.md', plain + body + 'alpha body\n', 'alpha', ['alpha'])
 
+    def test_lint_scanners_are_reached_by_the_default_lint(self):
+        # The scanners equal their oracles with line feeds too, so their callers
+        # need no line-feed precondition; recorded() still holds every value a
+        # caller passes to the oracle.
+        notes = scan_notes(SCAN_LINES[:80])
+        for name in ('lint code removal', 'lint link texts', 'lint heading link text'):
+            with self.subTest(pair=name), recorded(self, PAIR[name]):
+                lint.analyze_notes(notes, {})
+
+    def test_check_support_passes_each_source_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = support_vault(Path(tmp).resolve() / 'vault', SOURCE_CELLS)
+            with recorded(self, PAIR['ssot code spans']) as calls:
+                vault_ssot.check_support(vault, 'notes/facts.md')
+        self.assertEqual(sorted(set(calls)), sorted(SOURCE_CELLS))
+
+    def test_frontmatter_reaches_full_mode_without_cr_and_staged_mode_with_cr(self):
+        # Full mode reads notes in text mode, which turns CR and CRLF into a line
+        # feed; --staged decodes the index blob as stored, so a CRLF note keeps
+        # its CR. The split equals the oracle either way (held by recorded()).
+        if shutil.which('git') is None:
+            self.skipTest('git is not available')
+        texts = ('---\r\ntitle: "A"\r\n---\r\nbody\r\n', '---\rtitle: "A"\r---\r', '---\ntitle: "A"\n---\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = health_vault(Path(tmp).resolve() / 'vault', texts)
+            with recorded(self, PAIR['healthcheck frontmatter']) as calls:
+                full_healthcheck(vault)
+            self.assertEqual(len(calls), len(texts))
+            self.assertFalse([value for value in calls if '\r' in value])
+            for args in (('init', '-q'), ('config', 'core.autocrlf', 'false'), ('add', '--', '.')):
+                subprocess.run(['git', *args], cwd=vault, check=True, capture_output=True)
+            with recorded(self, PAIR['healthcheck frontmatter']) as calls:
+                vault_healthcheck.validate_staged(vault, vault_healthcheck.load_staged_config(vault))
+            self.assertEqual(sorted(calls), sorted(texts))
+
 
 class DefaultOutputUnchangedTests(unittest.TestCase):
     """Whole caller outputs equal the same runs with the former regexes patched in."""
@@ -541,11 +755,46 @@ class DefaultOutputUnchangedTests(unittest.TestCase):
              vault_query_expansion.rank_expanded('n.md', text, 'alpha', ['alpha'])) for text in documents])
         self.assertTrue(all(ranked is not None for ranked, _ in result))
 
+    def test_lint_scans_keep_the_lint_warnings(self):
+        # Chunks keep each run under the 200-warning cap, so no finding is cut.
+        runs = [scan_notes(SCAN_LINES[start:start + 40]) for start in range(0, len(SCAN_LINES), 40)]
+        names = ('lint code removal', 'lint link texts', 'lint heading link text')
+        result = self.same_with_oracles(names, lambda: [lint.analyze_notes(notes, {}) for notes in runs])
+        codes = {item['code'] for findings in result for item in findings}
+        self.assertTrue({'missing-anchor', 'ambiguous-link', 'missing-link-path'} <= codes)
+        self.assertNotIn('lint-incomplete', codes)
+
+    def test_check_support_sources_are_unchanged(self):
+        cells = SOURCE_CELLS + tuple(line.strip() for line in SCAN_LINES[:60] if '|' not in line and line.strip())
+        references = self.same_with_oracles(('ssot code spans',), lambda: [vault_ssot._references(cell)
+                                                                           for cell in cells])
+        self.assertEqual({strict for found in references for _, strict in found}, {True, False})
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = support_vault(Path(tmp).resolve() / 'vault', cells)
+            result = self.same_with_oracles(('ssot code spans',),
+                                            lambda: vault_ssot.check_support(vault, 'notes/facts.md'))
+        self.assertTrue(result['rows_supported'] and result['rows_unsupported'] and result['rows_unresolved'])
+        self.assertTrue(result['rows_skipped'])
+
+    def test_healthcheck_frontmatter_verdicts_are_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = health_vault(Path(tmp).resolve() / 'vault', FRONTMATTER_TEXTS)
+            code, _, _, report = self.same_with_oracles(('healthcheck frontmatter',), lambda: full_healthcheck(vault))
+        self.assertEqual(code, 1)
+        missing = int(re.search(r'## 1\. 프런트매터 누락 — 치명 \((\d+)\)', report)[1])
+        self.assertTrue(0 < missing < len(FRONTMATTER_TEXTS))
+        config = vault_healthcheck.validate_config(HEALTH_CONFIG)
+        errors = self.same_with_oracles(('healthcheck frontmatter',), lambda: [
+            vault_healthcheck._staged_schema_errors(f'notes/n{number}.md', text, config)
+            for number, text in enumerate(FRONTMATTER_TEXTS)])
+        self.assertTrue(any(errors) and not all(errors))
+
     def test_warning_promotion_replay_is_unchanged(self):
         # The certificate binds the bundled benign corpus results; only the
         # checker file hash may change with this work.
         names = ('ssot ATX heading', 'lint heading text', 'lint closing run', 'lint date field',
-                 'lint comment split', 'provenance header field')
+                 'lint comment split', 'provenance header field', 'lint code removal', 'lint link texts',
+                 'lint heading link text', 'ssot code spans')
         result = self.same_with_oracles(names, vault_warning_policy.build_promotion_certificate)
         self.assertEqual(result['false_positives'], 0)
 
@@ -574,6 +823,15 @@ SHAPES = {
                            lambda n: ' ' * n + 'title: x'),
     'recall heading label': (lambda n: '# a' + ' ' * n + 'b', lambda n: '# a' + ' #' * n,
                              lambda n: '#' + '\u3000' * n + 'x', lambda n: ' ' * n + '# x'),
+    # The first shape of each scanner is the one the former regex was slowest on.
+    'lint code removal': (lambda n: '`' * n, lambda n: '``a' * (n // 3),
+                          lambda n: '`' * (n // 2) + 'a' + '`' * (n // 2 - 1)),
+    'lint link texts': (lambda n: '[' * n, lambda n: '[[a' * (n // 3), lambda n: '![[a]]' * (n // 6)),
+    'lint heading link text': (lambda n: '[' * n, lambda n: '[a](' * (n // 4), lambda n: '[' * (n - 2) + ']x'),
+    'healthcheck frontmatter': (lambda n: '---' + '\n' * n, lambda n: '---' + ' \n' * (n // 2),
+                                lambda n: '---\n' + '\n' * n + '---\n'),
+    'ssot code spans': (lambda n: '`' * n, lambda n: '``a' * (n // 3),
+                        lambda n: '`' * (n // 2) + 'a' + '`' * (n // 2 - 1)),
 }
 SHAPES['state ATX heading'] = SHAPES['ssot ATX heading']
 
@@ -597,22 +855,35 @@ class TimingGateTests(unittest.TestCase):
                 self.assertLess(self.elapsed(pair.new(), SHAPES[pair.name]), TIMING_BUDGET)
 
 
+def shipped_code_strings():
+    """(file:line, value) of each string constant in shipped Python code, docstrings excluded."""
+    for directory in (SCRIPTS, ROOT / 'hooks'):
+        for path in sorted(directory.glob('*.py')):
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+            docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                          if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                          and node.body and isinstance(node.body[0], ast.Expr)
+                          and isinstance(node.body[0].value, ast.Constant)}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
+                    yield f'{path.name}:{node.lineno}', node.value
+
+
 class NoLazySuffixLeftTests(unittest.TestCase):
     def test_no_shipped_regex_keeps_a_lazy_group_before_an_optional_whitespace_tail(self):
         # Docstrings and comments may quote the former patterns; code may not.
         shape = re.compile(r'\?\)(?:#\*)*\\s\*(?:\\s\*|#\*)*\$')
-        found = []
-        for directory in (SCRIPTS, ROOT / 'hooks'):
-            for path in sorted(directory.glob('*.py')):
-                tree = ast.parse(path.read_text(encoding='utf-8'))
-                docstrings = {id(node.body[0].value) for node in ast.walk(tree)
-                              if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                              and node.body and isinstance(node.body[0], ast.Expr)
-                              and isinstance(node.body[0].value, ast.Constant)}
-                found.extend(f'{path.name}:{node.lineno}' for node in ast.walk(tree)
-                             if isinstance(node, ast.Constant) and isinstance(node.value, str)
-                             and id(node) not in docstrings and shape.search(node.value))
-        self.assertEqual(found, [])
+        self.assertEqual([where for where, value in shipped_code_strings() if shape.search(value)], [])
+
+    def test_no_shipped_regex_keeps_a_former_scanned_pattern(self):
+        # Nor a backtick run closed by a backreference, which retries every
+        # opening length against every later position.
+        former = {OLD_LINT_CODE.pattern, OLD_LINT_LINKS.pattern, OLD_KEY_LINK.pattern, OLD_FRONTMATTER.pattern,
+                  OLD_CODE_SPAN.pattern}
+        shape = re.compile(r'\(`\+\).*\\[1-9]')
+        self.assertTrue(shape.search(OLD_LINT_CODE.pattern) and shape.search(OLD_CODE_SPAN.pattern))
+        self.assertEqual([where for where, value in shipped_code_strings()
+                          if value in former or shape.search(value)], [])
 
 
 @unittest.skipUnless(SLOW, 'set AGENTIC_VAULT_SLOW_TESTS=1 for the larger runs')
@@ -633,9 +904,21 @@ class SlowEquivalenceTests(unittest.TestCase):
                 _, found = mismatches(pair, strings(alphabet, length + 1, pair.prefixes))
                 self.assertEqual(found, [])
 
+    def test_scanners_on_their_distinguished_characters_at_greater_lengths(self):
+        for name, (alphabet, length, prefixes) in {
+                'lint code removal': ('`a\n', 14, ('',)), 'ssot code spans': ('`a\n', 14, ('',)),
+                'lint link texts': ('[]!a\n', 10, ('',)), 'lint heading link text': ('[]()a\n', 9, ('',)),
+                'healthcheck frontmatter': ('-\n\r a', 10, ('---',))}.items():
+            pair = PAIR[name]
+            with self.subTest(pair=name):
+                _, found = mismatches(pair, strings(alphabet, length, prefixes))
+                self.assertEqual(found, [])
+
     def test_report_former_and_new_times(self):
         report = io.StringIO()
-        sizes = {'recall heading label': (1_000, 2_000)}  # the former form was cubic
+        # The former forms were cubic for these; CODE_SPAN_RE read cells of at most 4 KiB.
+        sizes = {'recall heading label': (1_000, 2_000), 'lint code removal': (2_000, 4_000, 8_000),
+                 'ssot code spans': (1_024, 2_048, 4_096)}
         for pair in PAIRS:
             if pair.name == 'state ATX heading':
                 continue
