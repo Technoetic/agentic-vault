@@ -365,6 +365,15 @@ Git staged 검사는 index 원문만 사용한다. JSON 근거를 직접 확인�
 `vault_warning_policy.py --certificate`의 현재 checker/corpus 해시와 실제 benign replay 0 FP를 함께 사용한다.
 불완전 스캔·미검증 출처는 치명 승격할 수 없다. 코드·줄바꿈·corpus가 달라지면 기존 인증서는 재사용하지 않는다.
 
+corpus 해시는 `skills/agentic-vault/scripts/resources/lint-benign-v1.json`의 바이트로 계산하며, 릴리스 ZIP의 이 파일은
+저장소의 LF 바이트(`38efaabd…`)다. v0.31.0까지는 `.gitattributes`가 이 파일의 줄 끝을 정하지 않아
+`core.autocrlf=true`인 Windows git checkout(그 사본을 그대로 복사한 설치본도 같다)이 CRLF로 받았고, corpus 해시가
+`4b31a673…`로 달랐다(2026-10-27 측정). 그런 사본에서 만든 인증서는 LF 설치본에서 맞지 않고 그 반대도 맞지 않는다.
+2026-10-27부터 `.gitattributes`가 이 파일을 `text eol=lf`로 지정하므로 새 checkout은 `core.autocrlf`와 관계없이 LF
+바이트를 받는다(`tests/test_vault_lint_extensions.py`가 속성과 `core.autocrlf=true` checkout 결과를 검사한다). 이미
+CRLF로 받은 checkout은 속성이 바뀌어도 이 파일을 다시 쓰지 않으므로, 파일을 지우고
+`git checkout -- skills/agentic-vault/scripts/resources/lint-benign-v1.json`으로 다시 받는다(2026-10-27 확인).
+
 ## 부분 편집과 checkpoint
 
 `patch_note(vault,path,expected_sha256,[{"start":0,"end":0,"replacement":"..."}], expected_config_sha256=...)`의

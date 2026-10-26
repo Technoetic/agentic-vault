@@ -190,6 +190,34 @@ class PromotionTests(unittest.TestCase):
                 self.assertFalse(result['valid'])
                 self.assertEqual(result['promoted_codes'], [])
 
+    def test_bundled_corpus_checks_out_with_repository_lf_bytes(self):
+        # corpus_sha256 hashes the corpus file's bytes and certificates bind that hash. The
+        # release ZIP carries the repository's LF bytes, so .gitattributes must keep a Windows
+        # checkout with core.autocrlf=true from writing CRLF and computing another hash.
+        root = SCRIPTS.parents[2]
+        corpus = (SCRIPTS / 'resources' / 'lint-benign-v1.json').relative_to(root).as_posix()
+        git = shutil.which('git')
+        if git is None:
+            self.skipTest('git is not installed, so the checkout attributes cannot be read')
+        top = subprocess.run([git, 'rev-parse', '--show-toplevel'], cwd=root, capture_output=True,
+                             encoding='utf-8', errors='replace')
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root.resolve():
+            self.skipTest('not a git checkout of this repository (for example an installed copy); '
+                          '.gitattributes line endings apply only to git checkouts')
+        names = ('text', 'eol', 'crlf', 'ident', 'filter', 'working-tree-encoding')
+        listed = subprocess.run([git, 'check-attr', '-z', *names, '--', corpus], cwd=root,
+                                capture_output=True, check=True).stdout.decode('utf-8').split('\0')
+        self.assertEqual({listed[i + 1]: listed[i + 2] for i in range(0, len(listed) - 1, 3)},
+                         {'text': 'set', 'eol': 'lf', 'crlf': 'unspecified', 'ident': 'unspecified',
+                          'filter': 'unspecified', 'working-tree-encoding': 'unspecified'})
+        blob = subprocess.run([git, 'cat-file', 'blob', ':' + corpus], cwd=root, capture_output=True,
+                              check=True).stdout
+        with tempfile.TemporaryDirectory() as temporary:
+            subprocess.run([git, '-c', 'core.autocrlf=true', 'checkout-index', '-f',
+                            '--prefix=' + Path(temporary).as_posix() + '/', '--', corpus],
+                           cwd=root, capture_output=True, check=True)
+            self.assertEqual((Path(temporary) / corpus).read_bytes(), blob)
+
 
 class WarningCliTests(unittest.TestCase):
     def setUp(self):
