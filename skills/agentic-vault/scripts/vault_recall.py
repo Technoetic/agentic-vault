@@ -37,8 +37,10 @@ MAX_SNIPPET_CHARS = 500
 MAX_TITLE_CHARS = 512
 
 _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
-_TITLE_RE = re.compile(r"^\s*title\s*:\s*(.*?)\s*$", re.IGNORECASE)
-_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$")
+# Only the bounded line prefixes stay regexes; _title_value and _heading_label
+# give the values in linear time (see below).
+_TITLE_KEY_RE = re.compile(r"\s*title\s*:", re.IGNORECASE)
+_HEADING_OPEN_RE = re.compile(r"\s*#{1,6}(?=\s)")
 
 
 def _diagnostics() -> dict:
@@ -296,19 +298,44 @@ def _read_markdown(path: Path, diagnostics: dict, rel_path: str, *, raw_sink=Non
         return None
 
 
+# The two helpers below give the same values as the former
+# re.match(r"^\s*title\s*:\s*(.*?)\s*$", line, re.IGNORECASE).group(1) and
+# re.match(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", line).group(1). Their lazy groups
+# retried the optional suffix at every position: quadratic, and cubic for the
+# heading, on a long whitespace run inside one line ('# a' + many spaces + 'b').
+# Precondition: no line feed in line; callers pass str.splitlines() lines.
+# For str patterns \s is str.isspace, the test argument-free strip(),
+# lstrip() and rstrip() use. tests/test_linear_line_parsers.py keeps the
+# former patterns as oracles.
+def _title_value(line: str) -> str | None:
+    match = _TITLE_KEY_RE.match(line)
+    return line[match.end():].strip() if match else None
+
+
+def _heading_label(line: str) -> str | None:
+    match = _HEADING_OPEN_RE.match(line)
+    if not match:
+        return None
+    rest = line[match.end():]
+    body = rest.lstrip()
+    if not body:
+        return rest[-1] if len(rest) >= 2 else None
+    return body.rstrip().rstrip("#").rstrip() or body[0]
+
+
 def _title(lines: list[str], fallback: str) -> tuple[str, int, str, bool]:
     if lines and lines[0].strip() == "---":
         for index, line in enumerate(lines[1:65], start=2):
             if line.strip() == "---":
                 break
-            match = _TITLE_RE.match(line)
-            if match:
-                value = match.group(1).strip().strip('"\'')
+            value = _title_value(line)
+            if value is not None:
+                value = value.strip().strip('"\'')
                 return value, index, line.strip(), True
     for index, line in enumerate(lines, start=1):
-        match = _HEADING_RE.match(line)
-        if match:
-            return match.group(1), index, line.strip(), True
+        label = _heading_label(line)
+        if label is not None:
+            return label, index, line.strip(), True
     return fallback, 0, "", False
 
 

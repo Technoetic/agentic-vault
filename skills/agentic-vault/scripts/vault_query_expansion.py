@@ -475,7 +475,7 @@ def rank_expanded(rel_path, text, phrase, terms):
         if line.lstrip().startswith(('```', '~~~')):
             fenced = not fenced
             continue
-        if fenced or not line.strip() or recall._HEADING_RE.match(line):
+        if fenced or not line.strip() or recall._heading_label(line) is not None:
             continue
         quality = recall._line_quality(recall._normalize(line), phrase, terms)
         if quality[1] and (best is None or quality > best[0]):

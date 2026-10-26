@@ -425,6 +425,20 @@ def validate_provenance(vault, manifest, *, privileged=False, evidence_id=None,
         return result
 
 
+_HEADER_KEY_RE = re.compile(r'([a-z_]+)\s*:')
+
+
+def _header_field(line):
+    """(key, value text) of one 'key: value' line, or None, in linear time."""
+    # Same groups as the former re.match(r'^([a-z_]+)\s*:\s*(.*?)\s*$', line),
+    # whose lazy value retried \s*$ at every position (quadratic on a long
+    # whitespace run). Precondition: no line feed in line (_header_fields reads
+    # str.splitlines output). For str patterns \s is str.isspace, the test
+    # strip() uses.
+    match = _HEADER_KEY_RE.match(line)
+    return (match[1], line[match.end():].strip()) if match else None
+
+
 def _header_fields(text):
     """Small selected metadata surface, not a general YAML interpretation."""
     if not text.startswith(('---\n', '---\r\n')):
@@ -433,14 +447,15 @@ def _header_fields(text):
     for line in text.splitlines()[1:65]:
         if line == '---':
             break
-        match = re.match(r'^([a-z_]+)\s*:\s*(.*?)\s*$', line)
-        if not match or match[1] in fields:
+        parsed = _header_field(line)
+        if not parsed or parsed[0] in fields:
             continue
+        key, raw = parsed
         try:
-            value = _decode(match[2].encode('utf-8'))
+            value = _decode(raw.encode('utf-8'))
         except ProvenanceError:
-            value = match[2].strip('"\'')
-        fields[match[1]] = value
+            value = raw.strip('"\'')
+        fields[key] = value
     return fields
 
 

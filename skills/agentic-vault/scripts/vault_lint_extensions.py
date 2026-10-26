@@ -134,13 +134,59 @@ def _frontmatter_end(lines):
     return 0
 
 
+# Linear forms of four earlier regexes. Each lazy group or scanned \s+ run
+# retried its suffix at every position, which was quadratic on a long
+# whitespace run inside one line ('# a' + many spaces + 'b'). For str patterns
+# \s is str.isspace, the test argument-free strip()/rstrip() use. Lines come
+# from _clean_lines (str.splitlines), so no line feed reaches the two forms
+# that depended on '.' and '$'; tests/test_linear_line_parsers.py keeps the
+# old patterns as oracles.
+_HEADING_OPEN_RE = re.compile(r' {0,3}#{1,6}(?=\s)')
+_DATE_FIELD_RE = re.compile(r'(created|updated):')
+_COMMENT_MARK_RE = re.compile(r'\s#')
+
+
+def _heading_text(line):
+    """Former re.match(r'^ {0,3}#{1,6}\\s+(.+?)\\s*$', line)[1], or None."""
+    match = _HEADING_OPEN_RE.match(line)
+    if not match:
+        return None
+    rest = line[match.end():]
+    text = rest.strip()
+    if text:
+        return text
+    return rest[-1] if len(rest) >= 2 else None
+
+
+def _date_field(line):
+    """Former re.match(r'^(created|updated):\\s*(.*?)\\s*$', line) groups, or None."""
+    match = _DATE_FIELD_RE.match(line)
+    return (match[1], line[match.end():].strip()) if match else None
+
+
+def _without_closing_run(text):
+    """Former re.sub(r'\\s+#+\\s*$', '', text), line feeds included."""
+    trimmed = text.rstrip()
+    body = trimmed.rstrip('#')
+    if body == trimmed or body.rstrip() == body:
+        return text
+    return body.rstrip()
+
+
+def _before_comment(value):
+    """Former re.split(r'\\s+#', value, maxsplit=1)[0], line feeds included."""
+    # The first '#' after whitespace; the split dropped that whole whitespace run.
+    mark = _COMMENT_MARK_RE.search(value)
+    return value if mark is None else value[:mark.end() - 1].rstrip()
+
+
 def _anchors(lines, start):
     headings, blocks = set(), set()
     for i in range(start, len(lines)):
         line = lines[i]
-        match = re.match(r'^ {0,3}#{1,6}\s+(.+?)\s*$', line)
-        if match:
-            headings.add(_heading_key(re.sub(r'\s+#+\s*$', '', match[1])))
+        text = _heading_text(line)
+        if text is not None:
+            headings.add(_heading_key(_without_closing_run(text)))
         elif i > start and re.match(r'^ {0,3}(?:=+|-+)\s*$', line) and lines[i - 1].strip():
             headings.add(_heading_key(lines[i - 1].strip()))
         block = re.search(r'(?:^|\s)\^([^\s^]+)\s*$', line)
@@ -191,10 +237,11 @@ def _date_warnings(path, lines, end, config):
         return []
     warnings = []
     for i in range(1, end - 1):
-        match = re.match(r'^(created|updated):\s*(.*?)\s*$', lines[i])
-        if not match:
+        parsed = _date_field(lines[i])
+        if not parsed:
             continue
-        scalar = re.split(r'\s+#', match[2], maxsplit=1)[0].strip()
+        field, value = parsed
+        scalar = _before_comment(value).strip()
         if len(scalar) >= 2 and scalar[0] in ('"', "'") and scalar[-1] == scalar[0]:
             scalar = scalar[1:-1]
         valid = bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', scalar))
@@ -205,8 +252,8 @@ def _date_warnings(path, lines, end, config):
                 valid = False
         if not valid:
             warnings.append(make_warning('invalid-date', path, i + 1,
-                            f'{match[1]} must be a nonempty calendar date (YYYY-MM-DD)',
-                            details={'field': match[1], 'value': scalar}))
+                            f'{field} must be a nonempty calendar date (YYYY-MM-DD)',
+                            details={'field': field, 'value': scalar}))
     return warnings
 
 

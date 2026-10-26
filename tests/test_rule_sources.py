@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 BEGIN = "# --- BEGIN SHARED PATH RULE"
 END = "# --- END SHARED PATH RULE ---"
+ATX_BEGIN = "# --- BEGIN ATX HEADING (verbatim copy) ---"
+ATX_END = "# --- END ATX HEADING (verbatim copy) ---"
 
 sys.path.insert(0, str(SCRIPTS))
 try:
@@ -33,6 +35,8 @@ try:
     import vault_judge
     import vault_paths
     import vault_recall
+    import vault_ssot
+    import vault_state
 finally:
     sys.path.remove(str(SCRIPTS))
 
@@ -345,6 +349,40 @@ class PathRuleSourceTests(unittest.TestCase):
                 self.assertIs(vault_paths._is_denied(parts, zones), expected)
                 self.assertIs(vault_recall._classified_skip(parts, zones, ()) == "denied", expected)
                 self.assertIs(vault_recall._classified_skip(parts, (), zones) == "excluded", expected)
+
+
+class AtxHeadingSourceTests(unittest.TestCase):
+    """The ledger and the handoff projection read section headings the same way.
+
+    vault_ssot.py imports vault_state, so the heading helper cannot be shared by
+    import; vault_state keeps a byte-identical copy, and vault_ssot's copy is the
+    one the warning-promotion checker hash binds.
+    """
+
+    def test_state_carries_a_verbatim_copy_of_the_ledger_heading_rule(self) -> None:
+        def block(name: str) -> bytes:
+            raw = (SCRIPTS / name).read_bytes()
+            self.assertEqual(raw.count(ATX_BEGIN.encode()), 1, name)
+            self.assertEqual(raw.count(ATX_END.encode()), 1, name)
+            return raw[raw.index(ATX_BEGIN.encode()):raw.index(ATX_END.encode())]
+
+        self.assertEqual(block("vault_state.py"), block("vault_ssot.py"))
+        self.assertIn(b"def _atx_heading(text):", block("vault_ssot.py"))
+
+    def test_no_other_script_carries_the_heading_block(self) -> None:
+        owners = sorted(
+            path.name
+            for directory in (SCRIPTS, ROOT / "hooks", ROOT / "scripts")
+            for path in directory.glob("*.py")
+            if ATX_BEGIN in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(owners, ["vault_ssot.py", "vault_state.py"])
+
+    def test_both_copies_read_section_headings_alike(self) -> None:
+        for line in ("## ✅확정", "### Blocked ###", "## 확정 ###   ", "#\u3000보류",
+                     "####### 차단", "    # a", "#  ", "## ##"):
+            with self.subTest(line=line):
+                self.assertEqual(vault_state._atx_heading(line), vault_ssot._atx_heading(line))
 
 
 class LinkedComponentSourceTests(unittest.TestCase):
