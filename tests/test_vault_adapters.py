@@ -6,10 +6,13 @@ paths), and on Windows run the helper script far enough to prove that a hook
 call never blocks, acts only on commands that run aside, and never mistakes
 the CLI process (also named aside.exe) for the browser. The helper runs with a
 PATH that holds no aside CLI and with a missing ASIDE_EXE, so no test can start
-the real app.
+the real app. The opt-in deny-zone guard has its own report entry
+(adapters.deny_guard): its states and hook checks, the install offer that only
+/vault-init asks for, and an Aside entry that stays as it was in v0.31.0.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import json
@@ -33,8 +36,12 @@ except ImportError:  # run as tests.<module> from the repository root
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
-ASSETS = ROOT / "assets" / "adapters" / "aside"
+ADAPTERS = ROOT / "assets" / "adapters"
+ASSETS = ADAPTERS / "aside"
 HELPER = ASSETS / "aside-up.ps1"
+DENY_GUARD = ADAPTERS / "deny-guard" / "deny-guard.py"
+DENY_GUARD_PARSER = ADAPTERS / "deny-guard" / "ps-parse.ps1"
+DENY_GUARD_HOOKS = ADAPTERS / "deny-guard" / "settings-hooks.json"
 MISSING_EXE = "C:/missing/Aside.exe"
 
 sys.path.insert(0, str(SCRIPTS))
@@ -112,6 +119,41 @@ class AdapterAssetTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
 
+    def test_deny_guard_is_ascii_and_stamped(self) -> None:
+        # The opt-in deny-zone guard is copied into vaults like the Aside helper.
+        raw = DENY_GUARD.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM: the file must stay ASCII")
+        text = raw.decode("ascii")  # raises if a non-ASCII byte slipped in
+        match = re.fullmatch(r"# agentic-vault:adapter deny-guard engine=(\S+)", text.splitlines()[0])
+        self.assertIsNotNone(match)
+        stamp = match.group(1)
+        self.assertRegex(stamp, vault_adapters.VERSION_RE)
+        # It first ships after v0.31.0 and never names a release beyond the next minor one.
+        major, minor, _ = _manifest_core()
+        self.assertGreater(vault_adapters._compare(stamp, "0.31.0"), 0)
+        self.assertLessEqual(vault_adapters._version(stamp), (major, minor + 1, 0))
+        for literal in ("BEGIN SHARED ZONE RULE", "END SHARED ZONE RULE", "CLAUDE_PROJECT_DIR",
+                        "hookSpecificOutput", "permissionDecisionReason", "shlex.shlex", "punctuation_chars",
+                        "whitespace_split", "os.path.realpath", "os.path.normcase"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+
+    def test_deny_guard_parser_is_ascii_and_stamped_like_the_guard(self) -> None:
+        # Windows PowerShell 5.1 reads a file without a BOM in the ANSI code page, so it stays ASCII.
+        raw = DENY_GUARD_PARSER.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM: the file must stay ASCII")
+        text = raw.decode("ascii")  # raises if a non-ASCII byte slipped in
+        match = re.fullmatch(r"# agentic-vault:adapter ps-parse engine=(\S+)", text.splitlines()[0])
+        self.assertIsNotNone(match)
+        guard = re.fullmatch(r"# agentic-vault:adapter deny-guard engine=(\S+)",
+                             DENY_GUARD.read_text(encoding="ascii").splitlines()[0])
+        self.assertEqual(match.group(1), guard.group(1))  # the two files ship and are copied together
+        for literal in ("[System.Management.Automation.Language.Parser]::ParseInput", "FindAll", "GetCommandName",
+                        "InvocationOperator", "IsDriveQualified", "OpenStandardInput", "UTF8Encoding",
+                        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ps-parse.ps1"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+
     def test_clause_has_one_marker_pair_and_states_the_data_path(self) -> None:
         text = (ASSETS / "browser-clause.md").read_text(encoding="utf-8")
         self.assertEqual(len(vault_adapters.CLAUSE_BEGIN_RE.findall(text)), 1)
@@ -158,8 +200,11 @@ class AdapterAssetTests(unittest.TestCase):
         self.assertRegex(body, r"\[\[[^\]]+\]\]")  # at least one wikilink: no orphan note
 
     def test_assets_carry_no_personal_or_vault_specific_data(self) -> None:
-        for path in sorted(ASSETS.iterdir()):
-            with self.subTest(asset=path.name):
+        assets = sorted(path for path in ADAPTERS.glob("*/*") if path.is_file())
+        self.assertIn(DENY_GUARD, assets)  # every adapter folder, the deny-zone guard included
+        self.assertIn(DENY_GUARD_PARSER, assets)
+        for path in assets:
+            with self.subTest(asset=path.relative_to(ADAPTERS).as_posix()):
                 # Offsets and lengths only, so a failure never prints the matched text.
                 self.assertEqual(_forbidden_spans(path.read_text(encoding="utf-8")), [])
 
@@ -431,6 +476,471 @@ class AdapterReportTests(unittest.TestCase):
             code = vault_adapters.main(["--vault", str(empty)])
         self.assertEqual(code, 2)
         self.assertIn("not_vault", buffer.getvalue())
+
+
+def _first_line_stamp(path: Path) -> str:
+    """The engine= value on the first line of an adapter script."""
+    first = path.read_text(encoding="utf-8").splitlines()[0]
+    match = re.search(r"engine=(\S+)$", first)
+    assert match, first
+    return match.group(1)
+
+
+def _guard_constants() -> dict:
+    """PATH_TOOLS, SHELL_TOOLS, GUARD_REL and PARSER_REL as the guard asset writes them (read, not imported)."""
+    wanted = {"PATH_TOOLS", "SHELL_TOOLS", "GUARD_REL", "PARSER_REL"}
+    values = {}
+    for node in ast.parse(DENY_GUARD.read_text(encoding="utf-8")).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in wanted):
+            values[node.targets[0].id] = ast.literal_eval(node.value)
+    assert set(values) == wanted, sorted(values)
+    return values
+
+
+class _VaultCase(unittest.TestCase):
+    """A temporary vault per test (new_vault() starts another one), no aside CLI, Windows."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._count = 0
+        self.new_vault()
+        for patcher in (mock.patch.object(vault_adapters.shutil, "which", return_value=None),
+                        mock.patch.object(vault_adapters, "_platform", return_value="windows")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def new_vault(self) -> Path:
+        self._count += 1
+        self.vault = Path(self._tmp.name) / f"vault{self._count}"
+        self.write("00-meta/vault-config.json", "{}")
+        return self.vault
+
+    def write(self, rel: str, text: str, newline: str = "\n") -> Path:
+        path = self.vault / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline=newline) as handle:
+            handle.write(text)
+        return path
+
+    @staticmethod
+    def template() -> dict:
+        return json.loads(DENY_GUARD_HOOKS.read_text(encoding="utf-8"))
+
+    def install_scripts(self, guard: bool = True, parser: bool = True) -> None:
+        if guard:
+            self.write(vault_adapters.GUARD_REL, DENY_GUARD.read_text(encoding="utf-8"))
+        if parser:
+            self.write(vault_adapters.PARSER_REL, DENY_GUARD_PARSER.read_text(encoding="utf-8"))
+
+    def merge_hook(self, data: dict | None = None, rel: str = ".claude/settings.local.json") -> None:
+        self.write(rel, json.dumps(self.template() if data is None else data, indent=2))
+
+
+class DenyGuardReportTests(_VaultCase):
+    """adapters.deny_guard: the guard's two scripts and its hook; offered only when /vault-init asks."""
+
+    def report(self, offer: bool = False) -> dict:
+        report, code = vault_adapters.diagnose(self.vault, offer_deny_guard=offer)
+        self.assertEqual(code, 0)
+        return report["adapters"]["deny_guard"]
+
+    def modified_template(self, **changes) -> dict:
+        """The template with handler keys replaced (None removes the key); "matcher" changes the group."""
+        data = self.template()
+        group = data["hooks"]["PreToolUse"][0]
+        for key, value in changes.items():
+            target = group if key == "matcher" else group["hooks"][0]
+            if value is None:
+                target.pop(key, None)
+            else:
+                target[key] = value
+        return data
+
+    def test_vault_without_the_guard_reports_absent(self) -> None:
+        guard = self.report()
+        self.assertEqual(guard["state"], "absent")
+        self.assertEqual(guard["actions"], [])
+        self.assertEqual(guard["hook"], {"state": "absent", "configured_in": [], "unreadable": [], "problems": []})
+        for key, rel, asset in (("guard", "00-meta/scripts/deny-guard.py", DENY_GUARD),
+                                ("parser", "00-meta/scripts/ps-parse.ps1", DENY_GUARD_PARSER)):
+            with self.subTest(script=key):
+                self.assertEqual(guard[key], {"path": rel, "bundled_stamp": _first_line_stamp(asset),
+                                              "installed_stamp": None, "state": "missing"})
+
+    def test_install_offer_is_listed_only_when_asked(self) -> None:
+        # /vault-doctor runs the report without the flag; only /vault-init passes it.
+        self.assertEqual(self.report()["actions"], [])
+        self.assertEqual(self.report(offer=True)["actions"], ["offer_deny_guard"])
+        for argv, expected in (([], []), (["--offer-deny-guard"], ["offer_deny_guard"])):
+            with self.subTest(argv=argv):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    code = vault_adapters.main(["--vault", str(self.vault), "--format", "json", *argv])
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(buffer.getvalue())["adapters"]["deny_guard"]["actions"], expected)
+
+    def test_offer_needs_a_local_settings_file_it_can_merge_into(self) -> None:
+        self.write(".claude/settings.json", "{not json")
+        guard = self.report(offer=True)
+        self.assertEqual((guard["state"], guard["hook"]["unreadable"]), ("absent", [".claude/settings.json"]))
+        self.assertEqual(guard["actions"], ["offer_deny_guard"])  # the merge goes to settings.local.json
+        self.write(".claude/settings.local.json", "{not json")
+        guard = self.report(offer=True)
+        self.assertEqual(guard["state"], "absent")
+        self.assertEqual(guard["actions"], [])  # nothing to merge into; the Aside entry reports the files
+
+    def test_not_a_vault_ignores_the_offer_flag(self) -> None:
+        empty = Path(self._tmp.name) / "plain"
+        empty.mkdir()
+        self.assertEqual(vault_adapters.diagnose(empty, offer_deny_guard=True),
+                         ({"schema_version": 1, "status": "not_vault", "reason_code": "config_not_found",
+                           "adapters": {}}, 2))
+
+    def test_template_install_is_installed_and_not_offered_again(self) -> None:
+        self.install_scripts()
+        self.merge_hook()
+        for offer in (False, True):
+            with self.subTest(offer=offer):
+                guard = self.report(offer)
+                self.assertEqual(guard["state"], "installed")
+                self.assertEqual((guard["guard"]["state"], guard["parser"]["state"]), ("current", "current"))
+                self.assertEqual(guard["guard"]["installed_stamp"], guard["guard"]["bundled_stamp"])
+                self.assertEqual(guard["hook"], {"state": "configured",
+                                                 "configured_in": [".claude/settings.local.json"],
+                                                 "unreadable": [], "problems": []})
+                self.assertEqual(guard["actions"], [])
+
+    def test_crlf_and_bom_copies_are_current(self) -> None:
+        self.merge_hook()
+        self.write(vault_adapters.GUARD_REL, DENY_GUARD.read_text(encoding="utf-8"), newline="\r\n")
+        self.write(vault_adapters.PARSER_REL, "\ufeff" + DENY_GUARD_PARSER.read_text(encoding="utf-8"),
+                   newline="\r\n")
+        guard = self.report()
+        self.assertEqual((guard["guard"]["state"], guard["parser"]["state"], guard["state"]),
+                         ("current", "current", "installed"))
+
+    def test_script_version_states(self) -> None:
+        for key, rel, asset in (("guard", vault_adapters.GUARD_REL, DENY_GUARD),
+                                ("parser", vault_adapters.PARSER_REL, DENY_GUARD_PARSER)):
+            text = asset.read_text(encoding="utf-8")
+            bundled = _first_line_stamp(asset)
+            cases = {
+                "outdated": (text.replace(f"engine={bundled}", "engine=0.1.0", 1), "offer_guard_update"),
+                "newer": (text.replace(f"engine={bundled}", "engine=99.0.0", 1), "review_guard"),
+                "modified": (text + "\n# local tweak\n", "review_guard"),
+                "unstamped": (text.split("\n", 1)[1], "review_guard"),
+            }
+            for state, (content, action) in cases.items():
+                with self.subTest(script=key, state=state):
+                    self.new_vault()
+                    self.install_scripts()
+                    self.merge_hook()
+                    self.write(rel, content)
+                    guard = self.report(offer=True)
+                    self.assertEqual(guard[key]["state"], state)
+                    self.assertEqual(guard["state"], "installed")
+                    self.assertEqual(guard["actions"], [action])
+
+    def test_partial_installs_are_incomplete_and_never_offered(self) -> None:
+        cases = {
+            "scripts_without_hook": lambda: self.install_scripts(),
+            "hook_without_scripts": lambda: self.merge_hook(),
+            "guard_and_hook_without_parser": lambda: (self.install_scripts(parser=False), self.merge_hook()),
+            "parser_alone": lambda: self.install_scripts(guard=False),
+        }
+        for name, build in cases.items():
+            with self.subTest(case=name):
+                self.new_vault()
+                build()
+                guard = self.report(offer=True)
+                self.assertEqual(guard["state"], "incomplete")
+                self.assertEqual(guard["actions"], ["review_guard"])
+
+    def test_hook_settings_that_weaken_the_guard_need_review(self) -> None:
+        bare = "$CLAUDE_PROJECT_DIR/00-meta/scripts/deny-guard.py"
+        cases = {
+            "no_on_failure": ({"onFailure": None}, '"onFailure": "block"'),
+            "on_failure_continue": ({"onFailure": "continue"}, '"onFailure": "block"'),
+            "if_filter": ({"if": "Read(*)"}, "`if` filter"),
+            "bare_variable_in_args": ({"args": ["-X", "utf8", "-I", bare]}, "bare $CLAUDE_PROJECT_DIR"),
+            "bare_variable_in_shell_form": ({"command": f'python -X utf8 -I "{bare}"', "args": None},
+                                            "bare $CLAUDE_PROJECT_DIR"),
+            "narrowed_matcher": ({"matcher": "Read|Edit|Write|Bash"},
+                                 "leaves out Grep, Glob, NotebookEdit, PowerShell"),
+            "comma_matcher_without_powershell": ({"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash"},
+                                                 "leaves out PowerShell,"),
+        }
+        for name, (changes, fragment) in cases.items():
+            with self.subTest(case=name):
+                self.new_vault()
+                self.install_scripts()
+                self.merge_hook(self.modified_template(**changes))
+                guard = self.report(offer=True)
+                self.assertEqual(guard["state"], "needs_review")
+                self.assertEqual(guard["hook"]["state"], "needs_review")
+                self.assertEqual(guard["hook"]["configured_in"], [".claude/settings.local.json"])
+                self.assertEqual(len(guard["hook"]["problems"]), 1, guard["hook"]["problems"])
+                problem = guard["hook"]["problems"][0]
+                self.assertTrue(problem.startswith(".claude/settings.local.json: deny-guard "), problem)
+                self.assertIn(fragment, problem)
+                self.assertEqual(guard["actions"], ["review_settings"])
+
+    def test_hook_forms_that_keep_every_check_are_configured(self) -> None:
+        guard_path = "${CLAUDE_PROJECT_DIR}/00-meta/scripts/deny-guard.py"
+        variants = {
+            "match_all": {"matcher": "*"},
+            "no_matcher": {"matcher": None},
+            "wider_list": {"matcher": "Read, Grep, Glob, Edit, Write, NotebookEdit, Bash, PowerShell, WebFetch"},
+            "regular_expression_not_judged": {"matcher": "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|Power.*"},
+            "py_launcher": {"command": "py", "args": ["-3", "-X", "utf8", "-I", guard_path]},
+            "shell_form": {"command": f'python -X utf8 -I "{guard_path}"', "args": None},
+        }
+        for name, changes in variants.items():
+            with self.subTest(variant=name):
+                self.new_vault()
+                self.install_scripts()
+                self.merge_hook(self.modified_template(**changes))
+                guard = self.report()
+                self.assertEqual(guard["hook"]["problems"], [])
+                self.assertEqual(guard["state"], "installed")
+                self.assertEqual(guard["actions"], [])
+
+    def test_unreadable_settings_are_reviewed_once_part_of_the_guard_exists(self) -> None:
+        # The hook in the local file still counts; the shared file that cannot be read needs a look.
+        self.install_scripts()
+        self.merge_hook()
+        self.write(".claude/settings.json", "{not json")
+        guard = self.report()
+        self.assertEqual(guard["state"], "installed")
+        self.assertEqual(guard["hook"]["unreadable"], [".claude/settings.json"])
+        self.assertEqual(guard["actions"], ["review_settings"])
+        # Scripts and only an unreadable local file: whether a hook runs them cannot be told.
+        self.new_vault()
+        self.install_scripts()
+        self.write(".claude/settings.local.json", "{not json")
+        guard = self.report(offer=True)
+        self.assertEqual((guard["state"], guard["hook"]["state"]), ("needs_review", "unreadable"))
+        self.assertEqual(guard["actions"], ["review_guard", "review_settings"])
+
+    def test_linked_scripts_directory_is_not_followed(self) -> None:
+        outside = Path(self._tmp.name) / "outside"
+        outside.mkdir()
+        for asset in (DENY_GUARD, DENY_GUARD_PARSER):
+            (outside / asset.name).write_text(asset.read_text(encoding="utf-8"), encoding="utf-8")
+        (self.vault / "00-meta").mkdir(exist_ok=True)
+        try:
+            os.symlink(outside, self.vault / "00-meta" / "scripts", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are not available")
+        self.merge_hook()
+        guard = self.report(offer=True)
+        self.assertEqual((guard["guard"]["state"], guard["parser"]["state"]), ("unsafe_path", "unsafe_path"))
+        self.assertEqual(guard["state"], "needs_review")
+        self.assertEqual(guard["actions"], ["review_guard"])
+
+    @unittest.skipUnless(os.name == "nt", "junctions are Windows only")
+    def test_junctioned_scripts_and_settings_folders_are_not_followed(self) -> None:
+        outside = Path(self._tmp.name) / "outside-junction"
+        (outside / "scripts").mkdir(parents=True)
+        (outside / "claude").mkdir()
+        for asset in (DENY_GUARD, DENY_GUARD_PARSER):
+            (outside / "scripts" / asset.name).write_text(asset.read_text(encoding="utf-8"), encoding="utf-8")
+        (outside / "claude" / "settings.local.json").write_text(DENY_GUARD_HOOKS.read_text(encoding="utf-8"),
+                                                                 encoding="utf-8")
+        (self.vault / "00-meta").mkdir(exist_ok=True)
+        make_junction(self.vault / "00-meta" / "scripts", outside / "scripts")
+        self.merge_hook()
+        guard = self.report(offer=True)
+        self.assertEqual((guard["guard"]["state"], guard["parser"]["state"]), ("unsafe_path", "unsafe_path"))
+        self.assertEqual(guard["state"], "needs_review")
+        self.assertEqual(guard["actions"], ["review_guard"])
+        # A junctioned .claude folder is not read, and nothing is offered into it.
+        self.new_vault()
+        make_junction(self.vault / ".claude", outside / "claude")
+        guard = self.report(offer=True)
+        self.assertEqual(guard["hook"]["unreadable"], [".claude/settings.json", ".claude/settings.local.json"])
+        self.assertEqual(guard["state"], "absent")
+        self.assertEqual(guard["actions"], [])
+
+    def test_guard_tools_and_paths_match_the_shipped_guard_and_template(self) -> None:
+        constants = _guard_constants()
+        group = self.template()["hooks"]["PreToolUse"][0]
+        self.assertEqual(len(set(vault_adapters.GUARD_TOOLS)), len(vault_adapters.GUARD_TOOLS))
+        self.assertEqual(set(vault_adapters.GUARD_TOOLS), set(group["matcher"].split("|")))
+        self.assertEqual(set(vault_adapters.GUARD_TOOLS),
+                         set(constants["PATH_TOOLS"]) | set(constants["SHELL_TOOLS"]))
+        self.assertEqual((vault_adapters.GUARD_REL, vault_adapters.PARSER_REL),
+                         (constants["GUARD_REL"], constants["PARSER_REL"]))
+        self.assertEqual(vault_adapters.BUNDLED_GUARD.resolve(), DENY_GUARD.resolve())
+        self.assertEqual(vault_adapters.BUNDLED_PARSER.resolve(), DENY_GUARD_PARSER.resolve())
+        # The shipped hook passes the report's own checks, and neither adapter claims the other's hook.
+        handler = group["hooks"][0]
+        self.assertTrue(vault_adapters._is_guard_handler(handler))
+        self.assertFalse(vault_adapters._is_aside_handler(handler))
+        self.assertEqual(vault_adapters._guard_problems(group, handler), [])
+        aside_hooks = json.loads((ASSETS / "settings-hooks.json").read_text(encoding="utf-8"))
+        for aside_handler in vault_adapters._hook_handlers(aside_hooks):
+            self.assertFalse(vault_adapters._is_guard_handler(aside_handler))
+
+    def test_text_output_adds_guard_lines_after_the_aside_lines(self) -> None:
+        self.install_scripts()
+        self.merge_hook(self.modified_template(onFailure=None))
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = vault_adapters.main(["--vault", str(self.vault)])
+        self.assertEqual(code, 0)
+        guard, parser = _first_line_stamp(DENY_GUARD), _first_line_stamp(DENY_GUARD_PARSER)
+        self.assertEqual(buffer.getvalue().splitlines()[7:], [
+            "deny_guard.state: needs_review",
+            f"deny_guard.guard: current (installed={guard}, bundled={guard})",
+            f"deny_guard.parser: current (installed={parser}, bundled={parser})",
+            "deny_guard.hook: needs_review",
+            "deny_guard.actions: review_settings",
+            'deny_guard.hook.problem: .claude/settings.local.json: deny-guard handler without "onFailure": '
+            '"block", so a crash, a timeout or a missing python lets the tool call run',
+        ])
+
+
+class AdapterReportCompatibilityTests(_VaultCase):
+    """The deny_guard entry sits next to aside; what v0.31.0 reported stays exactly as it was."""
+
+    def test_aside_entry_and_text_lines_match_v0310(self) -> None:
+        report, code = vault_adapters.diagnose(self.vault)
+        stamp = vault_adapters._stamp(HELPER.read_text(encoding="utf-8"))
+        self.assertEqual(code, 0)
+        self.assertEqual((report["schema_version"], report["status"], report["platform"]), (1, "ok", "windows"))
+        self.assertEqual(set(report), {"schema_version", "status", "platform", "adapters"})
+        self.assertEqual(report["adapters"]["aside"], {
+            "cli_on_path": False,
+            "helper_supported": True,
+            "helper": {"path": "00-meta/scripts/aside-up.ps1", "bundled_stamp": stamp, "installed_stamp": None,
+                       "state": "missing"},
+            "clause": {"path": "CLAUDE.md", "state": "missing"},
+            "hook": {"state": "absent", "configured_in": [], "unreadable": [], "problems": []},
+            "guide_note": {"path": "20-knowledge/tools/Aside CLI 운영 가이드.md", "present": False,
+                           "unsafe_path": False},
+            "actions": [],
+        })
+        self.assertEqual(vault_adapters._format_text(report).splitlines()[:7], [
+            "agentic-vault adapters: ok (platform=windows)",
+            "aside.cli_on_path: false",
+            f"aside.helper: missing (installed=None, bundled={stamp})",
+            "aside.clause: missing",
+            "aside.hook: absent",
+            "aside.guide_note: false",
+            "aside.actions: none",
+        ])
+
+    def test_installing_the_guard_changes_no_aside_field(self) -> None:
+        aside_hooks = json.loads((ASSETS / "settings-hooks.json").read_text(encoding="utf-8"))
+        self.write("CLAUDE.md", "# vault\n\n" + (ASSETS / "browser-clause.md").read_text(encoding="utf-8"))
+        self.write(vault_adapters.HELPER_REL, HELPER.read_text(encoding="utf-8"))
+        self.write(vault_adapters.GUIDE_REL, "---\ntitle: x\n---\n")
+        self.merge_hook(aside_hooks)
+        with mock.patch.object(vault_adapters.shutil, "which", return_value="C:/aside/aside.exe"):
+            before, _ = vault_adapters.diagnose(self.vault)
+            self.install_scripts()
+            merged = json.loads(json.dumps(aside_hooks))
+            merged["hooks"]["PreToolUse"] += self.template()["hooks"]["PreToolUse"]
+            self.merge_hook(merged)
+            after, _ = vault_adapters.diagnose(self.vault)
+        self.assertEqual(after["adapters"]["aside"], before["adapters"]["aside"])
+        self.assertEqual(after["adapters"]["aside"]["hook"]["state"], "configured")
+        self.assertEqual(after["adapters"]["aside"]["actions"], [])
+        self.assertEqual(vault_adapters._format_text(after).splitlines()[:7],
+                         vault_adapters._format_text(before).splitlines()[:7])
+        self.assertEqual((before["adapters"]["deny_guard"]["state"], after["adapters"]["deny_guard"]["state"]),
+                         ("absent", "installed"))
+
+    def test_not_a_vault_answer_is_unchanged(self) -> None:
+        empty = Path(self._tmp.name) / "plain"
+        empty.mkdir()
+        self.assertEqual(vault_adapters.diagnose(empty),
+                         ({"schema_version": 1, "status": "not_vault", "reason_code": "config_not_found",
+                           "adapters": {}}, 2))
+
+
+class DenyGuardWiringTests(unittest.TestCase):
+    """Only /vault-init offers the guard; the docs say where it applies and where it stops."""
+
+    @staticmethod
+    def read(rel: str) -> str:
+        return (ROOT / rel).read_text(encoding="utf-8")
+
+    def test_only_vault_init_runs_the_report_with_the_offer_flag(self) -> None:
+        runs: dict[str, list[bool]] = {}
+        for path in sorted((*(ROOT / "commands").glob("*.md"), *(ROOT / "skills").rglob("*.md"))):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if "vault_adapters.py" in line and "--vault" in line:
+                    runs.setdefault(path.relative_to(ROOT).as_posix(), []).append("--offer-deny-guard" in line)
+        self.assertEqual({rel for rel, flags in runs.items() if any(flags)}, {"commands/vault-init.md"})
+        self.assertEqual(runs["commands/vault-init.md"].count(True), 1)  # the 4-2 step only
+        for rel in ("commands/vault-doctor.md", "commands/vault-upgrade.md",
+                    "skills/agentic-vault/references/codex.md"):
+            with self.subTest(caller=rel):
+                self.assertIn(rel, runs)
+                self.assertNotIn(True, runs[rel])
+
+    def test_vault_init_asks_for_the_guard_in_its_own_step_after_aside(self) -> None:
+        text = self.read("commands/vault-init.md")
+        aside = text.index("## 4-1. 도구 어댑터")
+        start = text.index("## 4-2. deny zone 가드")
+        end = text.index("## 5. 권한 병합")
+        self.assertLess(aside, start)
+        self.assertLess(start, end)
+        step = text[start:end]
+        for literal in ("Codex에서는 이 단계를 생략한다", "--offer-deny-guard", "`offer_deny_guard`", "**따로**",
+                        "거부하거나 답이 없으면 아무것도 복사·병합하지 않는다", "00-meta/scripts/deny-guard.py",
+                        "00-meta/scripts/ps-parse.ps1", "settings-hooks.json", "`.claude/settings.local.json`",
+                        '"onFailure": "block"', "v2.1.295", "fail-open", "우회하지 말고"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, step)
+        self.assertIn("(4-1·4-2·5·6)", text)
+        self.assertNotIn("offer_deny_guard", text[aside:start])
+
+    def test_default_templates_carry_no_guard(self) -> None:
+        # /vault-init copies these into every new vault; the guard comes only from its own opt-in step.
+        for path in sorted((ROOT / "assets" / "templates").rglob("*")):
+            if path.is_file():
+                with self.subTest(template=path.relative_to(ROOT).as_posix()):
+                    text = path.read_text(encoding="utf-8")
+                    self.assertNotIn("deny-guard", text)
+                    self.assertNotIn("ps-parse", text)
+        init = self.read("commands/vault-init.md")
+        self.assertNotIn("deny-guard", init[init.index("## 3. 템플릿 복사"):init.index("## 4-1.")])
+
+    def test_doctor_and_upgrade_report_the_guard_without_offering_it(self) -> None:
+        doctor = self.read("commands/vault-doctor.md")
+        for literal in ("adapters.deny_guard", "`absent`·`installed`·`incomplete`·`needs_review`",
+                        "Doctor는 가드를 제안하지 않는다", "`offer_deny_guard`는 나오지 않고"):
+            with self.subTest(doc="vault-doctor.md", literal=literal):
+                self.assertIn(literal, doctor)
+        upgrade = self.read("commands/vault-upgrade.md")
+        for literal in ("`adapters.deny_guard.actions`", "`offer_guard_update`", "`review_guard`",
+                        "Codex는 건너뛴다", "가드를 새로 설치하거나 제안하지 않는다",
+                        "`agentic-vault:adapter deny-guard engine=`"):
+            with self.subTest(doc="vault-upgrade.md", literal=literal):
+                self.assertIn(literal, upgrade)
+
+    def test_security_policy_and_codex_docs_state_scope_trust_and_limits(self) -> None:
+        security = self.read("SECURITY.md")
+        scope = security[security.index("## Scope"):security.index("## Known limitations")]
+        self.assertIn("**Optional deny-zone guard**", scope)
+        limits = security[security.index("## Known limitations"):security.index("## 한국어 요약")]
+        for literal in ("**The deny-zone guard is a guard, not a sandbox.**",
+                        "**The deny-zone guard lives in the vault.**", "Join-Path 90 -assets", "v2.1.295",
+                        "fail-open", "spawned process", "junction swapped", "Grep or Glob calls without a path"):
+            with self.subTest(section="limits", literal=literal):
+                self.assertIn(literal, limits)
+        summary = security[security.index("## 한국어 요약"):]
+        for literal in ("선택형 deny zone 가드 훅·스크립트", "가드이지 샌드박스가 아니다", "v2.1.295", "fail-open"):
+            with self.subTest(section="summary", literal=literal):
+                self.assertIn(literal, summary)
+        self.assertIn("(PreToolUse 훅)은 Claude Code 전용이다", self.read("docs/codex.md"))
+        self.assertIn("deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다",
+                      self.read("skills/agentic-vault/references/codex.md"))
 
 
 def _powershell() -> str | None:

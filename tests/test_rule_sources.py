@@ -6,6 +6,8 @@ and they pin the few differences that are intended.
 """
 from __future__ import annotations
 
+import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -21,10 +23,14 @@ except ImportError:  # run as tests.<module> from the repository root
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
+ADAPTER_SCRIPTS = ROOT / "assets" / "adapters"
+DENY_GUARD = ADAPTER_SCRIPTS / "deny-guard" / "deny-guard.py"
 BEGIN = "# --- BEGIN SHARED PATH RULE"
 END = "# --- END SHARED PATH RULE ---"
 ATX_BEGIN = "# --- BEGIN ATX HEADING (verbatim copy) ---"
 ATX_END = "# --- END ATX HEADING (verbatim copy) ---"
+ZONE_BEGIN = "# --- BEGIN SHARED ZONE RULE"
+ZONE_END = "# --- END SHARED ZONE RULE ---"
 
 sys.path.insert(0, str(SCRIPTS))
 try:
@@ -266,6 +272,14 @@ def _backup(value):
     return backup_vault._relative_name(value)
 
 
+def _deny_guard():
+    """The standalone deny-zone guard asset (a hyphenated file name, so no plain import)."""
+    spec = importlib.util.spec_from_file_location("deny_guard_rule_source", DENY_GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class PathRuleSourceTests(unittest.TestCase):
     def test_healthcheck_carries_a_verbatim_copy_of_the_shared_rule(self) -> None:
         def block(name: str) -> str:
@@ -280,11 +294,46 @@ class PathRuleSourceTests(unittest.TestCase):
                          vault_paths.UNSAFE_SEGMENT_CHARACTERS)
 
     def test_no_other_script_reimplements_the_segment_rule(self) -> None:
+        # The standalone adapter scripts copied into vaults are scanned too.
         owners = sorted(
-            path.name for path in SCRIPTS.glob("*.py")
+            path.name for path in (*SCRIPTS.glob("*.py"), *ADAPTER_SCRIPTS.glob("*/*.py"))
             if '<>:"|?*' in path.read_text(encoding="utf-8")
         )
         self.assertEqual(owners, ["vault_healthcheck.py", "vault_paths.py"])
+
+    def test_deny_guard_carries_a_verbatim_copy_of_zone_matches(self) -> None:
+        # The guard is copied into vaults and run alone by a PreToolUse hook, so
+        # it cannot import vault_paths; its copy between the SHARED ZONE RULE
+        # markers must stay the exact source of vault_paths.zone_matches.
+        text = DENY_GUARD.read_text(encoding="utf-8")
+        self.assertEqual(text.count(ZONE_BEGIN), 1)
+        self.assertEqual(text.count(ZONE_END), 1)
+        start = text.index("\n", text.index(ZONE_BEGIN)) + 1
+        self.assertEqual(text[start:text.index(ZONE_END)], inspect.getsource(vault_paths.zone_matches))
+        owners = sorted(
+            path.relative_to(ROOT).as_posix()
+            for path in (*SCRIPTS.glob("*.py"), *ADAPTER_SCRIPTS.glob("*/*.py"), *(ROOT / "hooks").glob("*.py"))
+            if "def zone_matches" in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(owners, ["assets/adapters/deny-guard/deny-guard.py",
+                                  "skills/agentic-vault/scripts/vault_paths.py"])
+
+    def test_deny_guard_fallback_zones_match_the_healthcheck_default(self) -> None:
+        self.assertEqual(list(_deny_guard().DEFAULT_DENY_ZONES), vault_healthcheck.DEFAULT_CONFIG["deny_zones"])
+
+    def test_deny_guard_keeps_every_zone_the_healthcheck_accepts(self) -> None:
+        # Intended difference: the guard only compares zones, so it is looser
+        # than validate_config. It must never drop a zone the healthcheck keeps.
+        guard = _deny_guard()
+        accepted_zones = (*vault_healthcheck.DEFAULT_CONFIG["deny_zones"], *ACCEPTED,
+                          " 90-assets ", "10-inbox\\_processed", "40-people/비공개")
+        for value in accepted_zones:
+            with self.subTest(value=value):
+                self.assertEqual(guard.normalize_zone(value), _healthcheck(value))
+        for value in REJECTED:
+            with self.subTest(rejected=value):
+                if guard.normalize_zone(value) is None:
+                    self.assertFalse(_accepts(_healthcheck, value))
 
     def test_all_relative_path_validators_agree(self) -> None:
         for value in REJECTED + ACCEPTED:
@@ -342,6 +391,7 @@ class PathRuleSourceTests(unittest.TestCase):
             ".obsidian/workspace.md": True, "20-knowledge/a.md": False,
         }
         prefixes, names = vault_healthcheck.build_deny_rules(zones)
+        guard = _deny_guard()
         for rel, expected in cases.items():
             parts = tuple(rel.split("/"))
             with self.subTest(rel=rel):
@@ -349,6 +399,7 @@ class PathRuleSourceTests(unittest.TestCase):
                 self.assertIs(vault_paths._is_denied(parts, zones), expected)
                 self.assertIs(vault_recall._classified_skip(parts, zones, ()) == "denied", expected)
                 self.assertIs(vault_recall._classified_skip(parts, (), zones) == "excluded", expected)
+                self.assertIs(any(guard.zone_matches(parts, zone) for zone in zones), expected)
 
 
 class AtxHeadingSourceTests(unittest.TestCase):

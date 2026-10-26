@@ -235,7 +235,11 @@ def verify(codex: str) -> dict:
                          "scripts/evaluate_memory_workflows.py",
                          "docs/evidence.md",
                          "docs/link-proposals.md",
-                         "assets/templates/AGENTS-vault-stub.md"):
+                         "assets/templates/AGENTS-vault-stub.md",
+                         # doctor's adapter report reads the bundled deny-zone guard for its stamps
+                         "skills/agentic-vault/scripts/vault_adapters.py",
+                         "assets/adapters/deny-guard/deny-guard.py",
+                         "assets/adapters/deny-guard/ps-parse.ps1"):
             if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")
         return {"version": installed["version"], "installed_resources": "verified",

@@ -71,6 +71,8 @@ class CodexVerificationTests(unittest.TestCase):
             "scripts/eval_stats.py",
             "scripts/evaluate_memory_workflows.py",
             "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
+            "skills/agentic-vault/scripts/vault_adapters.py",
+            "assets/adapters/deny-guard/deny-guard.py", "assets/adapters/deny-guard/ps-parse.ps1",
         )
         for relative in resources:
             resource = source / relative
@@ -134,6 +136,26 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Changed doctor resource\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_adapter_resources_must_exist_and_match(self) -> None:
+        # doctor's adapter report compares an installed deny-zone guard with these bundled copies.
+        for relative in ("skills/agentic-vault/scripts/vault_adapters.py",
+                         "assets/adapters/deny-guard/deny-guard.py",
+                         "assets/adapters/deny-guard/ps-parse.ps1"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed adapter resource\n", encoding="utf-8")
 
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)

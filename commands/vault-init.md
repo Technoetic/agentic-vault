@@ -5,7 +5,7 @@ description: 새 프로젝트에 에이전틱 지식 볼트를 스캐폴딩 — 
 # /vault-init — 볼트 스캐폴딩
 
 현재 프로젝트 디렉토리에 에이전틱 지식 볼트를 새로 구축하라. 인자: `$ARGUMENTS` = `<볼트명> [프로젝트명]` (둘 다 선택 — 없으면 질문).
-아래 절차를 순서대로 수행하되, 사용자 확인이 필요한 단계(4-1·5·6)는 반드시 물어본 뒤 진행하라.
+아래 절차를 순서대로 수행하되, 사용자 확인이 필요한 단계(4-1·4-2·5·6)는 반드시 물어본 뒤 진행하라.
 
 ## 0. 가드 (이미 볼트면 중단)
 
@@ -64,7 +64,7 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 ## 4-1. 도구 어댑터 (선택 — 사용자 승인 후에만)
 
-선택 기능이다. 설치된 도구에 맞춘 볼트 조항을 제안할 뿐 엔진 규칙을 바꾸지 않는다. 지금 제공하는 어댑터는 Aside(AI 브라우저 CLI) 하나다.
+선택 기능이다. 설치된 도구에 맞춘 볼트 조항을 제안할 뿐 엔진 규칙을 바꾸지 않는다. 이 절에서 제안하는 어댑터는 Aside(AI 브라우저 CLI) 하나다. deny zone 가드는 4-2에서 따로 묻는다.
 
 - `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행해 `adapters.aside`를 읽는다. 읽기 전용 진단이며 아무것도 설치하지 않는다.
 - `actions`에 `offer_install`이 없으면 이 단계를 조용히 건너뛴다. 브라우저 도구는 사용자가 나중에 CLAUDE.md에 정한다(vault-browser 규칙 1).
@@ -75,6 +75,22 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
   3. **운영 가이드 노트:** `20-knowledge/tools/Aside CLI 운영 가이드.md`가 없을 때만 `operations-guide.md`의 `{{DATE}}`를 치환해 생성하고 index의 도구 절에 서술 규격대로 등록한다. 프로젝트 decisions 노트가 있으면 "브라우저 도구 = Aside" 결정을 ADR로 남긴다. 이 노트의 「엔진 개발 실측」 표는 참고용이다. 이 기기에서 실행해 본 뒤 「이 볼트의 실측」 표를 채우고 `status: active`로 바꾸라고 안내한다.
   4. **자동 기동 훅(Claude Code·Windows만, 따로 확인):** `settings-hooks.json`을 보여 주고 "aside 명령 앞에서 기동 도우미를 자동으로 실행하는 훅을 이 기기의 `.claude/settings.local.json`에 병합할까요?"를 따로 묻는다. 훅은 기기마다 다르므로 기본 병합 대상은 공유되지 않는 `settings.local.json`이다. 공유 `.claude/settings.json`에 넣으려면 이유를 설명하고 따로 확인받는다. 거부하거나 답이 없으면 병합하지 않는다. 승인하면 JSON을 파싱해 `hooks.PreToolUse` 배열에 이 그룹을 추가한다. `aside-up.ps1`을 부르는 훅이 이미 있으면 건너뛰고, 기존 키와 훅은 모두 보존한다. 폴더 동기화(OneDrive 등)를 쓰는 볼트는 local 파일도 다른 기기로 퍼진다는 점을 알린다. 훅은 `if` 조건(`Bash(aside *)`·`PowerShell(aside *)`) 때문에 aside 명령에서만 실행되고, 도우미도 훅 입력을 다시 확인해 명령 위치에 aside가 없으면 곧바로 끝낸다. 결과와 상관없이 명령을 막지 않는다. 훅 명령은 작은따옴표로 감싼 `-Command` 안에서 `$env:CLAUDE_PROJECT_DIR`를 PowerShell이 풀도록 되어 있어 Git Bash·PowerShell 어느 훅 셸에서도 같은 경로를 가리킨다. 이 형태를 고치지 마라. Codex에서는 이 단계를 생략하고 조항의 기동 절차를 따르게 한다.
 - 끝나면 같은 진단을 다시 실행해 `clause.state=present`를 확인한다. Windows에서는 `helper.state=current`도, 훅을 병합했다면 `hook.state=configured`도 확인한다.
+
+## 4-2. deny zone 가드 (선택 — Claude Code 전용, 따로 승인한 경우에만)
+
+선택 기능이다. Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell 호출이 deny zone을 가리키면 PreToolUse 훅이 `deny`로 막거나 `ask`로 사용자 확인을 받게 하는 가드 템플릿을 설치한다. `allow`는 내지 않으므로 권한을 넓히지 않는다. 가드이지 샌드박스가 아니며 파일 시스템 권한을 바꾸지 않는다. 기본으로는 설치하지 않는다.
+
+- **Codex에서는 이 단계를 생략한다.** Claude Code 전용 템플릿이다(Codex는 훅 모델이 다르다).
+- `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json --offer-deny-guard`를 실행해 `adapters.deny_guard`를 읽는다. 읽기 전용 진단이며 아무것도 설치하지 않는다. `--offer-deny-guard`는 이 단계에서만 붙인다(`/vault-doctor`·`/vault-upgrade`는 가드를 제안하지 않는다).
+- `actions`에 `offer_deny_guard`가 없으면 묻지 않는다. `state`가 `absent`가 아니면 이미 일부가 있으므로 상태만 한 줄로 보고하고, `hook.unreadable`에 `.claude/settings.local.json`이 있으면(읽을 수 없거나 링크·정션을 거침) 병합할 수 없다고 보고한다.
+- 있으면 4-1의 Aside 질문과 **따로** 묻는다: "deny zone 가드를 켤까요? Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell 호출이 deny zone을 가리키면 막거나(deny) 확인을 받습니다(ask). 가드 스크립트 두 개를 `00-meta/scripts/`에 복사하고 이 기기의 `.claude/settings.local.json`에 훅을 병합합니다. 대상 도구를 부를 때마다 Python 시작 시간(약 0.5초)이 더 들고, 샌드박스가 아니어서 실행된 프로그램이 스스로 여는 파일 같은 경로는 막지 못합니다." 거부하거나 답이 없으면 아무것도 복사·병합하지 않는다.
+- 승인하면 아래 순서로 진행한다. 원본은 `${CLAUDE_PLUGIN_ROOT}/assets/adapters/deny-guard/`에 있고, 판정표·한계·끄는 법은 같은 폴더의 `guide.md`에 있다.
+  1. **python 확인:** 훅은 PATH의 `python`을 셸 없이 실행한다. `python -c "import sys; print(sys.version)"`이 3.10 이상을 출력하는지 확인한다. 실패하거나 낮으면 병합하지 말고 `guide.md` 「켜는 법」 1의 대안(python.exe 절대 경로, `py -3`)을 보여 주고 어느 쪽으로 바꿀지 다시 묻는다. Claude Code v2.1.295 이상에서는 훅이 `python`을 시작하지 못하면 대상 도구 호출이 모두 막힌다.
+  2. **스크립트 복사:** `deny-guard.py`와 `ps-parse.ps1`을 `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`로 바이트 그대로 함께 복사한다(폴더가 없으면 만든다). 첫 줄의 `agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=` 스탬프를 지우지 않는다.
+  3. **훅 병합:** `settings-hooks.json`을 보여 주고 JSON을 파싱해 `.claude/settings.local.json`의 `hooks.PreToolUse` 배열에 이 그룹을 추가한다(파일이 없으면 이 내용으로 만든다). 기존 키와 훅은 모두 보존하고, `deny-guard.py`를 부르는 훅이 이미 있으면 건너뛴다. 공유 `.claude/settings.json`에는 넣지 않는다(python 경로가 기기마다 다르다). `matcher`·`"onFailure": "block"`·`${CLAUDE_PROJECT_DIR}` 경로를 고치지 말고 `if` 필터를 더하지 마라. 1에서 실행기를 바꾸기로 했으면 그것만 `command`·`args`에 반영한다. 폴더 동기화를 쓰는 볼트는 local 파일도 다른 기기로 퍼진다는 점을 알린다.
+  4. **확인:** 같은 진단을 `--offer-deny-guard` 없이 다시 실행해 `deny_guard.state=installed`, `guard.state`·`parser.state`=`current`, `hook.state=configured`를 확인한다. 끄는 법(`.claude/settings.local.json`에서 `deny-guard.py`를 부르는 그룹을 지운다)과, Claude Code v2.1.295 미만에서는 가드가 충돌하거나 시간을 넘기면 호출이 그대로 진행된다는 점(fail-open)을 한 줄씩 알린다. 훅 반영을 위해 세션 재시작을 권한다(9단계).
+- 이 세션에 훅이 곧바로 적용되면 이후 단계(5단계 권한 병합, 6단계 초기 커밋에서 구역 폴더의 `.gitkeep`을 이름으로 스테이징하는 명령)가 `ask`·`deny`를 받을 수 있다. 우회하지 말고 결과를 그대로 보고한다.
+- 가드를 켜면 엔진 작업 흐름 두 곳이 달라진다는 점을 한 줄로 알린다: `/vault-process-inbox`의 격리 이동은 PowerShell `Move-Item`이 막히므로 Bash 도구의 `mv -n`(이미 추적 중인 파일은 `git mv`)으로 하고, 구역으로 옮긴 파일을 이름으로 스테이징하는 `git add`(`/vault-session-end` 7단계)는 `deny`이므로 `git mv`로 옮기거나 구역 밖 상위 폴더(`git add 10-inbox`)를 스테이징한다. 자세한 것은 `guide.md` 「한계」에 있다.
 
 ## 5. 권한 병합 (사용자 확인 후에만)
 
@@ -131,4 +147,4 @@ python -c "import pathlib; [pathlib.Path(d).mkdir(parents=True, exist_ok=True) f
 
 ## 9. 완료 보고
 
-사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·도구 어댑터·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`, Codex는 `$agentic-vault:agentic-vault <작업>`)으로 처리, 세션 시작 시 이미 주입된 컨텍스트를 재사용하고 없으면 검증·예산이 적용된 session-start 절차로 복원. Codex의 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰한 뒤 실행된다.
+사용자에게 보고하라: ① 생성된 트리 요약(디렉토리 수·파일 수) ② 수행/생략된 선택 단계(프로젝트 미니볼트·도구 어댑터·deny zone 가드·권한 병합·git) ③ healthcheck 결과 ④ 다음 단계 안내 — 권한·훅 반영을 위해 세션 재시작 권장, 첫 지식은 `10-inbox/`에 수집한 뒤 볼트 명령(`/vault-*`, Codex는 `$agentic-vault:agentic-vault <작업>`)으로 처리, 세션 시작 시 이미 주입된 컨텍스트를 재사용하고 없으면 검증·예산이 적용된 session-start 절차로 복원. Codex의 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰한 뒤 실행된다.
