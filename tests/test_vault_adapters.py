@@ -31,8 +31,10 @@ except ImportError:  # run as tests.<module> from the repository root
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
-ASSETS = ROOT / "assets" / "adapters" / "aside"
+ADAPTERS = ROOT / "assets" / "adapters"
+ASSETS = ADAPTERS / "aside"
 HELPER = ASSETS / "aside-up.ps1"
+DENY_GUARD = ADAPTERS / "deny-guard" / "deny-guard.py"
 MISSING_EXE = "C:/missing/Aside.exe"
 
 sys.path.insert(0, str(SCRIPTS))
@@ -62,6 +64,25 @@ class AdapterAssetTests(unittest.TestCase):
         for literal in ("[switch]$Hook", "[switch]$CheckOnly", "[ValidateRange(1, 45)]", "Stop-With",
                         "ConvertFrom-Json", "SW_MINIMIZE", "Local\\agentic-vault-aside-up",
                         "Test-IsBrowserProcess", "'Aside CLI'", "console.log(6*7)", "WaitForExit"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+
+    def test_deny_guard_is_ascii_and_stamped(self) -> None:
+        # The opt-in deny-zone guard is copied into vaults like the Aside helper.
+        raw = DENY_GUARD.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM: the file must stay ASCII")
+        text = raw.decode("ascii")  # raises if a non-ASCII byte slipped in
+        match = re.fullmatch(r"# agentic-vault:adapter deny-guard engine=(\S+)", text.splitlines()[0])
+        self.assertIsNotNone(match)
+        stamp = match.group(1)
+        self.assertRegex(stamp, vault_adapters.VERSION_RE)
+        # It first ships after v0.31.0 and never names a release beyond the next minor one.
+        major, minor, _ = _manifest_core()
+        self.assertGreater(vault_adapters._compare(stamp, "0.31.0"), 0)
+        self.assertLessEqual(vault_adapters._version(stamp), (major, minor + 1, 0))
+        for literal in ("BEGIN SHARED ZONE RULE", "END SHARED ZONE RULE", "CLAUDE_PROJECT_DIR",
+                        "hookSpecificOutput", "permissionDecisionReason", "shlex.shlex", "punctuation_chars",
+                        "whitespace_split", "os.path.realpath", "os.path.normcase"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
 
@@ -112,8 +133,10 @@ class AdapterAssetTests(unittest.TestCase):
 
     def test_assets_carry_no_personal_or_vault_specific_data(self) -> None:
         forbidden = re.compile(r"corei|D:[\\/]NS|ns-electric|jmj@|엔에스|\\Users\\", re.IGNORECASE)
-        for path in sorted(ASSETS.iterdir()):
-            with self.subTest(asset=path.name):
+        assets = sorted(path for path in ADAPTERS.glob("*/*") if path.is_file())
+        self.assertIn(DENY_GUARD, assets)  # every adapter folder, the deny-zone guard included
+        for path in assets:
+            with self.subTest(asset=path.relative_to(ADAPTERS).as_posix()):
                 self.assertIsNone(forbidden.search(path.read_text(encoding="utf-8")))
 
 
