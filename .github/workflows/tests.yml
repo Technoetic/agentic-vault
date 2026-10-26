@@ -21,9 +21,12 @@ jobs:
     env:
       PYTHONUTF8: '1'
     steps:
+      # fetch-depth: 0 also fetches the release tags: the vault_period differential
+      # test (tests/test_vault_period_metamorphic.py) reads a tagged release with git show.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python }}
