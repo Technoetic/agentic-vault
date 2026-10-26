@@ -2015,7 +2015,10 @@ def _parser() -> argparse.ArgumentParser:
                               'sorts per_query, failed_queries, evaluation_errors, inspected ids and twin rows of '
                               'every arm by their keyed id token after all statistics and gates, so whoever holds '
                               'the gold set but not the key cannot link rows by position. Needs --redact-key-file '
-                              'or --redact-ephemeral; row shape, repeats, per-scenario counts and timings remain')
+                              'or --redact-ephemeral; row shape, repeats, per-scenario counts, timings and the '
+                              'deterministic metric values of each row remain, so whoever holds the gold set and '
+                              'can rerun it on the same vault can still match rows whose values are unique (see '
+                              'redaction.limits)')
     split = parser.add_argument_group('dev/held-out split (opt-in)')
     split.add_argument('--split', choices=SPLIT_NAMES,
                        help='evaluate only this side of the split definition and report n per split')

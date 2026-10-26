@@ -1595,7 +1595,8 @@ class TokenRowOrderTests(unittest.TestCase):
         self.assertEqual(evaluator.EPHEMERAL_REDACTION_DESCRIPTION["limits"][:len(V0310_KEYED_LIMITS)],
                          V0310_KEYED_LIMITS)
         flat = " ".join(evaluator._parser().format_help().split())
-        for phrase in ("--redact-row-order {gold,token}", "keyed id token", "cannot link rows by position"):
+        for phrase in ("--redact-row-order {gold,token}", "keyed id token", "cannot link rows by position",
+                       "deterministic metric values of each row remain", "can still match rows"):
             self.assertIn(phrase, flat)
         # Both keyed options name the exception to their gold-order sentence (wide enough not to wrap).
         with mock.patch.dict(os.environ, {"COLUMNS": "1000"}):
