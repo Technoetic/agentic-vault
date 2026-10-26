@@ -138,8 +138,7 @@ class PeriodParsingTests(unittest.TestCase):
         self.assertTable({text: q3_end for text in (
             '2026년 3분기 말에', '2026년 3분기말에', '2026년 3분기 말까지', '2026년 3분기 말부터', '2026년 3분기 말일',
             '2026년 3분기 말경', '2026년 3분기 말 기준', '2026년 3분기 말기준', '2026년 3분기 말 현재', '2026년 3분기 말의',
-            '2026년 3분기 말로', '2026년 3분기 말쯤', '2026년 3분기 말께', '2026년 3분기 말은', '2026년 3분기 말는',
-            '2026년 3분기 말이', '2026년 3분기 말가', '2026년 3분기 말도', '2026년 3분기 말엔', '2026년 3분기 말.',
+            '2026년 3분기 말로', '2026년 3분기 말쯤', '2026년 3분기 말께', '2026년 3분기 말엔', '2026년 3분기 말.',
             '2026년 3분기  말에', '2026년 3Q 말', '3Q26말', '3Q26 말에', '2026Q3 말', '2026-Q3말까지')})
         self.assertTable({'2026년 상반기 말에': ('period_end', '2026-06-30', D(2026, 6, 30), D(2026, 7, 1), None)})
         fiscal_end = ('period_end', '2027-03-31', D(2027, 3, 31), D(2027, 4, 1), None)
@@ -157,12 +156,21 @@ class PeriodParsingTests(unittest.TestCase):
             '3Q26 초': 'quarter', '2026Q3 초': 'quarter', '2026년 3Q 초': 'quarter',
             '2026년 4분기 연속 흑자': 'quarter', '2026년 4분기연속': 'quarter', '2026년 3분기째': 'quarter',
             '2026년 3분기 만에': 'quarter', '2026년 3분기만에': 'quarter', '4분기 연속': 'quarter', '3분기째': 'quarter',
+            # 말 before 은, 는, 이, 가 or 도 may be the noun 말, and 초안 may be 초 안에: never a computed day or the whole period.
+            '2026년 3분기 말은': 'quarter', '2026년 3분기 말는': 'quarter', '2026년 3분기 말이': 'quarter',
+            '2026년 3분기 말가': 'quarter', '2026년 3분기 말도': 'quarter', '2026년 3분기 말도 안 되는': 'quarter',
+            '2026년 3분기말이 많다': 'quarter', '2026년 상반기 말은': 'half', '3Q26 말도': 'quarter',
+            '2026년 3분기 초안': 'quarter', '2026년 3분기초안': 'quarter',
+            # 차이, 차인 and 차였다 may be week 2 with a copula.
+            '2026년 3분기 2주 차이': 'quarter', '2026년 3분기 2주 차인': 'quarter', '2026년 3분기 2주 차였다': 'quarter',
+            '2026년 3분기 2주 차이다': 'quarter',
         }
         for fiscal_start in (None, 4):
             self.assertTable({text: (kind, None, None, None, 'period_qualifier') for text, kind in qualified.items()},
                              fiscal_start=fiscal_start)
         self.assertTable({'FY2026 초': ('fiscal_year', None, None, None, 'period_qualifier'),
                           'FY2026 말레이시아': ('fiscal_year', None, None, None, 'period_qualifier'),
+                          'FY2026 말도': ('fiscal_year', None, None, None, 'period_qualifier'),
                           '2026 회계연도 하반기 초': ('fiscal_half', None, None, None, 'period_qualifier'),
                           'FY2026 3분기 연속': ('fiscal_quarter', None, None, None, 'period_qualifier')}, fiscal_start=4)
 
@@ -197,7 +205,9 @@ class PeriodParsingTests(unittest.TestCase):
         q3 = ('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None)
         for word in ('중', '중에', '내', '이내', '동안', '전체', '이후', '이전', '부터', '까지', '실적', '전반적으로',
                      '첫 흑자', '첫 출하', '첫 주문', '첫 세일', '첫째, 매출', '시작하는', '시작된', '시작품', '결산 실적',
-                     '종료 예정', '개시 예정', '마감 실적', '3개월'):
+                     '종료 예정', '개시 예정', '마감 실적', '3개월',
+                     # 초과 is not 초 (start of period), and 2주 차질, 차량 or 차례 is not week 2.
+                     '초과', '초과 달성', '초과분', '2주 차질', '2주 차량', '2주 차례', '1개월 차질', '중 첫 흑자'):
             for text in ('2026년 3분기 ' + word, '2026년 3분기' + word, '2026년 3분기의 ' + word):
                 with self.subTest(text=text):
                     self.assertEqual(self.records(text), [q3])
@@ -210,10 +220,24 @@ class PeriodParsingTests(unittest.TestCase):
 
     def test_a_body_period_with_a_narrowing_word_is_not_indexed(self):
         for body in ('신제품은 2026년 하반기 후반 양산 목표.', '3공장은 2026년 3분기 마지막 날 완공.', '2026년 3분기의 첫 달 출시',
-                     '2026년 3분기 종료일 정산', '3Q26 끝까지 점검', '2026년 3분기 시작과 함께 가동', '2026Q3 막바지'):
+                     '2026년 3분기 종료일 정산', '3Q26 끝까지 점검', '2026년 3분기 시작과 함께 가동', '2026Q3 막바지',
+                     # After 중, 내 or 동안, a list of months, N주째 and N개월 차, and an English prefix.
+                     '2026년 3분기 중 마지막 달 완공', '2026년 하반기 동안 마지막 주 점검', '2026년 3분기 내 8월 출시',
+                     '2026년 3분기 7·8월 집중', '2026년 3분기 7~8월 성수기', '2026년 3분기 7, 8월', '2026년 3분기 3주째 지연',
+                     '2026년 3분기 1개월 차 점검', '2026Q3 1개월차', 'late 2026Q3 launch', 'Early 2026년 하반기',
+                     'mid-2026Q3', 'by the end of 3Q26', 'start of 2026 Q3', 'end-of-2026Q3'):
             with self.subTest(body=body):
                 self.assertEqual(period.index(period.parse(body)), ())
         self.assertEqual(period.index(period.parse('2026년 3분기 중 완공')), ((D(2026, 7, 1), D(2026, 10, 1)),))
+        # A day is not narrowed by a prefix (a time inside a day), and a longer word is not a prefix.
+        for body, interval in (('late 2026.10.07', (D(2026, 10, 7), D(2026, 10, 8))),
+                               ('chocolate 2026Q3', (D(2026, 7, 1), D(2026, 10, 1))),
+                               ('midterm 2026Q3', (D(2026, 7, 1), D(2026, 10, 1)))):
+            with self.subTest(body=body):
+                self.assertEqual(period.index(period.parse(body)), (interval,))
+        for text in ('late FY2026', 'the end of 2026 회계연도', 'mid FY2026 Q3'):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text, 4)[0][4], 'period_qualifier')
 
     def test_q_or_h_marks_around_a_fiscal_year_abstain_except_fy_then_q(self):
         marks = {'Q3 FY2026': 'fiscal_quarter', 'Q3 FY26': 'fiscal_quarter', 'q3 fy2026': 'fiscal_quarter',
@@ -240,6 +264,13 @@ class PeriodParsingTests(unittest.TestCase):
             'Q3.FY2026': 'fiscal_quarter', 'Q3_FY2026': 'fiscal_quarter', 'Q3의 FY2026': 'fiscal_quarter',
             'Q 3 FY2026': 'fiscal_quarter', 'Q3-FY2026': 'fiscal_quarter', 'Q3 (FY2026)': 'fiscal_quarter',
             '1H/FY26': 'fiscal_half', '3분기 FY2026': 'fiscal_quarter', '하반기/FY2026': 'fiscal_half',
+            # Any run of punctuation, symbols, whitespace or format characters, with at most one 의, 및, 과 or 와.
+            'FY2026 & Q3': 'fiscal_quarter', 'FY2026 [Q3]': 'fiscal_quarter', 'FY2026+Q3': 'fiscal_quarter',
+            'FY2026 | H1': 'fiscal_half', 'FY2026; 3분기': 'fiscal_quarter', 'FY2026 > Q3': 'fiscal_quarter',
+            'FY2026\N{EM DASH}Q3': 'fiscal_quarter', 'FY2026~Q3': 'fiscal_quarter', 'FY2026 #Q3': 'fiscal_quarter',
+            'FY2026 및 Q3': 'fiscal_quarter', 'FY2026과 3분기': 'fiscal_quarter', 'FY2026, (Q3)': 'fiscal_quarter',
+            'Q3 & FY2026': 'fiscal_quarter', 'Q3 및 FY2026': 'fiscal_quarter', '하반기와 FY2026': 'fiscal_half',
+            'Q3 [FY2026]': 'fiscal_quarter', '1H + FY26': 'fiscal_half',
             # Quarter or half tokens the fiscal row cannot read.
             'FY2026 Q5': 'fiscal_quarter', 'FY2026 Q0': 'fiscal_quarter', 'FY2026 5분기': 'fiscal_quarter',
             'FY2026 Q3Q4': 'fiscal_quarter', 'FY2026 Q12': 'fiscal_quarter', 'FY2026Q5': 'fiscal_quarter',
@@ -296,8 +327,9 @@ class PeriodParsingTests(unittest.TestCase):
             ('FY2025의 H2 FY2026', ['FY2025', 'H2 FY2026'], half),
             ('FY2025, 3분기 FY2026', ['FY2025', '3분기 FY2026'], quarter),
             ('FY2025, 하반기 FY2026', ['FY2025', '하반기 FY2026'], half),
-            ('FY2025  H1 FY2026', ['FY2025', 'H1 FY2026'], half),
-            ('FY2025' + chr(0x200B) + 'Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            # A wider joiner after the earlier year: the hand-off still reads the mark with the later one.
+            ('FY2025 & Q1 FY2026', ['FY2025', 'Q1 FY2026'], quarter),
+            ('FY2025 [H2 FY2026', ['FY2025', 'H2 FY2026'], half),
             # The mark before the later year may start inside the mark read after the earlier one.
             ('FY2025 Q 1Q FY2026', ['FY2025', '1Q FY2026'], quarter),
             ('FY2025 H' + chr(0x200B) + '4Q FY2026', ['FY2025', '4Q FY2026'], quarter),
@@ -312,19 +344,48 @@ class PeriodParsingTests(unittest.TestCase):
                     self.assertEqual(self.records(text, fiscal_start), [*years, mark])
                     # The body index holds the earlier years only.
                     self.assertEqual(period.index(records), tuple((year[2], year[3]) for year in years if year[2]))
-        # Unchanged: a mark the earlier year reads, H1-H4, 1Q-4Q or 1H-4H right after it or after one space or tab,
-        # and a mark on its digits that no mark before the later year starts in stay the earlier year's; the later
-        # year is then read on its own.
+        # A mark the earlier year reads, H1-H4, 1Q-4Q or 1H-4H right after it or after one space or tab, and a mark
+        # on its digits that no mark before the later year starts in stay the earlier year's. With only whitespace
+        # before the later year the mark may be its own, so the later year abstains instead of being read whole.
         fiscal_q4 = ('fiscal_quarter', '2026-01/2026-03', D(2026, 1, 1), D(2026, 4, 1), None)
+        unread = ('fiscal_year', None, None, None, 'period_qualifier')
         for text, first in (('FY2025 Q4 FY2026', fiscal_q4), ('FY2025 H1 FY2026', half), ('FY2025\t1Q FY2026', quarter),
                             ('FY2025 2H FY2026', half), ('FY2025H1 FY2026', half), ('2025 회계연도 h2 FY2026', half),
-                            ('FY2025Q5 FY2026', quarter)):
+                            ('FY2025Q5 FY2026', quarter), ('FY2025 Q4  FY2026', fiscal_q4),
+                            ('FY2025 Q4' + chr(0x200B) + 'FY2026', fiscal_q4)):
             with self.subTest(text=text):
-                self.assertEqual(self.records(text, 4), [first, self.fiscal_year(2026, 4)])
+                self.assertEqual(self.records(text, 4), [first, unread])
+                for fiscal_start in (1, 12):
+                    self.assertEqual(self.records(text, fiscal_start)[1:], [unread])
+        # Likewise when the hand-off reads the mark with the later year across whitespace only: the earlier year
+        # abstains too.
+        for text, mark in (('FY2025  H1 FY2026', half), ('FY2025' + chr(0x200B) + 'Q1 FY2026', quarter),
+                           ('FY2025\n하반기 FY2026', half)):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text, 4), [unread, mark])
+        # A list of quarters or halves joined to a fiscal year as a mark would be is not one the year reads.
+        multiple = ('multiple', None, None, None, 'multiple_periods')
+        for text, expected in (('FY2025 1·2분기 FY2026', [unread, multiple, unread]), ('FY2026 1·2분기', [unread, multiple]),
+                               ('1~2분기 FY2026', [multiple, unread]), ('FY2026, 상·하반기', [unread, multiple]),
+                               ('FY2026 및 1, 2분기', [unread, multiple]),
+                               # A word between keeps the year whole.
+                               ('FY2026 실적, 1·2분기', [self.fiscal_year(2026, 4), multiple])):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text, 4), expected)
+        # Explicit separators keep the whole year beside a mark the other year reads, in either order. A mark joined
+        # to the later year by a joiner the hand-off does not read stays the earlier year's (as in v0.31.0), so the
+        # later year is compared whole.
+        for text, expected in (('FY2025 Q4, FY2026', [fiscal_q4, self.fiscal_year(2026, 4)]),
+                               ('FY2026, FY2025 Q4', [self.fiscal_year(2026, 4), fiscal_q4]),
+                               ('FY2025, Q1 & FY2026', [quarter, self.fiscal_year(2026, 4)]),
+                               ('FY2025/Q3 FY2026/Q1', [self.fiscal_year(2025, 4), quarter])):
+            with self.subTest(text=text):
+                self.assertEqual(self.records(text, 4), expected)
 
     def test_a_list_item_no_row_reads_adds_a_multiple_periods_record(self):
         multiple = ('multiple', None, None, None, 'multiple_periods')
         q1 = ('quarter', '2026-33', D(2026, 1, 1), D(2026, 4, 1), None)
+        q3 = ('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None)
 
         def day(month, number):
             start = D(2026, month, number)
@@ -336,8 +397,21 @@ class PeriodParsingTests(unittest.TestCase):
             '2026.10.07/09': [day(10, 7), multiple], '2026.10.07·10.09': [day(10, 7), multiple],
             '2026.10.07 및 10.09': [day(10, 7), multiple], '2026년 10월 7일, 9일': [day(10, 7), multiple],
             '2026. 3. 5., 9. 5.': [day(3, 5), multiple], '2026.10.07(수), 10.09(금)': [day(10, 7), multiple],
-            # The same shape without a list abstains too.
-            '2026년 3분기, 2공장 가동': [('quarter', '2026-35', D(2026, 7, 1), D(2026, 10, 1), None), multiple],
+            '2026.10.07, 10.09': [day(10, 7), multiple], '2026.03.05, 9월 5일': [day(3, 5), multiple],
+            # The same shape without a list abstains too, and so does a number in a unit that may be a period.
+            '2026년 3분기, 2027년': [q3, multiple], '2026년 3분기, 12월': [q3, multiple], '2026년 3분기, 3개월': [q3, multiple],
+            '2026년 3분기, 3 개월': [q3, multiple], '2026년 3분기, 2차 연도': [q3, multiple], '2026년 3분기, 2차년도': [q3, multiple],
+            '2026년 3분기, 2시즌': [q3, multiple], '2026.10.07, 2주': [day(10, 7), multiple],
+            # A time, or a count in a unit that is never a period, is not another item.
+            '2026년 3분기, 2공장 가동': [q3], '2026-10-07, 10:00': [day(10, 7)], '2026.10.07 / 14:00': [day(10, 7)],
+            '2026년 3분기, 120억': [q3], '2026년 3분기, 1,200억 원': [q3], '2026년 3분기, 3만 개': [q3],
+            '2026년 3분기·3개 신규 고객': [q3], '2026.10.07, 1차 납품': [day(10, 7)], '2026.10.07, 10시': [day(10, 7)],
+            '2026년 3분기 및 15%': [q3], '2026년 3분기와 12명': [q3], '2026년 3분기, 7건': [q3],
+            '2026.10.07, 5천 원': [day(10, 7)], '2026.10.07(수), 09:30': [day(10, 7)],
+            '2026년 3분기, 120억, 3개 신규 고객': [q3], '2026.10.07, 10:00, 2026.10.09': [day(10, 7), day(10, 9)],
+            # Unless another number follows a later list separator: the list goes on.
+            '2026.10.07, 10:00, 10.09': [day(10, 7), multiple], '2026년 3분기, 3개 신규 고객, 10.09': [q3, multiple],
+            '2026년 3분기, 120억, Q4': [q3, multiple],
             # Unchanged: the later item is read (a yearless quarter abstains on its own), or a word comes first.
             '2026년 1분기, 2분기': [q1, ('quarter', None, None, None, 'no_year')],
             '2026.03.05, 2026.09.05': [day(3, 5), day(9, 5)],
