@@ -1558,7 +1558,50 @@ def compile_fact_patterns(ssot_facts, warnings: list[str]) -> list[tuple[str, re
     return compiled
 
 
-RULE_HEADING_RE = re.compile(r"^#{1,3}\s+(.+?)\s*$")
+# 규칙 제목 줄(#~###)과 그 정규화는 선형 시간으로 처리한다. 예전 정규식은 게으른 (.+?)나
+# 자리마다 다시 시도하는 \s* 때문에 제목 글자 사이의 긴 공백('# a'+공백 N개+'b')에서
+# 이차 시간이었다. 아래 함수는 예전 정규식과 같은 값을 내며, 예전 식은
+# tests/test_linear_line_parsers.py에 대조용으로만 남는다. str 패턴의 \s는 str.isspace와
+# 같고 인자 없는 strip()·rstrip()도 같은 기준을 쓴다. 호출부는 str.splitlines()로 나눈
+# 줄만 넘기므로 줄 안에 '\n'이 없다.
+_RULE_HEADING_OPEN_RE = re.compile(r"#{1,3}(?=\s)")
+_DASH_TAIL_RE = re.compile(r"[—-](?=\s)")
+
+
+def _rule_heading(line: str) -> str | None:
+    """예전 re.match(r"^#{1,3}\\s+(.+?)\\s*$", line).group(1)과 같은 값, 제목이 아니면 None."""
+    m = _RULE_HEADING_OPEN_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end():]
+    title = rest.strip()
+    if title:
+        return title
+    return rest[-1] if len(rest) >= 2 else None
+
+
+def _drop_parenthesized(h: str) -> str:
+    """예전 re.sub(r"\\s*\\([^)]*\\)", "", h)와 같은 값('\\n'이 있어도 같다)."""
+    parts, pos = [], 0
+    while True:
+        opening = h.find("(", pos)
+        closing = h.find(")", opening + 1) if opening >= 0 else -1
+        if closing < 0:
+            break
+        start = opening
+        while start > pos and h[start - 1].isspace():
+            start -= 1
+        parts.append(h[pos:start])
+        pos = closing + 1
+    parts.append(h[pos:])
+    return "".join(parts)
+
+
+def _drop_dash_tail(h: str) -> str:
+    """예전 re.sub(r"\\s*[—-]\\s.*$", "", h)와 같은 값(h에 '\\n'이 없을 때)."""
+    # 공백이 뒤따르는 첫 대시부터 끝까지와 그 앞 공백을 지운다.
+    m = _DASH_TAIL_RE.search(h)
+    return h[:m.start()].rstrip() if m else h
 
 
 def _norm_heading(h: str) -> str:
@@ -1567,8 +1610,8 @@ def _norm_heading(h: str) -> str:
     콜론 뒤가 핵심인 경우가 많아 오판 위험)."""
     h = re.sub(r"[*_`]", "", h)                       # 강조 기호 제거
     h = re.sub(r"^\s*\d+(?:[.\-)]\d*)*[.\-)]?\s+", "", h)  # 선두 번호 접두사 제거 ("1. ", "2-3) " 등)
-    h = re.sub(r"\s*\([^)]*\)", "", h)                # 괄호 주석 제거 (예: "(위반 시 …)")
-    h = re.sub(r"\s*[—-]\s.*$", "", h)                # 대시 이후 부연 제거 ("— 절대 규칙" 등)
+    h = _drop_parenthesized(h)                        # 괄호 주석 제거 (예: "(위반 시 …)")
+    h = _drop_dash_tail(h)                            # 대시 이후 부연 제거 ("— 절대 규칙" 등)
     return " ".join(h.split()).strip().lower()
 
 
@@ -1596,9 +1639,9 @@ def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_line
     if not is_denied(rel_posix(claude_md, vault), *build_deny_rules(deny_zones)) and claude_md.is_file():
         ctext = CODE_FENCE_RE.sub("", read_vault_text(vault, claude_md, "CLAUDE.md", deny_zones))
         for line in ctext.splitlines():
-            m = RULE_HEADING_RE.match(line)
-            if m:
-                claude_headings.add(_norm_heading(m.group(1)))
+            title = _rule_heading(line)
+            if title is not None:
+                claude_headings.add(_norm_heading(title))
     for rf in rule_files:
         rtext = read_vault_text(vault, rf, f"rule file {rf.name}", deny_zones)
         # 코드펜스 내부는 예시 인용일 뿐 실제 규칙/제목이 아니므로 크기·제목 판정에서 제외
@@ -1609,9 +1652,9 @@ def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_line
         if n > max_lines:
             oversized.append((rf.name, n))
         for line in rclean.splitlines():
-            m = RULE_HEADING_RE.match(line)
-            if m and _norm_heading(m.group(1)) in claude_headings:
-                dup_headings.append(f"{rf.name} → `{m.group(1).strip()}` (CLAUDE.md와 중복)")
+            title = _rule_heading(line)
+            if title is not None and _norm_heading(title) in claude_headings:
+                dup_headings.append(f"{rf.name} → `{title.strip()}` (CLAUDE.md와 중복)")
     return oversized, dup_headings
 
 

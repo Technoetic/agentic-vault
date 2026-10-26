@@ -140,6 +140,38 @@ def _cells(line):
     return dict(values=values, spans=spans, raw=raw, right=right)
 
 
+# vault_state.py carries a byte-identical copy of the block below: this module
+# imports vault_state, so importing back would be a cycle, and a helper kept only
+# there would sit outside the checker_sha256-bound files.
+# tests/test_rule_sources.py fails if the two copies drift apart.
+# --- BEGIN ATX HEADING (verbatim copy) ---
+_ATX_OPEN_RE = re.compile(r' {0,3}(#{1,6})(?=\s)')
+
+
+def _atx_heading(text):
+    """Return (level, raw label) of one ATX heading line, or None, in linear time.
+
+    Precondition: text holds no line feed (callers split bytes with splitlines
+    and strip CR/LF). The label keeps the earlier regex semantics, not
+    CommonMark; callers strip and casefold it themselves.
+    """
+    # Same result as the former re.match(r' {0,3}(#{1,6})\s+(.+?)\s*#*$', text),
+    # whose lazy label retried the optional closing run at every position
+    # (quadratic on '# a' + many spaces + 'b'). For str patterns \s is
+    # str.isspace, the test that argument-free lstrip() and rstrip() use.
+    match = _ATX_OPEN_RE.match(text)
+    if not match:
+        return None
+    rest = text[match.end():]
+    body = rest.lstrip()
+    if not body:
+        # Only whitespace follows: \s+ gave its last character to the label.
+        return (len(match[1]), rest[-1]) if len(rest) >= 2 else None
+    # The shortest label after which only whitespace and a '#' run remain.
+    return len(match[1]), body.rstrip('#').rstrip() or body[0]
+# --- END ATX HEADING (verbatim copy) ---
+
+
 def _line_rows(raw):
     fence, offset = '', 0
     rows, headings = [], []
@@ -159,9 +191,9 @@ def _line_rows(raw):
             fence = marker[1]
             eligible = False
         if eligible:
-            heading = re.match(r' {0,3}(#{1,6})\s+(.+?)\s*#*$', text)
+            heading = _atx_heading(text)
             if heading:
-                level, label = len(heading[1]), heading[2].strip().casefold()
+                level, label = heading[0], heading[1].strip().casefold()
                 headings = [(depth, status) for depth, status in headings if depth < level]
                 explicit = 'confirmed' if re.match(r'^(?:✅\s*확정|확정|confirmed)(?:\s*$|\s*[—:：-])', label) else ''
                 headings.append((level, explicit))

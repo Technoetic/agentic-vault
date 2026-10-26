@@ -344,6 +344,93 @@ EDTF 구간은 끝을 포함하는 정밀도 표기라 반열린 구간과 끝�
 - 해석은 파일명 정확 일치다. Obsidian의 대소문자 무시·별칭 해석과 결과가 다를 수 있다.
 - 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-17 기준, `ledger_table_only`는 2026-10-24 기준). 근거는 단위 테스트의 합성 자료뿐이다.
 
+## 제목·frontmatter 줄 파싱의 선형 시간
+
+기본 lint·`check-support`·healthcheck와 recall이 노트마다 읽는 제목·frontmatter 줄의 정규식 가운데 게으른 묶음 뒤에 생략 가능한 공백 꼬리가 오는 꼴
+(`(.+?)\s*#*$`, `(.*?)\s*$`)과 그 값에 이어 쓰는 공백 런 스캔(`\s+#`, `\s*\(` 등)을, 같은 값을 내는 선형 처리로 바꿨다.
+켜는 설정·옵션·새 출력 필드는 없다. 판정·경고·`issue_id`·출력·종료 코드는 그대로다.
+
+| 위치(v0.31.0) | 바꾼 식 | 쓰는 곳 |
+|---|---|---|
+| `vault_ssot.py:162` | `' {0,3}(#{1,6})\s+(.+?)\s*#*$'` | `parse_ledger`의 확정 구역. 기본 lint(SessionStart 비동기 healthcheck, pre-commit `--staged`)가 소비 노트마다 `check_ledger`를, 기본 `check-support`가 인용 노트마다 `parse_ledger`를 부른다 |
+| `vault_state.py:579` | 같은 식 | `project_handoff`의 Blocked·차단·보류 구역 |
+| `vault_lint_extensions.py:141`·`143`·`194`·`197` | `'^ {0,3}#{1,6}\s+(.+?)\s*$'`, `re.sub(r'\s+#+\s*$', …)`, `'^(created\|updated):\s*(.*?)\s*$'`, `re.split(r'\s+#', …)` | 기본 lint의 제목 anchor와 `created`·`updated` 날짜 |
+| `vault_provenance.py:436` | `'^([a-z_]+)\s*:\s*(.*?)\s*$'` | 기본 lint의 출처 frontmatter |
+| `vault_healthcheck.py:1561`·`1570`·`1571` | `'^#{1,3}\s+(.+?)\s*$'`, `_norm_heading`의 `\s*\([^)]*\)`·`\s*[—-]\s.*$` | healthcheck full 모드의 rules 제목 중복 검사 |
+| `vault_recall.py:40`·`41`, `vault_query_expansion.py:478` | `'^\s*title\s*:\s*(.*?)\s*$'`, `'^\s*#{1,6}\s+(.+?)\s*#*\s*$'` | `/vault-recall`의 제목, `--expand-query`의 제목 줄 건너뛰기(기본 훅 밖) |
+
+**원인과 바꾼 방법.** 게으른 `(.+?)`는 한 글자 늘 때마다 꼬리 `\s*#*$`를 처음부터 다시 맞춘다. 제목 글자 사이에 긴 공백이 있으면(`# a` + 공백 N개 + `b`)
+자리마다 그 공백을 다시 훑어 이차 시간이 되고, 꼬리에 `\s*`가 둘인 `vault_recall.py`의 제목 식은 삼차 시간이었다. 새 처리는 길이가 정해진 머리
+(` {0,3}(#{1,6})(?=\s)` 등)만 정규식으로 맞추고 값은 `strip()`·`lstrip()`·`rstrip()`·`rstrip('#')`로 잘라 낸다. 게으른 묶음이 고르던 가장 짧은 label은
+"끝의 `#` 런과 그 앞 공백을 지운 것, 비면 첫 글자"와 같다. 대장과 handoff 투영은 같은 `_atx_heading`을 쓴다. `vault_ssot.py`가 `vault_state.py`를
+import하므로 거꾸로 import하면 순환이 되어, `vault_state.py`에 바이트가 같은 사본을 둔다(`# --- BEGIN ATX HEADING (verbatim copy) ---` 표시 사이).
+두 사본이 갈라지면 `tests/test_rule_sources.py`가 실패하고, `checker_sha256`가 묶는 쪽은 `vault_ssot.py`의 원본이다.
+
+**possessive·atomic 형식을 쓰지 않은 이유.** `\s*+`·`#*+`나 `(?>…)`는 묶음 안의 되돌아가기 지점만 버린다. 비용은 바깥의 게으른 `(.+?)`가
+N개 자리마다 꼬리를 다시 시작하는 데서 오므로 여전히 이차 시간이다(아래 표에서 길이가 두 배면 약 4배). 두 문법은 Python 3.11에서 추가되어 CI의 Python 3.10에서는 쓸 수도 없다.
+
+| `# a` + 공백 N개 + `b` | 예전 식 | possessive `\s++(.+?)\s*+#*+$` | atomic `(.+?)(?>\s*#*)$` | `_atx_heading` |
+|---|---|---|---|---|
+| N = 8,000 | 0.32초 | 0.039초 | 0.039초 | 0.6 µs |
+| N = 16,000 | 1.30초 | 0.17초 | 0.16초 | 0.7 µs |
+| N = 32,000 | 5.33초 | 0.64초 | 0.64초 | 0.8 µs |
+| N = 64,000 | 21.15초 | 2.58초 | 2.53초 | 1.4 µs |
+
+2026-10-27, Windows 11·Python 3.12.10, 이 PC 한 대에서 세 번 가운데 가장 빠른 값이다(N = 64,000은 두 번). 같은 날 한 번씩 잰 다른 식은
+N = 8,000/16,000/32,000에 약 0.15/0.6/2.5초(공백 런 스캔은 0.05~0.2/0.2~0.8/0.9~3.1초), `vault_recall.py`의 제목 식은 N = 1,000/2,000에
+0.80/6.3초였다. 새 처리는 N = 64,000에서도 한 줄에 1 ms 미만이었다(가장 느린 것이 0.6 ms).
+
+**같다는 근거와 그 범위.** 예전 식은 `tests/test_linear_line_parsers.py` 안에만 대조용(oracle)으로 남는다. 시험은 VULCANBOOST가 ReDoS 수리를
+받아들이는 두 단계를 판정 틀로만 빌린다.
+
+- 고정 사례: CommonMark 예제를 바꿔 쓴 사례(아래)와 볼트 제목(`## 확정 ###`, `### Blocked ###`, `#　확정` 등)에서 새 처리가 예전 식과 같은 (수준, 가공 전 label)을 낸다.
+- 한정된 전수 비교: 11개 기호(공백 종류 8개 — 공백·탭·U+000B·U+001C·U+0085·U+00A0·U+2028·U+3000 — 와 `#`·`a`·`가`)로 만든 길이 6 이하 문자열
+  1,948,717개 전부에서 같다. 다른 식은 각자의 기호(`:`·`(`·`)`·`—`·`-`, 필요하면 `\n`)와 앞붙이(`created:` 등)를 더해 길이 5~6 이하 전부를 본다.
+  `AGENTIC_VAULT_SLOW_TESTS=1`이면 Python이 공백으로 보는 code point 29개(아래 줄바꿈 조건이 있는 식은 `\n`을 뺀 28개)를 모두 넣은 길이 3~4 이하와
+  기본 기호의 길이 7(제목 식은 21,435,888개)까지 보고, 예전 식과 새 처리의 시간을 출력한다(이 PC에서 약 3분).
+- 바탕 사실: str 패턴의 `\s`가 `str.isspace()`와 같고 인자 없는 `strip()`·`lstrip()`·`rstrip()`도 같은 기준을 쓴다는 것을 0x110000개 code point 전부로 확인한다.
+- 줄바꿈 조건: 줄 안에 `\n`이 있으면 제목 식들은 예전과 다르다(`.`이 `\n`을 지나지 못하고 `$`가 끝 `\n` 앞에서도 맞는다. 예: `# \n`은 예전에 제목이 아니었지만
+  새 처리는 `(1, '\n')`). 대장과 handoff는 바이트를 `bytes.splitlines`로 나눠 CR·LF를 떼고, 나머지 호출부는 `str.splitlines()`의 줄만 넘긴다. 시험은 호출부마다
+  CR·CRLF·U+000B·U+000C·U+001C~U+001E·U+0085·U+2028·U+2029를 섞어 넣고, 새 처리가 받은 값에 `\n`이 없으며 예전 식과 같은 값을 냈는지 본다.
+  닫는 `#` 런 지우기, 날짜 뒤 주석 자르기, 괄호 주석 지우기는 `\n`이 있어도 같다.
+- 기본 출력: 새 처리 자리에 예전 식을 끼워 넣은 실행과 `parse_ledger`·`check_ledger`·`project_handoff`(dry run)·lint 경고·출처 frontmatter·rules 중복 목록·recall 제목과
+  `--expand-query` 순위가 같고, 경고 승격 인증서의 benign replay 결과(`result_sha256`)도 같다.
+- 시간 상한: 새 처리만 잰다. N = 8,000~64,000의 위 모양들을 함수마다 모두 돌린 합계가 0.25초 미만이어야 한다(이 PC에서 2 ms 이하). 예전 식을 넣으면 16,000자 단계 안에 이 상한을 넘는다.
+
+이 근거는 "이 기호 집합 위 이 길이까지, 줄에 `\n`이 없으면 같다"는 것이며 모든 문자열에 대한 증명이 아니다.
+
+**일부러 남긴 CommonMark와의 차이.** 이 변경은 제목 해석을 CommonMark 쪽으로 고치지 않는다. 고치면 어느 구역이 확정·차단인지가 조용히 바뀐다.
+CommonMark 0.31.2 4.2절 예제 62~79를 다른 말로 바꿔 쓴 시험 사례에서 CommonMark와 다른 예제는 66·73·75·76·79이고, 나머지는 제목 여부와 앞뒤 공백을 뗀 label이 같다.
+
+- 66: label에 인라인 서식과 escape가 그대로 남는다(`*`·`\*`).
+- 73: 닫는 `#` 런 뒤에 공백이 있으면 그 런이 label에 남는다. 뒤에 공백이 붙은 `## 확정 ###`은 label이 `확정 ###`이어서 확정 구역이 아니다.
+- 75: 앞에 공백이 없는 닫는 런도 지운다(`# alpha#`의 label은 `alpha`).
+- 76: backslash escape를 모른다. `### alpha \###`의 끝 `###`를 닫는 런으로 지워 label이 `alpha \`가 된다.
+- 79: 빈 제목(`##`, `### `)을 제목으로 보지 않고, `## ##`의 label은 `#`이다.
+- 예제 밖: `\s`가 유니코드 공백이라 `#` 뒤 U+3000(`#　확정`)도 제목으로 본다. CommonMark는 공백·탭만 받는다.
+
+**경고 승격 인증서.** `checker_sha256`가 묶는 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`가 바뀌어 `checker_sha256`가 바뀐다.
+benign corpus와 그 replay 결과는 같다. 경고를 `fatal`로 올린 볼트는 [위](#출처와-공유-상태-보강)에 적은 순서대로 승격 단계를 되돌리고 엔진 사본을 모두 바꾼 뒤 인증서를 다시 만든다.
+
+**남은 비선형 정규식.** 이번과 다른 꼴이 같은 경로에 남아 있다(이 PC에서 잰 값).
+
+- `vault_lint_extensions.py`가 줄마다 인라인 코드를 지우는 `` re.sub(r'(`+).*?\1', '', line) ``: 백틱만 이어진 줄에서 삼차 시간(N = 4,000/8,000/16,000에 0.36/2.7/21초). 기본 lint 경로다.
+- 같은 파일의 위키링크 찾기 `(?<!!)\[\[([^]\n]+)\]\]`와 `_heading_key`의 `\[([^]]+)\]\([^)]*\)`: `[`만 이어진 줄에서 이차 시간(N = 16,000에 0.67초·0.40초).
+- `vault_healthcheck.py`의 `split_frontmatter`(`^---\s*\n(.*?)\n---\s*\n?`, full 모드와 `--staged`): `---` 뒤에 빈 줄만 이어지고 닫는 `---`가 없는 노트에서 이차 시간(빈 줄 16,000개에 0.69초).
+- `vault_ssot.py`의 `CODE_SPAN_RE`(`` (`+)(.+?)\1 ``): `check-support`가 출처 칸마다 쓰며 백틱만 있는 칸에서 삼차 시간이다. 칸이 4 KiB로 묶여 칸 하나에 약 0.7초지만 행 수만큼 곱해진다.
+
+**한계.**
+
+- 측정은 이 PC 한 대에서 했다. Python 3.10·3.14와 Linux·macOS에서는 CI의 시간 상한 시험만 새 처리의 시간을 본다.
+- `vault_state.py`의 사본은 `checker_sha256`가 묶지 않는다. 사본이 원본과 같은지는 위 시험만 확인한다.
+- 앞으로 `\n`이 든 문자열을 넘기는 호출부가 생기면 제목 함수들은 예전 식과 다를 수 있다. 각 함수의 설명에 이 조건을 적었다.
+
+**출처.** Python [`re` 문서](https://docs.python.org/3/library/re.html)의 `\s`(str 패턴은 `str.isspace()`가 정하는 유니코드 공백)와
+atomic group·possessive quantifier("Added in version 3.11"). [VULCANBOOST](https://www.usenix.org/conference/usenixsecurity25/presentation/li-yeting)
+(Yeting Li 외, USENIX Security 2025)의 두 수용 기준 — 시험 사례를 모두 통과하고 ReDoS가 없는 수리(TCRSR), 원래 정규식과 동치이고 ReDoS가 없는 수리(ERSR) — 를
+판정 틀로만 빌렸다. DFA 변환과 dk.brics 동치 검사는 쓰지 않는다. 게으른 묶음이 고르는 capture 값은 정규 언어의 동치로 나타나지 않기 때문이다.
+[CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/)(John MacFarlane, CC BY-SA 4.0) 4.2절 예제 62~79는 번호만 인용하고, 시험 사례의 입력은 새로 썼다.
+
 ## 수집과 경고
 
 Jarvis 수집은 `captured_via`, `content_origin`, `captured_at`, `body_sha256`을 호스트가 만든다.

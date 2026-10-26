@@ -571,17 +571,48 @@ def _block_span(raw):
     return found
 
 
+# The block below is a byte-identical copy of the one in vault_ssot.py, which
+# imports this module (importing it back would be a cycle).
+# tests/test_rule_sources.py fails if the two copies drift apart.
+# --- BEGIN ATX HEADING (verbatim copy) ---
+_ATX_OPEN_RE = re.compile(r' {0,3}(#{1,6})(?=\s)')
+
+
+def _atx_heading(text):
+    """Return (level, raw label) of one ATX heading line, or None, in linear time.
+
+    Precondition: text holds no line feed (callers split bytes with splitlines
+    and strip CR/LF). The label keeps the earlier regex semantics, not
+    CommonMark; callers strip and casefold it themselves.
+    """
+    # Same result as the former re.match(r' {0,3}(#{1,6})\s+(.+?)\s*#*$', text),
+    # whose lazy label retried the optional closing run at every position
+    # (quadratic on '# a' + many spaces + 'b'). For str patterns \s is
+    # str.isspace, the test that argument-free lstrip() and rstrip() use.
+    match = _ATX_OPEN_RE.match(text)
+    if not match:
+        return None
+    rest = text[match.end():]
+    body = rest.lstrip()
+    if not body:
+        # Only whitespace follows: \s+ gave its last character to the label.
+        return (len(match[1]), rest[-1]) if len(rest) >= 2 else None
+    # The shortest label after which only whitespace and a '#' run remain.
+    return len(match[1]), body.rstrip('#').rstrip() or body[0]
+# --- END ATX HEADING (verbatim copy) ---
+
+
 def _items(raw, namespace):
     records, seen, registry = [], {}, {}
     blocked_level = None
     try:
         for _, _, line in _lines(raw):
-            heading = re.match(r' {0,3}(#{1,6})\s+(.+?)\s*#*$', line)
+            heading = _atx_heading(line)
             if heading:
-                level = len(heading[1])
+                level = heading[0]
                 if blocked_level is not None and level <= blocked_level:
                     blocked_level = None
-                if heading[2].strip().casefold() in {'blocked', '차단', '보류'} and blocked_level is None:
+                if heading[1].strip().casefold() in {'blocked', '차단', '보류'} and blocked_level is None:
                     blocked_level = level
             blocked = blocked_level is not None
             task = re.match(r'\s*[-*+]\s+\[([ xX])\]\s+(.+)$', line)
