@@ -68,7 +68,6 @@ codex plugin add agentic-vault@agentic-vault-local
 v0.32.0은 `checker_sha256`가 묶는 파일 가운데
 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`·`vault_paths.py`를 바꿨다(`d8f9559a…`에서
 `9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563`로, 저장소 바이트로 측정. corpus는 같다).
-<!-- TODO(host, item 1e): jev_client.py is listed because item 1e (feat/r6-regex4-20261027, no commits when this was written) changes it; drop it here if item 1e is not merged. -->
 그래서 v0.31.0 이하에서 만든 인증서는 새 설치본에서, 새 설치본에서 만든 인증서는 이전
 설치본에서 맞지 않는다. 맞지 않으면 healthcheck가 종료 코드 1로 멈추고, SessionStart 훅이 주입하지 않으며,
 staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종료 코드 2)를 보고한다. 볼트 설정 전체를

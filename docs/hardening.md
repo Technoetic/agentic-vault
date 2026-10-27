@@ -2,12 +2,13 @@
 
 v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
 Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
-바꿨다(켜는 옵션·출력 필드는 없다). `check-support`는 [표를 뺀 자리와 줄 나눔](#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을
+바꿨다(켜는 옵션·출력 필드는 없다). 기본 lint의 유출 검사와 Jev 경로가 함께 쓰는 자격 증명 식(`jev_client.SENSITIVE`)의 이차 시간 조각
+넷과 선택형 Telegram 브리지의 위키링크 바꾸기도 같은 판정·같은 문자열을 내는 선형 처리로 바꿨다(자격 증명 식은 매치가 있는지만 예전
+식과 같고, 쓰는 곳은 모두 그것만 본다). `check-support`는 [표를 뺀 자리와 줄 나눔](#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을
 다르게 읽어 그 경우에만 기본 출력이 바뀌고, 선택형 기간 표현 정규화는 잘못 읽던 꼴을 더 보류하고 v0.31.0이 지나치게
 보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패를
 [생성한 사례로 센다](#기간-정규화의-알려진-실패-목록). 인증서가 묶는 corpus 파일은 `core.autocrlf=true`인 checkout에서도
 [LF로 받는다](#수집과-경고).
-<!-- TODO(host, item 1e): feat/r6-regex4-20261027 had no commits when this lead was written. Describe its linear-time jev_client.SENSITIVE scan and Jarvis wiki-link substitution here after merging it, or drop jev_client.py from the v0.32.0 file list below if it is not merged. -->
 v0.31.0은 시간 대장의 [`check-support`](#대장-값의-출처-노트-대조-vault_ssotpy-check-support)에 다른 대장의 사실 표에만
 있는 값을 표시하는 [두 필드](#다른-대장의-사실-표에만-있는-값)(기본 출력)와 선택형 `--primary-text-only`,
 선택형 [기간 표현 정규화](#기간-표현-정규화---normalize-periods)(`--normalize-periods`)를 더한다.
