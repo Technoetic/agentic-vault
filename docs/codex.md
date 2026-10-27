@@ -229,7 +229,8 @@ python scripts/evaluate_memory_workflows.py --backend deterministic
 해당 노출 지표는 최종 답변 오류나 공격 성공률이 아니며, 기존 어휘 검색의
 한계를 관찰하는 용도다. [연결 제안 helper](link-proposals.md)는 후보·해시·diff만
 반환한다. 검증기는 이 helper와 사용 문서의 설치본도 원본과 대조한다. `doctor`의 어댑터 보고가 비교
-기준으로 읽는 `vault_adapters.py`와 번들 deny zone 가드 스크립트 두 개도 대조한다.
+기준으로 읽는 `vault_adapters.py`, 번들 deny zone 가드 스크립트 두 개와 Aside 도우미 `aside-up.ps1`도
+대조한다.
 
 실제 모델이 초기화·마감을 수행하는 대화, 신뢰 후 자동 훅 실행, Codex의 출력
 축약 동작은 통합 실세션으로 검증하지 않았다. Telegram Jarvis는 계속 Claude CLI를

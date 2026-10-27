@@ -589,7 +589,7 @@ agentic-vault/
 │   ├── deny-guard.py                  ← PreToolUse 훅 스크립트 (deny·ask만 내고 allow는 내지 않음)
 │   ├── ps-parse.ps1                   ← PowerShell 명령 구문 분석용 자식 프로세스
 │   ├── guide.md                       ← 판정표·켜는 법·상태 보고·지연 실측·한계
-│   └── settings-hooks.json            ← 8개 도구에 걸리는 PreToolUse 훅 조각 (onFailure: block)
+│   └── settings-hooks.json            ← 9개 도구에 걸리는 PreToolUse 훅 조각 (onFailure: block)
 │
 └── assets/git-hooks/                  ← git 무결성 게이트 (vault-init이 볼트에 설치)  🛡️
     ├── pre-commit                     ← 커밋 시점 fail-closed 검증 (프런트매터·YAML 위키링크)
