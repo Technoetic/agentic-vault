@@ -349,7 +349,7 @@ CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3f
 # vault_provenance.py, jev_client.py and the vault_paths.py docstring). The release host writes the
 # final digest in place of the placeholder once the last bound file has changed; until then the
 # shipped-hash test below fails on purpose.
-CHECKER_SHA256_V0320 = "⟦CHECKER_SHA256⟧"
+CHECKER_SHA256_V0320 = "9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563"
 # checker_sha256 of the seven bound files as shipped now. A change to any of them invalidates
 # promoted vaults' certificates: update this pin together with a release note upgrade section.
 CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0320
