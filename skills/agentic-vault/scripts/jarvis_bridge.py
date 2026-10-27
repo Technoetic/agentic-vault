@@ -1234,12 +1234,36 @@ def md_to_telegram_html(text: str) -> str:
         esc = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         esc = re.sub(r"`([^`]+)`", r"<code>\1</code>", esc)
         esc = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", esc)
-        esc = re.sub(r"\[\[([^\]]+)\]\]", r"<i>\1</i>", esc)
+        esc = _italic_wiki_links(esc)
         m = re.match(r"^(#{1,6})\s+(.*)$", esc)
         if m:
             esc = f"<b>{m.group(2)}</b>"
         out_lines.append(esc)
     return "\n".join(out_lines)
+
+
+def _italic_wiki_links(text: str) -> str:
+    r"""예전 re.sub(r"\[\[([^\]]+)\]\]", r"<i>\1</i>", text)와 같은 문자열을 선형 시간에 만든다.
+
+    예전 식은 '['마다 첫 ']'까지 다시 훑어 '['가 이어진 줄에서 이차 시간이었고,
+    tests/test_linear_line_parsers.py에 대조용으로만 남는다.
+    """
+    # '[['는 그 뒤 첫 ']'에서만 닫힌다. 그 ']'가 '[[' 바로 뒤가 아니고 뒤에 ']'가 하나 더 있어야 한다.
+    # 닫히지 않으면 그 사이의 다른 '[['도 같은 ']'에서 멈춰 닫히지 않으므로, 그 ']' 뒤에서 다시 찾는다.
+    parts, done = [], 0
+    start = text.find("[[")
+    while start >= 0:
+        close = text.find("]", start + 2)
+        if close < 0:
+            break  # 뒤에 ']'가 없으면 어느 '[['도 닫히지 않는다
+        if close > start + 2 and text.startswith("]]", close):
+            parts += (text[done:start], "<i>", text[start + 2:close], "</i>")
+            done = close + 2
+            start = text.find("[[", done)
+        else:
+            start = text.find("[[", close + 1)
+    parts.append(text[done:])
+    return "".join(parts)
 
 
 def _chunks_by_line(text: str, limit: int = TG_CHUNK) -> list[str]:

@@ -26,15 +26,27 @@ _ID = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 # Known credential shapes. Detection is best effort, not a guarantee.
 # The pattern is the union of the two earlier copies (jev_ask and vault_judge),
 # so merging them never let through anything either copy used to reject.
+# Callers use only whether search() finds a match. It runs in linear time and
+# finds one in the same texts as the v0.31.0 pattern (kept as the oracle in
+# tests/test_linear_line_parsers.py), though not always at the same position.
+# The JWT and URL branches repeat only single characters, so their memory does
+# not grow with a run.
 SENSITIVE = re.compile(
     r"apikey_[a-f0-9]{32}_[a-f0-9]{64}|"
     r"\b(?:sk[-_][a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9]{20,}|"
     r"github_pat_[a-zA-Z0-9_]{20,}|AKIA[A-Z0-9]{16}|(?:ts|tsk|typesafe)[_-][a-zA-Z0-9_-]{16,})\b|"
-    r"\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b|"
+    # A JWT is tried only where a [a-zA-Z0-9_-] run starts. The lookahead finds
+    # an "eyJ" with eight characters after it, at the run start after a word
+    # boundary or after a "-"; every such start reaches the same ".".
+    r"(?<![a-zA-Z0-9_-])(?=[a-zA-Z0-9_-])"
+    r"(?=\beyJ[a-zA-Z0-9_-]{8}|[a-zA-Z0-9_-]*-eyJ[a-zA-Z0-9_-]{8})"
+    r"[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b|"
     r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|"
+    # Here and for the Korean labels below, an optional quote is taken with the
+    # whitespace after it; \s* on both sides of it tried every split of a run.
     r"\b(?:authorization\s*[:=]\s*(?:bearer|basic)\s+\S+|"
     r"(?:[A-Z0-9_]*API[_-]?KEY|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
-    r"password|passwd|secret)\s*[\"']?\s*[:=]\s*[\"']?[^\s\"',;]{4,})|"
+    r"password|passwd|secret)\s*(?:[\"']\s*)?[:=]\s*[\"']?[^\s\"',;]{4,})|"
     # Earlier vault_judge form: also matches "bearer" without a space and
     # values that contain quotes, commas or semicolons.
     r"\b(?:authorization\s*:\s*bearer|api[_-]?key\s*[:=]|"
@@ -46,9 +58,13 @@ SENSITIVE = re.compile(
     r"\bxox[abposr]-[A-Za-z0-9-]{10,}|\bxapp-[0-9]-[A-Za-z0-9-]{10,}|"
     r"hooks\.slack\.com/services/[A-Za-z0-9_/-]{20,}|"
     r"\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])|"
-    r"\b[a-z][a-z0-9+.-]*://[^\s:/?#@]*:[^\s/?#@]+@|"
+    # A URL scheme is tried only where a [a-z0-9+.-] run starts. The lookahead
+    # finds a letter at the run start after a word boundary or after a "+", "."
+    # or "-"; every such scheme start reaches the same "://".
+    r"(?<![a-z0-9+.-])(?=[a-z0-9+.-])(?=\b[a-z]|[a-z0-9+.-]*?[+.-][a-z])"
+    r"[a-z0-9+.-]+://[^\s:/?#@]*:[^\s/?#@]+@|"
     r"(?:비밀\s?번호|비번|패스워드|암호|토큰|인증\s?키|액세스\s?키|시크릿|api\s?키)"
-    r"\s*[\"']?\s*[:=]\s*[\"']?(?:(?![\"',;])[\x21-\x7e]){4,}", re.IGNORECASE)
+    r"\s*(?:[\"']\s*)?[:=]\s*[\"']?(?:(?![\"',;])[\x21-\x7e]){4,}", re.IGNORECASE)
 # Whole JSON field names only. A bare "secret" or "token" may be an ordinary
 # question label; their existing assignment/text patterns remain in SENSITIVE.
 _CREDENTIAL_LABEL = re.compile(
