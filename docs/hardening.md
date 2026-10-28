@@ -140,6 +140,10 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 `cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
 `--primary-text-only`를 켜면 `ledger_tables_unseparated`([아래](#다른-대장의-사실-표에만-있는-값))가 더해진다.
 `--normalize-periods`를 켜면 `normalized_periods`·`period_convention`([아래](#기간-표현-정규화---normalize-periods))이 더해진다.
+선택형 `--row-references`는 지원 행까지 포함한 parsed 행별 참조와 `audit_population`을,
+`--bind-subject`는 같은 원문 물리 줄에서의 주어·값 결속 관측과 별도 경고를 더한다.
+기존 `warnings`·리터럴 지원 수·지원 판정·기간 비교는 바뀌지 않으며, 두 옵션을 주지 않으면 기존 출력 키도 같다.
+구체적인 출력과 경고 인증서 이행은 [전체 행 참조와 주어 진단](support-row-diagnostics.md)을 따른다.
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
 상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.

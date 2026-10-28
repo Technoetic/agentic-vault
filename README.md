@@ -142,6 +142,15 @@ final CI, release-asset and installation results go into the release's `verifica
 (the pre-publication receipt).
 Host installation is a separate step.
 
+Source-checkout additions: the offline [state/dependency revision evaluation](docs/state-revision-evaluation.md)
+separates current, superseded and mixed answers; the [evidence-insufficiency evaluation](docs/evidence-insufficiency-evaluation.md)
+distinguishes acknowledging missing evidence from unsupported premise denial. They use independently authored
+synthetic fixtures and explicit response replay, not model inference or upstream datasets. Opt-in
+[`check-support --row-references --bind-subject`](docs/support-row-diagnostics.md) exports all parsed rows
+for audit and separately reports same-physical-line subject/value observations. Default support output and
+decisions are unchanged. Updating the engine still changes the warning-certificate checker hash; follow the
+guide's coordinated migration instructions. These additions do not install or upgrade a host plugin.
+
 v0.21.0 adds opt-in [instruction inventory, index fold preview and requirement coverage](docs/moai-diagnostics.md).
 v0.22.1 [memory evaluation tools](docs/memory-evaluation.md) separately assess Korean
 structured answers, generated lifecycle sequences and optional synthetic tool-call episodes.

@@ -79,6 +79,33 @@ python scripts/evaluate_korean_memory.py --control wrong --answer-rates
 - 설계 원리는 AgentOnto(arXiv 2610.23317)의 '조용한 의미 오류' 지표와 응답률 병기에서 가져왔다. 그 논문의
   수치는 근거로 쓰지 않는다.
 
+## 상태 변경 의존 관계와 근거 부족 진단
+
+저장소 checkout에서 선택해 실행하는 독립 평가 도구 두 개다. Python 3.10+ 표준 라이브러리만 쓰며
+사용자 볼트·모델·네트워크에 접근하지 않는다. 기존 `evaluate_korean_memory.py`의 현재/과거/철회
+시나리오와 `--answer-rates`는 그대로 두고, 다음 두 경계를 별도로 시험한다.
+
+```sh
+python scripts/evaluate_state_revisions.py
+python scripts/evaluate_state_revisions.py --control mixed
+python scripts/evaluate_evidence_insufficiency.py
+python scripts/evaluate_evidence_insufficiency.py --control deny_missing
+```
+
+- **상태 변경과 의존 관계:** 직접 값의 정정과 선언한 덧셈·뺄셈·곱셈을 앞/뒤 snapshot에서 확인한다.
+  최신 입력에 옛 합계를 섞은 답은 `mixed_dependency_stale`, 완전한 옛 상태는 `superseded`로 구분한다.
+  답과 별개로 반환된 값들 사이의 산술 의존 관계 오류도 센다. 단위 변환·의존 관계 추론·자유 서술 QA는 하지 않는다.
+- **근거 부족과 전제 부정:** 선언한 구조화 claim을 정확히 대조한다. 자료가 없는데 사실이 없다고 단정하는
+  `unsupported_premise_denial`을 근거 부족 인정과 구분한다. 명시적 부정 근거는 별도로 다루고,
+  불완전한 근거는 부정 인증을 만들지 못한다. `coverage_low`는 합성 사례가 선언한 slot의 진단이며,
+  일반 검색 관련성·실제 부재의 증명·기본 검색 필터가 아니다.
+
+두 도구 모두 합성 대조군과 명시적 관측 재생을 구분한다. 재생은 fixture·질문·근거·설정의 digest에 묶이고,
+틀린 대조군의 실행 성공은 답변 품질 통과를 뜻하지 않는다. 모델 호출 수는 0이며, 재생 출처는 호출자의 신고다.
+자체 작성 fixture만 포함하고 논문 데이터·모델 성능을 재현했다고 주장하지 않는다.
+정확한 스키마·제한·종료 코드와 관측 내보내기/재생 예시는
+[상태 변경 평가](state-revision-evaluation.md)·[근거 부족 평가](evidence-insufficiency-evaluation.md)를 따른다.
+
 ## 시간 유효성: 표시 효과와 기전 잔차
 
 `--as-of` 기준으로 만료·미시작·대체된 출처를 빼는 시간 유효성 처리의 이득 중 얼마가
@@ -406,8 +433,11 @@ Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서
 - 결과는 그 볼트의 그 시점, 한 번 고정한 모집단(`population_sha256`·`source_sha256`)에만 해당한다. 대장이 바뀌면 줄 번호도
   바뀌므로 같은 판을 보고 라벨한다. 도구는 볼트를 다시 읽어 판을 확인하지 않는다.
 - 라벨이 적으면 상한이 넓다. 20개 중 0건이어도 모집단의 13.6%까지 놓쳤을 수 있다. 추정치로 읽지 않는다.
-- `check-support` 결과는 지원 행(`rows_supported`)의 줄 번호를 내지 않아, 그 행들은 아직 모집단으로 열거할 수 없다. 지금은
-  `none` 행과 사용자가 일반 형식으로 만든 모집단(경고 줄 등)만 감사할 수 있다.
+- 기본 `check-support`는 지원 행(`rows_supported`)의 줄 번호를 내지 않는다. 선택형 `--row-references`는
+  지원·미지원·미해결·건너뛴 parsed 행의 참조와 일반 형식 `audit_population`을 함께 낸다.
+  이 객체를 별도 JSON으로 추출하면 지원 행까지 같은 `draw` 도구로 표본 추출할 수 있다.
+  빈 모집단은 기존대로 거부한다. 내용·주어·값을 복사하지 않지만 경로·줄 번호도 볼트 메타데이터다.
+  [전체 행 참조와 주어 진단](support-row-diagnostics.md)의 스키마와 시점 한계를 따른다.
 - 경로·줄 번호도 볼트 메타데이터다. 표본·라벨 파일을 어디에 두고 git으로 추적할지는 골드셋과 같은 기준으로 정한다.
 - 게이트가 아니다. 상한마다 따로 계산한 값이라 여러 상한을 함께 볼 때의 동시 포함은 보장하지 않는다.
 
