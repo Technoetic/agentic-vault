@@ -14,7 +14,7 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import stat
 import sys
@@ -109,10 +109,23 @@ def _tree(value):
 
 
 def _safe_path(path):
-    path = Path(path)
-    if str(path).startswith(("\\\\", "//")):
+    raw = os.fspath(path)
+    windows = PureWindowsPath(raw)
+    if raw.startswith(("\\\\", "//")):
         raise ValueError("network paths are not allowed")
-    path = Path(os.path.abspath(path))
+    if windows.drive and (not re.fullmatch(r"[A-Za-z]:", windows.drive) or not windows.root):
+        raise ValueError("expected local absolute drive anchor")
+    # Validate before any filesystem inspection/open, on every host. A colon
+    # outside the drive anchor can name an NTFS stream on a file or directory.
+    for component in windows.parts[1:] if windows.anchor else windows.parts:
+        if component in (".", ".."):
+            continue
+        device = component.split(".", 1)[0].rstrip(" ").upper()
+        if (any(char in '<>:"|?*' or ord(char) < 32 for char in component)
+                or component.endswith((" ", ".")) or device in ("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$")
+                or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", device)):
+            raise ValueError("unsafe local path component")
+    path = Path(os.path.abspath(raw))
     for item in (*reversed(path.parents), path):
         if not item.exists() and not item.is_symlink():
             continue

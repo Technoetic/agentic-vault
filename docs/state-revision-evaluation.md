@@ -138,6 +138,10 @@ and node count. Duplicate keys, nonfinite numbers, boolean numeric fields,
 unpaired Unicode surrogates and unknown schema fields are rejected. Local file
 reads reject nonregular files, hardlinks, symlinks, reparse points and linked
 parents, and check file identity/metadata before and after the bounded read.
+Before any filesystem inspection or open, path checks reject colon-bearing
+components (including file/directory NTFS alternate streams), reserved Windows
+device names, invalid characters and trailing dots/spaces. Only an absolute
+local drive anchor may contain a drive colon; drive-relative paths are rejected.
 This is a conservative local-file check, not an operating-system sandbox against
 an adversary racing parent-directory changes. Canonical hashes ignore JSON
 whitespace and key order, while any fixture data change requires a fresh replay.

@@ -324,6 +324,75 @@ class StateRevisionEvaluationTests(unittest.TestCase):
                 module._write_observations(path, module.evaluate())
             self.assertEqual(path.read_text(encoding="utf-8"), "keep")
 
+    def test_portable_path_validation_rejects_windows_streams_and_unsafe_names(self):
+        module = self.evaluator()
+        paths = ("existing.txt:observations", "folder:stream/observations.json",
+                 "nested/file.json:input:$DATA", "C:/folder/file.json:stream",
+                 "C:relative.json", "NUL", "nested/CON.json", "nested/COM1.json",
+                 "nested/LPT9", "nested/aux .json", "nested/trailing. ",
+                 "nested/trailing.", "nested/question?.json", "nested/control\x01.json")
+        for path in paths:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                module._safe_path(path)
+
+    def test_invalid_stream_path_is_rejected_before_filesystem_checks_or_open(self):
+        module = self.evaluator()
+        report = module.evaluate()
+        with mock.patch.object(Path, "exists") as exists, mock.patch.object(module.os, "open") as opened:
+            for action in (module._safe_path, module._read_json,
+                           lambda path: module._write_observations(path, report)):
+                with self.subTest(action=action), self.assertRaises(ValueError):
+                    action("folder:stream/observations.json")
+            exists.assert_not_called()
+            opened.assert_not_called()
+
+    def test_normal_local_and_absolute_windows_drive_paths_remain_accepted(self):
+        module = self.evaluator()
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(module._safe_path(Path(directory) / "safe.json"), Path(directory) / "safe.json")
+        with mock.patch.object(Path, "exists", return_value=False), mock.patch.object(Path, "is_symlink", return_value=False):
+            module._safe_path("C:/safe-folder/observations.json")
+            module._safe_path("D:\\safe-folder\\observations.json")
+
+    @unittest.skipUnless(os.name == "nt", "NTFS stream regression requires Windows")
+    def test_windows_ads_output_never_creates_file_or_directory_stream(self):
+        module = self.evaluator()
+        report = module.evaluate()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "existing.txt"
+            base.write_text("keep", encoding="utf-8")
+            folder = Path(directory) / "existing-folder"
+            folder.mkdir()
+            for target in (base, folder):
+                stream = str(target) + ":observations"
+                with self.subTest(target=target.name), self.assertRaises(ValueError):
+                    module._write_observations(stream, report)
+                self.assertFalse(os.path.exists(stream), "rejected export created an alternate data stream")
+                self.assertEqual(base.read_text(encoding="utf-8"), "keep")
+                self.assertEqual(list(folder.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "nt", "NTFS stream regression requires Windows")
+    def test_windows_existing_ads_input_rejected_before_open(self):
+        module = self.evaluator()
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "existing.txt"
+            base.write_text("keep", encoding="utf-8")
+            folder = Path(directory) / "existing-folder"
+            folder.mkdir()
+            for target in (base, folder):
+                stream = str(target) + ":input"
+                # The fixture deliberately pre-creates a stream outside the evaluator.
+                with open(stream, "w", encoding="utf-8") as output:
+                    output.write('{"synthetic_input":true}')
+                with mock.patch.object(module.os, "open") as opened:
+                    with self.subTest(target=target.name), self.assertRaises(ValueError):
+                        module._read_json(stream)
+                    opened.assert_not_called()
+                with open(stream, encoding="utf-8") as source:
+                    self.assertEqual(source.read(), '{"synthetic_input":true}')
+                self.assertEqual(base.read_text(encoding="utf-8"), "keep")
+                self.assertEqual(list(folder.iterdir()), [])
+
     def test_invalid_responses_and_usage_never_score_current(self):
         module = self.evaluator()
         for mutation in ("bool", "infinite", "missing", "extra", "usage", "origin", "binding_bool"):
