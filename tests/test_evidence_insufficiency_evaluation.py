@@ -1,6 +1,7 @@
 """Real offline scoring and replay boundaries for synthetic insufficiency cases."""
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -329,13 +330,39 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
         for raw in ("file:observations", "folder:stream/file.json", "C:/folder/file:stream",
                     "C:\\folder\\file::$DATA", "../folder:stream/../safe.json",
                     "C:/folder/name. ", "C:/folder/NUL.json", "C:/folder/name?.json",
-                    "\\\\?\\C:\\file.json", "\\\\.\\C:\\file.json"):
+                    "\\\\?\\C:\\file.json", "\\\\.\\C:\\file.json", "//server/share/file.json"):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 self.ev._validate_path_syntax(raw)
         for raw in ("C:/folder/file.json", "D:\\folder\\file.json", "relative/observations.json",
-                    "../folder/observations.json", "/tmp/file.json", "//server/share/file.json"):
+                    "../folder/observations.json", "/tmp/file.json", "C:relative.json"):
             with self.subTest(raw=raw):
                 self.ev._validate_path_syntax(raw)
+
+    def test_network_paths_are_rejected_before_any_filesystem_inspection(self):
+        paths = ("//review-host/share/file.json", r"\\review-host\share\file.json",
+                 r"/\review-host/share\file.json", "///review-host/share/file.json",
+                 r"\\?\UNC\review-host\share\file.json", "//?/UNC/review-host/share/file.json",
+                 r"\\.\UNC\review-host\share\file.json", r"\??\UNC\review-host\share\file.json",
+                 "//?/GLOBALROOT/Device/Mup/review-host/share/file.json")
+        for raw in paths:
+            for boundary in ("--observations", "--write-observations", "load_pack"):
+                with self.subTest(raw=raw, boundary=boundary), \
+                        mock.patch.object(Path, "is_dir", side_effect=ValueError("filesystem sentinel")) as is_dir, \
+                        mock.patch.object(Path, "lstat", side_effect=ValueError("filesystem sentinel")) as lstat, \
+                        mock.patch.object(Path, "open", side_effect=ValueError("filesystem sentinel")) as path_open, \
+                        mock.patch.object(os, "open", side_effect=ValueError("filesystem sentinel")) as os_open, \
+                        mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                        mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                    if boundary == "load_pack":
+                        with self.assertRaises(ValueError):
+                            self.ev.load_pack(raw)
+                    else:
+                        self.assertEqual(self.ev.main([boundary, raw]), 2)
+                        self.assertEqual(stdout.getvalue(), "")
+                        self.assertLess(len(stderr.getvalue().encode("utf-8")), 256)
+                        self.assertNotIn("review-host", stderr.getvalue())
+                    for operation in (is_dir, lstat, path_open, os_open):
+                        operation.assert_not_called()
 
     @unittest.skipUnless(os.name == "nt", "Windows file ADS test")
     def test_windows_file_ads_output_is_rejected_without_creating_stream(self):

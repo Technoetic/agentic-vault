@@ -98,13 +98,17 @@ JSON inputs are limited to 1 MiB, 100 cases, 32 slots/claims per case, 20,000
 tree nodes, depth 24, bounded strings, and finite bounded numbers. Unknown fields,
 duplicate JSON keys, conflicting slot records, booleans used as numeric versions
 or thresholds, nonfinite values, symlinks/reparse points (including ancestors),
-hardlinked files and unstable file reads are rejected. Before opening any input
-or output, portable path validation rejects colon-bearing components (including
-NTFS alternate data streams), device namespaces, reserved Windows device names,
-and unsafe Windows component characters or trailing spaces/dots. Ordinary drive
-anchors such as `C:/` retain their colon. UTF-8 BOM is accepted.
-These filesystem checks reduce unsafe local reads; they are not an OS sandbox
-against an adversarial process racing directory replacement.
+hardlinked files and unstable file reads are rejected. Before filesystem
+inspection of a supplied input, output or fixture path, portable lexical
+validation normalizes both separators and rejects UNC/network prefixes,
+including extended network/device forms, colon-bearing components (including
+NTFS alternate data streams), reserved Windows device names, and unsafe Windows
+component characters or trailing spaces/dots. CLI paths are validated before
+loading the bundled fixture. Ordinary local relative paths and drive anchors
+such as `C:/` remain accepted. UTF-8 BOM is accepted.
+These checks are not an OS sandbox or a guarantee about mapped drives or
+network-backed mounts; they also cannot prevent an adversarial process racing
+directory replacement.
 
 The CLI emits JSON, escaping non-ASCII text for Windows pipe compatibility.
 Invalid input or output produces a bounded generic error and exit status 2.

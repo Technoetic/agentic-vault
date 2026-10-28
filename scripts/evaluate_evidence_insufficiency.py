@@ -86,10 +86,10 @@ def _bounded_tree(value):
 
 
 def _validate_path_syntax(path):
-    """Reject Windows stream/device syntax portably before any filesystem open."""
+    """Reject network and Windows stream/device syntax before filesystem access."""
     raw = _text(os.fspath(path), 4096).replace("\\", "/")
-    if raw.startswith(("//?/", "//./")):
-        raise ValueError("unsafe Windows device path")
+    if raw.startswith("//"):
+        raise ValueError("unsafe network or Windows device path")
     if len(raw) >= 2 and raw[1] == ":" and raw[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
         raw = raw[2:]  # The sole permitted colon belongs to an ordinary drive anchor.
     reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
@@ -119,7 +119,7 @@ def _stamp(info):
 
 
 def _read_json(path):
-    path = _check_path(Path(path))
+    path = _check_path(path)
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_JSON_BYTES:
         raise ValueError("unsafe or oversized JSON input")
@@ -420,12 +420,15 @@ class _SafeArgumentParser(argparse.ArgumentParser):
 def main(argv=None) -> int:
     parser = _SafeArgumentParser(description=__doc__)
     parser.add_argument("--control", choices=CONTROLS, default=None)
-    parser.add_argument("--observations", type=Path)
-    parser.add_argument("--write-observations", type=Path)
+    parser.add_argument("--observations")
+    parser.add_argument("--write-observations")
     parser.add_argument("--coverage-low-threshold", type=float, default=1.0,
                         help="Diagnostic threshold over declared fixture slots only (default: 1)")
     args = parser.parse_args(argv)
     try:
+        for path in (args.observations, args.write_observations):
+            if path is not None:
+                _validate_path_syntax(path)
         if args.observations and args.control is not None:
             raise ValueError("control and replay are mutually exclusive")
         observations = _read_json(args.observations) if args.observations else None
