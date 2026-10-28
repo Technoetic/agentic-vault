@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "description": "독립 작성한 한국어 모의 사례. 실제 기업·행사·사용자 볼트 자료가 아니다.",
+  "cases": [
+    {
+      "id": "answerable",
+      "question": "모의 새봄반의 출하 시각은 언제인가?",
+      "claim_slots": [{"id": "shipping", "subject": "모의 새봄반", "predicate": "출하 시각"}],
+      "evidence": {"complete": true, "records": [{"slot": "shipping", "value": "14:00", "polarity": "positive"}]}
+    },
+    {
+      "id": "missing",
+      "question": "모의 은하 회의가 개최되었는가?",
+      "claim_slots": [{"id": "meeting", "subject": "모의 은하 회의", "predicate": "개최 여부"}],
+      "evidence": {"complete": true, "records": []}
+    },
+    {
+      "id": "partial",
+      "question": "모의 달빛 행사의 시각과 장소는 무엇인가?",
+      "claim_slots": [{"id": "time", "subject": "모의 달빛 행사", "predicate": "시각"}, {"id": "place", "subject": "모의 달빛 행사", "predicate": "장소"}],
+      "evidence": {"complete": true, "records": [{"slot": "time", "value": "10:00", "polarity": "positive"}]}
+    },
+    {
+      "id": "truncated",
+      "question": "모의 솔잎 설비의 점검이 실시되었는가?",
+      "claim_slots": [{"id": "inspection", "subject": "모의 솔잎 설비", "predicate": "점검 실시 여부"}],
+      "evidence": {"complete": false, "records": [{"slot": "inspection", "value": "실시", "polarity": "positive"}]}
+    },
+    {
+      "id": "explicit_negative",
+      "question": "모의 바다 회의가 개최되었는가?",
+      "claim_slots": [{"id": "meeting", "subject": "모의 바다 회의", "predicate": "개최 여부"}],
+      "evidence": {"complete": true, "records": [{"slot": "meeting", "value": "개최", "polarity": "negative"}]}
+    }
+  ],
+  "labels": {
+    "answerable": {"expected_kind": "answer", "expected_claims": [{"slot": "shipping", "value": "14:00", "polarity": "positive"}]},
+    "missing": {"expected_kind": "insufficient", "expected_claims": []},
+    "partial": {"expected_kind": "insufficient", "expected_claims": []},
+    "truncated": {"expected_kind": "insufficient", "expected_claims": []},
+    "explicit_negative": {"expected_kind": "answer", "expected_claims": [{"slot": "meeting", "value": "개최", "polarity": "negative"}]}
+  }
+}
