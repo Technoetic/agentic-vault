@@ -1,9 +1,11 @@
 # Memory boundaries: development source fingerprint (2026-10-28)
 
-This unreleased development source checkout implements the approved
-[memory-boundaries specification](../superpowers/specs/2026-10-28-memory-boundaries.md).
-It is not a new public release. Public manifests, badges and installation refs
-remain v0.32.0; this note does not certify a release, installation or deployment.
+This historical development record describes the approved
+[memory-boundaries specification](../superpowers/specs/2026-10-28-memory-boundaries.md)
+at implementation commit `e9d382a6877411c377ccb49c0d7f3fba604ba1f8`, before v0.33.0
+release preparation. Public metadata was v0.32.0 at that point. Current release
+metadata and pending gates are in the [v0.33.0 verification record](v0.33.0.md);
+this dated note does not certify a release, installation or deployment.
 
 ## Fingerprints and certificate coordination
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import subprocess
 import sys
@@ -21,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.32.0"
-EXPECTED_PUBLIC_REF = "0.32.0"
+EXPECTED = "0.33.0"
+EXPECTED_PUBLIC_REF = "0.33.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.32.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.32.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.33.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.33.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.32.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.33.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -346,20 +347,18 @@ RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
 CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
 CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3fbfcbeb9c"
 # Published v0.32.0 changed five bound files. Its immutable release and verification
-# records retain that digest even when later, unreleased source changes the checker.
+# records retain that digest when a later release changes the checker.
 CHECKER_SHA256_V0320 = "9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563"
-# Declared fingerprint of the unreleased memory-boundaries source checkout, not a
-# new release. Keep its addendum and coordination instructions beside the byte pin.
-CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92"
+# Declared v0.33.0 fingerprint, also observed at the dated implementation commit.
+CHECKER_SHA256_V0330 = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
     "README.md", "docs/codex.md", "docs/hardening.md",
-    "docs/verification/memory-boundaries-20261028.md",
 )
 SOURCE_CHECKER_COORDINATION = (
     "Before switching to or from these source bytes, return promoted levels to `warning`; "
     "align every engine copy that checks the vault (Claude Code, Codex, and the git vault's "
     "`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on "
-    "that installation, then promote again."
+    "that installation (including its harmless replay), then promote again."
 )
 REQUIRED_V0310_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
 REQUIRED_V0310_RELEASE_LITERALS = (
@@ -426,7 +425,7 @@ REQUIRED_V0310_HASH_STATEMENTS = (
 # The v0.32.0 statements: the v0.31.0 digest as history, then the full v0.32.0 digest.
 REQUIRED_V0320_HASH_STATEMENTS = (
     ("README.md",
-     f"binds ({_OLD_HASH} in v0.26.0 to v0.30.0, {_V031_HASH} in v0.31.0, now {_V032_HASH})"),
+     f"binds ({_OLD_HASH} in v0.26.0 to v0.30.0, {_V031_HASH} in v0.31.0, in v0.32.0 {_V032_HASH})"),
     ("README.md", f"`checker_sha256`가 v0.31.0의 {_V031_HASH}에서 {_V032_HASH}로 바뀐다"),
     ("docs/codex.md", f"`vault_paths.py`를 바꿨다({_V031_HASH}에서 {_V032_HASH}로"),
     ("docs/hardening.md",
@@ -649,28 +648,32 @@ class ReleaseMetadataTests(unittest.TestCase):
                                 text=True, encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checker_sha256"],
-                         CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES)
-        self.assertNotEqual(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES, CHECKER_SHA256_V0320)
+                         CHECKER_SHA256_V0330)
+        self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
 
-    def test_source_checker_addenda_state_unreleased_hash_and_coordination(self) -> None:
+    def test_current_checker_addenda_state_release_hash_and_coordination(self) -> None:
         for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
             with self.subTest(path=rel_path):
                 text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-                self.assertIn(f"`{CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES}`", text)
-                self.assertEqual(text.count(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES[:8]), 1)
-                self.assertIn("unreleased development source checkout", _folded(text))
-                self.assertIn("not a new public release", _folded(text))
+                self.assertIn(f"`{CHECKER_SHA256_V0330}`", text)
+                self.assertEqual(text.count(CHECKER_SHA256_V0330[:8]), 1)
+                self.assertIn("v0.33.0 source and certificate migration", text)
+                self.assertNotIn("unreleased development source checkout", _folded(text))
+                self.assertIn("version preparation does not certify them", _folded(text))
                 self.assertIn(SOURCE_CHECKER_COORDINATION, _folded(text))
-        note = (REPO_ROOT / SOURCE_CHECKER_ADDENDUM_PATHS[-1]).read_text(encoding="utf-8")
+        note = (REPO_ROOT / "docs/verification/memory-boundaries-20261028.md").read_text(encoding="utf-8")
+        self.assertIn(f"`{CHECKER_SHA256_V0330}`", note)
+        self.assertIn("e9d382a6877411c377ccb49c0d7f3fba604ba1f8", note)
+        self.assertIn("Public metadata was v0.32.0 at that point", _folded(note))
         self.assertIn(f"`{CHECKER_SHA256_V0320}`", note)
         self.assertIn("vault_ssot.py", note)
         self.assertIn("LF", note)
-        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS[:-1]:
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
             text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
             self.assertIn("verification/memory-boundaries-20261028.md)", text)
         for rel_path in ("docs/releases/v0.32.0.md", "docs/verification/v0.32.0.md"):
             with self.subTest(published_record=rel_path):
-                self.assertNotIn(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES,
+                self.assertNotIn(CHECKER_SHA256_V0330,
                                  (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
 
     def test_published_v0320_checker_hash_statements_and_history_stay_intact(self) -> None:
@@ -1107,3 +1110,63 @@ class V0320ReleaseNoteTests(unittest.TestCase):
                 stamp = template.read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.32.0", stamp)
+
+
+class V0330ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.33.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.33.0.md"
+
+    def test_v0330_feature_scope_and_migration_are_explicit(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        for literal in ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계",
+                        "scripts/evaluate_state_revisions.py", "scripts/evaluate_evidence_insufficiency.py",
+                        "--row-references", "--bind-subject", "audit_population", "binding_warnings",
+                        "파싱한 모든 사실 행", "같은 물리 줄", "모델 효능", "56건", "--ref v0.33.0",
+                        CHECKER_SHA256_V0320, CHECKER_SHA256_V0330, "harmless replay"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        self.assertIn(V0310_UPGRADE_ORDER_LEAD, _folded(release))
+        lines = release.splitlines()
+        first = lines.index(V0310_UPGRADE_STEPS[0])
+        self.assertEqual(lines[first:first + 2], list(V0310_UPGRADE_STEPS[:2]))
+        self.assertTrue(lines[first + 2].startswith(V0310_UPGRADE_STEPS[2]))
+        self.assertEqual(lines[first + 3], V0310_UPGRADE_STEPS[3])
+
+    def test_v0330_verification_separates_implementation_from_release_gates(self) -> None:
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        for literal in ("## Implementation evidence", "## Final release gates", "## Limits",
+                        "e9d382a6877411c377ccb49c0d7f3fba604ba1f8", "2,537", "1,407.344", "43 skips",
+                        "Fifteen CLI checks", "56 flags-off", "not results for the final release source",
+                        "healthcheck is outside", CHECKER_SHA256_V0320, CHECKER_SHA256_V0330,
+                        "following gates are pending", "verification.json", "post-publication.json",
+                        "zero model turns", "Master and tag CI", "L1 byte", "L2 Git-blob/member",
+                        "Scripted controls are not actual-model efficacy evidence"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, _folded(record))
+
+    def test_v0330_document_links_resolve(self) -> None:
+        import re
+        from urllib.parse import unquote
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
+                if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                with self.subTest(document=document.name, target=target):
+                    self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists())
+
+    def test_published_v0320_records_keep_canonical_bytes(self) -> None:
+        # Text-mode reading canonicalizes platform checkout line endings to Git LF bytes.
+        for path, expected in {
+            "docs/releases/v0.32.0.md": "ff8b10c9bb5d51de7ccda0e0677dac962bc08310780bfe3eee850a6a2a2c7308",
+            "docs/verification/v0.32.0.md": "b8f3b427190eb3b141c0d59d3585107e28bc076c5867bd1a73a71b73ba9d4e6b",
+        }.items():
+            with self.subTest(path=path):
+                canonical = (REPO_ROOT / path).read_text(encoding="utf-8").encode("utf-8")
+                self.assertEqual(hashlib.sha256(canonical).hexdigest(), expected)
+
+    def test_v0330_keeps_unchanged_rule_and_adapter_stamps(self) -> None:
+        for path in (*BROWSER_RULE.parent.glob("vault-*.md"),
+                     REPO_ROOT / "assets/adapters/aside/aside-up.ps1"):
+            with self.subTest(path=path.name):
+                self.assertNotIn("engine=0.33.0", path.read_text(encoding="utf-8"))
