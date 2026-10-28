@@ -784,10 +784,14 @@ def _binding_observation(row, path, status, bodies, unresolved, run, reference_l
     """Content-free lexical co-occurrence; no semantic or truth inference."""
     entry = dict(path=path, line=row['line'], status='unassessed', reason='literal_not_supported', via=[])
     subject = row['fields'].get('subject', '')
-    subjects = _forms(subject, aliases=True)
-    if not any(_literal(_render(subject, alias)) for alias in (False, True)):
+    # Rendering is deliberately small, not a complete Markdown parser. Its
+    # leftover punctuation (for example the '*' in '***') is not a subject.
+    # An explicit display alias can supply substance, but must not enable a
+    # marker-only target candidate to bind against formatting in the source.
+    if not any(char.isalnum() for alias in (False, True) for char in _literal(_render(subject, alias))):
         entry['reason'] = 'subject_missing'
         return entry
+    subjects = tuple(form for form in _forms(subject, aliases=True) if any(char.isalnum() for char in form))
     if status != 'supported':
         return entry
     patterns = [_support_pattern(form) for form in _forms(row['fields'].get('value', '').strip())]

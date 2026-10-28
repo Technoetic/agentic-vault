@@ -56,6 +56,13 @@ Comparison reuses NFKC, casefold, whitespace normalization, wiki/code/bold marku
 rendering, and the existing literal boundary rules. An explicit wiki display
 alias in the subject or source line is accepted. Frontmatter aliases, filenames,
 organization metadata and inferred entity synonyms do not create aliases.
+Before building match patterns, a rendered and normalized subject target or
+explicit display alias must contain a Unicode letter or number (`isalnum`).
+Empty, anchor-only, marker-only and other symbol-only subjects are conservatively
+`unassessed` with `subject_missing` and empty `via`, regardless of source formatting.
+When an explicit alias supplies substantive text, marker-only target candidates
+are still excluded from matching. This bounded lexical rule may leave a real
+symbol-only entity unassessed; it does not declare such entities invalid.
 Subject and value may be in different cells of the same ordinary table row.
 Co-occurrence is only a lexical diagnostic: a sentence that names two companies
 can still pass even if the value belongs to the other company. It does not prove

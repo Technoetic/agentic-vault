@@ -274,6 +274,28 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                 observation = self.check(bind_subject=True)['binding_observations'][0]
                 self.assertEqual((observation['status'], observation['reason']), ('unassessed', 'subject_missing'))
 
+    def test_marker_only_subjects_are_unassessed_with_formatted_or_plain_values(self):
+        for subject in ('*', '_', '***', '___', '*_', '**__**', '`**`', '***___***'):
+            for value in ('12', '**12**', '__12__'):
+                with self.subTest(subject=subject, value=value):
+                    self.set_rows([[subject, 'r', '12', '[[Evidence]]']])
+                    self.write('notes/Evidence.md', 'Birch retains ' + value + ' months.\n')
+                    baseline = self.check()
+                    result = self.check(bind_subject=True)
+                    observation = result['binding_observations'][0]
+                    self.assertEqual((observation['status'], observation['reason'], observation['via']),
+                                     ('unassessed', 'subject_missing', []))
+                    self.assertEqual(result['binding_warnings'], [])
+                    self.assertEqual(baseline, {k: v for k, v in result.items() if k in baseline})
+
+    def test_substantive_alias_does_not_allow_marker_target_to_bind(self):
+        self.set_rows([['[[***\\|Atlas]]', 'r', '12', '[[Evidence]]']])
+        self.write('notes/Evidence.md', 'Birch retains **12** months.\n')
+        observation = self.check(bind_subject=True)['binding_observations'][0]
+        self.assertEqual(observation['status'], 'subject_absent')
+        self.write('notes/Evidence.md', 'ATLAS retains **12** months.\n')
+        self.assertEqual(self.check(bind_subject=True)['binding_observations'][0]['status'], 'bound')
+
 
 if __name__ == '__main__':
     unittest.main()
