@@ -1,5 +1,21 @@
 # Claude Code · Codex 겸용 사용
 
+## Development source checkout (2026-10-28)
+
+This unreleased development source checkout adds the memory-boundary evaluations
+and opt-in support-row diagnostics; it is not a new public release. Its
+`checker_sha256` is `af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`,
+which differs from the published v0.32.0 fingerprint retained below. Version badges,
+installation refs and v0.32.0 release/verification records still describe that release.
+See the [source fingerprint and verification note](verification/memory-boundaries-20261028.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation, then promote again.
+This coordination also applies when returning to published v0.32.0. No installed
+plugin or vault engine copy is updated by this development work.
+
 v0.32.0은 기본 lint·`check-support`·healthcheck·`recall`이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·링크 등)을 시험한 입력에서 같은 결과를 내는 [선형 처리](hardening.md#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로 바꾼다. `check-support`는 [표를 뺀 자리와 줄 나눔](hardening.md#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을 다르게 읽어 그 경우에만 기본 출력이 바뀌고, 선택형 `--normalize-periods`는 잘못 읽던 꼴을 더 보류하고 v0.31.0이 지나치게 보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패를 [생성한 사례로 센다](hardening.md#기간-정규화의-알려진-실패-목록). 선택형 [답 없음 쌍둥이](memory-evaluation.md#답-없음-쌍둥이)(`--gold-removal-twins`)와 키 가명화 보고서의 행 토큰 정렬(`--redact-row-order token`), 저장소 도구 [실제 볼트 표본 감사](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)(`scripts/real_vault_audit.py`)를 더한다. Claude Code 전용 deny zone 가드 템플릿은 아래 [실행과 검증 범위](#실행과-검증-범위)에 있다. `checker_sha256`가 묶는 파일이 바뀌어 경고 승격 인증서의 `checker_sha256`가 바뀌므로 아래 [설치](#설치)의 인증서 순서를 따른다. 기본 훅·검색·15명령·Python 3.10+ 표준 라이브러리와, v0.31.0의 읽기 전용 [사례별 뒤집힘 표와 정정·유지 역할](tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)(`runs`의 `flips`, fixture assertion의 선택 키 `role`)·[다른 대장 사실 표 표시](hardening.md#다른-대장의-사실-표에만-있는-값)·선택형 [기간 표현 정규화](hardening.md#기간-표현-정규화---normalize-periods)·`doctor`의 선택형 [세션 기록 SessionStart 확인](reliability.md#세션-기록으로-sessionstart-실행-확인-선택)(`--session-evidence`, Claude Code 세션 기록 하나와 상태 표시 문구를 확인하려고 이 플러그인 설치본의 `hooks/hooks.json`을 읽는다), v0.30.0의 [평가기 식별·개선 비용 근거](improvement-accounting.md)와 v0.29.0의 측정 기능을 유지한다.
 
 v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `via_bot` 출처로 수집하도록 기본 동작을 바꾸고([수집과 경고](hardening.md#수집과-경고)), 선택형 질의 확장·지침량 진단이 디렉터리 이름 목록도 대조하게 한다. [골드셋 보고서 키 가명화](memory-evaluation.md#개인정보와-보관), [재현 가능한 릴리스 ZIP과 재빌드 확인](release-integrity.md#zip-재현과-재빌드-명세), [간헐 실패 테스트의 반복 측정](evaluation-stability.md#간헐-실패-테스트-분류와-반복-측정)은 명시적으로 실행하는 선택형 도구다. 평가·진단 도구는 기본 모델·네트워크 호출이나 의존성을 추가하지 않는다. v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가·소표본 통계](memory-evaluation.md), [llama-server 측정 조건 기록](evaluation-stability.md)과 해시로 고정한 CI 경고 전용 pip-audit 설치를 유지한다. v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·공개 fixture Kiwi/qmd 비교](evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](memory-evaluation.md), [한글 음절 bigram BM25](memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](hardening.md)와 [GitHub 불변 릴리스](release-integrity.md)를 유지한다. v0.22.1의 [한국어 답변·근거 분리, 상태 변경 순서, 합성 도구 호출 평가](memory-evaluation.md), 기존 [지침량·인덱스·검증 누락 진단](moai-diagnostics.md)과 [Tower 신뢰성 도구](tower-reliability.md)도 유지한다.

@@ -1,5 +1,21 @@
 # 출처와 공유 상태 보강
 
+## Development source checkout (2026-10-28)
+
+This unreleased development source checkout adds the memory-boundary evaluations
+and opt-in support-row diagnostics; it is not a new public release. Its
+`checker_sha256` is `af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`,
+which differs from the published v0.32.0 fingerprint retained below. Version badges,
+installation refs and v0.32.0 release/verification records still describe that release.
+See the [source fingerprint and verification note](verification/memory-boundaries-20261028.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation, then promote again.
+This coordination also applies when returning to published v0.32.0. No installed
+plugin or vault engine copy is updated by this development work.
+
 v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
 Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
 바꿨다(켜는 옵션·출력 필드는 없다). 기본 lint의 유출 검사와 Jev 경로가 함께 쓰는 자격 증명 식(`jev_client.SENSITIVE`)의 이차 시간 조각

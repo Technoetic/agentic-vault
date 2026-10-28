@@ -30,6 +30,22 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
+## Development source checkout (2026-10-28)
+
+This unreleased development source checkout adds the memory-boundary evaluations
+and opt-in support-row diagnostics; it is not a new public release. Its
+`checker_sha256` is `af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`,
+which differs from the published v0.32.0 fingerprint retained below. Version badges,
+installation refs and v0.32.0 release/verification records still describe that release.
+See the [source fingerprint and verification note](docs/verification/memory-boundaries-20261028.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation, then promote again.
+This coordination also applies when returning to published v0.32.0. No installed
+plugin or vault engine copy is updated by this development work.
+
 ---
 
 <div align="center">

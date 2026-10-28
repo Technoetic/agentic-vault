@@ -1,4 +1,4 @@
-﻿"""Opt-in, content-free support-row and physical-line binding diagnostics."""
+"""Opt-in, content-free support-row and physical-line binding diagnostics."""
 import importlib
 import json
 from pathlib import Path

@@ -345,14 +345,22 @@ REQUIRED_V0230_RELEASE_LITERALS = (
 RELEASE_NOTE_V0310 = REPO_ROOT / "docs" / "releases" / "v0.31.0.md"
 CHECKER_SHA256_V0260_TO_V0300 = "84cf52358d2bf2562af6e79e80a76572f0cfa3230d062cd8cd6438febcc04bfd"
 CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3fbfcbeb9c"
-# v0.32.0 changes five of the seven bound files again (vault_ssot.py, vault_lint_extensions.py,
-# vault_provenance.py, jev_client.py and the vault_paths.py docstring). The release host writes the
-# final digest in place of the placeholder once the last bound file has changed; until then the
-# shipped-hash test below fails on purpose.
+# Published v0.32.0 changed five bound files. Its immutable release and verification
+# records retain that digest even when later, unreleased source changes the checker.
 CHECKER_SHA256_V0320 = "9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563"
-# checker_sha256 of the seven bound files as shipped now. A change to any of them invalidates
-# promoted vaults' certificates: update this pin together with a release note upgrade section.
-CURRENT_CHECKER_SHA256 = CHECKER_SHA256_V0320
+# Declared fingerprint of the unreleased memory-boundaries source checkout, not a
+# new release. Keep its addendum and coordination instructions beside the byte pin.
+CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92"
+SOURCE_CHECKER_ADDENDUM_PATHS = (
+    "README.md", "docs/codex.md", "docs/hardening.md",
+    "docs/verification/memory-boundaries-20261028.md",
+)
+SOURCE_CHECKER_COORDINATION = (
+    "Before switching to or from these source bytes, return promoted levels to `warning`; "
+    "align every engine copy that checks the vault (Claude Code, Codex, and the git vault's "
+    "`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on "
+    "that installation, then promote again."
+)
 REQUIRED_V0310_RELEASE_SECTIONS = ("## 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계")
 REQUIRED_V0310_RELEASE_LITERALS = (
     # Per-assertion flips and correction/retention roles (vault_runs.py).
@@ -383,10 +391,9 @@ REQUIRED_V0310_RELEASE_LITERALS = (
     "`--p`", "--ref v0.31.0", "engine=0.31.0",
 )
 SESSION_EVIDENCE_SCRIPT = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_session_evidence.py"
-# Each file states the current checker hash this many times (README in English and Korean), so a
-# stale second statement fails as well as a missing one. README, the Codex guide and the hardening
-# lead state the v0.32.0 digest in full; earlier digests keep their eight-character form there.
-CURRENT_CHECKER_HASH_COUNTS = {
+# Preserve every published v0.32.0 statement and its exact count, independently
+# of the current development-source fingerprint. Earlier digests remain abbreviated.
+V0320_CHECKER_HASH_COUNTS = {
     "README.md": 2, "docs/codex.md": 1, "docs/hardening.md": 1,
     "docs/releases/v0.32.0.md": 1, "docs/verification/v0.32.0.md": 1,
 }
@@ -634,28 +641,53 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(commit, verification_section)
                 self.assertIn(commit, record)
 
-    def test_stated_checker_hash_is_the_shipped_checker_hash(self) -> None:
-        # Certificates bind these bytes; a stale stated hash misleads every promoted vault.
-        # A child process computes it from the files next to the shipped script.
+    def test_stated_source_checker_hash_matches_actual_certificate(self) -> None:
+        # The expected value is declared, never derived from the implementation under test.
+        # A child process reads the actual checkout beside the certificate CLI.
         script = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_warning_policy.py"
         result = subprocess.run([sys.executable, str(script), "--certificate"], capture_output=True,
                                 text=True, encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["checker_sha256"], CURRENT_CHECKER_SHA256)
-        texts = {rel_path: (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-                 for rel_path in (*CURRENT_CHECKER_HASH_COUNTS, *CHECKER_HISTORY_RECORDS,
-                                  ".codex-plugin/plugin.json", "SECURITY.md", "docs/README.md")}
-        for rel_path in CURRENT_CHECKER_HASH_COUNTS:
+        self.assertEqual(json.loads(result.stdout)["checker_sha256"],
+                         CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES)
+        self.assertNotEqual(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES, CHECKER_SHA256_V0320)
+
+    def test_source_checker_addenda_state_unreleased_hash_and_coordination(self) -> None:
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
             with self.subTest(path=rel_path):
-                self.assertIn(CURRENT_CHECKER_SHA256, texts[rel_path])
-        # README, the Codex guide and the hardening lead give the current digest in full, as code.
+                text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                self.assertIn(f"`{CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES}`", text)
+                self.assertEqual(text.count(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES[:8]), 1)
+                self.assertIn("unreleased development source checkout", _folded(text))
+                self.assertIn("not a new public release", _folded(text))
+                self.assertIn(SOURCE_CHECKER_COORDINATION, _folded(text))
+        note = (REPO_ROOT / SOURCE_CHECKER_ADDENDUM_PATHS[-1]).read_text(encoding="utf-8")
+        self.assertIn(f"`{CHECKER_SHA256_V0320}`", note)
+        self.assertIn("vault_ssot.py", note)
+        self.assertIn("LF", note)
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS[:-1]:
+            text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+            self.assertIn("verification/memory-boundaries-20261028.md)", text)
+        for rel_path in ("docs/releases/v0.32.0.md", "docs/verification/v0.32.0.md"):
+            with self.subTest(published_record=rel_path):
+                self.assertNotIn(CHECKER_SHA256_UNRELEASED_MEMORY_BOUNDARIES,
+                                 (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+
+    def test_published_v0320_checker_hash_statements_and_history_stay_intact(self) -> None:
+        texts = {rel_path: (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                 for rel_path in (*V0320_CHECKER_HASH_COUNTS, *CHECKER_HISTORY_RECORDS,
+                                  ".codex-plugin/plugin.json", "SECURITY.md", "docs/README.md")}
+        for rel_path in V0320_CHECKER_HASH_COUNTS:
+            with self.subTest(path=rel_path):
+                self.assertIn(CHECKER_SHA256_V0320, texts[rel_path])
+        # README, the Codex guide and the hardening lead retain the published digest in full.
         for rel_path in ("README.md", "docs/codex.md", "docs/hardening.md"):
             with self.subTest(path=rel_path, form="full"):
-                self.assertIn(f"`{CURRENT_CHECKER_SHA256}`", texts[rel_path])
-        # Exact counts: every statement of the hash is current, not only one of them.
-        for rel_path, expected in CURRENT_CHECKER_HASH_COUNTS.items():
+                self.assertIn(f"`{CHECKER_SHA256_V0320}`", texts[rel_path])
+        # Exact historical counts remain mandatory after adding a separate source fingerprint.
+        for rel_path, expected in V0320_CHECKER_HASH_COUNTS.items():
             with self.subTest(path=rel_path, count=expected):
-                self.assertEqual(texts[rel_path].count(CURRENT_CHECKER_SHA256[:8]), expected)
+                self.assertEqual(texts[rel_path].count(CHECKER_SHA256_V0320[:8]), expected)
         for rel_path, text in texts.items():
             expected = 1 if rel_path == "docs/verification/v0.31.0.md" else 0
             with self.subTest(path=rel_path, digest_at_169d8a6=expected):
@@ -938,8 +970,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 # check-support body edges R10-R12 (the only default verdict changes), the opt-in period-normalization
 # metamorphic suite, gold-removal twins and keyed-token row order, the real-vault sample audit and the
 # opt-in deny-zone guard. Checker-bound files changed, so the note carries both hashes and the v0.31.0
-# upgrade and rollback order. The new hash is CHECKER_SHA256_V0320, a placeholder token until the release
-# host fills in the digest of the final bound files, in the constant and in both documents alike.
+# upgrade and rollback order. The published digest is CHECKER_SHA256_V0320.
 class V0320ReleaseNoteTests(unittest.TestCase):
     RELEASE_NOTE = REPO_ROOT / "docs" / "releases" / "v0.32.0.md"
     VERIFICATION = REPO_ROOT / "docs" / "verification" / "v0.32.0.md"
