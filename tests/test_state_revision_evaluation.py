@@ -129,14 +129,14 @@ class StateRevisionEvaluationTests(unittest.TestCase):
         pack["labels"]["direct"]["pre"]["current"]["quantity"] = "4"
         pack["labels"]["direct"]["post"]["superseded"][0]["quantity"] = "4"
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             path.write_text(json.dumps(pack), encoding="utf-8")
             report = module.evaluate(path, observations=observations)
         self.assertEqual(report["summary"]["execution_error_count"], 9)
         pack = module.load_pack()
         pack["cases"][0]["question"] += " Revised wording."
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             path.write_text(json.dumps(pack), encoding="utf-8")
             report = module.evaluate(path, observations=observations)
         self.assertEqual(report["summary"]["execution_error_count"], 9)
@@ -184,7 +184,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
         bad["schema_version"] = True
         variants.append(json.dumps(bad))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             for raw in variants:
                 path.write_text(raw, encoding="utf-8")
                 with self.subTest(raw=raw[:80]), self.assertRaises(ValueError):
@@ -210,7 +210,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
             else:
                 case["snapshots"][0]["after_revision"] = True
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "pack.json"
+                path = Path(directory).resolve() / "pack.json"
                 path.write_text(json.dumps(pack), encoding="utf-8")
                 with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                     module.load_pack(path)
@@ -218,7 +218,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
     def test_unsafe_file_and_parent_links_rejected(self):
         module = self.evaluator()
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
+            base = Path(directory).resolve()
             source = base / "pack.json"
             source.write_text(json.dumps(module.load_pack()), encoding="utf-8")
             link = base / "hard.json"
@@ -249,7 +249,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
     def test_json_byte_and_depth_limits(self):
         module = self.evaluator()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             for raw in (" " * (module.MAX_JSON_BYTES + 1), "[" * 200 + "]" * 200):
                 path.write_text(raw, encoding="utf-8")
                 with self.assertRaises(ValueError):
@@ -294,7 +294,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
         pack["labels"] = {"decimal": {"pre": {"current": pre, "superseded": []},
                                       "post": {"current": post, "superseded": [pre]}}}
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             path.write_text(json.dumps(pack), encoding="utf-8")
             self.assertEqual(module.evaluate(path)["summary"]["current_count"], 2)
             pack["cases"][0]["initial"] = {"a": "1000000000000", "b": "-1"}
@@ -308,7 +308,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
         pack = module.load_pack()
         pack["cases"][0]["initial"]["quantity"] = "1000000000000.1"
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pack.json"
+            path = Path(directory).resolve() / "pack.json"
             path.write_text(json.dumps(pack), encoding="utf-8")
             with localcontext() as context:
                 context.prec = 4
@@ -318,7 +318,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
     def test_cli_export_does_not_overwrite_existing_file(self):
         module = self.evaluator()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "existing.json"
+            path = Path(directory).resolve() / "existing.json"
             path.write_text("keep", encoding="utf-8")
             with self.assertRaises(OSError):
                 module._write_observations(path, module.evaluate())
@@ -349,7 +349,8 @@ class StateRevisionEvaluationTests(unittest.TestCase):
     def test_normal_local_and_absolute_windows_drive_paths_remain_accepted(self):
         module = self.evaluator()
         with tempfile.TemporaryDirectory() as directory:
-            self.assertEqual(module._safe_path(Path(directory) / "safe.json"), Path(directory) / "safe.json")
+            path = Path(directory).resolve() / "safe.json"
+            self.assertEqual(module._safe_path(path), path)
         with mock.patch.object(Path, "exists", return_value=False), mock.patch.object(Path, "is_symlink", return_value=False):
             module._safe_path("C:/safe-folder/observations.json")
             module._safe_path("D:\\safe-folder\\observations.json")
@@ -359,9 +360,9 @@ class StateRevisionEvaluationTests(unittest.TestCase):
         module = self.evaluator()
         report = module.evaluate()
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory) / "existing.txt"
+            base = Path(directory).resolve() / "existing.txt"
             base.write_text("keep", encoding="utf-8")
-            folder = Path(directory) / "existing-folder"
+            folder = Path(directory).resolve() / "existing-folder"
             folder.mkdir()
             for target in (base, folder):
                 stream = str(target) + ":observations"
@@ -375,9 +376,9 @@ class StateRevisionEvaluationTests(unittest.TestCase):
     def test_windows_existing_ads_input_rejected_before_open(self):
         module = self.evaluator()
         with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory) / "existing.txt"
+            base = Path(directory).resolve() / "existing.txt"
             base.write_text("keep", encoding="utf-8")
-            folder = Path(directory) / "existing-folder"
+            folder = Path(directory).resolve() / "existing-folder"
             folder.mkdir()
             for target in (base, folder):
                 stream = str(target) + ":input"
@@ -431,7 +432,7 @@ class StateRevisionEvaluationTests(unittest.TestCase):
 
     def test_real_cli_round_trip_and_safe_error(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "observations.json"
+            output = Path(directory).resolve() / "observations.json"
             first = subprocess.run([sys.executable, str(SCRIPT), "--write-observations", str(output)],
                                    capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(first.returncode, 0, first.stderr)

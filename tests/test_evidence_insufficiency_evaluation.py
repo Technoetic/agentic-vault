@@ -250,7 +250,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
 
     def test_strict_json_rejects_duplicate_nonfinite_deep_large_and_boolean(self):
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "pack.json"
+            path = Path(temp).resolve() / "pack.json"
             for raw in ('{"synthetic": true, "synthetic": true}', '{"n": NaN}',
                         '{"n": 1e999}', '[' * 50 + '0' + ']' * 50,
                         ' ' * (1024 * 1024 + 1), '{"schema_version": true}'):
@@ -267,7 +267,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
             values["st_ctime_ns"] += 1
             return SimpleNamespace(**values)
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "pack.json"
+            path = Path(temp).resolve() / "pack.json"
             path.write_text(json.dumps(self.pack), encoding="utf-8")
             with mock.patch.object(self.ev.os, "fstat", side_effect=different_ctime):
                 self.assertEqual(self.ev.load_pack(path), self.pack)
@@ -284,16 +284,16 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
             values["st_ctime_ns"] += calls
             return SimpleNamespace(**values)
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "pack.json"
+            path = Path(temp).resolve() / "pack.json"
             path.write_text(json.dumps(self.pack), encoding="utf-8")
             with mock.patch.object(self.ev.os, "fstat", side_effect=changing_ctime), self.assertRaises(ValueError):
                 self.ev.load_pack(path)
 
     def test_unsafe_hardlink_input_and_existing_output_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "pack.json"
+            path = Path(temp).resolve() / "pack.json"
             path.write_text(json.dumps(self.pack), encoding="utf-8")
-            linked = Path(temp) / "linked.json"
+            linked = Path(temp).resolve() / "linked.json"
             os.link(path, linked)
             with self.assertRaises(ValueError):
                 self.ev.load_pack(linked)
@@ -304,10 +304,10 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
 
     def test_symlink_input_and_parent_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
-            folder = Path(temp) / "real"; folder.mkdir()
+            folder = Path(temp).resolve() / "real"; folder.mkdir()
             path = folder / "pack.json"; path.write_text(json.dumps(self.pack), encoding="utf-8")
-            link = Path(temp) / "link.json"
-            parent = Path(temp) / "alias"
+            link = Path(temp).resolve() / "link.json"
+            parent = Path(temp).resolve() / "alias"
             try:
                 link.symlink_to(path)
                 parent.symlink_to(folder, target_is_directory=True)
@@ -320,9 +320,9 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows directory junction test")
     def test_windows_junction_parent_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
-            folder = Path(temp) / "real"; folder.mkdir()
+            folder = Path(temp).resolve() / "real"; folder.mkdir()
             path = folder / "pack.json"; path.write_text(json.dumps(self.pack), encoding="utf-8")
-            junction = Path(temp) / "junction"
+            junction = Path(temp).resolve() / "junction"
             try:
                 make_junction(junction, folder)
             except OSError:
@@ -372,7 +372,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows file ADS test")
     def test_windows_file_ads_output_is_rejected_without_creating_stream(self):
         with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp) / "existing.txt"
+            base = Path(temp).resolve() / "existing.txt"
             base.write_bytes(b"keep")
             stream = str(base) + ":observations"
             run = subprocess.run([sys.executable, str(SCRIPT), "--write-observations", stream],
@@ -381,7 +381,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
             self.assertEqual(run.stdout, "")
             self.assertLess(len(run.stderr), 500)
             self.assertEqual(base.read_bytes(), b"keep")
-            self.assertEqual(sorted(p.name for p in Path(temp).iterdir()), ["existing.txt"])
+            self.assertEqual(sorted(p.name for p in Path(temp).resolve().iterdir()), ["existing.txt"])
             with self.assertRaises(FileNotFoundError):
                 with open(stream, "rb"):
                     self.fail("export created a hidden file stream")
@@ -389,7 +389,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows directory ADS test")
     def test_windows_directory_ads_output_is_rejected_without_creating_stream(self):
         with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp) / "existing-directory"
+            base = Path(temp).resolve() / "existing-directory"
             base.mkdir()
             marker = base / "marker.txt"; marker.write_bytes(b"keep")
             stream = str(base) + ":observations"
@@ -407,7 +407,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows ADS input test")
     def test_windows_ads_input_is_rejected_without_mutation(self):
         with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp) / "existing.txt"; base.write_bytes(b"keep")
+            base = Path(temp).resolve() / "existing.txt"; base.write_bytes(b"keep")
             stream = str(base) + ":observations"
             raw = json.dumps(self.ev.evaluate(self.pack)["observations"]).encode("utf-8")
             with open(stream, "wb") as output:
@@ -428,7 +428,7 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
 
     def test_cli_roundtrip_and_safe_rejection(self):
         with tempfile.TemporaryDirectory() as temp:
-            observations = Path(temp) / "observations.json"
+            observations = Path(temp).resolve() / "observations.json"
             first = subprocess.run([sys.executable, str(SCRIPT), "--write-observations", str(observations)],
                                    capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(first.returncode, 0, first.stderr)
