@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "direct",
+      "question": "What is the quantity at this snapshot?",
+      "initial": {
+        "quantity": "3"
+      },
+      "revisions": [
+        {
+          "set": {
+            "quantity": "8"
+          }
+        }
+      ],
+      "rules": [],
+      "requested": [
+        "quantity"
+      ],
+      "snapshots": [
+        {
+          "id": "pre",
+          "after_revision": 0
+        },
+        {
+          "id": "post",
+          "after_revision": 1
+        }
+      ]
+    },
+    {
+      "id": "unchanged",
+      "question": "What are the quantity and unchanged unit price at this snapshot?",
+      "initial": {
+        "quantity": "3",
+        "unit_price": "7"
+      },
+      "revisions": [
+        {
+          "set": {
+            "quantity": "6"
+          }
+        }
+      ],
+      "rules": [],
+      "requested": [
+        "quantity",
+        "unit_price"
+      ],
+      "snapshots": [
+        {
+          "id": "pre",
+          "after_revision": 0
+        },
+        {
+          "id": "post",
+          "after_revision": 1
+        }
+      ]
+    },
+    {
+      "id": "chained",
+      "question": "Give quantity, unit price, fee, total and grand total at this snapshot.",
+      "initial": {
+        "quantity": "2",
+        "unit_price": "3",
+        "fee": "1"
+      },
+      "revisions": [
+        {
+          "set": {
+            "quantity": "4"
+          }
+        },
+        {
+          "set": {
+            "unit_price": "5"
+          }
+        }
+      ],
+      "rules": [
+        {
+          "target": "total",
+          "op": "multiply",
+          "inputs": [
+            "quantity",
+            "unit_price"
+          ]
+        },
+        {
+          "target": "grand_total",
+          "op": "add",
+          "inputs": [
+            "total",
+            "fee"
+          ]
+        }
+      ],
+      "requested": [
+        "quantity",
+        "unit_price",
+        "fee",
+        "total",
+        "grand_total"
+      ],
+      "snapshots": [
+        {
+          "id": "pre",
+          "after_revision": 0
+        },
+        {
+          "id": "mid",
+          "after_revision": 1
+        },
+        {
+          "id": "post",
+          "after_revision": 2
+        }
+      ]
+    },
+    {
+      "id": "derived",
+      "question": "Give quantity, unit price and the recomputed total at this snapshot.",
+      "initial": {
+        "quantity": "2",
+        "unit_price": "12.5"
+      },
+      "revisions": [
+        {
+          "set": {
+            "quantity": "5"
+          }
+        }
+      ],
+      "rules": [
+        {
+          "target": "total",
+          "op": "multiply",
+          "inputs": [
+            "quantity",
+            "unit_price"
+          ]
+        }
+      ],
+      "requested": [
+        "quantity",
+        "unit_price",
+        "total"
+      ],
+      "snapshots": [
+        {
+          "id": "pre",
+          "after_revision": 0
+        },
+        {
+          "id": "post",
+          "after_revision": 1
+        }
+      ]
+    }
+  ],
+  "labels": {
+    "direct": {
+      "pre": {
+        "current": {
+          "quantity": "3"
+        },
+        "superseded": []
+      },
+      "post": {
+        "current": {
+          "quantity": "8"
+        },
+        "superseded": [
+          {
+            "quantity": "3"
+          }
+        ]
+      }
+    },
+    "unchanged": {
+      "pre": {
+        "current": {
+          "quantity": "3",
+          "unit_price": "7"
+        },
+        "superseded": []
+      },
+      "post": {
+        "current": {
+          "quantity": "6",
+          "unit_price": "7"
+        },
+        "superseded": [
+          {
+            "quantity": "3",
+            "unit_price": "7"
+          }
+        ]
+      }
+    },
+    "chained": {
+      "pre": {
+        "current": {
+          "quantity": "2",
+          "unit_price": "3",
+          "fee": "1",
+          "total": "6",
+          "grand_total": "7"
+        },
+        "superseded": []
+      },
+      "mid": {
+        "current": {
+          "quantity": "4",
+          "unit_price": "3",
+          "fee": "1",
+          "total": "12",
+          "grand_total": "13"
+        },
+        "superseded": [
+          {
+            "quantity": "2",
+            "unit_price": "3",
+            "fee": "1",
+            "total": "6",
+            "grand_total": "7"
+          }
+        ]
+      },
+      "post": {
+        "current": {
+          "quantity": "4",
+          "unit_price": "5",
+          "fee": "1",
+          "total": "20",
+          "grand_total": "21"
+        },
+        "superseded": [
+          {
+            "quantity": "2",
+            "unit_price": "3",
+            "fee": "1",
+            "total": "6",
+            "grand_total": "7"
+          },
+          {
+            "quantity": "4",
+            "unit_price": "3",
+            "fee": "1",
+            "total": "12",
+            "grand_total": "13"
+          }
+        ]
+      }
+    },
+    "derived": {
+      "pre": {
+        "current": {
+          "quantity": "2",
+          "unit_price": "12.5",
+          "total": "25"
+        },
+        "superseded": []
+      },
+      "post": {
+        "current": {
+          "quantity": "5",
+          "unit_price": "12.5",
+          "total": "62.5"
+        },
+        "superseded": [
+          {
+            "quantity": "2",
+            "unit_price": "12.5",
+            "total": "25"
+          }
+        ]
+      }
+    }
+  }
+}
