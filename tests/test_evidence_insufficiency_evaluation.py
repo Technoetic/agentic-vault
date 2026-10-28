@@ -12,6 +12,11 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import make_junction
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/evaluate_evidence_insufficiency.py"
@@ -318,9 +323,9 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
             folder = Path(temp) / "real"; folder.mkdir()
             path = folder / "pack.json"; path.write_text(json.dumps(self.pack), encoding="utf-8")
             junction = Path(temp) / "junction"
-            made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(folder)],
-                                  capture_output=True)
-            if made.returncode:
+            try:
+                make_junction(junction, folder)
+            except OSError:
                 self.skipTest("directory junction creation unavailable on this host")
             with self.assertRaises(ValueError):
                 self.ev.load_pack(junction / "pack.json")
