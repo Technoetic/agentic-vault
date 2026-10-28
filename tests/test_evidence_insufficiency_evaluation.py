@@ -324,6 +324,76 @@ class EvidenceInsufficiencyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.ev.load_pack(junction / "pack.json")
 
+    def test_portable_path_syntax_rejects_stream_components_and_keeps_drive_anchors(self):
+        self.assertTrue(hasattr(self.ev, "_validate_path_syntax"), "portable path validation is missing")
+        for raw in ("file:observations", "folder:stream/file.json", "C:/folder/file:stream",
+                    "C:\\folder\\file::$DATA", "../folder:stream/../safe.json",
+                    "C:/folder/name. ", "C:/folder/NUL.json", "C:/folder/name?.json",
+                    "\\\\?\\C:\\file.json", "\\\\.\\C:\\file.json"):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                self.ev._validate_path_syntax(raw)
+        for raw in ("C:/folder/file.json", "D:\\folder\\file.json", "relative/observations.json",
+                    "../folder/observations.json", "/tmp/file.json", "//server/share/file.json"):
+            with self.subTest(raw=raw):
+                self.ev._validate_path_syntax(raw)
+
+    @unittest.skipUnless(os.name == "nt", "Windows file ADS test")
+    def test_windows_file_ads_output_is_rejected_without_creating_stream(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "existing.txt"
+            base.write_bytes(b"keep")
+            stream = str(base) + ":observations"
+            run = subprocess.run([sys.executable, str(SCRIPT), "--write-observations", stream],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 2)
+            self.assertEqual(run.stdout, "")
+            self.assertLess(len(run.stderr), 500)
+            self.assertEqual(base.read_bytes(), b"keep")
+            self.assertEqual(sorted(p.name for p in Path(temp).iterdir()), ["existing.txt"])
+            with self.assertRaises(FileNotFoundError):
+                with open(stream, "rb"):
+                    self.fail("export created a hidden file stream")
+
+    @unittest.skipUnless(os.name == "nt", "Windows directory ADS test")
+    def test_windows_directory_ads_output_is_rejected_without_creating_stream(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "existing-directory"
+            base.mkdir()
+            marker = base / "marker.txt"; marker.write_bytes(b"keep")
+            stream = str(base) + ":observations"
+            run = subprocess.run([sys.executable, str(SCRIPT), "--write-observations", stream],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 2)
+            self.assertEqual(run.stdout, "")
+            self.assertLess(len(run.stderr), 500)
+            self.assertEqual(marker.read_bytes(), b"keep")
+            self.assertEqual(sorted(p.name for p in base.iterdir()), ["marker.txt"])
+            with self.assertRaises(FileNotFoundError):
+                with open(stream, "rb"):
+                    self.fail("export created a hidden directory stream")
+
+    @unittest.skipUnless(os.name == "nt", "Windows ADS input test")
+    def test_windows_ads_input_is_rejected_without_mutation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "existing.txt"; base.write_bytes(b"keep")
+            stream = str(base) + ":observations"
+            raw = json.dumps(self.ev.evaluate(self.pack)["observations"]).encode("utf-8")
+            with open(stream, "wb") as output:
+                output.write(raw)
+            run = subprocess.run([sys.executable, str(SCRIPT), "--observations", stream],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 2)
+            self.assertEqual(run.stdout, "")
+            self.assertLess(len(run.stderr), 500)
+            self.assertEqual(base.read_bytes(), b"keep")
+            with open(stream, "rb") as source:
+                self.assertEqual(source.read(), raw)
+            pack_stream = str(base) + ":pack"
+            with open(pack_stream, "wb") as output:
+                output.write(json.dumps(self.pack).encode("utf-8"))
+            with self.assertRaises(ValueError):
+                self.ev.load_pack(pack_stream)
+
     def test_cli_roundtrip_and_safe_rejection(self):
         with tempfile.TemporaryDirectory() as temp:
             observations = Path(temp) / "observations.json"

@@ -98,7 +98,11 @@ JSON inputs are limited to 1 MiB, 100 cases, 32 slots/claims per case, 20,000
 tree nodes, depth 24, bounded strings, and finite bounded numbers. Unknown fields,
 duplicate JSON keys, conflicting slot records, booleans used as numeric versions
 or thresholds, nonfinite values, symlinks/reparse points (including ancestors),
-hardlinked files and unstable file reads are rejected. UTF-8 BOM is accepted.
+hardlinked files and unstable file reads are rejected. Before opening any input
+or output, portable path validation rejects colon-bearing components (including
+NTFS alternate data streams), device namespaces, reserved Windows device names,
+and unsafe Windows component characters or trailing spaces/dots. Ordinary drive
+anchors such as `C:/` retain their colon. UTF-8 BOM is accepted.
 These filesystem checks reduce unsafe local reads; they are not an OS sandbox
 against an adversarial process racing directory replacement.
 

@@ -85,8 +85,26 @@ def _bounded_tree(value):
         raise ValueError("JSON exceeds byte limit")
 
 
+def _validate_path_syntax(path):
+    """Reject Windows stream/device syntax portably before any filesystem open."""
+    raw = _text(os.fspath(path), 4096).replace("\\", "/")
+    if raw.startswith(("//?/", "//./")):
+        raise ValueError("unsafe Windows device path")
+    if len(raw) >= 2 and raw[1] == ":" and raw[0] in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+        raw = raw[2:]  # The sole permitted colon belongs to an ordinary drive anchor.
+    reserved = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    reserved.update(prefix + digit for prefix in ("COM", "LPT") for digit in "123456789¹²³")
+    for component in raw.split("/"):
+        if component in ("", ".", ".."):
+            continue
+        if (any(character in component for character in ':<>"|?*') or
+                component.rstrip(" .") != component or component.split(".")[0].upper() in reserved):
+            raise ValueError("unsafe portable path component")
+
+
 def _check_path(path: Path):
     """Refuse symlinks, Windows reparse points and linked parent directories."""
+    _validate_path_syntax(path)
     path = Path(os.path.abspath(path))
     for part in (path, *path.parents):
         info = part.lstat()
@@ -218,6 +236,7 @@ def _validate_pack(pack):
 
 def load_pack(fixture=DEFAULT_FIXTURE) -> dict:
     """Load only a bounded synthetic pack JSON file (or its containing folder)."""
+    _validate_path_syntax(fixture)
     path = Path(fixture)
     if path.is_dir():
         path = path / "pack.json"
@@ -381,6 +400,7 @@ def evaluate(pack=None, *, control="good", observations=None, answerer: Callable
 
 
 def _write_observations(path, observations):
+    _validate_path_syntax(path)
     path = Path(os.path.abspath(path))
     _check_path(path.parent)
     raw = (_json(observations) + "\n").encode("utf-8")
