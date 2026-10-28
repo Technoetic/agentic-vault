@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.33.0"
-EXPECTED_PUBLIC_REF = "0.33.0"
+EXPECTED = "0.33.1"
+EXPECTED_PUBLIC_REF = "0.33.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.33.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.33.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.33.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.33.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.33.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.33.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -349,7 +349,7 @@ CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3f
 # Published v0.32.0 changed five bound files. Its immutable release and verification
 # records retain that digest when a later release changes the checker.
 CHECKER_SHA256_V0320 = "9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563"
-# Declared v0.33.0 fingerprint, also observed at the dated implementation commit.
+# Declared v0.33.0 candidate fingerprint, retained by v0.33.1 and the dated implementation.
 CHECKER_SHA256_V0330 = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
     "README.md", "docs/codex.md", "docs/hardening.md",
@@ -657,7 +657,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
                 self.assertIn(f"`{CHECKER_SHA256_V0330}`", text)
                 self.assertEqual(text.count(CHECKER_SHA256_V0330[:8]), 1)
-                self.assertIn("v0.33.0 source and certificate migration", text)
+                self.assertIn(f"v{EXPECTED} source and certificate migration", text)
                 self.assertNotIn("unreleased development source checkout", _folded(text))
                 self.assertIn("version preparation does not certify them", _folded(text))
                 self.assertIn(SOURCE_CHECKER_COORDINATION, _folded(text))
@@ -1115,6 +1115,8 @@ class V0320ReleaseNoteTests(unittest.TestCase):
 class V0330ReleaseMetadataTests(unittest.TestCase):
     RELEASE = REPO_ROOT / "docs/releases/v0.33.0.md"
     VERIFICATION = REPO_ROOT / "docs/verification/v0.33.0.md"
+    CURRENT_RELEASE = REPO_ROOT / "docs/releases/v0.33.1.md"
+    CURRENT_VERIFICATION = REPO_ROOT / "docs/verification/v0.33.1.md"
 
     def test_v0330_feature_scope_and_migration_are_explicit(self) -> None:
         release = self.RELEASE.read_text(encoding="utf-8")
@@ -1131,6 +1133,22 @@ class V0330ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(lines[first:first + 2], list(V0310_UPGRADE_STEPS[:2]))
         self.assertTrue(lines[first + 2].startswith(V0310_UPGRADE_STEPS[2]))
         self.assertEqual(lines[first + 3], V0310_UPGRADE_STEPS[3])
+        # Keep the unpublished candidate contract above, and separately constrain the patch.
+        current = self.CURRENT_RELEASE.read_text(encoding="utf-8")
+        for literal in ("v0.33.0은 macOS CI의 시험 fixture 실패로 공개하지 않은 후보",
+                        "공개 기준판은 v0.32.0", "/var", "/private/var", "Path(...).resolve()",
+                        "엄격한 런타임 경로 가드는 유지", "제품 평가기·SSOT 로직은 바꾸지 않는다",
+                        "--ref v0.33.1", "--row-references", "--bind-subject",
+                        CHECKER_SHA256_V0320, CHECKER_SHA256_V0330,
+                        "harmless replay", "verification.json", "post-publication.json"):
+            with self.subTest(current_contract=literal):
+                self.assertIn(literal, current)
+        self.assertIn(V0310_UPGRADE_ORDER_LEAD, _folded(current))
+        current_lines = current.splitlines()
+        current_first = current_lines.index(V0310_UPGRADE_STEPS[0])
+        self.assertEqual(current_lines[current_first:current_first + 2], list(V0310_UPGRADE_STEPS[:2]))
+        self.assertTrue(current_lines[current_first + 2].startswith(V0310_UPGRADE_STEPS[2]))
+        self.assertEqual(current_lines[current_first + 3], V0310_UPGRADE_STEPS[3])
 
     def test_v0330_verification_separates_implementation_from_release_gates(self) -> None:
         record = self.VERIFICATION.read_text(encoding="utf-8")
@@ -1143,23 +1161,36 @@ class V0330ReleaseMetadataTests(unittest.TestCase):
                         "Scripted controls are not actual-model efficacy evidence"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, _folded(record))
+        current = self.CURRENT_VERIFICATION.read_text(encoding="utf-8")
+        for literal in ("## Candidate history and scoped fix", "## Evidence boundaries",
+                        "## Final release gates", "## Limits", "was not published",
+                        "published baseline remains v0.32.0", "old failed CI evidence",
+                        "Path(...).resolve()", "strict runtime guards remain intact",
+                        "No evaluator or SSOT runtime logic changes", "2,543 tests",
+                        "not a final v0.33.1 CI result", "these gates are pending",
+                        "verification.json", "post-publication.json", "No old tag is rewritten",
+                        CHECKER_SHA256_V0320, CHECKER_SHA256_V0330):
+            with self.subTest(current_evidence=literal):
+                self.assertIn(literal, _folded(current))
 
     def test_v0330_document_links_resolve(self) -> None:
         import re
         from urllib.parse import unquote
 
-        for document in (self.RELEASE, self.VERIFICATION):
+        for document in (self.RELEASE, self.VERIFICATION, self.CURRENT_RELEASE, self.CURRENT_VERIFICATION):
             for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
                 if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
                     continue
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists())
 
-    def test_published_v0320_records_keep_canonical_bytes(self) -> None:
+    def test_historical_release_records_keep_canonical_bytes(self) -> None:
         # Text-mode reading canonicalizes platform checkout line endings to Git LF bytes.
         for path, expected in {
             "docs/releases/v0.32.0.md": "ff8b10c9bb5d51de7ccda0e0677dac962bc08310780bfe3eee850a6a2a2c7308",
             "docs/verification/v0.32.0.md": "b8f3b427190eb3b141c0d59d3585107e28bc076c5867bd1a73a71b73ba9d4e6b",
+            "docs/releases/v0.33.0.md": "59f3a34a22be7f660f0bd96a1fd4739056fa5d68c5a005dd7afa82db18be0a1b",
+            "docs/verification/v0.33.0.md": "85a04c40a5d9a7e9acbe669f06a43b45363a8ed1cd62b427693861b41c5b410a",
         }.items():
             with self.subTest(path=path):
                 canonical = (REPO_ROOT / path).read_text(encoding="utf-8").encode("utf-8")
@@ -1170,3 +1201,4 @@ class V0330ReleaseMetadataTests(unittest.TestCase):
                      REPO_ROOT / "assets/adapters/aside/aside-up.ps1"):
             with self.subTest(path=path.name):
                 self.assertNotIn("engine=0.33.0", path.read_text(encoding="utf-8"))
+                self.assertNotIn("engine=0.33.1", path.read_text(encoding="utf-8"))

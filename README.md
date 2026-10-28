@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.33.0-10B981?style=for-the-badge)](docs/releases/v0.33.0.md)
+[![Version](https://img.shields.io/badge/v0.33.1-10B981?style=for-the-badge)](docs/releases/v0.33.1.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -30,15 +30,17 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
-## v0.33.0 source and certificate migration
+## v0.33.1 source and certificate migration
 
-v0.33.0 adds offline synthetic state/dependency revision and evidence-insufficiency
+v0.33.1 includes offline synthetic state/dependency revision and evidence-insufficiency
 evaluations, plus opt-in support-row diagnostics. Its `checker_sha256` is
 `af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`.
-The v0.32.0 release/verification records retain their published fingerprint as history.
+The v0.33.0 candidate was not published after macOS CI exposed temporary-root fixture failures.
+Positive test fixtures canonicalize temporary roots; strict runtime guards stay unchanged.
+The published baseline remains v0.32.0. Its release/verification records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [source fingerprint and verification note](docs/verification/memory-boundaries-20261028.md).
+See the [v0.33.1 release record](docs/verification/v0.33.1.md) and [source fingerprint and verification note](docs/verification/memory-boundaries-20261028.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -153,13 +155,13 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs below target v0.33.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.33.0.md);
+budgets; new findings warn first. The installation refs below target v0.33.1.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.33.1.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
 
-**v0.33.0 additions:** the offline [state/dependency revision evaluation](docs/state-revision-evaluation.md)
+**v0.33.1 feature scope:** the offline [state/dependency revision evaluation](docs/state-revision-evaluation.md)
 separates current, superseded and mixed answers; the [evidence-insufficiency evaluation](docs/evidence-insufficiency-evaluation.md)
 distinguishes acknowledging missing evidence from unsupported premise denial. They use independently authored
 synthetic fixtures and explicit response replay, not model inference or upstream datasets. Opt-in
@@ -545,7 +547,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.33.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.33.1 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -630,7 +632,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.33.0**이며 **Claude Code, Codex 겸용**이다. 독립 작성한 합성 자료로 [상태·의존성 변경](docs/state-revision-evaluation.md)과 [근거 부족·근거 없는 전제 부정](docs/evidence-insufficiency-evaluation.md)을 구분하는 오프라인 평가기를 더한다. `check-support`의 선택형 [행 참조·주어 진단](docs/support-row-diagnostics.md)(`--row-references`, `--bind-subject`)은 파싱한 모든 행의 감사 모집단과 같은 물리 줄의 주어·값 관측을 기존 판정과 분리해 보고한다. 합성 대조군은 모델 효능 측정이 아니며, 같은 줄 동시 출현은 사실·의미 귀속을 검증하지 않는다. 새 옵션을 끈 기존 출력 56건은 v0.32.0과 같았다. 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.33.0.md)를 따른다.
+현재 버전은 **v0.33.1**이며 **Claude Code, Codex 겸용**이다. v0.33.0은 macOS 임시 경로 시험 실패로 공개하지 않은 후보이며, 공개 기준판은 v0.32.0이다. 이번 패치는 양성 시험 fixture의 임시 루트만 실제 경로로 정규화하고 엄격한 런타임 링크 경로 거부는 유지한다. 독립 작성한 합성 자료로 [상태·의존성 변경](docs/state-revision-evaluation.md)과 [근거 부족·근거 없는 전제 부정](docs/evidence-insufficiency-evaluation.md)을 구분하는 오프라인 평가기를 더한다. `check-support`의 선택형 [행 참조·주어 진단](docs/support-row-diagnostics.md)(`--row-references`, `--bind-subject`)은 파싱한 모든 행의 감사 모집단과 같은 물리 줄의 주어·값 관측을 기존 판정과 분리해 보고한다. 합성 대조군은 모델 효능 측정이 아니며, 같은 줄 동시 출현은 사실·의미 귀속을 검증하지 않는다. 새 옵션을 끈 기존 출력 56건은 v0.32.0과 같았다. 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.33.1.md)를 따른다.
 
 v0.32.0은 기본 lint(SessionStart 비동기 healthcheck·pre-commit `--staged`)·`check-support`·healthcheck full 모드·`/vault-recall`이 노트마다 돌리던 제목·frontmatter·인라인 코드·링크 정규식은 꾸민 한 줄에서 이차·삼차 시간이 걸렸다(공백 64,000개가 든 대장 제목 한 줄에 21.15초, 새 처리는 1.4 µs. 2026-10-27 한 Windows PC 측정). 한정된 전수 비교에서 예전 식과 같은 결과를 내는 선형 처리로 바꿨고, 켜는 옵션이나 출력 필드는 없다([바꾼 곳과 근거의 범위](docs/hardening.md#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)).
 기본 lint의 유출 검사가 줄마다, 그리고 노트 전체에 쓰는 자격 증명 식 `jev_client.SENSITIVE`의 이차 시간 조각 넷과 선택형 Telegram 브리지의 위키링크 바꾸기도 선형 처리로 바꿨다(같은 PC에서 꾸민 32,000자 한 줄 노트의 유출 검사는 3.14초에서 21 ms로, `[` 32,000개인 줄의 위키링크 바꾸기는 1.62초에서 1.2 µs로). 한정된 전수 비교에서 자격 증명 식은 같은 글에서 매치를 찾고 브리지의 위키링크 바꾸기는 같은 문자열을 내며, 보통 글의 검사는 4~16% 더 걸린다.
@@ -644,9 +646,9 @@ v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#�
 
 v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md), v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.33.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.33.1`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.33.0) 경로는 v0.33.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.33.0 검증 기록](docs/verification/v0.33.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.33.1) 경로는 v0.33.1을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.33.1 검증 기록](docs/verification/v0.33.1.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -689,7 +691,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.33.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.33.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 

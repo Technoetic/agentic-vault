@@ -4,7 +4,7 @@ This historical development record describes the approved
 [memory-boundaries specification](../superpowers/specs/2026-10-28-memory-boundaries.md)
 at implementation commit `e9d382a6877411c377ccb49c0d7f3fba604ba1f8`, before v0.33.0
 release preparation. Public metadata was v0.32.0 at that point. Current release
-metadata and pending gates are in the [v0.33.0 verification record](v0.33.0.md);
+metadata and pending gates are in the [v0.33.1 verification record](v0.33.1.md);
 this dated note does not certify a release, installation or deployment.
 
 ## Fingerprints and certificate coordination

@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.33.0",
+  "version": "0.33.1",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.33.0: offline state/dependency revision and evidence-insufficiency evaluations use independently authored synthetic fixtures and digest-bound structured observation replay. Opt-in check-support --row-references exports every parsed row and an audit population; --bind-subject adds conservative same-physical-line subject/value observations separately from existing warnings and support decisions. These diagnostics do not verify facts or semantic attribution. Existing flags-off output is unchanged in the tested comparisons. checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again. Certificate regeneration runs the harmless replay. No model/network call, default hook change or automatic vault migration is added.",
+    "longDescription": "Release v0.33.1: macOS positive test fixtures canonicalize temporary roots because /var can resolve to /private/var; strict runtime linked-parent guards remain unchanged. The v0.33.0 candidate was not published after macOS CI failed. Published baseline remains v0.32.0. Feature scope: offline state/dependency revision and evidence-insufficiency evaluations use independently authored synthetic fixtures and digest-bound structured observation replay. Opt-in check-support --row-references exports every parsed row and an audit population; --bind-subject adds conservative same-physical-line subject/value observations separately from existing warnings and support decisions. These diagnostics do not verify facts or semantic attribution. Existing flags-off output is unchanged in the tested comparisons. checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again. Certificate regeneration runs the harmless replay. No model/network call, default hook change or automatic vault migration is added.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

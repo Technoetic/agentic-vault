@@ -1,14 +1,16 @@
 # 출처와 공유 상태 보강
 
-## v0.33.0 source and certificate migration
+## v0.33.1 source and certificate migration
 
-v0.33.0 adds offline synthetic state/dependency revision and evidence-insufficiency
+v0.33.1 includes offline synthetic state/dependency revision and evidence-insufficiency
 evaluations, plus opt-in support-row diagnostics. Its `checker_sha256` is
 `af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`.
-The v0.32.0 release/verification records retain their published fingerprint as history.
+The v0.33.0 candidate was not published after macOS CI exposed temporary-root fixture failures.
+Positive test fixtures canonicalize temporary roots; strict runtime guards stay unchanged.
+The published baseline remains v0.32.0. Its release/verification records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [source fingerprint and verification note](verification/memory-boundaries-20261028.md).
+See the [v0.33.1 release record](verification/v0.33.1.md) and [source fingerprint and verification note](verification/memory-boundaries-20261028.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -17,7 +19,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.32.0. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.33.0은 선택형 [행 참조와 물리 줄 주어 진단](support-row-diagnostics.md)을 더한다. 기존 `check-support` 출력·판정은 새 옵션을 끄면 유지하며, 인증서는 [v0.33.0 전환 절차](releases/v0.33.0.md#하위호환업그레이드)를 따른다. 아래는 이전 버전의 변경 이력이다.
+v0.33.1은 선택형 [행 참조와 물리 줄 주어 진단](support-row-diagnostics.md)을 포함한다. 기존 `check-support` 출력·판정은 새 옵션을 끄면 유지하며, 인증서는 [v0.33.1 전환 절차](releases/v0.33.1.md#하위호환업그레이드)를 따른다. 아래는 이전 버전의 변경 이력이다.
 
 v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
 Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
