@@ -669,6 +669,10 @@ def _cited_forms(policy, relative, run):
             else:
                 run['marks'][relative] = mark
                 run['cited'][relative] = dict(path=relative, sha256=info['sha256'], bytes=info['size'])
+                if 'binding_raw' in run:
+                    # Only the opt-in diagnostic retains the already permitted,
+                    # stable read; never race a second read for line evidence.
+                    run['binding_raw'][relative] = text
                 outside, refusal = _separate_tables(text)
                 if refusal:
                     run['unseparated'][relative] = refusal
@@ -746,7 +750,77 @@ def _matches(patterns, forms):
     return any(pattern.search(body) for pattern in patterns for body in forms)
 
 
-def check_support(vault, path, *, primary_text_only=False, normalize_periods=False, fiscal_start=None):
+def _binding_lines(text):
+    """Eligible original physical lines, excluding frontmatter and fact tables.
+
+    Parse refusals/malformed tables are unknown, rather than permission to
+    treat an unseparated table as primary evidence. Line numbers refer to the
+    original source (including a BOM/frontmatter), never a joined body.
+    """
+    text = text.removeprefix('\ufeff')
+    lines = _split_lines(text)
+    start = 0
+    if lines and lines[0].strip() == '---':
+        end = next((i for i, line in enumerate(lines[1:65], 1) if line.strip() == '---'), None)
+        if end is None:
+            return (), 'frontmatter_unclosed'
+        start = end + 1
+    body = '\n'.join(lines[start:])
+    try:
+        parsed = parse_ledger(body)
+    except SSOTError:
+        return (), 'source_parse_limit'
+    if parsed['diagnostics']:
+        return (), 'source_malformed'
+    tables = parsed['tables']
+    physical = _line_rows(body.encode('utf-8'))
+    return tuple((line['line'] + start,
+                  _forms(re.sub(r'\\([\\|])', r'\1', line['text']), aliases=True))
+                 for line in physical
+                 if not any(table['start'] <= line['start'] < table['end'] for table in tables)), None
+
+
+def _binding_observation(row, path, status, bodies, unresolved, run, reference_limited):
+    """Content-free lexical co-occurrence; no semantic or truth inference."""
+    entry = dict(path=path, line=row['line'], status='unassessed', reason='literal_not_supported', via=[])
+    subject = row['fields'].get('subject', '')
+    subjects = _forms(subject, aliases=True)
+    if not any(_literal(_render(subject, alias)) for alias in (False, True)):
+        entry['reason'] = 'subject_missing'
+        return entry
+    if status != 'supported':
+        return entry
+    patterns = [_support_pattern(form) for form in _forms(row['fields'].get('value', '').strip())]
+    subject_patterns = [_support_pattern(form) for form in subjects]
+    values, bound, incomplete = [], [], bool(unresolved or reference_limited)
+    for cited in sorted(bodies):
+        if cited not in run['binding_lines']:
+            text = run['binding_raw'].get(cited)
+            run['binding_lines'][cited] = _binding_lines(text) if text is not None else ((), 'source_unavailable')
+        lines, refusal = run['binding_lines'][cited]
+        incomplete = incomplete or bool(refusal)
+        for number, forms in lines:
+            if _matches(patterns, forms):
+                reference = dict(path=cited, line=number)
+                # Keep output bounded even for a note repeating a value on
+                # thousands of lines. Scan every line before deciding status.
+                if len(values) < 32:
+                    values.append(reference)
+                if _matches(subject_patterns, forms) and len(bound) < 32:
+                    bound.append(reference)
+    if bound:
+        entry.update(status='bound', reason='same_physical_line', via=bound)
+    elif incomplete:
+        entry.update(reason='source_incomplete', via=values)
+    elif values:
+        entry.update(status='subject_absent', reason='subject_not_on_value_line', via=values)
+    else:
+        entry['reason'] = 'value_not_on_physical_line'
+    return entry
+
+
+def check_support(vault, path, *, primary_text_only=False, normalize_periods=False, fiscal_start=None,
+                  row_references=False, bind_subject=False):
     """Warn when a row value is absent from its cited note or the citation is unresolved.
 
     Warning-only observation, never a truth or authority decision. A value is
@@ -783,8 +857,15 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     vault_period that cannot be imported raises
     SSOTError('period_normalizer_unavailable'). Literal support, counts and
     warnings stay exactly as without it.
+
+    row_references=True exports every parsed row as content-free references
+    and a generic audit_population. bind_subject=True separately observes
+    subject/value co-occurrence on original physical source lines outside
+    frontmatter and fact tables, using only cached permitted stable reads.
+    Its binding_warnings never enter warnings or change literal support.
+    Co-occurrence is not semantic attribution or truth verification.
     """
-    if type(primary_text_only) is not bool or type(normalize_periods) is not bool:
+    if any(type(option) is not bool for option in (primary_text_only, normalize_periods, row_references, bind_subject)):
         raise SSOTError('invalid_opt_in')
     if fiscal_start is not None and (not normalize_periods or type(fiscal_start) is not int
                                      or not 1 <= fiscal_start <= 12):
@@ -803,6 +884,9 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
         parsed = parse_ledger(raw.decode('utf-8'))
         ledger_path = info['path']
         run = dict(cache={}, notes=0, bytes=0, marks={}, cited={}, incomplete=set(), inventory=None, unseparated={})
+        if bind_subject:
+            run.update(binding_raw={}, binding_lines={})
+        references_rows, binding_rows, binding_warnings = [], [], []
         warnings = []
         counts = dict(rows_checked=0, rows_supported=0, rows_unsupported=0, rows_unresolved=0, rows_skipped=0,
                       rows_supported_ledger_table_only=0)
@@ -814,6 +898,7 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                 value_forms = _forms(row['fields'].get('value', '').strip())
                 source = row['fields'].get('source', '').strip()
                 references = _references(source) if value_forms and source and not table['duplicate_fields'] else []
+                reference_limited = len(references) > MAX_REFERENCES
                 if len(references) > MAX_REFERENCES:
                     references = references[:MAX_REFERENCES]
                     run['incomplete'].add('reference_limit')
@@ -830,6 +915,8 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                             # A row cannot support itself: compare outside the fact tables.
                             self_forms = _self_forms(raw, parsed)
                             run['cited'][ledger_path] = dict(path=ledger_path, sha256=info['sha256'], bytes=info['size'])
+                            if bind_subject:
+                                run['binding_raw'][ledger_path] = raw.decode('utf-8-sig')
                         bodies[ledger_path] = self_forms
                         continue
                     forms, reason = _cited_forms(policy, detail, run)
@@ -841,6 +928,13 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                             outside[detail] = stripped
                 if not bodies and not unresolved:
                     counts['rows_skipped'] += 1
+                    if row_references:
+                        reason = ('duplicate_fields' if table['duplicate_fields'] else 'value_missing' if not value_forms
+                                  else 'source_missing' if not source else 'no_note_reference')
+                        references_rows.append(dict(path=ledger_path, line=row['line'], status='skipped', reason=reason, via=[]))
+                    if bind_subject:
+                        binding_rows.append(_binding_observation(row, ledger_path, 'skipped', bodies, unresolved, run,
+                                                                 reference_limited))
                     continue
                 counts['rows_checked'] += 1
                 for target, detail in unresolved:
@@ -848,6 +942,12 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                                              dict(reference=target[:MAX_REFERENCE_CHARS], **detail)))
                 if not bodies:
                     counts['rows_unresolved'] += 1
+                    if row_references:
+                        references_rows.append(dict(path=ledger_path, line=row['line'], status='unresolved',
+                                                    reason='source_unresolved', via=[]))
+                    if bind_subject:
+                        binding_rows.append(_binding_observation(row, ledger_path, 'unresolved', bodies, unresolved,
+                                                                 run, reference_limited))
                     continue
                 patterns = [_support_pattern(form) for form in value_forms]
                 supported, extra = any(_matches(patterns, forms) for forms in bodies.values()), {}
@@ -866,6 +966,19 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
                     counts['rows_unsupported'] += 1
                     warnings.append(_warning('ssot-source-unsupported', row['line'], ledger_path,
                                              dict(cited=sorted(bodies), **extra)))
+                status = 'supported' if supported else 'unsupported'
+                if row_references:
+                    compared = {cited: outside.get(cited, forms) if primary_text_only else forms
+                                for cited, forms in bodies.items()}
+                    references_rows.append(dict(path=ledger_path, line=row['line'], status=status,
+                                                reason='literal_present' if supported else extra.get('reason', 'literal_absent'),
+                                                via=sorted(cited for cited, forms in compared.items() if _matches(patterns, forms))))
+                if bind_subject:
+                    observation = _binding_observation(row, ledger_path, status, bodies, unresolved, run, reference_limited)
+                    binding_rows.append(observation)
+                    if observation['status'] == 'subject_absent':
+                        binding_warnings.append(_warning('ssot-subject-unbound', row['line'], ledger_path,
+                                                         dict(reason=observation['reason'])))
                 # Period intervals are a separate observation after the literal
                 # result; they never change it. value_forms[-1] has markup
                 # rendered, and the body indexes read only rendered forms too.
@@ -928,6 +1041,13 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
         if normalize_periods:
             result.update(normalized_periods=period_rows,
                           period_convention=dict(fiscal_start=fiscal_start, scope=period.SCOPE))
+        if row_references:
+            result.update(row_references=references_rows,
+                          audit_population=dict(population_id='ssot-support-rows', source_sha256=info['sha256'],
+                                                items=[dict(id='%s:%d' % (ledger_path, row['line']), path=ledger_path,
+                                                            line=row['line']) for row in references_rows]))
+        if bind_subject:
+            result.update(binding_observations=binding_rows, binding_warnings=binding_warnings)
         return result
     except SSOTError:
         raise
@@ -1092,6 +1212,10 @@ def main(argv=None):
     support.add_argument('--path', required=True)
     support.add_argument('--primary-text-only', action='store_true',
                          help="count a value found only in other ledgers' fact tables as unsupported")
+    support.add_argument('--row-references', action='store_true',
+                         help='export content-free references and an audit population for every parsed row')
+    support.add_argument('--bind-subject', action='store_true',
+                         help='also diagnose subject/value presence on the same original physical source line')
     support.add_argument('--normalize-periods', action='store_true',
                          help='also report normalized_match of date/quarter/half/fiscal-year periods per row')
     support.add_argument('--fiscal-start', metavar='MM',
@@ -1120,7 +1244,8 @@ def main(argv=None):
                     raise SSOTError('invalid_opt_in')
                 fiscal_start = int(fiscal_start)
             result = check_support(args.vault, args.path, primary_text_only=args.primary_text_only,
-                                   normalize_periods=args.normalize_periods, fiscal_start=fiscal_start)
+                                   normalize_periods=args.normalize_periods, fiscal_start=fiscal_start,
+                                   row_references=args.row_references, bind_subject=args.bind_subject)
         else:
             raw = sys.stdin.buffer.read(MAX_PROPOSAL_BYTES + 1)
             if len(raw) > MAX_PROPOSAL_BYTES:
