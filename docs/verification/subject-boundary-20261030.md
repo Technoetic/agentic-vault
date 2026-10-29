@@ -11,9 +11,9 @@ v0.33.1, and this note does not certify a release, installation or deployment.
 `vault_ssot.py check-support --bind-subject` builds its subject patterns with
 `_support_pattern(literal, subject=True)`. A normalized subject form that starts with
 a non-ASCII letter then needs a left edge: a letter right before it blocks the match
-(kana, Han, the representative SA ranges and U+119E do not), except right after one
-of the five legal forms of the Korean Commercial Act written without a space. The
-value patterns of the same diagnostic, literal support and
+(kana and Han in the exempted blocks, the representative SA ranges and U+119E do
+not), except right after one of the five legal forms of the Korean Commercial Act
+written without a space. The value patterns of the same diagnostic, literal support and
 `_matches` are unchanged, so default output, `warnings`, counts and exit codes stay
 as in v0.33.1, and only `binding_observations` and `binding_warnings` can differ.
 The rule, its UAX #29 approximation, the U+119E tailoring and the kept limits are in
@@ -71,12 +71,19 @@ These ran on one Windows PC with Python 3.12 and synthetic data only.
   `Éclair`) and one to `unassessed` (`source_incomplete`), because its other cited
   source was denied.
 - Compared with WordBreakProperty-18.0.0 (ALetter and Hebrew_Letter) over the 142,897
-  assigned, non-private code points that NFKC and casefolding leave unchanged in the
-  Unicode 15.0.0 database of Python 3.12, the blocking class blocks 9,147 code points
-  that the table does not treat as letters (mostly Tangut, Khitan Small Script, Nushu,
-  hentaigana and some Tai and Myanmar ranges) and does not block 117 that it does
-  (modifier letters, squared or circled Latin letters, and U+119E by design). Python
-  versions with other Unicode databases give other counts.
+  assigned, non-private code points that the engine's `_literal` normalization (NFKC,
+  casefolding and whitespace folding) leaves unchanged in the Unicode 15.0.0 database
+  of Python 3.12, the blocking class blocks 9,147 code points that the table does not
+  treat as letters and does not block 117 that it does. NFKC and casefolding alone
+  leave 142,911 code points unchanged; the other 14 are whitespace and change neither
+  count. The 9,147 are: 6,913 Tangut characters; 749 numeric characters that are not
+  decimal digits (739 No, mostly historic number signs, and the 10 Nl U+3007 and
+  U+3021–U+3029); 470 Khitan Small Script; 396 Nushu; 313 kana in U+1AFF0–U+1B16F,
+  285 of them hentaigana; 300 Tai, Myanmar and Ahom letters outside the representative
+  ranges; and U+3006 and U+3031–U+3035. The 117 are: 57 spacing modifier symbols;
+  52 negative circled or squared Latin capital letters; five Armenian punctuation
+  marks and one Hebrew one; the Syriac abbreviation mark U+070F; and U+119E by design.
+  Python versions with other Unicode databases give other counts.
 
 Run from this checkout:
 

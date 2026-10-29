@@ -94,9 +94,17 @@ normalized subject form whose first character is a non-ASCII letter
 comes right before it. On the line `이가나다전기 매출 12억` the subject `가나다전기`
 is absent, and so is `Éclair` in `xÉclair`. The subject may follow the start of
 the line, a character that is not a word character (a space, punctuation or a
-symbol), a decimal digit, `_`, a kana or Han character, a character in the
-representative Thai, Lao, Myanmar or Khmer ranges, or U+119E. Right after
-one of the five legal forms of the Korean Commercial Act written without a space
+symbol), a decimal digit, `_`, a kana or Han character in the exempted blocks
+(Hiragana and Katakana U+3040–U+30FF, Katakana Phonetic Extensions
+U+31F0–U+31FF, CJK Unified Ideographs U+4E00–U+9FFF and Extension A
+U+3400–U+4DBF, CJK Compatibility Ideographs U+F900–U+FAFF, and U+20000–U+3FFFF),
+a character in the representative Thai, Lao, Myanmar or Khmer ranges, or U+119E.
+Related characters outside those blocks still block: the iteration and closing
+marks U+3005, U+3006, U+303B and U+16FE3, the numerals U+3007 and
+U+3021–U+3029, the vertical kana repeat marks U+3031–U+3035, the masu mark
+U+303C, the ideographic tally marks U+1D372–U+1D376 and the kana in
+U+1AFF0–U+1B16F, hentaigana included. Right after one of the five legal forms of
+the Korean Commercial Act written without a space
 (`주식회사`, `유한회사`, `합명회사`, `합자회사`, `유한책임회사`) is an edge too;
 `(주)` and `㈜` (NFKC `(주)`) end in `)`. Values, default support and
 `--row-references` keep the existing rules, so `(주)이가나다전기` still supports
@@ -108,10 +116,13 @@ WB4, WB6/7 or WB13a/b, so a boundary is assumed after a middle dot (U+00B7), aft
 an underscore and after a format character such as U+00AD. It does not claim
 UAX #29 conformance. A letter here is a word character (`\w`) that is not a
 decimal digit (`\d`) or `_` in the running Python's Unicode database, so it
-includes a few numeric characters that are not decimal digits, and the blocked set
-can shift slightly between Python versions. It also differs from the Word_Break table for
-some scripts: it blocks, for example, Tangut, Khitan Small Script, Nushu and
-hentaigana, and does not block some modifier letters. U+119E is deliberately not
+includes several hundred numeric characters that are not decimal digits (mostly
+historic number signs), and the blocked set can shift slightly between Python
+versions. It also differs from the Word_Break table. It blocks, for example,
+Tangut, Khitan Small Script, Nushu and hentaigana, which the table does not treat
+as letters, and it does not block some characters that the table treats as
+letters: some spacing modifier symbols, negative circled or squared Latin
+letters, and a few Armenian, Hebrew and Syriac marks. U+119E is deliberately not
 blocked, a Korean tailoring of its default ALetter value: it is the NFKC form of
 U+318D (`ㆍ`), which Korean text writes in place of a middle dot, so
 `XYㆍ가나다전기` keeps an edge like `XY·가나다전기`. The
@@ -132,6 +143,10 @@ Kept limits:
 - Any other word written before the subject without a space, such as a legal form
   outside the five or `고객사가나다전기`, blocks it and can add a `subject_absent`
   warning for a real mention.
+- The unrendered line is compared too, so bold, code or link markup between a
+  letter and the subject still leaves an edge: `이**가나다전기**` and
+  `이[[가나다전기]]` bind. Markup around the whole longer name does not
+  (`**이가나다전기**`, `[[이가나다전기]]`).
 
 Compared with v0.33.1 this changes only `--bind-subject` results. A row whose
 same-line subject matches are all blocked by this edge is now `subject_absent`, adding
