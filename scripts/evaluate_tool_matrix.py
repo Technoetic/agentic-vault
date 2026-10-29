@@ -310,7 +310,8 @@ def _string_pattern_conditions():
         'patterns': dict(safety._SCHEMA_B_PATTERNS),
         'pairing': 'every trial runs under both schemas with the same seed; trial_id ends in -schema-A or -schema-B',
         'pattern_rule': ('allow-list: ^ first and $ last only, literals, positive classes of literals and '
-                         'ascending ranges, (...) groups with | only inside, * + ? {m} {m,n}, escapes \\n \\r \\t'),
+                         'ascending ranges without doubled - & ~ |, (...) groups with | only inside, * + ? {m} '
+                         '{m,n} but not on a group that holds a quantifier or |, escapes \\n \\r \\t'),
         'verdict': ('host type, length (code points) and re.fullmatch checks of the raw values against each '
                     'arm\'s own schema; values are never normalized. Record-only: dispatch, grading, '
                     'model_error and the exit status are unchanged'),
@@ -321,8 +322,11 @@ def _string_pattern_conditions():
         'nfc_changed': 'judged calls with a string value that NFC normalization would change, counted separately',
         'server_enforcement': ('neither requested nor verified. In llama.cpp b10729 the Qwen3-Coder XML tool-call '
                                'path reads string argument values as free text, so maxLength and pattern stay out '
-                               'of its grammar and reach the model only as prompt text. Do not read A/B differences '
-                               'as constrained-decoding effects; re-check that path when server_props.build_info '
+                               'of its grammar and reach the model only as prompt text; some other tool-call paths '
+                               'of that build hand the whole parameter schema to the grammar builder. For runs whose '
+                               'chat template takes the Qwen3-Coder XML path, do not read A/B differences as '
+                               'constrained-decoding effects. Re-read the template path in the server source when '
+                               'server_props.build_info, server_props.model or server_props.chat_template_sha256 '
                                'changes')}
 
 
@@ -493,9 +497,10 @@ def main(argv=None):
     parser.add_argument('--string-patterns', action='store_true',
                         help='Opt-in: run every trial under schema A (the default tool schema) and schema B (A plus '
                              'allow-listed format-class patterns on send_message recipient and body) with the same '
-                             'seed, and record host re.fullmatch verdicts per arm. Record-only: dispatch, grading and '
-                             'the exit status are unchanged. A server may pass the patterns to the model as prompt '
-                             'text only.')
+                             'seed, and record host re.fullmatch verdicts per arm. The verdicts do not change '
+                             'dispatch, grading or the exit status; B-arm episodes count toward the pooled summary '
+                             'and the exit status like A-arm episodes. A server may pass the patterns to the model '
+                             'as prompt text only.')
     for name, field in safety.Limits.__dataclass_fields__.items():
         parser.add_argument('--' + name.replace('_', '-'), type=float if 'seconds' in name else int,
                             default=field.default)
