@@ -504,7 +504,9 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 잰다. agentic-vault의 recall에는 보류 장치가 없어 움직일 문턱이 없다. `operating_point`는 빈 결과라는 한 점만
 싣는다. 쌍둥이 거부 재현율은 완전 검색에서 빈 결과인 쌍둥이 / 쌍둥이, 답 있는 문항의 거짓 거부율은 완전 검색에서
 빈 결과인 답 있는 문항 / 답 있는 문항이다. 곡선이나 보정한 문턱이 아니고, n=56에서 5% 예산은 거짓 거부 2건까지라
-문턱을 맞출 표본도 아니다. 거부 문턱이나 잡음을 섞은 개수는 더하지 않았다.
+문턱을 맞출 표본도 아니다. 이 절에는 거부 문턱이나 잡음을 섞은 개수를 더하지 않았다. 평가기 안에서만 쓰는 보정
+문턱은 선택형 `--abstention-calibration conformal`이 따로 낸다([답 없음 보정 문턱](#답-없음-보정-문턱)). 엔진의
+recall에는 그 뒤에도 보류 장치가 없다.
 
 **근접 중복 주의.** 실제 볼트에는 라벨하지 않은 비슷한 노트가 있다. 그런 노트가 남으면 쌍둥이는 여전히 답할 수 있어
 쌍둥이 오탐이 어휘 검색의 오탐을 부풀린다. 그래서 `returned_candidates` 가운데, 같은 주장을 요구하는 다른 문항이 등급을
@@ -539,6 +541,108 @@ legacy 실행과 같다.
   표시만 하므로(`annotate_only`) legacy처럼 4다.
 - 이 작동점에서 질의 확장은 답 있는 문항의 빈 결과를 13개에서 0개로 줄이는 대신 쌍둥이 오탐을 2개 늘린다. 한 점의 두
   숫자일 뿐이며 곡선이나 문턱 비교가 아니다.
+
+## 답 없음 보정 문턱
+
+recall은 보류(abstention)를 호스트에 맡긴다(`abstention: host_decision`). 선택형 `--abstention-calibration conformal`은
+엔진을 바꾸지 않는다. 평가기 안에서만 '신호가 문턱보다 작으면 거부'라는 규칙을 두고, 그 문턱을 커밋한 분할의 dev
+쪽에서 맞춘 뒤 heldout 쪽에서 잰다. 플래그가 없으면 출력·표준 오류·종료 코드는 이전과 바이트 단위로 같다.
+
+```text
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --abstention-calibration conformal --min-recall-at-3 0 --min-mrr 0
+python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --abstention-calibration conformal --false-refusal-budget 0.1
+python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --split-file GOLDSET.split.json --abstention-calibration conformal --redact-key-file KEY_PATH > RESULT.json
+```
+
+- 근거: [Testing for Outliers with Conformal p-values](https://arxiv.org/abs/2104.08279)(Bates·Candès·Lei·Romano·Sesia,
+  Ann. Statist. 51(1), 2023)의 분할 conformal p-value와 [Learn then Test](https://arxiv.org/abs/2110.01052)
+  (Angelopoulos·Bates·Candès·Jordan·Lei, arXiv v5 2022-09-29)의 위험 통제 절차다. 문턱 규칙과 보장의 형태만 가져왔고
+  논문의 실험 수치는 가져오지 않았다.
+- 분할: 새 seed를 만들지 않는다. 분할 파일의 dev가 보정, heldout이 시험이다. fixture 모드의 기본 파일은
+  `<fixture>/split.json`이고(recall_hard는 seed 1707, 답 있는 문항 dev 28·heldout 28), 골드셋 모드에서는
+  `--split-file`이 필요하다. 두 쪽이 모두 필요하므로 `--split`·`--derive-split`과 함께 쓸 수 없고(종료 코드 2), 이
+  플래그가 있으면 `--split` 없이 `--split-file`만 줘도 된다. 대상 문항은 쌍둥이와 같다. 답 있는 헤드라인 문항만 쓰고
+  inspected·답 없음·분할 밖 문항은 뺀다.
+- 신호: 팔마다 실행 전에 하나로 정한다. 그 행의 옵션으로 검색을 한 번 더 실행해, 돌려받은 top_k 가운데 가장 큰 점수를
+  쓴다. 기본값은 legacy·lexical·hybrid 팔이 `lexical`(legacy 점수 또는 `scores.lexical`), bm25 팔이 `bm25`,
+  `--lexical-ngrams hangul2`를 켠 bm25 팔이 `bm25_hangul2`다. hybrid의 top_k에는 bm25가 0인 lexical 전용 후보가
+  섞이고, bigram 순위로만 찾은 후보는 단어 BM25가 0이기 때문이다. 순위로 만든 RRF 합은 쓰지 않는다.
+  `--abstention-signal`로 다른 점수를 고를 수 있지만 모든 팔에 맞아야 한다. legacy 팔은 `lexical`뿐이라 `--compare`에서는
+  기본값만 쓸 수 있다. 맞지 않거나, 기본값이 다른 백엔드가 한 팔에 섞이면 종료 코드 2다. 두 번째 검색이 평가한 행과 다른
+  결과를 내면(실행 중 볼트가 바뀐 경우 등) `status`가 `rerun_mismatch`가 되고 문턱을 내지 않는다.
+- 보정: dev에서 완전 검색으로 후보를 돌려준 답 있는 문항 n개의 신호만 쓴다. 완전 검색의 빈 결과와 불완전 검색은 보정에
+  넣지 않고 따로 센다. k = ⌊α(n+1)⌋이고(α는 `--false-refusal-budget`, 기본 0.05, 0과 1 사이가 아니면 종료 코드 2),
+  k = 0이면(α = 0.05에서 n < 19) 문턱이 없다. 그렇지 않으면 문턱 t는 보정 신호 가운데 k번째로 작은 값이다. 신호가 t보다
+  작으면 거부하고 같으면 답한다. 이 판정은 Bates 식 (3)의 p ≤ α와 같다(동점이 있어도 같으며 시험으로 확인한다).
+  `--false-refusal-budget`과 `--abstention-signal`은 `--abstention-calibration` 없이 쓸 수 없다(종료 코드 2).
+- 보장은 주변 보장뿐이다. 후보를 돌려주고 보정 문항과 교환 가능한 답 있는 질문이 거부될 확률은, 보정 집합을 뽑는
+  것까지 평균하면 k/(n+1) ≤ α다(`marginal_refusal_bound`). 보정 집합 하나가 실제로 내는 거짓 거부율은 점수가 연속이면
+  Beta(k, n+1−k)를 따르고 동점이 있으면 그보다 확률적으로 작다. 이 비율이 α를 넘을 확률의 상한 P(Bin(n, α) ≤ k−1)을
+  `realized_rate_above_budget_probability`로 함께 낸다. 빈 결과는 보장 밖이다. 총 거짓 거부율은 빈 결과율 + α 이하일
+  뿐이다.
+- 조건부판: `calibration_conditional.learn_then_test`는 빈 결과까지 넣은 총 거짓 거부율을 위험으로 삼는다. 그래서 n에
+  dev 빈 결과도 센다. 보정 신호의 서로 다른 값을 '거부 없음' 끝부터 차례로 검정하고(fixed sequence), p = P(Bin(n, α) ≤
+  거짓 거부 수)가 처음으로 δ = 0.1을 넘으면 멈춘다. 마지막으로 통과한 문턱은 P(위험 ≤ α) ≥ 1−δ를 만족하고, 하나도
+  통과하지 못하면 문턱이 없다. dev 빈 결과만으로 α를 넘는 팔은 늘 없음이다. δ는 라이브러리 함수의 `delta` 인자로만
+  바꿀 수 있고 명령줄 옵션은 없다.
+- 표시만 하는 값: `simes_ccv_minimum_p_value`는 Bates의 Simes 조정(k = ⌊n/2⌋) CCV p-value가 가질 수 있는 최솟값
+  1−δ^(1/k)다. 이 값이 α보다 크면 그 p-value로는 아무것도 거부하지 못하므로 절차로 돌리지 않는다.
+  `simultaneous_fpr_bound`는 Bates 명제 3으로 구한, 모든 문턱에서 동시에(확률 1−δ 이상) 성립하는 거짓 거부율 상한이다.
+  후보를 돌려준 문항에만 해당하며 서술용이다.
+- heldout: 답 있는 heldout 문항의 거짓 거부를 빈 결과와 문턱 거부로 나눠 센다. 그 문항의 쌍둥이(`--gold-removal-twins`와
+  같은 노트를 뺀다)도 같은 문턱으로 거부한 수를 빈 결과와 문턱 거부로 나눠 센다. 쌍둥이 거부 재현율은 검정력 보고용이며
+  어떤 보장도 없다. 쌍둥이 오류는 거부로 세지 않고 표준 오류에 `conformal abstention note (non-blocking)`를 남긴다.
+- 볼트 스냅샷: `vault_snapshot.vault_snapshot_sha256`은 정책을 거친 노트 목록의 경로와 각 노트 바이트의 sha256을 묶은
+  해시다. deny zone과 제외 폴더는 나열하지도 읽지도 않으며, 두 번째 검색 전에 한 번 잰다. 노트가 하나라도 바뀌면 값이
+  바뀌고 그 문턱은 무효다. `vault-config.json`, 질의 매핑 파일, 평가기 옵션은 이 해시에 들어가지 않는다.
+- 출력: 팔마다 `conformal_abstention` 절이 붙는다. 행 id·질문 원문·시나리오·주장·경로는 넣지 않는다. 키 옵션
+  (`--redact-key-file`, `--redact-ephemeral`)은 `vault_snapshot_sha256`과 분할 파일 해시를 다른 지문처럼 키 해시로
+  바꾸고, 이 절이 있는 보고서에서만 `redaction.replaced` 끝에 그 항목을 하나 더한다. `--redact`(키 없음)는 이 절을
+  바꾸지 않는다.
+- 게이트와 종료 코드는 이 절을 읽지 않는다. 팔마다 dev·heldout에서 후보를 돌려준 문항마다 검색을 한 번, heldout
+  쌍둥이마다 한 번 더 하고, 노트를 한 번 더 읽는다(`costs`).
+
+### 2026-10-30 측정
+
+로컬 Windows·Python 3.12.10에서 이 기능을 더한 소스로 recall_hard(top3, 1,500 토큰, α = 0.05, δ = 0.1)를 실행한
+값이다. 출처 보고값이 아닌 합성 fixture 측정이며 `tests/test_conformal_abstention.py`가 같은 값을 고정한다. legacy와
+improved는 CI 옵션(`--compare --expand-query --query-mapping 00-meta/query-map.txt`)의 baseline·improved 팔이고,
+나머지는 `--advanced --backend …`로 실행한 한 팔이다. heldout의 답 있는 문항과 쌍둥이는 각 28개다.
+
+| 팔 (신호) | dev n (빈 결과) | k | 문턱 t (동점) | heldout 거짓 거부 (빈 결과+문턱) | heldout 쌍둥이 거부 (빈 결과+문턱) | Learn then Test |
+|---|---|---|---|---|---|---|
+| legacy (`lexical`) | 21 (7) | 1 | 17 (3) | 6/28 (6+0) | 15/28 (13+2) | 없음 |
+| improved, 질의 확장 (`lexical`) | 28 (0) | 1 | 50 (3) | 0/28 (0+0) | 23/28 (13+10) | 없음 (p = 0.238) |
+| bm25 (`bm25`) | 17 (11) | 0 | 없음 | 12/28 (12+0) | 18/28 (18+0) | 없음 |
+| hybrid (`lexical`) | 21 (7) | 1 | 17 (3) | 6/28 (6+0) | 15/28 (13+2) | 없음 |
+| bm25 + hangul2 (`bm25_hangul2`) | 22 (6) | 1 | 1.940 (1) | 7/28 (7+0) | 15/28 (15+0) | 없음 |
+
+- expansion_ablation 팔은 legacy 행과 같다. dev와 heldout의 빈 결과를 더하면 쌍둥이 절 `operating_point`의 거짓 거부
+  수(legacy 13, improved 0)와 같다.
+- bm25 + hangul2 팔에 `--abstention-signal bm25`를 주면, bigram 순위로만 찾은 후보의 단어 BM25가 0이라 문턱이 0으로
+  떨어지고(동점 5) 거부를 더하지 않는다.
+- improved 팔에 `--false-refusal-budget 0.1`을 주면 k = 2, t = 50이다. Learn then Test는 가장 작은 문턱만 통과한다
+  (p = 0.9^28 ≈ 0.052 ≤ 0.1, 다음 문턱은 동점 3개를 거부해 p ≈ 0.69). δ = 0.05였다면 그것도 통과하지 못한다.
+
+### 보정 문턱의 한계
+
+- n = 28, α = 0.05이면 k = 1이라 문턱은 보정 신호의 최솟값 한 점에 걸린다. 주변 상한은 1/29 ≈ 0.034이지만 실현 거짓
+  거부율이 α를 넘을 확률은 0.95^28 ≈ 0.238이다.
+- 같은 조건에서 조건부판은 거짓 거부가 0이어도 p = 0.238 > δ라 문턱을 내지 못한다. 조건부 보장을 원하면 이 표의 모든
+  팔이 기존 빈 결과 작동점에 머물고 거부를 하나도 더하지 않는다. 빈 결과가 없을 때 α = 0.05·δ = 0.1에서 조건부판이
+  문턱을 낼 수 있는 최소 n은 45다(δ = 0.05면 59). Simes CCV의 최소 p도 n = 28, δ = 0.1에서 1−0.1^(1/14) ≈ 0.152다.
+- 빈 결과를 신호 0으로 보정에 넣으면, dev에 빈 결과가 있는 legacy·bm25·hybrid·bm25 + hangul2 팔(6~11개)은 k = 1의
+  문턱이 0이 되어 기존 빈 결과 작동점으로 퇴화하고 거부를 더하지 않는다. 그래서 빈 결과를 보정에서 빼고 따로 낸다. 그
+  대신 빈 결과는 보장 밖이며, 이 네 팔은 heldout 빈 결과만으로 이미 6/28~12/28이라 α를 크게 넘는다.
+- 볼트가 바뀌면 문턱은 무효다. 노트를 더하거나 고치면 BM25 IDF·평균 길이와 어휘 적중이 달라진다. 자주 고치는 볼트에서는
+  거의 매번 다시 보정해야 한다.
+- 교환 가능성은 실제 질의에서 깨질 수 있다. 골드셋 질문은 노트를 아는 사람이 써서 실제 질의보다 점수가 높은 쪽으로
+  치우칠 수 있고, legacy 점수는 질의어 수에 따라 척도가 커지며, 한 세션의 후속 질의는 서로 독립이 아니다. 조건부판과
+  동시 상한은 교환 가능성에 더해 질의끼리 독립이어야 한다. 이 가정이 깨지면 위의 어떤 상한도 성립하지 않는다.
+- fixture 쌍둥이는 설계한 사례이고, recall_hard heldout은 이미 공개·검토된 집합이다. improved 팔의 23/28 같은 값을
+  효과로 옮기지 않는다. 팔·신호·α는 heldout 결과를 보기 전에 정하고 모든 팔을 함께 보고한다.
+- 이 기능은 기본 recall에 보류를 만들지 않는다. 평가기가 보정한 작동점을 하나 더 낼 뿐이며, 문턱을 엔진 기본값으로
+  옮기면 위 보장은 모두 사라진다. 실익은 보정 집합을 늘린 뒤 같은 틀로 문턱을 고르는 데 있다.
 
 ## 실제 볼트 골드셋 평가
 
