@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Draw a seeded audit sample from a real-vault population and bound the misses from its labels.
 
+    python scripts/real_vault_audit.py plan --population-size 500 --target-share 0.05 --oc 5,25,26
     python scripts/real_vault_audit.py draw --population POPULATION.json --k 20 --out SAMPLE.json
     python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.json --population POPULATION.json
 
@@ -47,13 +48,35 @@ upper_missed_share = K / (T + K) at the bound K. The output carries only counts,
 the seed and digests: no ids, labels or note text. It is an input for human
 judgement, not a gate. Exit code 0 on success whatever x is, 2 for usage
 errors, which are reported as content-free codes.
+
+plan is arithmetic for the step before draw and takes no input file. For N
+items (--population-size, the N that draw will report) and a target share P
+(--target-share) it reads P from its decimal text, as the confidence is read
+(Fraction(repr(P))), so target_misses = floor(P * N) and ltpd_misses =
+ceil(P * N) are exact integers; a float product moves them (0.29 * 100
+floors to 28). sample_size is the smallest k from max(x, 1) to min(N, 5000)
+at which x or fewer misses (--expected-misses x, default 0) give bound an
+upper_misses of at most target_misses. The bound never rises with k, so a
+bisection finds it, and at that k exactly the samples with x or fewer misses
+pass. strict_ltpd_sample_size is the smallest k with
+P(X <= x | N, ltpd_misses, k) <= alpha: the consumer's risk at the LTPD as
+the NIST/SEMATECH e-Handbook of Statistical Methods (section 6.2.2) defines
+it. bound instead passes when P(X <= x | N, target_misses + 1, k) < alpha,
+so the two sizes can differ. A size without such a k is null with a reason
+code. --oc K1,K2,... adds the exact acceptance probability
+P(X <= x | N, K, sample_size) for each K, printed as a float. The output
+carries the numbers, a fixed basis, warnings and the authority, never ids,
+paths or labels. The exit code is 0 for valid arguments, a null size
+included, and 2 for usage errors.
 """
 from __future__ import annotations
 
 import argparse
+from fractions import Fraction
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -76,6 +99,7 @@ MAX_ID_CHARS = MAX_PATH_CHARS + 16
 MAX_POPULATION_ID_CHARS = 200
 MAX_LINE = 2 ** 31 - 1
 MAX_TRUE_POSITIVES = 10 ** 9
+MAX_OC_POINTS = 100
 ITEM_FIELDS = ('id', 'path', 'line', 'match')
 LABELS = ('miss', 'ok')
 GENERIC_FIELDS = ('population_id', 'items', 'source_sha256')
@@ -93,9 +117,29 @@ DRAW_METHOD = ("rank items by the lowercase SHA-256 hex of the UTF-8 text '<seed
 AUTHORITY = 'human_judgement_input_not_gate'
 TRUE_POSITIVES_BASIS = ('flagged_true_positives must be the exact count of true positives from labelling the '
                         'whole flagged set; an estimated count needs a joint interval, which is not given')
+PLAN_BASIS = ('target_misses = floor(target_share * N) and ltpd_misses = ceil(target_share * N), from the decimal '
+              'text of target_share; sample_size: the smallest k from max(expected_misses, 1) to min(N, %d) at '
+              'which expected_misses or fewer misses give bound an upper_misses of at most target_misses; '
+              'strict_ltpd_sample_size: the smallest k in that range with P(X <= expected_misses | N, ltpd_misses, '
+              "k) <= alpha, the consumer's risk at the LTPD (NIST/SEMATECH e-Handbook of Statistical Methods, 6.2.2); "
+              'exact hypergeometric arithmetic, not the binomial approximation for lots much larger than the sample'
+              % MAX_SAMPLE)
+OC_BASIS = ('acceptance_probability: P(X <= expected_misses | N, K, sample_size) for X ~ Hypergeometric(N, K, '
+            'sample_size), computed exactly and printed as a float; at sample_size it is the probability that bound '
+            'gives upper_misses <= target_misses when K of the N items are misses')
+PLAN_WARNINGS = (
+    'a planned size is not a guarantee: only the labels of the drawn sample give a bound',
+    'it assumes a uniform random draw, complete and correct labels and a population fixed before the draw',
+    'fix the seed, k and confidence before labelling; do not redraw or change k after seeing labels',
+    'the sample file records neither target_share nor expected_misses: keep this output with the sample_sha256 '
+    'that draw prints in the work record',
+    'check that N here equals the N in the draw summary',
+)
 SEED_RE = re.compile(r'[0-9a-f]{1,128}')
 SHA256_RE = re.compile(r'[0-9a-f]{64}')
 MATCH_RE = re.compile(r'[A-Za-z0-9_.:-]{1,64}')
+# One --oc entry: a decimal miss count, spaces around it allowed.
+OC_POINT_RE = re.compile(r' *([0-9]{1,9}) *')
 _CONTROL_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
 # References are vault-relative POSIX paths, as vault_ssot.py writes them. A rooted, UNC or drive path would
 # put local directory names in a sample, and a backslash, '.' or '..' would give one note two spellings and
@@ -432,6 +476,91 @@ def bound(args) -> dict:
     return report
 
 
+def _target_share(value) -> Fraction:
+    """The share as an exact fraction of its decimal text, as eval_stats.exact_alpha reads a confidence.
+
+    A float product decides boundaries wrongly: 0.29 * 100 is 28.999999999999996
+    and 0.07 * 100 is 7.000000000000001, so floor and ceil would give 28 and 8.
+    """
+    if type(value) is not float or not 0 < value < 1:
+        raise UsageError('invalid_target_share')
+    return Fraction(repr(value))
+
+
+def _oc_points(text: str, size: int) -> list:
+    """Up to MAX_OC_POINTS comma-separated miss counts K from 0 to N, in the order given."""
+    parts = text.split(',')
+    matches = [OC_POINT_RE.fullmatch(part) for part in parts]
+    if len(parts) > MAX_OC_POINTS or not all(matches):
+        raise UsageError('invalid_oc')
+    points = [int(match.group(1)) for match in matches]
+    if any(point > size for point in points):
+        raise UsageError('invalid_oc')
+    return points
+
+
+def _smallest_size(passes, low: int, high: int):
+    """The smallest k in [low, high] with passes(k), for a test that stays true once true; None if none passes."""
+    if low > high or not passes(high):
+        return None
+    while low < high:
+        middle = (low + high) // 2
+        if passes(middle):
+            high = middle
+        else:
+            low = middle + 1
+    return low
+
+
+def plan(args) -> dict:
+    stats = _load_eval_stats()
+    alpha = _alpha(stats, args.confidence, 'invalid_confidence')
+    size = args.population_size
+    if not 1 <= size <= MAX_POPULATION_ITEMS:
+        raise UsageError('invalid_population_size')
+    share = _target_share(args.target_share)
+    misses = args.expected_misses
+    if not 0 <= misses <= size:
+        raise UsageError('invalid_expected_misses')
+    points = None if args.oc is None else _oc_points(args.oc, size)
+    # Integers from the exact fraction: no float product decides a boundary.
+    target, ltpd = math.floor(share * size), math.ceil(share * size)
+    low, high = max(misses, 1), min(size, MAX_SAMPLE)
+
+    def bounded(k):
+        # bound's own test. Fewer misses never give a larger bound, so every x or fewer passes with x.
+        return stats.hypergeometric_upper_bound(misses, k, size, confidence=args.confidence)['upper_misses'] <= target
+
+    def strict(k):
+        # P(X <= x | N, ltpd, k) <= alpha in exact integers, compared as hypergeometric_upper_bound compares;
+        # _hypergeometric_cdf_numerator is the exact sum eval_stats uses for the bound itself.
+        return (stats._hypergeometric_cdf_numerator(misses, k, size, ltpd) * alpha.denominator
+                <= alpha.numerator * math.comb(size, k))
+
+    # Both tests stay true once true as k grows: X can only rise when an item is added to the sample.
+    sample_size = _smallest_size(bounded, low, high) if misses <= target else None
+    strict_size = _smallest_size(strict, low, high) if misses < ltpd else None
+    report = {'tool': TOOL, 'command': 'plan', 'version': VERSION, 'N': size,
+              'target_share': args.target_share, 'target_misses': target, 'ltpd_misses': ltpd,
+              'expected_misses': misses, 'confidence': args.confidence, 'alpha': float(alpha),
+              'sample_size': sample_size,
+              'sample_size_reason': None if sample_size is not None else (
+                  'expected_misses_exceed_target' if misses > target else 'exceeds_draw_maximum'),
+              'strict_ltpd_sample_size': strict_size,
+              'strict_ltpd_sample_size_reason': None if strict_size is not None else (
+                  'expected_misses_reach_ltpd' if misses >= ltpd else 'exceeds_draw_maximum'),
+              'basis': PLAN_BASIS, 'warnings': list(PLAN_WARNINGS), 'authority': AUTHORITY}
+    if points is not None:
+        report['oc_basis'] = OC_BASIS
+        report['oc'] = None
+        if sample_size is not None:
+            # The exact fractions run to hundreds of digits, so only their nearest floats are printed.
+            total = math.comb(size, sample_size)
+            report['oc'] = [{'K': point, 'acceptance_probability': float(Fraction(
+                stats._hypergeometric_cdf_numerator(misses, sample_size, size, point), total))} for point in points]
+    return report
+
+
 def _parser():
     parser = _Parser(description=__doc__.split('\n\n')[0],
                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -458,6 +587,21 @@ def _parser():
                          help='exact true positives from labelling the whole flagged set; adds recall bounds')
     bounder.add_argument('--confidence', type=float,
                          help='check only: must equal the confidence the sample records (draw --confidence)')
+    planner = commands.add_parser('plan', help='sample size for a target miss share before any draw; no input file')
+    planner.add_argument('--population-size', type=int, required=True, metavar='N',
+                         help='number of items in the population (1-%d), the N that draw will report'
+                              % MAX_POPULATION_ITEMS)
+    planner.add_argument('--target-share', type=float, required=True, metavar='P',
+                         help='largest miss share the bound should show (upper_misses <= floor(P * N)), strictly '
+                              'between 0 and 1; read from its decimal text')
+    planner.add_argument('--expected-misses', type=int, default=0, metavar='X',
+                         help='misses the sample may contain and still pass (default 0)')
+    planner.add_argument('--confidence', type=float, default=CONFIDENCE,
+                         help='one-sided confidence, strictly between 0.5 and 1 (default %.2f); give draw the same '
+                              'value' % CONFIDENCE)
+    planner.add_argument('--oc', metavar='K1,K2,...',
+                         help='up to %d comma-separated miss counts K from 0 to N; adds the exact acceptance '
+                              'probability at sample_size for each' % MAX_OC_POINTS)
     return parser
 
 
@@ -469,7 +613,7 @@ def _fail(code):
 def main(argv=None):
     try:
         args = _parser().parse_args(argv)
-        report = draw(args) if args.command == 'draw' else bound(args)
+        report = {'draw': draw, 'bound': bound, 'plan': plan}[args.command](args)
     except UsageError as error:
         return _fail(str(error))
     print(json.dumps(report, sort_keys=True, indent=2))
