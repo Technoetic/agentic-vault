@@ -182,6 +182,48 @@ class ThresholdRuleTests(unittest.TestCase):
         self.assertEqual(bounds, sorted(bounds))
         self.assertEqual(bounds[n - k + 1:], [1.0] * k)
 
+    def test_each_bound_point_covers_the_thresholds_up_to_its_own(self):
+        # Proposition 3 bounds refusing below t by b_(#(calibration < t) + 1): a point's upper_bound covers every t
+        # above the previous point up to and including its own, and a t just above a point also refuses its ties.
+        delta = 0.1
+
+        def valid(values, threshold, simes_k):
+            return evaluator._simes_upper_bound(len(values), simes_k, delta, sum(value < threshold for value in values))
+
+        def covering(points, threshold):
+            covers = [point["upper_bound"] for point in points if threshold <= point["threshold"]]
+            return covers[0] if covers else 1.0
+
+        calibration = [50, 50, 50, 51, 51, 51, 51, *range(55, 76)]  # n = 28: three ties, then four
+        points = evaluator._simultaneous_fpr_bound(sorted(calibration), 14, delta)
+        self.assertEqual([(point["threshold"], point["calibration_below"]) for point in points[:3]],
+                         [(50, 0), (51, 3), (55, 7)])
+        # 50.5 refuses the three signals tied at 50: b_4 = 0.2749 of the point at 51, not 0.1517 of the point at 50.
+        between = valid(calibration, 50.5, 14)
+        self.assertAlmostEqual(between, 1 - 0.1 ** (1 / 14) * (14 * 13 * 12 / (28 * 27 * 26)) ** (1 / 14), places=12)
+        self.assertAlmostEqual(between, 0.2749, places=4)
+        self.assertEqual(between, points[1]["upper_bound"])
+        self.assertGreater(between, points[0]["upper_bound"])
+        self.assertEqual((valid(calibration, 49, 14), valid(calibration, 76, 14)), (points[0]["upper_bound"], 1.0))
+        generator = random.Random(1707)
+        checked = 0
+        for _ in range(300):
+            size = generator.randrange(1, 61)
+            spread = generator.choice((2, 5, 50))
+            values = [generator.randrange(spread) if generator.random() < 0.7 else generator.random() * spread
+                      for _ in range(size)]
+            simes_k = max(1, size // 2)
+            drawn = evaluator._simultaneous_fpr_bound(sorted(values), simes_k, delta)
+            distinct = sorted(set(values))
+            self.assertEqual([point["threshold"] for point in drawn], distinct)
+            probes = [-1, spread + 1, *distinct, *((low + high) / 2 for low, high in zip(distinct, distinct[1:]))]
+            for threshold in probes:
+                self.assertEqual(valid(values, threshold, simes_k), covering(drawn, threshold), (size, threshold))
+                checked += 1
+        self.assertGreater(checked, 5000)
+        definition = " ".join(evaluator.CONFORMAL_DEFINITIONS["calibration_conditional"].split())
+        self.assertIn("covers every threshold above the previous point up to and including its own", definition)
+
     def test_signals_read_the_fixed_score_and_never_the_rrf_sum(self):
         legacy = [{"path": "a.md", "score": 17}, {"path": "b.md", "score": 23}]
         self.assertEqual(evaluator._conformal_signal_value(legacy, "lexical"), 23)
