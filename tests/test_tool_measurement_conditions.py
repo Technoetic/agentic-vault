@@ -680,6 +680,14 @@ class DefaultEquivalenceTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(printed(local).encode('utf-8')).hexdigest(),
                          self.golden['printed_sha256']['local-model-scripted-transport-ko-clean'])
 
+    def test_disabled_string_patterns_keep_the_v0240_golden_and_request_bytes(self):
+        self.assertSameOutput(normalized_matrix(matrix.evaluate_matrix(string_patterns=False)), self.expected)
+        pinned = self.golden['request_bytes_sha256']['matrix-local-model-safe-both-variants-repeats-2']
+        recorder = Recorder(safety.ScriptedControl('safe'))
+        matrix.evaluate_matrix(spec=matrix.MatrixSpec(prompt_variants=('canonical', 'literal-identifiers'), repeats=2),
+                               backend='local-model', transport=recorder, string_patterns=False)
+        self.assertEqual((len(recorder.requests), digest(recorder.requests)), (pinned['requests'], pinned['sha256']))
+
     def test_default_matrix_cli_equals_the_v0240_golden(self):
         result = subprocess.run([sys.executable, str(SCRIPTS / 'evaluate_tool_matrix.py')],
                                 capture_output=True, timeout=60)
