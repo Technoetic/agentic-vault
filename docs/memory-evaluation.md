@@ -588,7 +588,10 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
 - 표시만 하는 값: `simes_ccv_minimum_p_value`는 Bates의 Simes 조정(k = ⌊n/2⌋) CCV p-value가 가질 수 있는 최솟값
   1−δ^(1/k)다. 이 값이 α보다 크면 그 p-value로는 아무것도 거부하지 못하므로 절차로 돌리지 않는다.
   `simultaneous_fpr_bound`는 Bates 명제 3으로 구한, 모든 문턱에서 동시에(확률 1−δ 이상) 성립하는 거짓 거부율 상한이다.
-  후보를 돌려준 문항에만 해당하며 서술용이다.
+  서로 다른 보정 신호 값마다 점이 하나 있고, `calibration_below`는 그 값보다 작은 보정 신호 수다. 한 점의
+  `upper_bound`는 바로 앞 점보다 크고 자기 값 이하인 모든 문턱에 성립한다(첫 점은 그보다 작은 문턱도 모두 덮는다).
+  어떤 점보다 조금 큰 문턱은 그 점의 동점 신호까지 거부하므로 다음 점의 상한을 쓴다. 가장 큰 신호보다 큰 문턱의
+  상한은 1이다. 후보를 돌려준 문항에만 해당하며 서술용이다.
 - heldout: 답 있는 heldout 문항의 거짓 거부를 빈 결과와 문턱 거부로 나눠 센다. 그 문항의 쌍둥이(`--gold-removal-twins`와
   같은 노트를 뺀다)도 같은 문턱으로 거부한 수를 빈 결과와 문턱 거부로 나눠 센다. 쌍둥이 거부 재현율은 검정력 보고용이며
   어떤 보장도 없다. 쌍둥이 오류는 거부로 세지 않고 표준 오류에 `conformal abstention note (non-blocking)`를 남긴다.
