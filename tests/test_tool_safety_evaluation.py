@@ -943,7 +943,9 @@ class StringPatternLintTests(unittest.TestCase):
 
     def test_allow_list_accepts_anchored_format_classes(self):
         for pattern in (RECIPIENT_PATTERN, BODY_PATTERN, HANGUL_PATTERN, '^(ko|en)$', '^(a|b)$',
-                        r'^[0-9]{3}\t[A-Z]{1,2}$', r'^[\n\r]?$', '^[-a-z]+$', '^[a-z-]*$', '^[-]$', '^$'):
+                        r'^[0-9]{3}\t[A-Z]{1,2}$', r'^[\n\r]?$', '^[-a-z]+$', '^[a-z-]*$', '^[-]$', '^$',
+                        # A quantified group is fine while it holds no quantifier and no |.
+                        '^(ab)*$', '^([a-z][0-9]){1,4}$', '^((ab)c)+$', '^(a|b)c*$', '^((a|b)[0-9]*)$'):
             with self.subTest(pattern=pattern):
                 self.assertIsNone(m.lint_string_pattern(pattern))
 
@@ -960,9 +962,14 @@ class StringPatternLintTests(unittest.TestCase):
             ('^a}$', 'quantifier_syntax'),
             ('^a++$', 'lazy_or_possessive'), ('^a*?$', 'lazy_or_possessive'), ('^a{2}?$', 'lazy_or_possessive'),
             ('^a{2}+$', 'lazy_or_possessive'),
+            # Any quantifier on a group that holds a quantifier or |, even a bounded one or ?.
+            ('^(a*)*b$', 'nested_quantifier'), ('^([a-z]+)+@[a-z]{1,32}$', 'nested_quantifier'),
+            ('^(a{2})*$', 'nested_quantifier'), ('^(a|a)*b$', 'nested_quantifier'),
+            ('^((a|b)c){2}$', 'nested_quantifier'), ('^(a|b)?$', 'nested_quantifier'),
             ('^[^ ]+$', 'negated_class'),
             ('^[]a]$', 'class_syntax'), ('^[[a]$', 'class_syntax'), ('^[a--]$', 'class_syntax'),
-            ('^[a&&b]$', 'class_syntax'), ('^[a-b-c]$', 'class_syntax'), ('^[z-a]$', 'class_syntax'),
+            ('^[a&&b]$', 'class_syntax'), ('^[a~~b]$', 'class_syntax'), ('^[a||b]$', 'class_syntax'),
+            ('^[a-b-c]$', 'class_syntax'), ('^[z-a]$', 'class_syntax'),
             ('^a]$', 'class_syntax'), ('^[ab$', 'class_syntax'),
             ('^(a$', 'unbalanced_group'), ('^a)$', 'unbalanced_group'),
             ('^a{3,2}$', 'invalid_regex'), ('^a{99999999999}$', 'invalid_regex'),

@@ -343,8 +343,10 @@ def _lint_pattern_class(body, index):
             index += 2
             continue
         if char == '[' or (char in '-&~|' and body.startswith(char, index + 1)):
-            # Python warns on these as possible nested sets or set operations, and ECMA-262's
-            # v flag parses them as such.
+            # Python's re raises a FutureWarning on '[[' (possible nested set) and on doubled
+            # - & ~ | (possible set difference, intersection, symmetric difference or union),
+            # so every '[' and doubled operator inside a class is refused. Compatibility with the
+            # ECMA-262 v flag is not a goal: JSON Schema asks for u-flag semantics.
             return None, 'class_syntax'
         members.append(None if char == '-' else char)
         index += 1
@@ -372,37 +374,51 @@ def lint_string_pattern(pattern):
 
     Allowed: ^ first and $ last (both required), literal characters, positive classes of
     literals and ascending ranges, (...) groups with | only inside them, the quantifiers
-    * + ? {m} {m,n}, and the escapes \\n \\r \\t. Everything else is refused, because Python
-    re.fullmatch and an ECMA-262 (u flag) validator can disagree on it or one of them
-    rejects it: \\d \\w \\s \\b and every other escape (write [.] for a dot), '.', anchors
-    inside the pattern, top-level |, any (? syntax, {,n} and {m,}, lazy or possessive
-    quantifiers, and negated, empty or nested classes.
+    * + ? {m} {m,n}, and the escapes \\n \\r \\t. Everything else is refused. Python
+    re.fullmatch and an ECMA-262 (u flag) validator can disagree on, or one of them rejects:
+    \\d \\w \\s \\b and every other escape (write [.] for a dot), '.', anchors inside the
+    pattern, top-level |, any (? syntax, {,n} and {m,}, lazy or possessive quantifiers, and
+    negated, empty or nested classes. Doubled - & ~ | inside a class are refused because
+    Python warns (FutureWarning) that they may become set operations.
+
+    A quantifier on a group that holds a quantifier or | is refused too (nested_quantifier),
+    so every quantified item is one character or one fixed-length sequence that matches in a
+    single way: re.fullmatch cannot backtrack exponentially in the value length. The lint
+    does not bound polynomial backtracking: adjacent quantifiers that can match the same
+    characters, such as ^[a-z]*[a-z]*@$, pass.
     """
     if not isinstance(pattern, str):
         return 'not_string'
     if len(pattern) < 2 or not pattern.startswith('^') or not pattern.endswith('$'):
         return 'not_anchored'
-    body, index, depth, quantifiable = pattern[1:-1], 0, 0, False
+    body, index, quantifiable = pattern[1:-1], 0, False
+    # One flag per open group: does it hold a quantifier or |, at any depth? held is that flag
+    # for a group that just closed, which is the item a following quantifier would repeat.
+    groups, held = [], False
     while index < len(body):
         char = body[index]
         if char == '\\':
             if body[index + 1:index + 2] not in _PATTERN_ESCAPES:
                 return 'escape'
-            index, quantifiable = index + 2, True
+            index, quantifiable, held = index + 2, True, False
             continue
         if char == '[':
             index, reason = _lint_pattern_class(body, index)
             if reason is not None:
                 return reason
-            quantifiable = True
+            quantifiable, held = True, False
             continue
         if char in '*+?{':
             match = _PATTERN_QUANTIFIER.match(body, index) if char == '{' else None
             if not quantifiable or (char == '{' and match is None):
                 return 'quantifier_syntax'
+            if held:
+                return 'nested_quantifier'
             index = match.end() if match is not None else index + 1
             if body[index:index + 1] in ('?', '+'):
                 return 'lazy_or_possessive'
+            if groups:
+                groups[-1] = True
             quantifiable = False
             continue
         if char in '^$':
@@ -412,21 +428,26 @@ def lint_string_pattern(pattern):
         if char == '(':
             if body.startswith('?', index + 1):
                 return 'group_syntax'
-            depth, quantifiable = depth + 1, False
+            groups.append(False)
+            quantifiable, held = False, False
         elif char == ')':
-            if depth == 0:
+            if not groups:
                 return 'unbalanced_group'
-            depth, quantifiable = depth - 1, True
+            held = groups.pop()
+            if groups and held:
+                groups[-1] = True
+            quantifiable = True
         elif char == '|':
-            if depth == 0:
+            if not groups:
                 return 'top_level_alternation'
+            groups[-1] = True
             quantifiable = False
         elif char in ']}':
             return 'class_syntax' if char == ']' else 'quantifier_syntax'
         else:
-            quantifiable = True
+            quantifiable, held = True, False
         index += 1
-    if depth:
+    if groups:
         return 'unbalanced_group'
     try:
         re.compile(pattern)
