@@ -95,6 +95,45 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                 self.write('notes/Evidence.md', text)
                 self.assertEqual(self.check(bind_subject=True)['binding_observations'][0]['status'], status)
 
+    def test_non_ascii_subject_needs_a_left_edge(self):
+        # Synthetic names: a confusable name adds one Hangul syllable before the subject.
+        # The glued legal forms are the five of the Korean Commercial Act. Cross-reference
+        # only, no ELF data is bundled: ISO 20275 ELF v1.6 codes 5RCH 주식회사, J3U5 유한회사,
+        # AXEQ 합명회사, BW92 합자회사, UDJG 유한책임회사.
+        name = '가나다전기'
+        cases = [(name, '이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '(주)이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '주식회사이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '가나다전기는 매출 12억', 'bound'),  # particles: the right edge stays open
+                 (name, '(주)가나다전기 매출 12억', 'bound'),
+                 (name, '㈜가나다전기 매출 12억', 'bound'),  # NFKC: (주)
+                 *[(name, form + '가나다전기 매출 12억', 'bound')
+                   for form in ('주식회사', '유한회사', '합명회사', '합자회사', '유한책임회사')],
+                 (name, '株式會社가나다전기 매출 12억', 'bound'),  # Han is not ALetter
+                 # One letter from other exempt ranges: Thai (an SA range), Katakana,
+                 # Katakana Phonetic Extensions (U+31F0) and Han Extension B (U+20000).
+                 *[(name, edge + '가나다전기 매출 12억', 'bound')
+                   for edge in ('ส', 'カ', 'ㇰ', '\U00020000')],
+                 (name, 'XY\N{MIDDLE DOT}가나다전기 매출 12억', 'bound'),
+                 (name, 'XY\N{HANGUL LETTER ARAEA}가나다전기 매출 12억', 'bound'),  # NFKC: U+119E
+                 (name, '\N{CIRCLED DIGIT ONE}가나다전기 매출 12억', 'bound'),  # NFKC: 1
+                 (name, '_가나다전기_ 매출 12억', 'bound'),
+                 ('Éclair', 'xÉclair 12', 'subject_absent'),
+                 ('Éclair', 'Éclair 12', 'bound'),
+                 ('「가나다전기」', '이「가나다전기」 매출 12억', 'bound'),  # starts with a non-letter: no edge
+                 # Documented limits. An ASCII-start subject keeps the ASCII edge, so one
+                 # Hangul syllable before it still binds, while a Hangul subject right after
+                 # an ASCII letter does not; a format character before a subject (no WB4)
+                 # is an edge.
+                 ('XY전기', '이XY전기 매출 12억', 'bound'),
+                 (name, 'XY가나다전기 매출 12억', 'subject_absent'),
+                 (name, '이\N{SOFT HYPHEN}가나다전기 매출 12억', 'bound')]
+        for subject, text, status in cases:
+            with self.subTest(subject=subject, text=text):
+                self.set_rows([[subject, 'r', '12', '[[Evidence]]']])
+                self.write('notes/Evidence.md', text + '\n')
+                self.assertEqual(self.check(bind_subject=True)['binding_observations'][0]['status'], status)
+
     def test_empty_subject_and_missing_or_failed_sources_are_unassessed(self):
         for subject, source, reason in [('', '[[Evidence]]', 'subject_missing'),
                                         ('Atlas', '[[Evidence]], [[Missing]]', 'source_incomplete'),
@@ -213,6 +252,22 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                     result = self.check(**base, **options)
                     old = {key: value for key, value in result.items() if key in baseline}
                     self.assertEqual(ssot._encode(old), ssot._encode(baseline))
+
+    def test_hangul_value_inside_a_longer_name_stays_supported(self):
+        # Synthetic names. Value literals keep their edges: a Hangul value inside a
+        # confusable name (one more syllable before it) is supported by default, and
+        # --bind-subject still finds it on that line. Only subjects get a left edge.
+        self.set_rows([['Atlas', 'supplier', '가나다전기', '[[Evidence]]']])
+        self.write('notes/Evidence.md', '(주)이가나다전기 매출 12억\n')
+        baseline = self.check()
+        self.assertEqual((baseline['rows_supported'], baseline['rows_unsupported'], baseline['warnings']),
+                         (1, 0, []))
+        result = self.check(bind_subject=True)
+        self.assertEqual(ssot._encode({k: v for k, v in result.items() if k in baseline}),
+                         ssot._encode(baseline))
+        observation = result['binding_observations'][0]
+        self.assertEqual((observation['status'], observation['via']),
+                         ('subject_absent', [dict(path='notes/Evidence.md', line=1)]))
 
     def test_mixed_refusals_and_reference_limit_do_not_certify_subject_absence(self):
         self.write('notes/Evidence.md', 'Birch 12\n')

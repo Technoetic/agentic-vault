@@ -1,5 +1,24 @@
 # 출처와 공유 상태 보강
 
+## Development source after v0.33.1 (2026-10-30)
+
+This development source is not a release. Opt-in `check-support --bind-subject` now
+requires a left edge before a subject that starts with a non-ASCII letter, so a
+subject written right after another letter (for example one more Hangul syllable
+before it) no longer binds; values, default output and exit codes are unchanged. Changing
+`vault_ssot.py` gives this source the `checker_sha256`
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,
+which differs from the published v0.33.1 fingerprint stated below. Version badges,
+installation refs and the v0.33.1 release and verification records still describe v0.33.1.
+See the [subject boundary note](verification/subject-boundary-20261030.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+This coordination also applies when returning to published v0.33.1. No installed
+plugin or vault engine copy is updated by this development work.
+
 ## v0.33.1 source and certificate migration
 
 v0.33.1 includes offline synthetic state/dependency revision and evidence-insufficiency
@@ -165,6 +184,8 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 `--bind-subject`는 같은 원문 물리 줄에서의 주어·값 결속 관측과 별도 경고를 더한다.
 기존 `warnings`·리터럴 지원 수·지원 판정·기간 비교는 바뀌지 않으며, 두 옵션을 주지 않으면 기존 출력 키도 같다.
 구체적인 출력과 경고 인증서 이행은 [전체 행 참조와 주어 진단](support-row-diagnostics.md)을 따른다.
+v0.33.1 이후 개발 소스에서 `--bind-subject`의 주어는 첫 글자가 ASCII가 아닌 글자이면 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)도 본다(값은 그대로, [아래 한계](#한계)).
+비슷한 이름이 다른 법인이라는 기록은 `different_from` 행으로 적을 수 있다([형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance), 파서는 바뀌지 않는다).
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
 상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.
@@ -427,6 +448,16 @@ python -m unittest tests.test_vault_period_metamorphic -v
   `ledger_tables_unseparated`에 경로와 이유로 적는다. 그런 노트의 표, 코드 펜스·들여쓰기 안의 표, `subject`·`relation`·`value`(또는 별칭) 열이 없는 표에 있는 값은 1차 근거로 센다.
 - 경계 규칙은 값의 처음·끝 글자가 ASCII 영숫자일 때만 적용된다. `-5`처럼 부호로 시작하는 값은 앞쪽 경계를 보지 않아
   `10-5` 같은 범위 표기 안에서도 일치로 센다.
+- v0.33.1 이후 개발 소스에서 `--bind-subject`의 주어만 왼쪽 경계를 하나 더 본다. 첫 글자가 ASCII가 아닌 글자(`isalpha`)인 주어는
+  바로 앞이 글자이면 일치로 보지 않는다(`이가나다전기`에는 주어 `가나다전기`가 없다). UAX #29 WB5를 1글자 뒤보기로 근사했다.
+  Word_Break 표는 쓰지 않는다. WB4·WB6/7·WB13a/b는 적용하지 않는다(그래서 `·`·`_`·숨은 서식 문자 뒤는 경계다).
+  UAX #29를 준수한다고 하지 않는다. 주어 앞이 지정한 블록의 가나·한자(U+3040–U+30FF, U+31F0–U+31FF, U+3400–U+4DBF, U+4E00–U+9FFF,
+  U+F900–U+FAFF, U+20000–U+3FFFF)나 대표 SA 범위(타이·라오·미얀마·크메르)의 글자, U+119E이면 막지 않는다. 블록 밖의 관련 글자(U+3005–U+3007,
+  U+3021–U+3029, U+3031–U+3035, U+303B, U+303C, U+16FE3, U+1D372–U+1D376, U+1AFF0–U+1B16F의 가나)는 막는다. U+119E는 가운뎃점
+  대신 쓰는 `ㆍ`(U+318D)의 NFKC 결과라서, UAX #29 기본값(ALetter)과 달리 막지 않는 한국어 맞춤이다. 상법의 법인 형태 다섯
+  (주식회사·유한회사·합명회사·합자회사·유한책임회사)을 띄우지 않고 쓴 바로 뒤도 경계로 본다. ASCII로 시작하는 주어는 기존 ASCII
+  규칙을 그대로 써서 한글 한 음절 뒤에서도 일치한다(`이XY전기`의 `XY전기`). 오른쪽 경계는 조사 때문에 열어 둔다. 다른 말을 띄우지
+  않고 붙여 쓴 주어(`고객사가나다전기`)는 놓쳐 `subject_absent` 경고가 될 수 있다. 값과 기본 `check-support`에는 이 경계를 쓰지 않는다.
 - 경로 없이 쓴 `[[이름]]`이 deny·exclude·runtime 구역에만 있으면 구역을 목록에 넣지 않으므로 `not_found`로 보고한다.
   구역 안 노트의 존재를 드러내지 않기 위한 동작이며 출처가 실제로 없다는 뜻이 아니다. 구역 경로를 직접 쓴 참조만 `policy`다.
 - 끝의 재확인에서 대장은 SHA-256으로 다시 비교하지만 인용 노트는 stat(장치·inode·크기·수정 시각·링크 수, Windows가 아니면
@@ -680,6 +711,12 @@ CommonMark 0.31.2 4.2절 예제 62~79를 다른 말로 바꿔 쓴 시험 사례�
 
 반복 입력으로 찾는 방법이라 남은 것이 없다는 증명은 아니다. 실행 중에 만드는 식(`_support_pattern`, 설정의 사실 패턴, `session_start.py`의 이름표 식)은
 재지 않았고, 기본 경로 밖의 모듈은 `jarvis_bridge.py`만 쟀다.
+
+v0.33.1 이후 개발 소스에서 첫 글자가 ASCII가 아닌 글자인 `--bind-subject` 주어의 식은 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)의
+뒤보기로 시작해 `re`가 리터럴 앞머리 검색을 쓰지 못하므로, 2026-10-30 이 PC(Python 3.12)의 합성 줄에서 검색 한 번이 v0.33.1의 같은 주어 식보다
+약 50~190배(주어가 없는 120자 줄 6.5 µs 대 0.12 µs, 65,536자 한글 줄 3.2 ms 대 0.017 ms), ASCII로 시작하는 주어 식보다 약 5배 느렸다. 시간은 줄 길이에
+비례했고(길이 16배에 약 16~17배) 이 식은 옵트인 `--bind-subject`에서 값이 있는 줄에만 쓰이며, 한글 주어 행 256개가 값만 있고 주어는 없는 줄 2,000개짜리
+노트를 인용한 합성 볼트에서 실행 전체는 0.65초에서 1.6초가 됐다.
 
 **한계.**
 

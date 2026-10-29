@@ -53,7 +53,9 @@ Each observation contains only the ledger `path`/`line`, `status`, a fixed
 | `unassessed` | No literal support, an empty subject, incomplete/failed sources, or no eligible physical value line. This is never a subject-absence finding. |
 
 Comparison reuses NFKC, casefold, whitespace normalization, wiki/code/bold markup
-rendering, and the existing literal boundary rules. An explicit wiki display
+rendering, and the existing literal boundary rules; a subject that starts with a
+non-ASCII letter also needs the [subject left edge](#subject-left-edge) below.
+Values keep the existing rules only. An explicit wiki display
 alias in the subject or source line is accepted. Frontmatter aliases, filenames,
 organization metadata and inferred entity synonyms do not create aliases.
 Before building match patterns, a rendered and normalized subject target or
@@ -83,6 +85,109 @@ still be reported when another cited source fails. All allowed source lines are
 scanned, but at most 32 line references are returned per binding observation;
 `via` is representative evidence and is not an exhaustive line inventory.
 
+### Subject left edge
+
+The existing literal edges apply only where the first or last character of a
+literal is an ASCII letter or digit. For `--bind-subject` subjects only, a
+normalized subject form whose first character is a non-ASCII letter
+(`str.isalpha`) also needs a left edge: it does not match where another letter
+comes right before it. On the line `이가나다전기 매출 12억` the subject `가나다전기`
+is absent, and so is `Éclair` in `xÉclair`. The subject may follow the start of
+the line, a character that is not a word character (a space, punctuation or a
+symbol), a decimal digit, `_`, a kana or Han character in the exempted blocks
+(Hiragana and Katakana U+3040–U+30FF, Katakana Phonetic Extensions
+U+31F0–U+31FF, CJK Unified Ideographs U+4E00–U+9FFF and Extension A
+U+3400–U+4DBF, CJK Compatibility Ideographs U+F900–U+FAFF, and U+20000–U+3FFFF),
+a character in the representative Thai, Lao, Myanmar or Khmer ranges, or U+119E.
+Related characters outside those blocks still block: the iteration and closing
+marks U+3005, U+3006, U+303B and U+16FE3, the numerals U+3007 and
+U+3021–U+3029, the vertical kana repeat marks U+3031–U+3035, the masu mark
+U+303C, the ideographic tally marks U+1D372–U+1D376 and the kana in
+U+1AFF0–U+1B16F, hentaigana included. Right after one of the five legal forms of
+the Korean Commercial Act written without a space
+(`주식회사`, `유한회사`, `합명회사`, `합자회사`, `유한책임회사`) is an edge too;
+`(주)` and `㈜` (NFKC `(주)`) end in `)`. Values, default support and
+`--row-references` keep the existing rules, so `(주)이가나다전기` still supports
+the value `가나다전기`.
+
+The rule approximates UAX #29 WB5 (no break between two letters) with a
+one-character lookbehind. It does not use the Word_Break table and does not apply
+WB4, WB6/7 or WB13a/b, so a boundary is assumed after a middle dot (U+00B7), after
+an underscore and after a format character such as U+00AD. It does not claim
+UAX #29 conformance. A letter here is a word character (`\w`) that is not a
+decimal digit (`\d`) or `_` in the running Python's Unicode database, so it
+includes several hundred numeric characters that are not decimal digits (mostly
+historic number signs), and the blocked set can shift slightly between Python
+versions. It also differs from the Word_Break table. It blocks, for example,
+Tangut, Khitan Small Script, Nushu and hentaigana, which the table does not treat
+as letters, and it does not block some characters that the table treats as
+letters: some spacing modifier symbols, negative circled or squared Latin
+letters, and a few Armenian, Hebrew and Syriac marks. U+119E is deliberately not
+blocked, a Korean tailoring of its default ALetter value: it is the NFKC form of
+U+318D (`ㆍ`), which Korean text writes in place of a middle dot, so
+`XYㆍ가나다전기` keeps an edge like `XY·가나다전기`. The
+[subject boundary note](verification/subject-boundary-20261030.md) records how far
+the class is from the Word_Break table.
+
+Kept limits:
+
+- A subject that starts with an ASCII letter or digit keeps the ASCII edge. One
+  Hangul syllable before it still matches (`이XY전기` for `XY전기`), while a
+  Hangul subject right after an ASCII letter does not (`XY가나다전기` for
+  `가나다전기`).
+- The right edge stays open, because Korean particles follow a name without a
+  space (`가나다전기는`).
+- Apart from the five legal forms, only the one character before the subject is
+  examined. A subject that starts with a kana or Han character is blocked after a
+  letter too, where UAX #29 would break.
+- Any other word written before the subject without a space, such as a legal form
+  outside the five or `고객사가나다전기`, blocks it and can add a `subject_absent`
+  warning for a real mention.
+- The unrendered line is compared too, so bold, code or link markup between a
+  letter and the subject still leaves an edge: `이**가나다전기**` and
+  `이[[가나다전기]]` bind. Markup around the whole longer name does not
+  (`**이가나다전기**`, `[[이가나다전기]]`).
+
+Compared with v0.33.1 this changes only `--bind-subject` results. A row whose
+same-line subject matches are all blocked by this edge is now `subject_absent`, adding
+`ssot-subject-unbound` to `binding_warnings`, or `unassessed` with
+`source_incomplete` when a cited source was left unassessed. Default output,
+`warnings`, counts and exit codes are unchanged.
+
+## Recording confusable names (format guidance)
+
+The engine has no list of confusable names. To record that a similar name belongs
+to a different organization, use ordinary v2 fact rows with all eight columns; a
+human-readable list can stay above the table. Synthetic example:
+
+| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 이가나다전기 | different_from | [[가나다전기]] |  |  | 2026-10-30 | [[Supplier survey]] |  |
+
+- `subject`: the confusable name without its legal form (`이가나다전기`, not
+  `(주)이가나다전기`).
+- `relation`: `different_from`, after Wikidata property P1889 "different from",
+  which is symmetric: one row per pair, no reverse row.
+- `value`: a wiki link to the canonical note.
+- `valid_from`: leave it empty rather than invent a date. The row then keeps the
+  existing `ssot-unknown-validity` warning.
+- `valid_until` and `superseded_by`: empty.
+- `recorded`: the date the row was written.
+- `source`: a resolvable note in which both names appear. `check-support` compares
+  the value with it like any other row.
+- `status`: leave the column out or use a confirmed value (`confirmed`, `확정`,
+  `✅확정`). Never use the rejected vocabulary (`rejected`, `excluded`, `기각`,
+  `배제`, `🚫배제`): the parser reads such a row as a rejected claim and leaves it
+  out of conflict checks.
+
+The confusable name goes in `subject` because `check` keys conflicts by
+`(subject, relation)`: open-ended rows with the same subject and relation and
+different values raise `ssot-open-ended-conflict`. A canonical subject with several
+confusable values would raise it, and so does one confusable name recorded as
+different from two canonical notes. Leave unconfirmed candidates out of the table.
+This is format guidance only: the parser, `check` and `check-support` treat these
+rows like any other fact row, and nothing uses `different_from` to exclude a match.
+
 ## Limits, stability and certificate migration
 
 Existing ledger, citation, inventory, note-count and byte budgets remain in
@@ -100,6 +205,10 @@ copies and vault `00-meta/scripts/`), run the harmless replay on those copies,
 then regenerate the certificate with `vault_warning_policy.py --certificate`
 before re-promoting. Rollback also requires matching engine/certificate versions.
 This implementation does not update installed engines or certificates.
+The [subject left edge](#subject-left-edge) changed `vault_ssot.py` again after
+v0.33.1, so that development source has its own `checker_sha256`; the
+[subject boundary note](verification/subject-boundary-20261030.md) states it with
+the same coordination.
 
 Focused validation uses synthetic temporary vaults:
 
@@ -109,5 +218,7 @@ python -m unittest tests.test_support_row_diagnostics -v
 
 This checks the CLI/audit draw round trip, default serialization preservation,
 all parsed-row states, wrong-subject sources, aliases and numeric boundaries,
-frontmatter/table/line exclusions, source budgets/refusals and stale-read checks.
+the subject left edge with its kept limits, default support of a value inside a
+longer name, frontmatter/table/line exclusions, source budgets/refusals and
+stale-read checks.
 It is not a real-vault coverage or model-effectiveness measurement.

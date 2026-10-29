@@ -445,11 +445,38 @@ def _body_forms(text, marked=None):
     return _forms(re.sub(r'\\([\\|])', r'\1', _note_body(text, marked)), aliases=True)
 
 
-def _support_pattern(literal):
-    """An ASCII letter/digit next to an alphanumeric edge, or a longer number, is another literal."""
+# Left edge of a --bind-subject subject that starts with a non-ASCII letter;
+# values and default support never use it. It approximates UAX #29 WB5 (no
+# break between letters) with a one-character lookbehind: a letter (\w without
+# digits and '_') right before the subject makes it part of a longer word. It
+# does not read the Word_Break table or apply WB4, WB6/7 or WB13a/b, so a
+# format character, a middle dot or '_' before the subject is an edge. The
+# kana, Han and representative SA (Thai, Lao, Myanmar, Khmer) ranges below are
+# not ALetter and never block. U+119E, the NFKC form of U+318D written as a
+# Korean middle dot, never blocks either: a Korean tailoring of its ALetter
+# default. Right after one of the five legal forms of the Korean Commercial
+# Act, written without a space, is an edge too (one fixed-width lookbehind each).
+_LETTER_EDGE = (r'(?<![^\W\d_'
+                r'\u3040-\u30ff\u31f0-\u31ff'  # Hiragana, Katakana, Katakana Phonetic Extensions
+                r'\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003ffff'  # Han
+                r'\u0e00-\u0eff\u1000-\u109f\u1780-\u17ff'  # Thai, Lao, Myanmar, Khmer
+                r'\u119e])')
+_LEGAL_FORMS = ('주식회사', '유한회사', '합명회사', '합자회사', '유한책임회사')
+_SUBJECT_EDGE = '(?:' + ''.join(f'(?<={form})|' for form in _LEGAL_FORMS) + _LETTER_EDGE + ')'
+
+
+def _support_pattern(literal, *, subject=False):
+    """An ASCII letter/digit next to an alphanumeric edge, or a longer number, is another literal.
+
+    subject=True, for --bind-subject subjects only, adds _SUBJECT_EDGE before a
+    literal that starts with a non-ASCII letter. The right edge stays as it is:
+    Korean particles follow a name without a space.
+    """
     prefix = suffix = ''
     if literal[0] in _ASCII_ALNUM:
         prefix = r'(?<![0-9a-z])' + (r'(?<![0-9][.,])' if literal[0].isdigit() else '')
+    elif subject and not literal[0].isascii() and literal[0].isalpha():
+        prefix = _SUBJECT_EDGE
     if literal[-1] in _ASCII_ALNUM:
         suffix = r'(?![0-9a-z])' + (r'(?![.,][0-9])' if literal[-1].isdigit() else '')
     return re.compile(prefix + re.escape(literal) + suffix)
@@ -795,7 +822,7 @@ def _binding_observation(row, path, status, bodies, unresolved, run, reference_l
     if status != 'supported':
         return entry
     patterns = [_support_pattern(form) for form in _forms(row['fields'].get('value', '').strip())]
-    subject_patterns = [_support_pattern(form) for form in subjects]
+    subject_patterns = [_support_pattern(form, subject=True) for form in subjects]
     values, bound, incomplete = [], [], bool(unresolved or reference_limited)
     for cited in sorted(bodies):
         if cited not in run['binding_lines']:
@@ -867,6 +894,8 @@ def check_support(vault, path, *, primary_text_only=False, normalize_periods=Fal
     subject/value co-occurrence on original physical source lines outside
     frontmatter and fact tables, using only cached permitted stable reads.
     Its binding_warnings never enter warnings or change literal support.
+    A subject that starts with a non-ASCII letter also needs a left edge
+    (_SUBJECT_EDGE); values keep the edges of literal support.
     Co-occurrence is not semantic attribution or truth verification.
     """
     if any(type(option) is not bool for option in (primary_text_only, normalize_periods, row_references, bind_subject)):
