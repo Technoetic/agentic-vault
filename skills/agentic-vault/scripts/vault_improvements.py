@@ -152,8 +152,10 @@ def _receipt_order(plan, values):
 
     read_record has already parsed every created_at with this interpreter's
     datetime.fromisoformat and required a zero UTC offset. Only a strictly earlier
-    completion is listed, in definition order; an equal instant is not earlier and
-    an incomplete node counts as after the plan. Not observation time or a signature.
+    completion is listed, in role order (baseline, general, specialized, composed),
+    which is the stored plan definition and the inspect nodes order; an equal instant
+    is not earlier and an incomplete node counts as after the plan. Not observation
+    time or a signature.
     """
     planned = datetime.fromisoformat(plan['created_at'])
     before = [node['id'] for node, _, completed in values if completed is not None

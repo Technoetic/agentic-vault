@@ -94,7 +94,7 @@ python skills/agentic-vault/scripts/vault_improvements.py --vault PATH compare P
 | 필드 | 의미 |
 |---|---|
 | `plan_created_at` | 계획 영수증의 `created_at`. 같은 계획을 다시 `prepare`해도 처음 값이 남는다 |
-| `recorded_before_plan` | 완료 영수증의 `created_at`이 계획보다 엄격히 이른 노드 ID. 계획 정의 순서로 담고, 같은 시각은 이르지 않은 것으로 본다 |
+| `recorded_before_plan` | 완료 영수증의 `created_at`이 계획보다 엄격히 이른 노드 ID. 역할 순서(`baseline`·`general`·`specialized`·`composed`), 곧 저장된 계획 정의와 `inspect`의 `nodes` 순서로 담고, 같은 시각은 이르지 않은 것으로 본다 |
 | `receipt_order` | `plan_first`(계획보다 이른 완료가 없음) / `results_first`(네 노드가 모두 계획보다 이른 경우) / `mixed`(일부 노드만 이른 경우). 미완료 노드는 계획 뒤로 센다 |
 
 - 이미 있는 계획·완료 영수증의 `created_at`만 읽는다. 문자열이 아니라 `datetime.fromisoformat`으로
@@ -103,7 +103,8 @@ python skills/agentic-vault/scripts/vault_improvements.py --vault PATH compare P
   옵션을 켠 `inspect`도 파일을 만들지 않는다.
 - 이 값은 로컬 시계로 찍은 영수증 기록 순서다. 결과를 관찰하거나 열람한 시점이 아니고 서명도 아니다.
   체크섬은 영수증을 고쳐 쓴 뒤 다시 계산할 수 있다. 시계 보정·수동 변경이나 여러 기기의 시계 차이가
-  있으면 순서가 거꾸로 나올 수 있다.
+  있으면 순서가 거꾸로 나올 수 있다. 시계 해상도의 한 눈금 안에 기록된 영수증은 `created_at`이 같다.
+  같은 시각은 이르지 않은 것으로 보므로 그 안에서 계획보다 먼저 기록된 완료도 이른 것으로 세지 않는다.
 - `results_first`·`mixed`는 결과를 본 뒤 계획을 정했을 수 있다는 '선택 편향 가능' 표지일 뿐이다.
   잘못이나 무효를 뜻하지 않는다. 결과를 먼저 기록하고 계획을 만드는 정상 작업에서도 흔히 나오므로
   관문으로 쓰지 않는다.
