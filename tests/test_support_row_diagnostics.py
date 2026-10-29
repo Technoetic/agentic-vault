@@ -214,6 +214,22 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                     old = {key: value for key, value in result.items() if key in baseline}
                     self.assertEqual(ssot._encode(old), ssot._encode(baseline))
 
+    def test_hangul_value_inside_a_longer_name_stays_supported(self):
+        # Synthetic names. Value literals keep their edges: a Hangul value inside a
+        # confusable name (one more syllable before it) is supported by default, and
+        # --bind-subject still finds it on that line. Only subjects get a left edge.
+        self.set_rows([['Atlas', 'supplier', '가나다전기', '[[Evidence]]']])
+        self.write('notes/Evidence.md', '(주)이가나다전기 매출 12억\n')
+        baseline = self.check()
+        self.assertEqual((baseline['rows_supported'], baseline['rows_unsupported'], baseline['warnings']),
+                         (1, 0, []))
+        result = self.check(bind_subject=True)
+        self.assertEqual(ssot._encode({k: v for k, v in result.items() if k in baseline}),
+                         ssot._encode(baseline))
+        observation = result['binding_observations'][0]
+        self.assertEqual((observation['status'], observation['via']),
+                         ('subject_absent', [dict(path='notes/Evidence.md', line=1)]))
+
     def test_mixed_refusals_and_reference_limit_do_not_certify_subject_absence(self):
         self.write('notes/Evidence.md', 'Birch 12\n')
         sources = ['[[Evidence]], [[private/Denied]]', '[[Evidence]], [[Large]]',
