@@ -728,8 +728,10 @@ class PlanTests(AuditCase):
                          'expected_misses_exceed_target')
 
     def test_the_bisection_equals_linear_scans_on_small_populations(self):
-        # Every N up to 40, five shares and x up to 3: the smallest k from max(x, 1) to N for bound's own test
-        # and for an independent fraction at K = ltpd_misses. Below draw's maximum a size is null only through x.
+        # Every N up to 40, five shares and x up to 3: the smallest k from max(x, 1) to N, scanned with independent
+        # fractions. bound's K_U is at most target_misses exactly when P(X <= x | N, target_misses + 1, k) < alpha,
+        # and target_misses + 1 <= N as the share is below 1; the strict size takes K = ltpd_misses. A linear scan
+        # of bound's own test must give the same sample_size. Below draw's maximum a size is null only through x.
         cases, nulls, mismatches = 0, 0, []
         with mock.patch.object(self.tool, '_load_eval_stats', return_value=stats):
             for size in range(1, 41):
@@ -741,11 +743,13 @@ class PlanTests(AuditCase):
                         scan = range(max(misses, 1), size + 1)
                         bounds = {k: stats.hypergeometric_upper_bound(misses, k, size)['upper_misses'] for k in scan}
                         expected = (
-                            next((k for k in scan if bounds[k] <= target), None),
+                            next((k for k in scan
+                                  if hypergeometric_cdf(size, target + 1, k, misses) < Fraction(1, 20)), None),
                             next((k for k in scan if hypergeometric_cdf(size, ltpd, k, misses) <= Fraction(1, 20)),
                                  None),
                             None if misses <= target else 'expected_misses_exceed_target',
                             None if misses < ltpd else 'expected_misses_reach_ltpd')
+                        scanned = next((k for k in scan if bounds[k] <= target), None)
                         report = self.tool.plan(argparse.Namespace(
                             population_size=size, target_share=float(share), expected_misses=misses,
                             confidence=0.95, oc=None))
@@ -753,8 +757,9 @@ class PlanTests(AuditCase):
                                   report['sample_size_reason'], report['strict_ltpd_sample_size_reason'])
                         cases += 1
                         nulls += (expected[0] is None) + (expected[1] is None)
-                        if actual != expected or (report['target_misses'], report['ltpd_misses']) != (target, ltpd):
-                            mismatches.append((size, share, misses, actual, expected))
+                        if (actual != expected or scanned != expected[0]
+                                or (report['target_misses'], report['ltpd_misses']) != (target, ltpd)):
+                            mismatches.append((size, share, misses, actual, expected, scanned))
         self.assertEqual(mismatches, [])
         # 785 plans with 1,570 sizes, 584 of them null: both branches are covered.
         self.assertEqual((cases, nulls), (785, 584))
@@ -794,7 +799,9 @@ class PlanTests(AuditCase):
         self.assertEqual(len(self.plan(*self.FIVE_PERCENT, '--oc', ','.join(['1'] * 100))['oc']), 100)
         self.assertEqual(self.plan('--population-size', 200_000, '--target-share', 0.5)['N'], 200_000)
 
-    def test_plan_opens_no_file_and_writes_nothing(self):
+    def test_plan_opens_no_input_file_and_writes_no_output_file(self):
+        # plan still loads scripts/eval_stats.py, as draw and bound do. importlib reads it through io.open_code,
+        # which this open patch does not see, and without -B Python may write its bytecode cache.
         with mock.patch('builtins.open', side_effect=AssertionError('plan opened a file')):
             code, report = self.main('plan', *self.FIVE_PERCENT, '--oc', 5)
         self.assertEqual((code, report['sample_size']), (0, 54))
