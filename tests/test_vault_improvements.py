@@ -577,6 +577,27 @@ class VaultImprovementsTests(unittest.TestCase):
                                  str(self.vault), 'compare', plan['id'], '--receipt-order'],
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, opted['compare'], ''))
+        # A changed candidate note, or a completion receipt that writes the same instant with a
+        # +09:00 offset under a recomputed checksum, is refused the same way with the option.
+        receipt = self.vault / runs.RUNTIME_DIR / runs._names(self.arms['general']['id'])[1]
+        shifted = json.loads(receipt.read_bytes())
+        self.assertEqual(shifted['created_at'], EARLIER)
+        shifted['created_at'] = '2026-10-30T08:00:00+09:00'
+        shifted['receipt_sha256'] = runs.evidence.digest(runs.evidence.encode(
+            {key: value for key, value in shifted.items() if key != 'receipt_sha256'}))
+        tampers = (('note', self.vault / 'notes/general.md', b'Changed after the plan.\n', 'stale_source'),
+                   ('completion', receipt, runs.evidence.encode(shifted) + b'\n', 'invalid_receipt'))
+        for label, path, changed, error in tampers:
+            original = path.read_bytes()
+            path.write_bytes(changed)
+            with self.subTest(tampered=label):
+                for verb, function in (('inspect', improvements.inspect), ('compare', improvements.compare)):
+                    refused = self.rejected(partial(function, self.vault, plan['id']))
+                    self.assertEqual(self.rejected(partial(function, self.vault, plan['id'],
+                                                           receipt_order=True)), refused)
+                    self.assertEqual(refused, error)
+                    self.assertEqual(cli(verb, plan['id'], '--receipt-order'), cli(verb, plan['id']))
+            path.write_bytes(original)
 
 
 if __name__ == '__main__':
