@@ -546,7 +546,10 @@ legacy 실행과 같다.
 
 recall은 보류(abstention)를 호스트에 맡긴다(`abstention: host_decision`). 선택형 `--abstention-calibration conformal`은
 엔진을 바꾸지 않는다. 평가기 안에서만 '신호가 문턱보다 작으면 거부'라는 규칙을 두고, 그 문턱을 커밋한 분할의 dev
-쪽에서 맞춘 뒤 heldout 쪽에서 잰다. 플래그가 없으면 출력·표준 오류·종료 코드는 이전과 바이트 단위로 같다.
+쪽에서 맞춘 뒤 heldout 쪽에서 잰다. 플래그가 없으면 문서화한 어느 옵션으로 실행해도 출력·표준 오류·종료 코드는
+이전과 바이트 단위로 같다. 다만 `--help`와 argparse 오류 메시지의 usage 줄에는 새 옵션이 함께 나오고, `--fixture`를
+줄여 쓴 `--f`는 이제 `--false-refusal-budget`과도 겹쳐 argparse의 `ambiguous option` 오류와 종료 코드 2가 된다.
+약어는 문서화한 인터페이스가 아니므로 `--fixture`를 쓴다.
 
 ```text
 python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --abstention-calibration conformal --min-recall-at-3 0 --min-mrr 0
@@ -600,8 +603,11 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   같은 노트를 뺀다)도 같은 문턱으로 거부한 수를 빈 결과와 문턱 거부로 나눠 센다. 쌍둥이 거부 재현율은 검정력 보고용이며
   어떤 보장도 없다. 쌍둥이 오류는 거부로 세지 않고 표준 오류에 `conformal abstention note (non-blocking)`를 남긴다.
 - 볼트 스냅샷: `vault_snapshot.vault_snapshot_sha256`은 정책을 거친 노트 목록의 경로와 각 노트 바이트의 sha256을 묶은
-  해시다. deny zone과 제외 폴더는 나열하지도 읽지도 않으며, 두 번째 검색 전에 한 번 잰다. 노트가 하나라도 바뀌면 값이
-  바뀌고 그 문턱은 무효다. `vault-config.json`, 질의 매핑 파일, 평가기 옵션은 이 해시에 들어가지 않는다.
+  해시다. deny zone과 제외 폴더는 나열하지도 읽지도 않으며, 두 번째 검색 전에 한 번 잰다. 노트 목록이나 읽은 노트가
+  하나라도 바뀌면 값이 바뀌고 그 문턱은 무효다. recall이 읽지 않는 노트(512 KiB를 넘는 노트, 안전하지 않거나 하드
+  링크된 노트, 읽을 수 없는 노트, 읽기 합계 16 MiB를 넘긴 노트)는 경로만 들어가므로, 이 값이 정책을 거친 노트 전체를
+  보증하는 것은 `vault_snapshot.complete`가 true일 때뿐이다(이때 `hashed_note_count`가 `listed_note_count`와 같다).
+  `vault-config.json`, 질의 매핑 파일, 평가기 옵션은 이 해시에 들어가지 않는다.
 - 출력: 팔마다 `conformal_abstention` 절이 붙는다. 행 id·질문 원문·시나리오·주장·경로는 넣지 않는다. 키 옵션
   (`--redact-key-file`, `--redact-ephemeral`)은 `vault_snapshot_sha256`과 분할 파일 해시를 다른 지문처럼 키 해시로
   바꾸고, 이 절이 있는 보고서에서만 `redaction.replaced` 끝에 그 항목을 하나 더한다. `--redact`(키 없음)는 이 절을
