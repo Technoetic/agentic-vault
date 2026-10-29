@@ -95,6 +95,40 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                 self.write('notes/Evidence.md', text)
                 self.assertEqual(self.check(bind_subject=True)['binding_observations'][0]['status'], status)
 
+    def test_non_ascii_subject_needs_a_left_edge(self):
+        # Synthetic names: a confusable name adds one Hangul syllable before the subject.
+        # The glued legal forms are the five of the Korean Commercial Act. Cross-reference
+        # only, no ELF data is bundled: ISO 20275 ELF v1.6 codes 5RCH 주식회사, J3U5 유한회사,
+        # AXEQ 합명회사, BW92 합자회사, UDJG 유한책임회사.
+        name = '가나다전기'
+        cases = [(name, '이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '(주)이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '주식회사이가나다전기 매출 12억', 'subject_absent'),
+                 (name, '가나다전기는 매출 12억', 'bound'),  # particles: the right edge stays open
+                 (name, '(주)가나다전기 매출 12억', 'bound'),
+                 (name, '㈜가나다전기 매출 12억', 'bound'),  # NFKC: (주)
+                 *[(name, form + '가나다전기 매출 12억', 'bound')
+                   for form in ('주식회사', '유한회사', '합명회사', '합자회사', '유한책임회사')],
+                 (name, '株式會社가나다전기 매출 12억', 'bound'),  # Han is not ALetter
+                 (name, 'XY\N{MIDDLE DOT}가나다전기 매출 12억', 'bound'),
+                 (name, 'XY\N{HANGUL LETTER ARAEA}가나다전기 매출 12억', 'bound'),  # NFKC: U+119E
+                 (name, '\N{CIRCLED DIGIT ONE}가나다전기 매출 12억', 'bound'),  # NFKC: 1
+                 (name, '_가나다전기_ 매출 12억', 'bound'),
+                 ('Éclair', 'xÉclair 12', 'subject_absent'),
+                 ('Éclair', 'Éclair 12', 'bound'),
+                 # Documented limits. An ASCII-start subject keeps the ASCII edge, so one
+                 # Hangul syllable before it still binds, while a Hangul subject right after
+                 # an ASCII letter does not; a format character before a subject (no WB4)
+                 # is an edge.
+                 ('XY전기', '이XY전기 매출 12억', 'bound'),
+                 (name, 'XY가나다전기 매출 12억', 'subject_absent'),
+                 (name, '이\N{SOFT HYPHEN}가나다전기 매출 12억', 'bound')]
+        for subject, text, status in cases:
+            with self.subTest(subject=subject, text=text):
+                self.set_rows([[subject, 'r', '12', '[[Evidence]]']])
+                self.write('notes/Evidence.md', text + '\n')
+                self.assertEqual(self.check(bind_subject=True)['binding_observations'][0]['status'], status)
+
     def test_empty_subject_and_missing_or_failed_sources_are_unassessed(self):
         for subject, source, reason in [('', '[[Evidence]]', 'subject_missing'),
                                         ('Atlas', '[[Evidence]], [[Missing]]', 'source_incomplete'),

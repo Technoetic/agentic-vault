@@ -1,5 +1,24 @@
 # Claude Code · Codex 겸용 사용
 
+## Development source after v0.33.1 (2026-10-30)
+
+This development source is not a release. Opt-in `check-support --bind-subject` now
+requires a left edge before a subject that starts with a non-ASCII letter, so a
+subject written right after another letter (for example one more Hangul syllable
+before it) no longer binds; values, default output and exit codes are unchanged. Changing
+`vault_ssot.py` gives this source the `checker_sha256`
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,
+which differs from the published v0.33.1 fingerprint stated below. Version badges,
+installation refs and the v0.33.1 release and verification records still describe v0.33.1.
+See the [subject boundary note](verification/subject-boundary-20261030.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+This coordination also applies when returning to published v0.33.1. No installed
+plugin or vault engine copy is updated by this development work.
+
 ## v0.33.1 source and certificate migration
 
 v0.33.1 includes offline synthetic state/dependency revision and evidence-insufficiency

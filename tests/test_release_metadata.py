@@ -351,6 +351,12 @@ CHECKER_SHA256_V0310 = "d8f9559a873ed7cf00f6982a2aeab28880227f403cec358e8e4e5c3f
 CHECKER_SHA256_V0320 = "9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563"
 # Declared v0.33.0 candidate fingerprint, retained by v0.33.1 and the dated implementation.
 CHECKER_SHA256_V0330 = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92"
+# Declared fingerprint of the development source after v0.33.1, not a release: the
+# --bind-subject subject left edge changed vault_ssot.py. Published v0.33.x records keep
+# CHECKER_SHA256_V0330; the addenda and the dated note below state both.
+CHECKER_SHA256_SOURCE_20261030 = "be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f"
+SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
+SOURCE_CHECKER_SECTION_20261030 = "## Development source after v0.33.1 (2026-10-30)"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
     "README.md", "docs/codex.md", "docs/hardening.md",
 )
@@ -648,7 +654,8 @@ class ReleaseMetadataTests(unittest.TestCase):
                                 text=True, encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checker_sha256"],
-                         CHECKER_SHA256_V0330)
+                         CHECKER_SHA256_SOURCE_20261030)
+        self.assertNotEqual(CHECKER_SHA256_SOURCE_20261030, CHECKER_SHA256_V0330)
         self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
 
     def test_current_checker_addenda_state_release_hash_and_coordination(self) -> None:
@@ -674,6 +681,39 @@ class ReleaseMetadataTests(unittest.TestCase):
         for rel_path in ("docs/releases/v0.32.0.md", "docs/verification/v0.32.0.md"):
             with self.subTest(published_record=rel_path):
                 self.assertNotIn(CHECKER_SHA256_V0330,
+                                 (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
+
+    def test_development_source_addenda_state_fingerprint_after_v0331(self) -> None:
+        # Each addendum states the development fingerprint once, in its own section above the
+        # published v0.33.1 section, which keeps CHECKER_SHA256_V0330 as asserted above.
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
+            with self.subTest(path=rel_path):
+                text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                start = text.index(SOURCE_CHECKER_SECTION_20261030)
+                end = text.index("## v0.33.1 source and certificate migration")
+                self.assertLess(start, end)
+                section = _folded(text[start:end])
+                self.assertIn(f"`{CHECKER_SHA256_SOURCE_20261030}`", section)
+                self.assertEqual(text.count(CHECKER_SHA256_SOURCE_20261030[:8]), 1)
+                self.assertNotIn(CHECKER_SHA256_V0330[:8], section)
+                self.assertIn("This development source is not a release.", section)
+                self.assertIn(SOURCE_CHECKER_COORDINATION, section)
+                self.assertIn("This coordination also applies when returning to published v0.33.1.", section)
+                self.assertIn("verification/subject-boundary-20261030.md)", section)
+        note = (REPO_ROOT / SOURCE_CHECKER_NOTE_20261030).read_text(encoding="utf-8")
+        self.assertIn(f"`{CHECKER_SHA256_SOURCE_20261030}`", note)
+        self.assertIn(f"`{CHECKER_SHA256_V0330}`", note)
+        self.assertIn("Public metadata was v0.33.1 at that point", _folded(note))
+        self.assertIn(SOURCE_CHECKER_COORDINATION, _folded(note))
+        self.assertIn("vault_ssot.py", note)
+        self.assertIn("LF", note)
+        # Published records and the earlier dated note keep their own fingerprints.
+        for rel_path in ("docs/releases/v0.32.0.md", "docs/verification/v0.32.0.md",
+                         "docs/releases/v0.33.0.md", "docs/verification/v0.33.0.md",
+                         "docs/releases/v0.33.1.md", "docs/verification/v0.33.1.md",
+                         "docs/verification/memory-boundaries-20261028.md"):
+            with self.subTest(published_record=rel_path):
+                self.assertNotIn(CHECKER_SHA256_SOURCE_20261030[:8],
                                  (REPO_ROOT / rel_path).read_text(encoding="utf-8"))
 
     def test_published_v0320_checker_hash_statements_and_history_stay_intact(self) -> None:
