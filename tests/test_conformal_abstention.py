@@ -385,6 +385,57 @@ class SyntheticCalibrationTests(SyntheticCase):
         self.assertEqual((code, stdout, stderr.strip()),
                          (2, "", "recall evaluation unavailable: split file is not a readable file"))
 
+    def test_a_split_that_selects_no_query_exits_2_before_any_retrieval(self):
+        self.split = {"seed": 7, "dev": ["NOTLISTED1"], "heldout": ["NOTLISTED2", "NOTLISTED3"]}
+        self.save()
+        message = "recall evaluation unavailable: split dev and heldout select no queries"
+        goldset = ["--vault", self.vault, "--goldset", self.fixture / "queries.json",
+                   "--split-file", self.fixture / "split.json"]
+        with mock.patch.object(evaluator, "evaluate", side_effect=AssertionError("retrieval ran")):
+            for argv in (["--fixture", self.fixture], goldset):
+                with self.subTest(argv=argv):
+                    code, stdout, stderr = run_main([*argv, *LOOSE, *FLAG])
+                    self.assertEqual((code, stdout, stderr.strip()), (2, "", message))
+            # The same rejection as --split, which keeps one side of the same file.
+            code, stdout, stderr = run_main(["--fixture", self.fixture, *LOOSE, "--split", "dev"])
+            self.assertEqual((code, stdout, stderr.strip()),
+                             (2, "", "recall evaluation unavailable: split dev selects no queries"))
+        report = evaluator.evaluate(self.fixture)
+        with mock.patch.object(evaluator, "_twin_note_scan", side_effect=AssertionError("vault read")), \
+                self.assertRaises(evaluator.CalibrationError) as caught:
+            evaluator.with_conformal_abstention(report, self.fixture, self.split)
+        self.assertEqual(str(caught.exception), "split dev and heldout select no queries")
+
+    def test_a_split_without_answerable_dev_or_heldout_queries_only_adds_a_note(self):
+        original = copy.deepcopy(self.split)
+        cases = (
+            # Only the no_answer query is on the dev side, so nothing calibrates.
+            ({**original, "dev": ["CALID22"]}, (0, 3), "no_threshold"),
+            # Only the no_answer query is on the heldout side, so nothing is tested.
+            ({**original, "heldout": ["CALID23"]}, (19, 0), "threshold"),
+        )
+        for split, (dev, heldout), status in cases:
+            with self.subTest(dev=dev, heldout=heldout):
+                self.split = split
+                self.save()
+                note = (f"conformal abstention note (non-blocking): the split file leaves {dev} answerable dev "
+                        f"queries to calibrate on and {heldout} answerable heldout queries to test on (inspected and "
+                        "no_answer queries take no part)\n")
+                plain_code, plain_out, plain_err = run_main(["--fixture", self.fixture, *LOOSE])
+                code, stdout, stderr = run_main(["--fixture", self.fixture, *LOOSE, *FLAG])
+                self.assertEqual((code, stderr), (plain_code, plain_err + note))
+                self.assertEqual(code, 0)
+                flagged = json.loads(stdout)
+                self.assertEqual(json.dumps(without_section(flagged), ensure_ascii=False, indent=2) + "\n",
+                                 plain_out)
+                section = flagged[SECTION]
+                self.assertEqual((section["calibration"]["answerable_query_count"],
+                                  section["heldout"]["answerable_query_count"], section["status"]),
+                                 (dev, heldout, status))
+        # Every arm evaluates the same queries, so a compare run prints the note once.
+        code, _, stderr = self.calibrate("--compare")
+        self.assertEqual((code, stderr), (0, note))
+
     def test_vault_snapshot_digest_covers_listed_notes_only(self):
         _, first, _ = self.calibrate()
         snapshot = first[SECTION]["vault_snapshot"]

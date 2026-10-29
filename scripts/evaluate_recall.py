@@ -1570,7 +1570,8 @@ CONFORMAL_DEFINITIONS = {
 
 
 class CalibrationError(GoldSetError):
-    """An --abstention-calibration option that fits no signal of an evaluated arm (exit code 2).
+    """An --abstention-calibration split file that selects no evaluated query, or an option that fits no signal of
+    an evaluated arm (exit code 2).
 
     Messages name options, arms and row kinds only.
     """
@@ -1653,6 +1654,16 @@ def _conformal_kind(arm: dict, row: dict) -> str:
     if backend not in ('lexical', 'bm25', 'hybrid'):
         return 'invalid'
     return 'bm25+hangul2' if backend == 'bm25' and options.get('lexical_ngrams') == 'hangul2' else backend
+
+
+def _conformal_split_check(split: dict, query_ids) -> None:
+    """Reject a split file whose dev and heldout ids name no evaluated query, as select_split does (exit code 2).
+
+    A split that names some but leaves no answerable dev or heldout query only
+    gets a count-only note (conformal_abstention_notes).
+    """
+    if not (set(split['dev']) | set(split['heldout'])).intersection(query_ids):
+        raise CalibrationError('split dev and heldout select no queries')
 
 
 def _conformal_arm_signal(name, arm: dict, rows: list, signal: str | None) -> str:
@@ -1843,9 +1854,10 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
     directory or the EvaluationInput the report was evaluated from; split is a
     definition from load_split() whose dev side calibrates and heldout side
     tests. signal None takes the default of each arm's row kind; a named signal
-    must fit every arm. CalibrationError comes before any second retrieval
-    call. Existing keys and values are unchanged, the input is not mutated, and
-    gates never read the section.
+    must fit every arm. CalibrationError (a split that selects no evaluated
+    query, or no signal that fits) comes before any second retrieval call.
+    Existing keys and values are unchanged, the input is not mutated, and gates
+    never read the section.
     """
     if not isinstance(report, dict):
         raise ValueError('conformal abstention requires an evaluate() or compare() report')
@@ -1864,6 +1876,7 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
             not isinstance(value, str) for value in split[name]) for name in SPLIT_NAMES)
             or set(split['dev']).intersection(split['heldout'])):
         raise ValueError('conformal abstention requires a split definition from load_split()')
+    _conformal_split_check(split, [row['id'] for arm in arms.values() for row in arm['per_query']])
     listed = set(split['dev']) | set(split['heldout'])
     signals = {name: _conformal_arm_signal(name, arm, [row for row in arm['per_query']
                                                        if _twin_population(row) and row['id'] in listed], signal)
@@ -1887,14 +1900,20 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
 
 
 def conformal_abstention_notes(report: dict) -> list[str]:
-    """Non-blocking stderr notes for second calls that did not reproduce a row and unmeasured heldout twins."""
+    """Non-blocking stderr notes: a split that leaves no answerable dev or heldout query (counts only, once, as every
+    arm evaluates the same queries), second calls that did not reproduce a row and unmeasured heldout twins."""
     arms = ([(None, report)] if 'per_query' in report else
             [(name, report[name]) for name in REPORT_ARMS if name in report])
+    sections = [(name, arm[CONFORMAL_KEY]) for name, arm in arms if arm.get(CONFORMAL_KEY)]
     notes = []
-    for name, arm in arms:
-        section = arm.get(CONFORMAL_KEY)
-        if not section:
-            continue
+    if sections:
+        dev = sections[0][1]['calibration']['answerable_query_count']
+        heldout = sections[0][1]['heldout']['answerable_query_count']
+        if not dev or not heldout:
+            notes.append(f"conformal abstention note (non-blocking): the split file leaves {dev} answerable dev "
+                         f"queries to calibrate on and {heldout} answerable heldout queries to test on (inspected "
+                         "and no_answer queries take no part)")
+    for name, section in sections:
         where = '' if name is None else name + ' arm: '
         if section['rerun_mismatch_count']:
             notes.append(f"conformal abstention note (non-blocking): {where}{section['rerun_mismatch_count']} second "
@@ -2582,8 +2601,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             source = select_split(source, args.split, split_file)
         calibration_split = None
         if args.abstention_calibration is not None:
-            # Read before any retrieval, so a missing or invalid split file fails fast.
+            # Read and match before any retrieval, so a missing, invalid or unmatched split file fails fast.
             calibration_split = load_split(fixture / "split.json" if args.split_file is None else args.split_file)
+            _conformal_split_check(calibration_split, [item["id"] for item in _prepared(source).queries])
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
         if args.lexical_ngrams is not None:

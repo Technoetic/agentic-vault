@@ -562,7 +562,9 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   `<fixture>/split.json`이고(recall_hard는 seed 1707, 답 있는 문항 dev 28·heldout 28), 골드셋 모드에서는
   `--split-file`이 필요하다. 두 쪽이 모두 필요하므로 `--split`·`--derive-split`과 함께 쓸 수 없고(종료 코드 2), 이
   플래그가 있으면 `--split` 없이 `--split-file`만 줘도 된다. 대상 문항은 쌍둥이와 같다. 답 있는 헤드라인 문항만 쓰고
-  inspected·답 없음·분할 밖 문항은 뺀다.
+  inspected·답 없음·분할 밖 문항은 뺀다. 분할 파일의 id가 평가한 문항과 하나도 맞지 않으면 `--split`처럼 종료
+  코드 2로 끝나고, 맞더라도 답 있는 dev 문항이나 heldout 문항이 남지 않으면 종료 코드는 그대로이고 표준 오류에 두
+  쪽의 개수만 적은 `conformal abstention note (non-blocking)`를 남긴다.
 - 신호: 팔마다 실행 전에 하나로 정한다. 그 행의 옵션으로 검색을 한 번 더 실행해, 돌려받은 top_k 가운데 가장 큰 점수를
   쓴다. 기본값은 legacy·lexical·hybrid 팔이 `lexical`(legacy 점수 또는 `scores.lexical`), bm25 팔이 `bm25`,
   `--lexical-ngrams hangul2`를 켠 bm25 팔이 `bm25_hangul2`다. hybrid의 top_k에는 bm25가 0인 lexical 전용 후보가
