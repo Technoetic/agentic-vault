@@ -4,22 +4,27 @@ A repository evaluation tool like flaky_repeat.py. draw writes item
 references only (path, line, id, match) and records the commitment made
 before labelling (seed, k and confidence, with a digest of the whole sample);
 bound needs every sampled id labelled and prints counts, the seed and digests,
-never ids, labels or note text. Every population here is synthetic; nothing
-reads a real vault.
+never ids, labels or note text. plan is arithmetic before any draw: sample
+sizes for a target share of N and an exact OC table, from no input file.
+Every population here is synthetic; nothing reads a real vault.
 """
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 import contextlib
+from fractions import Fraction
 import hashlib
 import importlib.util
 import io
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +41,9 @@ SAMPLE_KEYS = {'tool', 'kind', 'version', 'population_id', 'population_kind', 'p
                'k', 'confidence', 'draw_method', 'items'}
 BOUND_KEYS = {'tool', 'command', 'version', 'N', 'k', 'x', 'confidence', 'alpha', 'seed', 'sample_sha256',
               'population_sha256', 'population_verified', 'upper_misses', 'upper_miss_share', 'method', 'authority'}
+PLAN_KEYS = {'tool', 'command', 'version', 'N', 'target_share', 'target_misses', 'ltpd_misses', 'expected_misses',
+             'confidence', 'alpha', 'sample_size', 'sample_size_reason', 'strict_ltpd_sample_size',
+             'strict_ltpd_sample_size_reason', 'basis', 'warnings', 'authority'}
 
 
 def _load(name, path):
@@ -67,6 +75,12 @@ def ledger(values):
              for value in values]
     return '\n'.join(['| ' + ' | '.join(FIELDS) + ' |', '| ' + ' | '.join(['---'] * len(FIELDS)) + ' |',
                       *['| ' + ' | '.join(row) + ' |' for row in table]]) + '\n'
+
+
+def hypergeometric_cdf(population, total, sample, misses) -> Fraction:
+    """P(X <= misses) for X ~ Hypergeometric(population, total, sample), summed directly from math.comb."""
+    return Fraction(sum(math.comb(total, i) * math.comb(population - total, sample - i)
+                        for i in range(min(misses, sample) + 1)), math.comb(population, sample))
 
 
 class AuditCase(unittest.TestCase):
@@ -584,6 +598,235 @@ class BoundTests(AuditCase):
             with self.subTest(args=args):
                 self.refused('invalid_arguments', 'bound', '--sample', out, '--labels', labels, *args)
         self.refused('sample_unreadable', 'bound', '--sample', self.dir / 'missing.json', '--labels', labels)
+
+
+class PlanTests(AuditCase):
+    FIVE_PERCENT = ('--population-size', 500, '--target-share', 0.05)
+
+    def plan(self, *args):
+        code, report = self.main('plan', *args)
+        self.assertEqual(code, 0, report)
+        return report
+
+    def test_sizes_for_a_five_percent_target_among_500_items(self):
+        for misses, (size, strict) in {0: (54, 56), 1: (84, 87), 2: (110, 114), 3: (135, 139)}.items():
+            with self.subTest(expected_misses=misses):
+                report = self.plan(*self.FIVE_PERCENT, '--expected-misses', misses)
+                self.assertEqual(set(report), PLAN_KEYS)
+                self.assertEqual({key: report[key] for key in PLAN_KEYS - {'basis', 'warnings'}}, {
+                    'tool': 'real_vault_audit', 'command': 'plan', 'version': 1, 'N': 500, 'target_share': 0.05,
+                    'target_misses': 25, 'ltpd_misses': 25, 'expected_misses': misses, 'confidence': 0.95,
+                    'alpha': 0.05, 'sample_size': size, 'sample_size_reason': None,
+                    'strict_ltpd_sample_size': strict, 'strict_ltpd_sample_size_reason': None,
+                    'authority': 'human_judgement_input_not_gate'})
+                # bound's own test passes at the planned size and fails one item earlier.
+                self.assertLessEqual(stats.hypergeometric_upper_bound(misses, size, 500)['upper_misses'], 25)
+                self.assertGreater(stats.hypergeometric_upper_bound(misses, size - 1, 500)['upper_misses'], 25)
+                # The consumer's risk at K = 25, from an independent fraction, first reaches 1/20 at the strict size.
+                self.assertLessEqual(hypergeometric_cdf(500, 25, strict, misses), Fraction(1, 20))
+                self.assertGreater(hypergeometric_cdf(500, 25, strict - 1, misses), Fraction(1, 20))
+        defaults = self.plan(*self.FIVE_PERCENT)
+        self.assertEqual(defaults, self.plan(*self.FIVE_PERCENT, '--expected-misses', 0, '--confidence', 0.95))
+        self.assertEqual((defaults['basis'], defaults['warnings']),
+                         (self.tool.PLAN_BASIS, list(self.tool.PLAN_WARNINGS)))
+        self.assertIn('NIST/SEMATECH e-Handbook of Statistical Methods', defaults['basis'])
+        warnings = ' '.join(defaults['warnings'])
+        for phrase in ('not a guarantee', 'uniform random draw', 'complete and correct labels', 'population fixed',
+                       'before labelling', 'do not redraw or change k', 'sample_sha256', 'N in the draw summary'):
+            with self.subTest(warning=phrase):
+                self.assertIn(phrase, warnings)
+        lower = self.plan(*self.FIVE_PERCENT, '--confidence', 0.9)
+        self.assertEqual((lower['alpha'], lower['sample_size'], lower['strict_ltpd_sample_size']), (0.1, 42, 43))
+
+    def test_the_oc_table_is_exact_at_the_planned_size(self):
+        report = self.plan(*self.FIVE_PERCENT, '--oc', '5,25,26,0,500, 25')
+        self.assertEqual(set(report), PLAN_KEYS | {'oc', 'oc_basis'})
+        self.assertEqual((report['sample_size'], report['oc_basis']), (54, self.tool.OC_BASIS))
+        self.assertEqual([point['K'] for point in report['oc']], [5, 25, 26, 0, 500, 25])
+        for point in report['oc']:
+            with self.subTest(K=point['K']):
+                self.assertEqual(set(point), {'K', 'acceptance_probability'})
+                self.assertEqual(point['acceptance_probability'], float(hypergeometric_cdf(500, point['K'], 54, 0)))
+        self.assertEqual([round(point['acceptance_probability'], 6) for point in report['oc']],
+                         [0.563334, 0.053264, 0.047209, 1.0, 0.0, 0.053264])
+        # 54 items are no '5% LTPD at 5% consumer's risk' plan: 25 misses pass with probability 0.053264.
+        # With 5 misses (1%) the audit still reports the target missed with probability about 0.44.
+        for misses, size, accepted in ((1, 84, 0.801821), (2, 110, 0.926561)):
+            with self.subTest(expected_misses=misses):
+                report = self.plan(*self.FIVE_PERCENT, '--expected-misses', misses, '--oc', 5)
+                self.assertEqual(report['sample_size'], size)
+                self.assertEqual(round(report['oc'][0]['acceptance_probability'], 6), accepted)
+        self.assertFalse({'oc', 'oc_basis'} & set(self.plan(*self.FIVE_PERCENT)))
+
+    def test_at_the_planned_size_x_or_fewer_misses_is_exactly_what_passes(self):
+        for misses in range(4):
+            with self.subTest(expected_misses=misses):
+                size = self.plan(*self.FIVE_PERCENT, '--expected-misses', misses)['sample_size']
+                passing = [x for x in range(size + 1)
+                           if stats.hypergeometric_upper_bound(x, size, 500)['upper_misses'] <= 25]
+                self.assertEqual(passing, list(range(misses + 1)))
+
+    def test_the_share_is_read_from_its_decimal_text(self):
+        # Float products would move these boundaries.
+        self.assertEqual((math.floor(0.29 * 100), math.floor(0.57 * 100), math.ceil(0.07 * 100)), (28, 56, 8))
+        cases = {(100, 0.29): (29, 29, 9, 9), (100, 0.57): (57, 57, 4, 4), (100, 0.07): (7, 7, 31, 34),
+                 (499, 0.05): (24, 25, 55, 55),
+                 # P(X = 0 | 1 miss) is (500 - k) / 500: bound needs < 1/20 (k = 476), the strict size <= 1/20 (475).
+                 (500, 0.001): (0, 1, 476, 475)}
+        for (size, share), expected in cases.items():
+            with self.subTest(N=size, share=share):
+                report = self.plan('--population-size', size, '--target-share', share)
+                self.assertEqual((report['target_misses'], report['ltpd_misses'], report['sample_size'],
+                                  report['strict_ltpd_sample_size']), expected)
+
+    def test_the_large_lot_binomial_plan_is_larger_for_500_items(self):
+        # NIST/SEMATECH 6.2.3.2 takes N as very large next to n and uses the binomial: at p = 0.05 with a 5%
+        # consumer's risk it asks for 59, 93 and 124 items for c = 0, 1 and 2, above the exact 56, 87 and 114.
+        share, risk = Fraction(1, 20), Fraction(1, 20)
+
+        def binomial_size(c):
+            return next(n for n in range(c + 1, 1000) if sum(
+                math.comb(n, d) * share ** d * (1 - share) ** (n - d) for d in range(c + 1)) <= risk)
+        self.assertEqual([binomial_size(c) for c in range(3)], [59, 93, 124])
+        self.assertEqual([self.plan(*self.FIVE_PERCENT, '--expected-misses', misses)['strict_ltpd_sample_size']
+                          for misses in range(3)], [56, 87, 114])
+        # With 200,000 items both exact sizes are the binomial 59.
+        report = self.plan('--population-size', 200_000, '--target-share', 0.05)
+        self.assertEqual((report['sample_size'], report['strict_ltpd_sample_size']), (59, 59))
+
+    def test_the_documented_bounds_come_back_as_planned_sizes(self):
+        # K_U(0, 20) = 68, K_U(0, 40) = 34 and K_U(1, 20) = 106 among 500 items (bound tests above).
+        for share, misses, size in ((0.136, 0, 20), (0.068, 0, 40), (0.212, 1, 20)):
+            with self.subTest(share=share, expected_misses=misses):
+                report = self.plan('--population-size', 500, '--target-share', share, '--expected-misses', misses)
+                self.assertEqual(report['sample_size'], size)
+                self.assertEqual(stats.hypergeometric_upper_bound(misses, size, 500)['upper_misses'],
+                                 report['target_misses'])
+
+    def test_a_size_without_a_solution_is_null_with_a_reason_and_exit_code_0(self):
+        cases = {
+            # More expected misses than the target: no sample size passes, and neither does the strict size.
+            (500, 0.05, 26): (None, 'expected_misses_exceed_target', None, 'expected_misses_reach_ltpd'),
+            # x = target = ltpd: only a census passes bound, and P(X <= x | K = x) is 1 for every k.
+            (500, 0.05, 25): (500, None, None, 'expected_misses_reach_ltpd'),
+            # Beyond the 5,000 items draw takes.
+            (200_000, 0.0005, 0): (None, 'exceeds_draw_maximum', None, 'exceeds_draw_maximum'),
+            (200_000, 0.5, 6_000): (None, 'exceeds_draw_maximum', None, 'exceeds_draw_maximum'),
+        }
+        for (size, share, misses), expected in cases.items():
+            with self.subTest(N=size, share=share, expected_misses=misses):
+                result = self.cli('plan', '--population-size', size, '--target-share', share,
+                                  '--expected-misses', misses, '--oc', 0)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual((report['sample_size'], report['sample_size_reason'],
+                                  report['strict_ltpd_sample_size'], report['strict_ltpd_sample_size_reason']),
+                                 expected)
+                self.assertEqual(report['oc'],
+                                 None if expected[0] is None else [{'K': 0, 'acceptance_probability': 1.0}])
+        self.assertEqual(self.plan(*self.FIVE_PERCENT, '--expected-misses', 500)['sample_size_reason'],
+                         'expected_misses_exceed_target')
+
+    def test_the_bisection_equals_linear_scans_on_small_populations(self):
+        # Every N up to 40, five shares and x up to 3: the smallest k from max(x, 1) to N for bound's own test
+        # and for an independent fraction at K = ltpd_misses. Below draw's maximum a size is null only through x.
+        cases, nulls, mismatches = 0, 0, []
+        with mock.patch.object(self.tool, '_load_eval_stats', return_value=stats):
+            for size in range(1, 41):
+                for share in ('0.01', '0.05', '0.1', '0.29', '0.5'):
+                    exact = Fraction(share)
+                    target = exact.numerator * size // exact.denominator
+                    ltpd = -(-exact.numerator * size // exact.denominator)
+                    for misses in range(min(size, 3) + 1):
+                        scan = range(max(misses, 1), size + 1)
+                        bounds = {k: stats.hypergeometric_upper_bound(misses, k, size)['upper_misses'] for k in scan}
+                        expected = (
+                            next((k for k in scan if bounds[k] <= target), None),
+                            next((k for k in scan if hypergeometric_cdf(size, ltpd, k, misses) <= Fraction(1, 20)),
+                                 None),
+                            None if misses <= target else 'expected_misses_exceed_target',
+                            None if misses < ltpd else 'expected_misses_reach_ltpd')
+                        report = self.tool.plan(argparse.Namespace(
+                            population_size=size, target_share=float(share), expected_misses=misses,
+                            confidence=0.95, oc=None))
+                        actual = (report['sample_size'], report['strict_ltpd_sample_size'],
+                                  report['sample_size_reason'], report['strict_ltpd_sample_size_reason'])
+                        cases += 1
+                        nulls += (expected[0] is None) + (expected[1] is None)
+                        if actual != expected or (report['target_misses'], report['ltpd_misses']) != (target, ltpd):
+                            mismatches.append((size, share, misses, actual, expected))
+        self.assertEqual(mismatches, [])
+        # 785 plans with 1,570 sizes, 584 of them null: both branches are covered.
+        self.assertEqual((cases, nulls), (785, 584))
+
+    def test_a_planned_draw_and_its_bound(self):
+        planned = self.plan(*self.FIVE_PERCENT)
+        population = self.population(rows(500))
+        out, summary = self.draw(population, planned['sample_size'], '1707')
+        self.assertEqual((summary['N'], summary['k']), (planned['N'], 54))
+        # No miss bounds the misses at 25 = target_misses; one miss at 40, above it.
+        for misses, upper in ((set(), 25), ({7}, 40)):
+            with self.subTest(x=len(misses)):
+                labels = self.labels(out, misses=misses, name='labels-%d.json' % len(misses))
+                code, report = self.main('bound', '--sample', out, '--labels', labels, '--population', population)
+                self.assertEqual((code, report['k'], report['x'], report['population_verified']),
+                                 (0, 54, len(misses), True))
+                self.assertEqual(report['upper_misses'], upper)
+
+    def test_invalid_plan_arguments_are_refused_with_content_free_codes(self):
+        cases = [('invalid_population_size', ('--population-size', value, '--target-share', 0.05))
+                 for value in (0, -5, 200_001)]
+        cases += [('invalid_target_share', ('--population-size', 500, '--target-share', value))
+                  for value in ('0', '0.0', '1', '1.5', '-0.05', 'nan', 'inf')]
+        cases += [('invalid_expected_misses', (*self.FIVE_PERCENT, '--expected-misses', value)) for value in (-1, 501)]
+        cases += [('invalid_confidence', (*self.FIVE_PERCENT, '--confidence', value)) for value in ('0.5', '1', 'nan')]
+        cases += [('invalid_oc', (*self.FIVE_PERCENT, '--oc', value))
+                  for value in ('', 'a', '5,', ',5', '5,,25', '5;25', '1.5', '-1', '501', '0x10', '1_0',
+                                '\N{FULLWIDTH DIGIT FIVE}', ','.join(['1'] * 101))]
+        cases += [('invalid_arguments', args) for args in (
+            (), ('--population-size', 500), ('--target-share', 0.05),
+            ('--population-size', 'many', '--target-share', 0.05),
+            ('--population-size', 500, '--target-share', 'small'), (*self.FIVE_PERCENT, '--expected-misses', '1.5'),
+            (*self.FIVE_PERCENT, '--confidence', 'high'), (*self.FIVE_PERCENT, '--oc'), (*self.FIVE_PERCENT, 'extra'))]
+        for code, args in cases:
+            with self.subTest(code=code, args=args):
+                self.refused(code, 'plan', *args)
+        self.assertEqual(len(self.plan(*self.FIVE_PERCENT, '--oc', ','.join(['1'] * 100))['oc']), 100)
+        self.assertEqual(self.plan('--population-size', 200_000, '--target-share', 0.5)['N'], 200_000)
+
+    def test_plan_opens_no_file_and_writes_nothing(self):
+        with mock.patch('builtins.open', side_effect=AssertionError('plan opened a file')):
+            code, report = self.main('plan', *self.FIVE_PERCENT, '--oc', 5)
+        self.assertEqual((code, report['sample_size']), (0, 54))
+        result = subprocess.run([sys.executable, '-B', str(TOOL), 'plan', '--population-size', '500',
+                                 '--target-share', '0.05'], cwd=self.dir, capture_output=True, text=True,
+                                encoding='utf-8', timeout=120)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        self.assertEqual(json.loads(result.stdout)['sample_size'], 54)
+        self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_plan_usage_errors_exit_2_without_echo_and_help_works(self):
+        # Before the dispatch named plan, every command but draw ran bound: a traceback and exit code 1.
+        sentinel = 'SYNTHETIC_ECHO_SENTINEL_' + uuid.uuid4().hex
+        for args, code in ((('plan',), 'invalid_arguments'), (('plan', '--' + sentinel), 'invalid_arguments'),
+                           (('plan', '--population-size', sentinel, '--target-share', 0.05), 'invalid_arguments'),
+                           (('plan', '--population-size', 500, '--target-share', sentinel), 'invalid_arguments'),
+                           (('plan', *self.FIVE_PERCENT, '--oc', sentinel), 'invalid_oc')):
+            with self.subTest(args=args):
+                result = self.cli(*args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'ok': False, 'error': code})
+                self.assertNotIn(sentinel, result.stdout + result.stderr)
+        result = self.cli('plan', *self.FIVE_PERCENT)
+        self.assertEqual((result.returncode, result.stderr, json.loads(result.stdout)['command']), (0, '', 'plan'))
+        result = self.cli('plan', '--help')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for option in ('--population-size', '--target-share', '--expected-misses', '--confidence', '--oc'):
+            with self.subTest(option=option):
+                self.assertIn(option, result.stdout)
+        result = self.cli('--help')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('{draw,bound,plan}', result.stdout)
 
 
 class IsolationTests(AuditCase):
