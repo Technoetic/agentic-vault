@@ -589,8 +589,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   거짓 거부 수)가 처음으로 δ = 0.1을 넘으면 멈춘다. 마지막으로 통과한 문턱은 P(위험 ≤ α) ≥ 1−δ를 만족하고, 하나도
   통과하지 못하면 문턱이 없다. dev 빈 결과만으로 α를 넘는 팔은 늘 없음이다. δ는 라이브러리 함수의 `delta` 인자로만
   바꿀 수 있고 명령줄 옵션은 없다.
-- 표시만 하는 값: `simes_ccv_minimum_p_value`는 Bates의 Simes 조정(k = ⌊n/2⌋) CCV p-value가 가질 수 있는 최솟값
-  1−δ^(1/k)다. 이 값이 α보다 크면 그 p-value로는 아무것도 거부하지 못하므로 절차로 돌리지 않는다.
+- 표시만 하는 값: `simes_ccv_minimum_p_value`는 Bates의 Simes 조정(k = max(1, ⌊n/2⌋)) CCV p-value가 가질 수 있는
+  최솟값 1−δ^(1/k)다. 이 값이 α보다 크면 그 p-value로는 아무것도 거부하지 못하므로 절차로 돌리지 않는다.
   `simultaneous_fpr_bound`는 Bates 명제 3으로 구한, 모든 문턱에서 동시에(확률 1−δ 이상) 성립하는 거짓 거부율 상한이다.
   서로 다른 보정 신호 값마다 점이 하나 있고, `calibration_below`는 그 값보다 작은 보정 신호 수다. 한 점의
   `upper_bound`는 바로 앞 점보다 크고 자기 값 이하인 모든 문턱에 성립한다(첫 점은 그보다 작은 문턱도 모두 덮는다).
@@ -641,6 +641,10 @@ improved는 CI 옵션(`--compare --expand-query --query-mapping 00-meta/query-ma
 - 빈 결과를 신호 0으로 보정에 넣으면, dev에 빈 결과가 있는 legacy·bm25·hybrid·bm25 + hangul2 팔(6~11개)은 k = 1의
   문턱이 0이 되어 기존 빈 결과 작동점으로 퇴화하고 거부를 더하지 않는다. 그래서 빈 결과를 보정에서 빼고 따로 낸다. 그
   대신 빈 결과는 보장 밖이며, 이 네 팔은 heldout 빈 결과만으로 이미 6/28~12/28이라 α를 크게 넘는다.
+- `--lexical-ngrams hangul2`를 켠 hybrid 팔도 `lexical` 신호만 쓸 수 있는데, bigram 순위로만 찾은 후보는
+  `scores.lexical`이 0이라 이 신호가 퇴화한다. recall_hard(`--advanced --backend hybrid --lexical-ngrams hangul2`,
+  top3, α = 0.05)에서는 n = 26(빈 결과 2), k = 1, 문턱 t = 0(동점 5)이라 문턱이 거부를 하나도 더하지 않았다
+  (2026-10-30 측정, 시험으로 고정).
 - 볼트가 바뀌면 문턱은 무효다. 노트를 더하거나 고치면 BM25 IDF·평균 길이와 어휘 적중이 달라진다. 자주 고치는 볼트에서는
   거의 매번 다시 보정해야 한다.
 - 교환 가능성은 실제 질의에서 깨질 수 있다. 골드셋 질문은 노트를 아는 사람이 써서 실제 질의보다 점수가 높은 쪽으로

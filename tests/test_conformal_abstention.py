@@ -181,6 +181,9 @@ class ThresholdRuleTests(unittest.TestCase):
             self.assertAlmostEqual(bound, expected, places=12)
         self.assertEqual(bounds, sorted(bounds))
         self.assertEqual(bounds[n - k + 1:], [1.0] * k)
+        # The report states the k the code uses: at n = 1, floor(n / 2) would be 0.
+        definition = " ".join(evaluator.CONFORMAL_DEFINITIONS["calibration_conditional"].split())
+        self.assertIn("(k = simes_k = max(1, floor(n / 2)))", definition)
 
     def test_each_bound_point_covers_the_thresholds_up_to_its_own(self):
         # Proposition 3 bounds refusing below t by b_(#(calibration < t) + 1): a point's upper_bound covers every t
@@ -757,7 +760,9 @@ class DefaultOutputTests(unittest.TestCase):
                        "empty results are outside it", "valid for this vault snapshot only",
                        "never an engine default", "gates and the exit code never read it; it exits 2 when the split "
                        "file is missing, invalid or selects no query, or when the rows of an arm need different "
-                       "signals or do not allow the given --abstention-signal"):
+                       "signals or do not allow the given --abstention-signal",
+                       "default: lexical for legacy, lexical and hybrid arms, bm25_hangul2 for bm25 arms with "
+                       "--lexical-ngrams hangul2 and bm25 for other bm25 arms"):
             self.assertIn(phrase, flat)
 
 
@@ -870,6 +875,17 @@ class RecallHardBackendTests(unittest.TestCase):
         self.assertAlmostEqual(observed[3], 1.9402, places=4)
         # The word BM25 score is 0 for candidates found only by the bigram rank: the threshold falls to 0.
         self.assertEqual(counts(self.section(report, signal="bm25")), (22, 6, 1, 0.0, 5, 7, 0, 15, 0))
+
+    def test_hybrid_with_the_hangul_bigram_rank_keeps_the_lexical_score_and_degenerates(self):
+        report = evaluator.evaluate(RECALL_HARD, backend="hybrid", lexical_ngrams="hangul2")
+        section = self.section(report)
+        self.assertEqual((section["signal"], section["status"]), ("lexical", "threshold"))
+        # Candidates found only by the bigram rank have a lexical score of 0: t = 0 with 5 ties refuses nothing.
+        self.assertEqual(counts(section), (26, 2, 1, 0, 5, 1, 0, 10, 0))
+        with self.assertRaises(evaluator.CalibrationError) as caught:
+            self.section(report, signal="bm25_hangul2")
+        self.assertEqual(str(caught.exception),
+                         "--abstention-signal bm25_hangul2 does not fit the evaluated arm: hybrid rows allow lexical")
 
 
 if __name__ == "__main__":

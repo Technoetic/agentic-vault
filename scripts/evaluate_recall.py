@@ -71,7 +71,8 @@ def _load_recall_module():
 
 @functools.lru_cache(maxsize=1)
 def _load_eval_stats():
-    """Load the small-sample statistics by path; only --exact-paired/--rate-bounds use them."""
+    """Load the small-sample statistics by path; --exact-paired, --rate-bounds, --success-bounds and
+    --abstention-calibration use them."""
     spec = importlib.util.spec_from_file_location("agentic_vault_eval_stats", EVAL_STATS_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load statistics module: {EVAL_STATS_PATH}")
@@ -1543,7 +1544,7 @@ CONFORMAL_DEFINITIONS = {
                                'threshold (the paper abstains), as when the dev empty results alone exceed alpha. '
                                'These conditional versions also assume independent queries. '
                                'simes_ccv_minimum_p_value is the smallest calibration-conditional (CCV) p-value of the '
-                               'conformal paper with the Simes adjustment (k = simes_k = floor(n / 2)), 1 - '
+                               'conformal paper with the Simes adjustment (k = simes_k = max(1, floor(n / 2))), 1 - '
                                'delta^(1/simes_k); it is shown only, and when it exceeds alpha those p-values refuse '
                                'nothing. simultaneous_fpr_bound applies Proposition 3 of that paper with the same '
                                'Simes sequence: with probability at least 1 - delta, at every threshold at once, the '
@@ -2507,8 +2508,9 @@ def _parser() -> argparse.ArgumentParser:
                                   f'and 1 (default {CONFORMAL_BUDGET})')
     calibration.add_argument('--abstention-signal', choices=CONFORMAL_SIGNALS,
                              help='with --abstention-calibration: the score every arm uses, fixed before the run '
-                                  '(default: lexical for legacy, lexical and hybrid arms, bm25 for bm25 arms, '
-                                  'bm25_hangul2 with --lexical-ngrams hangul2); it must fit every evaluated arm')
+                                  '(default: lexical for legacy, lexical and hybrid arms, bm25_hangul2 for bm25 arms '
+                                  'with --lexical-ngrams hangul2 and bm25 for other bm25 arms); it must fit every '
+                                  'evaluated arm')
     return parser
 
 
