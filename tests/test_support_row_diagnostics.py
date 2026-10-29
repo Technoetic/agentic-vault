@@ -110,12 +110,17 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                  *[(name, form + '가나다전기 매출 12억', 'bound')
                    for form in ('주식회사', '유한회사', '합명회사', '합자회사', '유한책임회사')],
                  (name, '株式會社가나다전기 매출 12억', 'bound'),  # Han is not ALetter
+                 # One letter from other exempt ranges: Thai (an SA range), Katakana,
+                 # Katakana Phonetic Extensions (U+31F0) and Han Extension B (U+20000).
+                 *[(name, edge + '가나다전기 매출 12억', 'bound')
+                   for edge in ('ส', 'カ', 'ㇰ', '\U00020000')],
                  (name, 'XY\N{MIDDLE DOT}가나다전기 매출 12억', 'bound'),
                  (name, 'XY\N{HANGUL LETTER ARAEA}가나다전기 매출 12억', 'bound'),  # NFKC: U+119E
                  (name, '\N{CIRCLED DIGIT ONE}가나다전기 매출 12억', 'bound'),  # NFKC: 1
                  (name, '_가나다전기_ 매출 12억', 'bound'),
                  ('Éclair', 'xÉclair 12', 'subject_absent'),
                  ('Éclair', 'Éclair 12', 'bound'),
+                 ('「가나다전기」', '이「가나다전기」 매출 12억', 'bound'),  # starts with a non-letter: no edge
                  # Documented limits. An ASCII-start subject keeps the ASCII edge, so one
                  # Hangul syllable before it still binds, while a Hangul subject right after
                  # an ASCII letter does not; a format character before a subject (no WB4)
