@@ -420,8 +420,9 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
 
 **계획** (`plan`)
 
-- 라벨하기 전에 표본 크기를 정하는 산술이다. 파일을 읽거나 쓰지 않고 볼트·네트워크·모델도 쓰지 않으며, 훅·CI·게이트에
-  연결하지 않는다. `--population-size`는 `draw`가 낼 모집단 크기 N(1~200,000), `--target-share`는 상한으로 말하려는
+- 라벨하기 전에 표본 크기를 정하는 산술이다. 입력 파일을 읽거나 출력 파일을 쓰지 않고(`draw`·`bound`처럼
+  `scripts/eval_stats.py`는 불러온다) 볼트·네트워크·모델도 쓰지 않으며, 훅·CI·게이트에 연결하지 않는다.
+  `--population-size`는 `draw`가 낼 모집단 크기 N(1~200,000), `--target-share`는 상한으로 말하려는
   놓침 몫 P(0 초과 1 미만), `--expected-misses`는 표본에 나와도 통과로 볼 놓침 수 x(기본 0), `--confidence`는 `draw`에도
   줄 신뢰 수준(기본 0.95)이다.
 - P는 신뢰 수준처럼 십진 표기에서 분수로 만든다(`Fraction(repr(P))`). `target_misses` = ⌊P·N⌋와 `ltpd_misses` = ⌈P·N⌉는
@@ -446,9 +447,13 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
   `invalid_confidence`·`invalid_oc`·`invalid_arguments`).
 - `--oc K1,K2,…`(0~N의 놓침 수, 100개까지)는 `sample_size`에서 합격 판정 수 c = x의 OC 표를 더한다. K마다
   `acceptance_probability` = P(X ≤ x | N, K, `sample_size`)를 `eval_stats`의 정확한 정수 합으로 분수 계산한 뒤 부동소수로 낸다.
-  분수는 수백 자리라 그대로 내지 않는다. k=54, x=0이면 K=5에서 0.563334, 25에서 0.053264, 26에서 0.047209다(계산값).
-  실제 놓침이 5개(1%)뿐이어도 약 44% 확률로 목표 미달이 보고된다(생산자 위험). 이 결과를 보고 다시 뽑거나 k를 늘리면
-  보장이 사라진다. x=1·k=84이면 K=5에서 0.801821, x=2·k=110이면 0.926561이다(계산값).
+  분수는 수백 자리라 그대로 내지 않는다. `sample_size`가 `null`이면 `oc`도 `null`이고 `oc_basis`만 남는다(엄격 크기에서는
+  OC를 계산하지 않는다). k=54, x=0이면 K=5에서 0.563334, 25에서 0.053264, 26에서 0.047209다(계산값).
+- x=0인 계획(합격 판정 수 c=0)은 생산자 위험이 크다. 위 54개 계획은 실제 놓침이 5개(1%)뿐이어도 약 44%(1 − 0.563334)의
+  확률로 목표 미달을 보고한다. 이 결과를 보고 다시 뽑거나 k를 늘리면 보장이 사라진다. 출력의 경고 다섯 가지는 이 위험을
+  다루지 않으므로, `plan`에는 늘 `--oc`를 주고 실제로 있을 법한 놓침 수 근처의 K를 넣어 라벨하기 전에 합격 확률을 읽는다
+  (위 사용 예의 `--oc 5,25,26`). x를 키우면 k가 커지고, 이 예에서는 K=5의 합격 확률도 커진다. x=1·k=84이면 0.801821,
+  x=2·k=110이면 0.926561이다(계산값).
 - 출력에는 수치와 고정 문구(`basis`, `--oc`이면 `oc_basis`), 경고(`warnings`), `authority`
   (`human_judgement_input_not_gate`)만 둔다. `id`·경로·라벨은 넣지 않는다. 경고는 다섯 가지다. 계획값은 보장이 아니다.
   무작위 추출·완전하고 정확한 라벨·고정 모집단을 전제한다. seed·k·신뢰 수준은 라벨하기 전에 정하고, 라벨을 본 뒤 다시
