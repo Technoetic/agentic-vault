@@ -1666,6 +1666,15 @@ def _conformal_split_check(split: dict, query_ids) -> None:
         raise CalibrationError('split dev and heldout select no queries')
 
 
+def _conformal_rejected(arm: dict, row: dict) -> bool:
+    """A row retrieval rejects for its options: status invalid_options, or an invalid backend.
+
+    Every second call for it is rejected again, so it never calibrates or tests
+    and stays an evaluation error, as without the flag; it chooses no signal.
+    """
+    return row['diagnostics']['status'] == 'invalid_options' or _conformal_kind(arm, row) == 'invalid'
+
+
 def _conformal_arm_signal(name, arm: dict, rows: list, signal: str | None) -> str:
     """The one signal of an arm: the default of its row kind, or the named signal if every row allows it."""
     label = 'the evaluated arm' if name is None else f'the {name} arm'
@@ -1854,10 +1863,11 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
     directory or the EvaluationInput the report was evaluated from; split is a
     definition from load_split() whose dev side calibrates and heldout side
     tests. signal None takes the default of each arm's row kind; a named signal
-    must fit every arm. CalibrationError (a split that selects no evaluated
-    query, or no signal that fits) comes before any second retrieval call.
-    Existing keys and values are unchanged, the input is not mutated, and gates
-    never read the section.
+    must fit every arm. Rows retrieval rejected for their options choose no
+    signal. CalibrationError (a split that selects no evaluated query, or no
+    signal that fits) comes before any second retrieval call. Existing keys and
+    values are unchanged, the input is not mutated, and gates never read the
+    section.
     """
     if not isinstance(report, dict):
         raise ValueError('conformal abstention requires an evaluate() or compare() report')
@@ -1878,8 +1888,9 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
         raise ValueError('conformal abstention requires a split definition from load_split()')
     _conformal_split_check(split, [row['id'] for arm in arms.values() for row in arm['per_query']])
     listed = set(split['dev']) | set(split['heldout'])
-    signals = {name: _conformal_arm_signal(name, arm, [row for row in arm['per_query']
-                                                       if _twin_population(row) and row['id'] in listed], signal)
+    signals = {name: _conformal_arm_signal(name, arm, [row for row in arm['per_query'] if _twin_population(row)
+                                                       and row['id'] in listed and not _conformal_rejected(arm, row)],
+                                           signal)
                for name, arm in arms.items()}
     recall_module = _load_recall_module()
     vault = fixture.vault if isinstance(fixture, EvaluationInput) else fixture / 'vault'
@@ -2488,7 +2499,9 @@ def _parser() -> argparse.ArgumentParser:
                                   'on the heldout ones and their gold-removal twins, with a Learn then Test version. '
                                   'Marginal guarantee only, empty results are outside it, valid for this vault '
                                   'snapshot only and never an engine default; cannot be combined with --split or '
-                                  '--derive-split (gates and exit code are unchanged)')
+                                  '--derive-split (observational: gates and the exit code never read it; it exits 2 '
+                                  'when the split file is missing, invalid or selects no query, or when the rows of '
+                                  'an arm need different signals or do not allow the given --abstention-signal)')
     calibration.add_argument('--false-refusal-budget', type=float, metavar='ALPHA',
                              help=f'with --abstention-calibration: the false refusal budget alpha, strictly between 0 '
                                   f'and 1 (default {CONFORMAL_BUDGET})')

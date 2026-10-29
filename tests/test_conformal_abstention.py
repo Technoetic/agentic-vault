@@ -562,6 +562,32 @@ class SignalValidationTests(SyntheticCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(report[SECTION]["signal"], "bm25")
 
+    def test_an_invalid_per_query_backend_stays_an_evaluation_error(self):
+        # retrieve() rejects the backend (status invalid_options) in the evaluation and in every second call, so the
+        # rows choose no signal: the run reports them and exits 1 as without the flag, plus the section.
+        self.queries[3]["backend"] = "BM25"  # dev
+        self.queries[19]["backend"] = "BM25"  # heldout
+        self.save()
+        argv = ["--fixture", self.fixture, *LOOSE, "--advanced"]
+        plain_code, plain_out, plain_err = run_main(argv)
+        code, stdout, stderr = run_main([*argv, *FLAG])
+        self.assertEqual(plain_code, 1)
+        self.assertEqual([row["status"] for row in json.loads(plain_out)["evaluation_errors"]],
+                         ["invalid_options", "invalid_options"])
+        self.assertEqual(code, plain_code)
+        flagged = json.loads(stdout)
+        self.assertEqual(json.dumps(without_section(flagged), ensure_ascii=False, indent=2) + "\n", plain_out)
+        self.assertEqual(stderr, plain_err + "conformal abstention note (non-blocking): 1 of 3 heldout twins could "
+                                             "not be measured and are not counted as refusals\n")
+        section = flagged[SECTION]
+        self.assertEqual((section["signal"], section["status"], section["rerun_mismatch_count"]),
+                         ("lexical", "no_threshold", 0))
+        calibration, heldout = section["calibration"], section["heldout"]
+        self.assertEqual((calibration["answerable_query_count"], calibration["error_count"], calibration["n"]),
+                         (19, 1, 18))
+        self.assertEqual((heldout["answerable_query_count"], heldout["error_count"],
+                          heldout["twins"]["twin_error_count"]), (3, 1, 1))
+
     def test_option_errors_exit_2_before_retrieval(self):
         fixture = ["--fixture", self.fixture]
         cases = (
@@ -729,7 +755,9 @@ class DefaultOutputTests(unittest.TestCase):
         for phrase in ("--abstention-calibration {conformal}", "--false-refusal-budget ALPHA",
                        "--abstention-signal {lexical,bm25,bm25_hangul2}", "Marginal guarantee only",
                        "empty results are outside it", "valid for this vault snapshot only",
-                       "never an engine default", "gates and exit code are unchanged"):
+                       "never an engine default", "gates and the exit code never read it; it exits 2 when the split "
+                       "file is missing, invalid or selects no query, or when the rows of an arm need different "
+                       "signals or do not allow the given --abstention-signal"):
             self.assertIn(phrase, flat)
 
 

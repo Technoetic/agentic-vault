@@ -570,8 +570,10 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   `--lexical-ngrams hangul2`를 켠 bm25 팔이 `bm25_hangul2`다. hybrid의 top_k에는 bm25가 0인 lexical 전용 후보가
   섞이고, bigram 순위로만 찾은 후보는 단어 BM25가 0이기 때문이다. 순위로 만든 RRF 합은 쓰지 않는다.
   `--abstention-signal`로 다른 점수를 고를 수 있지만 모든 팔에 맞아야 한다. legacy 팔은 `lexical`뿐이라 `--compare`에서는
-  기본값만 쓸 수 있다. 맞지 않거나, 기본값이 다른 백엔드가 한 팔에 섞이면 종료 코드 2다. 두 번째 검색이 평가한 행과 다른
-  결과를 내면(실행 중 볼트가 바뀐 경우 등) `status`가 `rerun_mismatch`가 되고 문턱을 내지 않는다.
+  기본값만 쓸 수 있다. 맞지 않거나, 기본값이 다른 백엔드가 한 팔에 섞이면 종료 코드 2다. 검색이 옵션을 거부한
+  행(잘못된 백엔드 등, `invalid_options`)은 신호를 고를 때 빼고, 플래그가 없을 때처럼 평가 오류로 남는다. 두 번째
+  검색이 평가한 행과 다른 결과를 내면(실행 중 볼트가 바뀐 경우 등) `status`가 `rerun_mismatch`가 되고 문턱을 내지
+  않는다.
 - 보정: dev에서 완전 검색으로 후보를 돌려준 답 있는 문항 n개의 신호만 쓴다. 완전 검색의 빈 결과와 불완전 검색은 보정에
   넣지 않고 따로 센다. k = ⌊α(n+1)⌋이고(α는 `--false-refusal-budget`, 기본 0.05, 0과 1 사이가 아니면 종료 코드 2),
   k = 0이면(α = 0.05에서 n < 19) 문턱이 없다. 그렇지 않으면 문턱 t는 보정 신호 가운데 k번째로 작은 값이다. 신호가 t보다
