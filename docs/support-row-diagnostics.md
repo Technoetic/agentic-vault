@@ -139,6 +139,40 @@ same-line subject matches are all blocked by this edge is now `subject_absent`, 
 `source_incomplete` when a cited source was left unassessed. Default output,
 `warnings`, counts and exit codes are unchanged.
 
+## Recording confusable names (format guidance)
+
+The engine has no list of confusable names. To record that a similar name belongs
+to a different organization, use ordinary v2 fact rows with all eight columns; a
+human-readable list can stay above the table. Synthetic example:
+
+| subject | relation | value | valid_from | valid_until | recorded | source | superseded_by |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 이가나다전기 | different_from | [[가나다전기]] |  |  | 2026-10-30 | [[Supplier survey]] |  |
+
+- `subject`: the confusable name without its legal form (`이가나다전기`, not
+  `(주)이가나다전기`).
+- `relation`: `different_from`, after Wikidata property P1889 "different from",
+  which is symmetric: one row per pair, no reverse row.
+- `value`: a wiki link to the canonical note.
+- `valid_from`: leave it empty rather than invent a date. The row then keeps the
+  existing `ssot-unknown-validity` warning.
+- `valid_until` and `superseded_by`: empty.
+- `recorded`: the date the row was written.
+- `source`: a resolvable note in which both names appear. `check-support` compares
+  the value with it like any other row.
+- `status`: leave the column out or use a confirmed value (`confirmed`, `확정`,
+  `✅확정`). Never use the rejected vocabulary (`rejected`, `excluded`, `기각`,
+  `배제`, `🚫배제`): the parser reads such a row as a rejected claim and leaves it
+  out of conflict checks.
+
+The confusable name goes in `subject` because `check` keys conflicts by
+`(subject, relation)`: open-ended rows with the same subject and relation and
+different values raise `ssot-open-ended-conflict`. A canonical subject with several
+confusable values would raise it, and so does one confusable name recorded as
+different from two canonical notes. Leave unconfirmed candidates out of the table.
+This is format guidance only: the parser, `check` and `check-support` treat these
+rows like any other fact row, and nothing uses `different_from` to exclude a match.
+
 ## Limits, stability and certificate migration
 
 Existing ledger, citation, inventory, note-count and byte budgets remain in

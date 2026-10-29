@@ -185,6 +185,7 @@ python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault 
 기존 `warnings`·리터럴 지원 수·지원 판정·기간 비교는 바뀌지 않으며, 두 옵션을 주지 않으면 기존 출력 키도 같다.
 구체적인 출력과 경고 인증서 이행은 [전체 행 참조와 주어 진단](support-row-diagnostics.md)을 따른다.
 v0.33.1 이후 개발 소스에서 `--bind-subject`의 주어는 첫 글자가 ASCII가 아닌 글자이면 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)도 본다(값은 그대로, [아래 한계](#한계)).
+비슷한 이름이 다른 법인이라는 기록은 `different_from` 행으로 적을 수 있다([형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance), 파서는 바뀌지 않는다).
 값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
 그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
 상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.

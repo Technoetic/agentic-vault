@@ -17,7 +17,10 @@ value patterns of the same diagnostic, literal support and
 `_matches` are unchanged, so default output, `warnings`, counts and exit codes stay
 as in v0.33.1, and only `binding_observations` and `binding_warnings` can differ.
 The rule, its UAX #29 approximation, the U+119E tailoring and the kept limits are in
-[Support-row diagnostics](../support-row-diagnostics.md#subject-left-edge).
+[Support-row diagnostics](../support-row-diagnostics.md#subject-left-edge), with
+format guidance for
+[`different_from` rows](../support-row-diagnostics.md#recording-confusable-names-format-guidance)
+(no parser change).
 
 ## Fingerprints and certificate coordination
 
