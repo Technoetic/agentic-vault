@@ -64,10 +64,11 @@ the NIST/SEMATECH e-Handbook of Statistical Methods (section 6.2.2) defines
 it. bound instead passes when P(X <= x | N, target_misses + 1, k) < alpha,
 so the two sizes can differ. A size without such a k is null with a reason
 code. --oc K1,K2,... adds the exact acceptance probability
-P(X <= x | N, K, sample_size) for each K, printed as a float. The output
-carries the numbers, a fixed basis, warnings and the authority, never ids,
-paths or labels. The exit code is 0 for valid arguments, a null size
-included, and 2 for usage errors.
+P(X <= x | N, K, sample_size) for each K, printed as a float. When
+sample_size is null, oc is null and only oc_basis remains: the OC is never
+computed at the strict size. The output carries the numbers, a fixed basis,
+warnings and the authority, never ids, paths or labels. The exit code is 0
+for valid arguments, a null size included, and 2 for usage errors.
 """
 from __future__ import annotations
 
@@ -601,7 +602,8 @@ def _parser():
                               'value' % CONFIDENCE)
     planner.add_argument('--oc', metavar='K1,K2,...',
                          help='up to %d comma-separated miss counts K from 0 to N; adds the exact acceptance '
-                              'probability at sample_size for each' % MAX_OC_POINTS)
+                              'probability at sample_size for each, and oc is null when sample_size is null '
+                              '(never computed at the strict size)' % MAX_OC_POINTS)
     return parser
 
 
