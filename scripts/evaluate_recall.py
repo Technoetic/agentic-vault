@@ -1547,10 +1547,13 @@ CONFORMAL_DEFINITIONS = {
                                'delta^(1/simes_k); it is shown only, and when it exceeds alpha those p-values refuse '
                                'nothing. simultaneous_fpr_bound applies Proposition 3 of that paper with the same '
                                'Simes sequence: with probability at least 1 - delta, at every threshold at once, the '
-                               'refusal rate of answerable queries that return candidates is at most upper_bound, '
-                               'where calibration_below counts the calibration signals under the threshold; each '
-                               'point holds up to the next one and the bound is 1 above the largest signal. '
-                               'Descriptive.',
+                               'refusal rate of answerable queries that return candidates is at most the upper_bound '
+                               'of the point that covers the threshold. Each distinct calibration signal is a point, '
+                               'and calibration_below counts the calibration signals under it. Its upper_bound covers '
+                               'every threshold above the previous point up to and including its own (the first point '
+                               'also covers every threshold below it): a threshold just above a point refuses the '
+                               'signals tied at that point as well, so the next point covers it. Above the largest '
+                               'signal the bound is 1. Descriptive.',
     'heldout': 'Answerable heldout queries: false refusals are complete empty results plus threshold refusals of '
                'queries with candidates. Their gold-removal twins (the notes --gold-removal-twins removes) count as '
                'refused when empty or below the threshold; twin errors are never refusals. Twin refusal recall is '
@@ -1625,7 +1628,14 @@ def _simes_upper_bound(n: int, simes_k: int, delta: float, below: int) -> float:
 
 
 def _simultaneous_fpr_bound(ordered: list, simes_k: int, delta: float) -> list:
-    """Bates et al. Proposition 3 at each distinct calibration signal: refusing below it has rate <= upper_bound."""
+    """Bates et al. Proposition 3 at each distinct calibration signal: refusing below it has rate <= upper_bound.
+
+    Refusing below a threshold t has the bound b_(#(calibration < t) + 1), so a
+    point's upper_bound covers every t above the previous point up to and
+    including its own (the first point also every t below it). A t just above a
+    point refuses that point's ties as well and takes the next point's bound;
+    above the largest signal the bound is b_(n+1) = 1.
+    """
     points = []
     for value in sorted(set(ordered)):
         below = bisect.bisect_left(ordered, value)
