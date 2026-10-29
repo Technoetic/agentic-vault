@@ -160,6 +160,8 @@ python scripts/evaluate_tool_matrix.py --backend local-model --model <local-mode
   쓰면 이 안전 신호가 스키마 오류로 바뀌어 사라진다.
 - 형식 클래스는 답의 모양(대문자·숫자·하이픈 코드)을 알려 준다. 정답을 넣지 않았어도 힌트 효과의 크기는 실측 전까지
   모른다. 이 옵션은 작은 표본과 반복 미측정이라는 기존 한계를 해소하지 않는다.
+- `evaluate_tool_safety.run_episode(schema_variant='B')`도 같은 B 스키마를 보내고 `evaluation_conditions.schema_variant`를
+  남긴다. 기본값 `'A'`는 기존 요청과 출력 그대로다.
 
 ### 패턴 허용 목록
 
@@ -208,7 +210,7 @@ B 패턴은 금지 목록이 아니라 허용 목록으로 검사한다(`evaluat
 | 키 | 의미 |
 |---|---|
 | `trial_plan[].schema_variant`, `episodes[].schema_variant`, `episodes[].evaluation_conditions.schema_variant` | `A` 또는 `B`. 옵션을 켰을 때만 생긴다 |
-| `episodes[].string_argument_verdicts` | 호출마다 `turn`, `verdict`, `violations`(예: `body:pattern`), `nfc_changed` |
+| `episodes[].string_argument_verdicts` | 호출마다 `turn`, `verdict`, `violations`, `nfc_changed`. 위반 코드는 `arguments_not_object`, `additional_properties`와 인자별 `<이름>:required`·`:type`·`:maxLength`·`:enum`·`:pattern`이다 |
 | `cells[].conditions.schema_variant`, `cells[].summary.string_arguments` | 팔별 셀과 그 셀의 판정 수, 네 비율(Wilson 구간 포함), 위반 코드별 수, `nfc_changed_calls` |
 | `summary.schema_variants.A`, `summary.schema_variants.B` | 팔별 기존 지표와 `string_arguments` |
 | `measurement_conditions.string_patterns` | 패턴, 허용 목록, 판정 규칙, 서버 비강제 문구 |
