@@ -341,9 +341,11 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
 위 비율 상한은 합성 fixture를 반복한다는 가정 아래의 서술이다. 실제 볼트에서 결정적 검사기가 놓친 항목 수는
 사람이 라벨한 무작위 표본으로 따로 잰다. `scripts/real_vault_audit.py`는 `flaky_repeat.py`와 같은 저장소 평가
 도구다. 플러그인 리소스가 아니며 훅·CI 게이트·기본 실행에 연결하지 않는다. 볼트를 열지 않고 주어진 JSON 파일만
-읽으며, 네트워크·모델 호출이 없다.
+읽으며, 네트워크·모델 호출이 없다. 라벨하기 전에 `plan`으로 표본 크기를 정하고(아래 **계획**), `draw`로 뽑아 라벨한 뒤
+`bound`로 상한을 낸다.
 
 ```text
+python scripts/real_vault_audit.py plan --population-size 500 --target-share 0.05 --oc 5,25,26
 python scripts/real_vault_audit.py draw --population POPULATION.json --k 20 --out SAMPLE.json
 python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.json --population POPULATION.json
 ```
@@ -416,6 +418,58 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
   Clopper-Pearson 상한으로 읽고 N을 곱하면 69.55·36.08이다. 표본이 모집단의 큰 몫이면 차이가 커진다(N=100, k=40,
   x=0: 5 대 7.22). 2026-10-27 로컬 Windows·Python 3.12.10에서 N=1,000,000·k=400·x=3(K_U=19,266)은 0.01초 안에 끝났다.
 
+**계획** (`plan`)
+
+- 라벨하기 전에 표본 크기를 정하는 산술이다. 입력 파일을 읽거나 출력 파일을 쓰지 않고(`draw`·`bound`처럼
+  `scripts/eval_stats.py`는 불러온다) 볼트·네트워크·모델도 쓰지 않으며, 훅·CI·게이트에 연결하지 않는다.
+  `--population-size`는 `draw`가 낼 모집단 크기 N(1~200,000), `--target-share`는 상한으로 말하려는
+  놓침 몫 P(0 초과 1 미만), `--expected-misses`는 표본에 나와도 통과로 볼 놓침 수 x(기본 0), `--confidence`는 `draw`에도
+  줄 신뢰 수준(기본 0.95)이다.
+- P는 신뢰 수준처럼 십진 표기에서 분수로 만든다(`Fraction(repr(P))`). `target_misses` = ⌊P·N⌋와 `ltpd_misses` = ⌈P·N⌉는
+  정수로 계산한다. 부동소수 곱은 경계를 틀리게 정한다. 0.29×100은 28.999…라 내림하면 28이 되고, 0.07×100은 7.000…1이라
+  올림하면 8이 된다.
+- `sample_size`는 `bound`와 같은 정의다. 놓침이 x개 이하로 나오면 `bound`의 K_U가 `target_misses` 이하가 되는 최소 k다.
+  K_U는 k가 커질수록 줄기만 하므로 max(x, 1)부터 min(N, 5,000)까지 이분법으로 찾는다. 표본이 하나 늘 때 놓침 수는 많아야
+  1 늘므로, 이 k에서는 'x개 이하'와 '`bound`의 K_U ≤ `target_misses`'가 같은 판정이고 x가 클수록 필요한 k도 커진다.
+- `strict_ltpd_sample_size`는 NIST의 소비자 위험 정의(LTPD와 같은 불량 수준의 로트를 합격시킬 확률)를 따른다.
+  P(X ≤ x | N, `ltpd_misses`, k) ≤ α인 최소 k다. `bound`는 P(X ≤ x | N, `target_misses` + 1, k) < α일 때 통과하므로 두
+  값은 다를 수 있다. 그래서 `sample_size`에는 LTPD라는 이름을 붙이지 않는다.
+- N=500, P=0.05, 신뢰 수준 0.95이면 `target_misses` = `ltpd_misses` = 25다. x=0·1·2·3에서 `sample_size`는 54·84·110·135,
+  `strict_ltpd_sample_size`는 56·87·114·139다(계산값). 54개 표본은 놓침이 25개인 모집단을 0.053264의 확률로 통과시키므로
+  'LTPD 5%·소비자 위험 5%' 계획이 아니다. P·N이 정수가 아니면 두 정의는 같은 K(`target_misses` + 1)에서 '<'와 '≤'만
+  다르므로 누적확률이 α와 정확히 같을 때만 갈린다(N=499·P=0.05: 55·55, N=500·P=0.001: 476·475). 위 `bound`의 예와도
+  맞는다. N=500·P=0.136이면 `sample_size`가 20인데, k=20·x=0의 K_U가 68(⌊0.136·500⌋)이기 때문이다.
+- 해가 없으면 그 크기를 `null`로 두고 이유 코드를 함께 낸다(`sample_size_reason`·`strict_ltpd_sample_size_reason`, 해가
+  있으면 `null`). x가 `target_misses`보다 크면 `expected_misses_exceed_target`, x가 `ltpd_misses` 이상이면 엄격 값에
+  `expected_misses_reach_ltpd`, 5,000개(`draw`의 최대)로 모자라면 `exceeds_draw_maximum`이다. N이 5,000 이하이면 전수
+  (k=N)에서 항상 통과하므로 마지막 코드는 N이 그보다 클 때만 나온다. 이때도 종료 코드는 0이다. 사용 오류는 `draw`·`bound`처럼
+  내용 없는 오류 코드와 종료 코드 2다(`invalid_population_size`·`invalid_target_share`·`invalid_expected_misses`·
+  `invalid_confidence`·`invalid_oc`·`invalid_arguments`).
+- `--oc K1,K2,…`(0~N의 놓침 수, 100개까지)는 `sample_size`에서 합격 판정 수 c = x의 OC 표를 더한다. K마다
+  `acceptance_probability` = P(X ≤ x | N, K, `sample_size`)를 `eval_stats`의 정확한 정수 합으로 분수 계산한 뒤 부동소수로 낸다.
+  분수는 수백 자리라 그대로 내지 않는다. `sample_size`가 `null`이면 `oc`도 `null`이고 `oc_basis`만 남는다(엄격 크기에서는
+  OC를 계산하지 않는다). k=54, x=0이면 K=5에서 0.563334, 25에서 0.053264, 26에서 0.047209다(계산값).
+- x=0인 계획(합격 판정 수 c=0)은 생산자 위험이 크다. 위 54개 계획은 실제 놓침이 5개(1%)뿐이어도 약 44%(1 − 0.563334)의
+  확률로 목표 미달을 보고한다. 이 결과를 보고 다시 뽑거나 k를 늘리면 보장이 사라진다. 출력의 경고 다섯 가지는 이 위험을
+  다루지 않으므로, `plan`에는 늘 `--oc`를 주고 실제로 있을 법한 놓침 수 근처의 K를 넣어 라벨하기 전에 합격 확률을 읽는다
+  (위 사용 예의 `--oc 5,25,26`). x를 키우면 k가 커지고, 이 예에서는 K=5의 합격 확률도 커진다. x=1·k=84이면 0.801821,
+  x=2·k=110이면 0.926561이다(계산값).
+- 출력에는 수치와 고정 문구(`basis`, `--oc`이면 `oc_basis`), 경고(`warnings`), `authority`
+  (`human_judgement_input_not_gate`)만 둔다. `id`·경로·라벨은 넣지 않는다. 경고는 다섯 가지다. 계획값은 보장이 아니다.
+  무작위 추출·완전하고 정확한 라벨·고정 모집단을 전제한다. seed·k·신뢰 수준은 라벨하기 전에 정하고, 라벨을 본 뒤 다시
+  뽑거나 k를 바꾸지 않는다. 목표 몫과 x는 표본 파일에 기록되지 않으므로 `plan` 출력을 `draw`의 `sample_sha256`과 함께
+  작업 기록에 남긴다. `plan`의 N이 `draw` 요약의 N과 같은지 대조한다.
+- NIST §6.2.3.2의 두 점 설계는 로트 크기 N이 표본 크기 n보다 매우 크다고 보고 이항분포를 쓴다. N=500, p=0.05, 소비자
+  위험 0.05에 그대로 쓰면 c=0·1·2에서 59·93·124로, 정확한 초기하 값(56·87·114)보다 크다(계산값). `plan`은 이 근사를 쓰지
+  않는다. N=200,000이면 두 정의 모두 59로 이항 값과 같다(계산값). 이중 표본 계획은 없다.
+- `plan`을 더해도 `draw`·`bound`의 출력·표본 파일·종료 코드와 각자의 `--help`는 그대로다. 2026-10-30 로컬 Windows·Python
+  3.12.10에서 합성 입력으로 명령 24개의 stdout·stderr·종료 코드와 표본 파일 4개가 v0.33.1과 바이트 단위로 같았다. 바뀌는
+  것은 최상위 `--help`의 하위 명령 목록과 그 열 정렬뿐이다.
+
+**계획의 출처.** NIST/SEMATECH e-Handbook of Statistical Methods, http://www.itl.nist.gov/div898/handbook/, 2026-10-30(접속일).
+§6.2.2(LTPD·소비자 위험·OC 곡선의 정의)와 §6.2.3.2(주어진 OC 곡선의 두 점으로 이항 근사 계획을 고르는 법)를 참고했다. 두 쪽에는
+날짜 표기가 없고, 핸드북 첫 화면에 'Last updated: 04/27/2022'가 있다. 표나 코드는 가져오지 않았다.
+
 **출처.** Callaghan·Müller-Hansen, 「Statistical stopping criteria for automated screening in systematic reviews」,
 Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서에서 비복원 무작위 표본을 뽑아, 초기하분포의 누적확률로
 '재현율이 목표에 못 미친다'는 귀무가설을 검정한다(식 7·9·10). 여기서는 그 검정을 뒤집어 놓침 수 K의 단측 신뢰 상한으로
@@ -433,6 +487,8 @@ Systematic Reviews 9:273(2020, CC BY 4.0). 논문은 아직 보지 않은 문서
 - 결과는 그 볼트의 그 시점, 한 번 고정한 모집단(`population_sha256`·`source_sha256`)에만 해당한다. 대장이 바뀌면 줄 번호도
   바뀌므로 같은 판을 보고 라벨한다. 도구는 볼트를 다시 읽어 판을 확인하지 않는다.
 - 라벨이 적으면 상한이 넓다. 20개 중 0건이어도 모집단의 13.6%까지 놓쳤을 수 있다. 추정치로 읽지 않는다.
+- `plan`의 크기는 위 전제 아래의 계획값이고 보장이 아니다. 목표 몫과 x는 표본 파일에 남지 않으므로, 라벨을 본 뒤 목표 몫을
+  바꿔 읽는 것을 도구가 막지 못한다. 작업 기록에 남긴 `plan` 출력과 `sample_sha256`으로만 드러난다.
 - 기본 `check-support`는 지원 행(`rows_supported`)의 줄 번호를 내지 않는다. 선택형 `--row-references`는
   지원·미지원·미해결·건너뛴 parsed 행의 참조와 일반 형식 `audit_population`을 함께 낸다.
   이 객체를 별도 JSON으로 추출하면 지원 행까지 같은 `draw` 도구로 표본 추출할 수 있다.
@@ -908,6 +964,7 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 - [Position: Don't Use the CLT in LLM Evals With Fewer Than a Few Hundred Datapoints](https://arxiv.org/abs/2503.01747) (Bowyer·Aitchison·Ivanova, ICML 2025 Spotlight Position, arXiv v3 2025-05-28): 작은 N에서 CLT 구간이 불확실성을 크게 과소평가하며, 독립 질문 설정에서 Wilson·베이지안 구간을 권하는 근거. 저자 라이브러리(bayes_evals)는 사용하지 않았다.
 - [Statistical Significance Testing in Information Retrieval: An Empirical Analysis of Type I, Type II and Type III Errors](https://arxiv.org/abs/1905.11096) (Urbano·Lima·Hanjalic, SIGIR 2019, arXiv v2 2019-06-05): 부호를 무작위로 바꾸는 순열 검정의 정의와 1·2·3종 오류 실험 참고. 코드나 데이터는 사용하지 않았다.
 - [Statistical stopping criteria for automated screening in systematic reviews](https://doi.org/10.1186/s13643-020-01521-4) (Callaghan·Müller-Hansen, Systematic Reviews 9:273, 2020, CC BY 4.0): 남은 문서의 무작위 표본과 초기하 검정(식 7·9·10)을 뒤집어 [실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)의 놓침 수 상한으로 썼다. 저자 코드는 사용하지 않았다.
+- NIST/SEMATECH e-Handbook of Statistical Methods, http://www.itl.nist.gov/div898/handbook/, 2026-10-30(접속일): §6.2.2의 LTPD·소비자 위험·OC 곡선 정의를 [실제 볼트 표본 감사](#실제-볼트-표본-감사초기하-정확-상한)의 `plan`(`strict_ltpd_sample_size`·`--oc`)에 썼다. §6.2.3.2의 이항 근사 두 점 설계는 N이 n보다 매우 크다는 전제라 쓰지 않았다. 쪽에는 날짜 표기가 없고 핸드북 첫 화면의 마지막 갱신일은 2022-04-27이다. 표나 코드는 가져오지 않았다.
 - [Search Engines Never Say No: How Frozen Agents React When the Retrieval Tool Refuses](https://arxiv.org/abs/2610.05348) (Chandradevan·Ghosh·Selvendran, arXiv v1 2026-10-04, cs.IR, CC BY 4.0): 골드 제거 쌍둥이와 '거짓 거부 예산을 고정한 거부 재현율'로 거부 장치를 평가하는 틀 참고. 동료 심사 전 v1 프리프린트이며 영어 위키백과 QA(NQ·HotpotQA, BM25 2,100만 단락) 실험이다. 탐지기·거부 문구 효과·수치는 가져오지 않았고 코드나 데이터 공개도 없다.
 - [Hypothesis 상태 기반 검사](https://hypothesis.readthedocs.io/en/latest/stateful.html): 작업 순서 생성과 실패 축소. 개발 패키지 라이선스는 [upstream LICENSE](https://github.com/HypothesisWorks/hypothesis/blob/master/LICENSE.txt)를 따른다.
 - [AgentDojo](https://arxiv.org/abs/2406.13352), [공식 코드](https://github.com/ethz-spylab/agentdojo): 정상 업무와 공격 목표를 독립 사후 조건으로 평가하는 방법 참고.
