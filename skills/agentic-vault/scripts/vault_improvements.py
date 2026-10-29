@@ -8,6 +8,7 @@ they do not certify causality, truth, authority or general effectiveness.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
@@ -141,6 +142,28 @@ def _incomplete(values):
     return [node['id'] for node, _, completed in values if completed is None]
 
 
+def _opt_in(receipt_order):
+    if type(receipt_order) is not bool:
+        raise ImprovementError('invalid_opt_in')
+
+
+def _receipt_order(plan, values):
+    """Local-clock recording order of the plan and completion receipts.
+
+    read_record has already parsed every created_at with this interpreter's
+    datetime.fromisoformat and required a zero UTC offset. Only a strictly earlier
+    completion is listed, in definition order; an equal instant is not earlier and
+    an incomplete node counts as after the plan. Not observation time or a signature.
+    """
+    planned = datetime.fromisoformat(plan['created_at'])
+    before = [node['id'] for node, _, completed in values if completed is not None
+              and datetime.fromisoformat(completed['created_at']) < planned]
+    order = ('plan_first' if not before
+             else 'results_first' if len(before) == len(values) else 'mixed')
+    return dict(plan_created_at=plan['created_at'], recorded_before_plan=before,
+                receipt_order=order)
+
+
 @_public
 def prepare(vault, input_path):
     """Bind a strict four-node lineage to compatible existing frozen runs."""
@@ -166,8 +189,13 @@ def prepare(vault, input_path):
 
 
 @_public
-def inspect(vault, plan_id):
-    """Read a plan and every node status without creating receipts."""
+def inspect(vault, plan_id, *, receipt_order=False):
+    """Read a plan and every node status without creating receipts.
+
+    receipt_order=True adds plan_created_at, recorded_before_plan and receipt_order
+    at the top level: the local-clock recording order of existing receipts.
+    """
+    _opt_in(receipt_order)
     receipt, values = _load_plan(runs.Store(vault), plan_id)
     missing = _incomplete(values)
     return _result(id=plan_id, path=_path(_name(plan_id)),
@@ -175,18 +203,26 @@ def inspect(vault, plan_id):
         compatibility_sha256=receipt['payload']['compatibility_sha256'],
         status='prepared' if missing else 'complete', incomplete_ids=missing,
         nodes=[{**node, 'status': 'complete' if completed else 'prepared'}
-               for node, _, completed in values])
+               for node, _, completed in values],
+        **(_receipt_order(receipt, values) if receipt_order else {}))
 
 
 @_public
-def compare(vault, plan_id):
-    """Compare all three candidates, preserving pending and ineligible arms."""
+def compare(vault, plan_id, *, receipt_order=False):
+    """Compare all three candidates, preserving pending and ineligible arms.
+
+    receipt_order=True adds the same three fields as inspect at the top level only,
+    never inside comparisons[]; decisions, reasons and errors stay the same.
+    """
+    _opt_in(receipt_order)
     store = runs.Store(vault)
     plan, values = _load_plan(store, plan_id)
+    order = _receipt_order(plan, values) if receipt_order else {}
     missing = _incomplete(values)
     if missing:
         return _result(id=plan_id, status='pending', decision='abstain', candidate_id=None,
-                       reasons=['incomplete_runs'], incomplete_ids=missing, comparisons=[])
+                       reasons=['incomplete_runs'], incomplete_ids=missing, comparisons=[],
+                       **order)
     baseline_node, baseline, completed = values[0]
     _, baseline_reasons = runs._score(baseline['payload'], completed)
     comparisons = [dict(node_id=node['id'], **runs.compare(vault, baseline['id'], prepared['id']))
@@ -206,7 +242,7 @@ def compare(vault, plan_id):
             else:
                 decision, winner, reasons = 'abstain', None, ['positive_score_tie']
     return _result(id=plan_id, status='complete', decision=decision, candidate_id=winner,
-                   reasons=reasons, incomplete_ids=[], comparisons=comparisons)
+                   reasons=reasons, incomplete_ids=[], comparisons=comparisons, **order)
 
 
 def _eligible_nodes(values):
@@ -366,7 +402,12 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True, parser_class=_ArgumentParser)
     commands.add_parser('prepare', help='freeze a four-node lineage').add_argument('--input', required=True)
     for verb in ('inspect', 'compare', 'inspect-record'):
-        commands.add_parser(verb).add_argument('id')
+        sub = commands.add_parser(verb)
+        sub.add_argument('id')
+        if verb != 'inspect-record':
+            sub.add_argument('--receipt-order', action='store_true',
+                             help='opt-in local-clock recording order of the plan and completion '
+                                  'receipts; not observation time or a signature')
     rec = commands.add_parser('record', help='record a review-only reflection or NO_ENTRY')
     rec.add_argument('id')
     rec.add_argument('--report', required=True)
@@ -376,9 +417,11 @@ def main(argv=None):
             result = prepare(args.vault, args.input)
         elif args.command == 'record':
             result = record(args.vault, args.id, args.report)
+        elif args.command == 'inspect-record':
+            result = inspect_record(args.vault, args.id)
         else:
-            function = {'inspect': inspect, 'compare': compare, 'inspect-record': inspect_record}[args.command]
-            result = function(args.vault, args.id)
+            function = {'inspect': inspect, 'compare': compare}[args.command]
+            result = function(args.vault, args.id, receipt_order=args.receipt_order)
         print(evidence.encode(result).decode('ascii'))
         return 0
     except ImprovementError as exc:

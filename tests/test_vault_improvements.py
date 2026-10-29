@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import copy
+from functools import partial
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -19,6 +22,24 @@ try:
     improvements = importlib.import_module('vault_improvements')
 except ModuleNotFoundError:
     improvements = None
+
+# Receipt clocks in the UTC isoformat that vault_evidence.timestamp writes.
+EARLIER = '2026-10-29T23:00:00+00:00'
+PLANNED = '2026-10-30T00:00:00+00:00'
+LATER = '2026-10-30T01:00:00+00:00'
+ROLES = ('baseline', 'general', 'specialized', 'composed')
+NODE_IDS = {'baseline': 'base', 'general': 'gen', 'specialized': 'spec', 'composed': 'both'}
+PASSES = {'baseline': 0, 'general': 4, 'specialized': 2, 'composed': 10}
+ORDER_KEYS = {'plan_created_at', 'recorded_before_plan', 'receipt_order'}
+INSPECT_KEYS = {'ok', 'id', 'path', 'definition', 'compatibility_sha256', 'status',
+                'incomplete_ids', 'nodes', 'authority', 'requires_review', 'applies_changes'}
+COMPARE_KEYS = {'ok', 'id', 'status', 'decision', 'candidate_id', 'reasons', 'incomplete_ids',
+                'comparisons', 'authority', 'requires_review', 'applies_changes'}
+
+
+def clock(value):
+    """Stamp every receipt published inside the block with created_at `value`."""
+    return mock.patch.object(runs.evidence, 'timestamp', return_value=value)
 
 
 class VaultImprovementsTests(unittest.TestCase):
@@ -110,6 +131,44 @@ class VaultImprovementsTests(unittest.TestCase):
         self.assertEqual(result['authority'], 'advisory_host_observations_only')
         self.assertTrue(result['requires_review'])
         self.assertFalse(result['applies_changes'])
+
+    def fresh(self):
+        """Another setUp vault with the same inputs, hence the same run and plan IDs."""
+        case = type(self)(methodName='runTest')
+        self.addCleanup(case.doCleanups)
+        case.setUp()
+        return case
+
+    def ordered(self, before, *, rest=True):
+        """Complete `before` roles, then prepare the plan, then (optionally) the rest."""
+        for role in before:
+            with clock(EARLIER):
+                self.complete(role, PASSES[role])
+        with clock(PLANNED):
+            plan = self.plan()
+        for role in ROLES:
+            if rest and role not in before:
+                with clock(LATER):
+                    self.complete(role, PASSES[role])
+        return plan
+
+    def assert_receipt_order(self, plan_id, before, order):
+        """The opt-in adds exactly three top-level keys, writes nothing, changes nothing else."""
+        runtime = self.vault / runs.RUNTIME_DIR
+        for function, keys in ((improvements.inspect, INSPECT_KEYS), (improvements.compare, COMPARE_KEYS)):
+            default = function(self.vault, plan_id)
+            files = {path.name: path.read_bytes() for path in runtime.iterdir()}
+            opted = function(self.vault, plan_id, receipt_order=True)
+            self.assertEqual({path.name: path.read_bytes() for path in runtime.iterdir()}, files)
+            self.assertEqual(set(default), keys)
+            self.assertEqual([key for key in opted if key not in ORDER_KEYS], list(default))
+            self.assertEqual({key: value for key, value in opted.items() if key not in ORDER_KEYS}, default)
+            self.assertEqual({key: opted[key] for key in ORDER_KEYS},
+                             {'plan_created_at': PLANNED, 'receipt_order': order,
+                              'recorded_before_plan': [NODE_IDS[role] for role in before]})
+            for item in opted.get('comparisons', []):
+                self.assertTrue(ORDER_KEYS.isdisjoint(item))
+        return opted
 
     def test_prepare_reuses_immutable_plan_and_inspect_is_read_only(self):
         plan = self.plan()
@@ -435,6 +494,89 @@ class VaultImprovementsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stderr, '')
             self.assertIn('usage:', result.stdout)
+
+    def test_receipt_order_is_opt_in_and_moves_no_plan_id_or_decision(self):
+        plan_ids, decisions = set(), set()
+        scenarios = (((), 'plan_first'), (('baseline', 'general'), 'mixed'), (ROLES, 'results_first'))
+        for index, (before, order) in enumerate(scenarios):
+            with self.subTest(order=order):
+                case = self.fresh() if index else self
+                plan = case.ordered(before)
+                result = case.assert_receipt_order(plan['id'], before, order)
+                plan_ids.add(plan['id'])
+                decisions.add((result['status'], result['decision'], result['candidate_id']))
+        # The plan payload holds no time, so recording order cannot move its ID.
+        self.assertEqual(len(plan_ids), 1)
+        self.assertEqual(decisions, {('complete', 'candidate', 'both')})
+
+    def test_incomplete_nodes_count_as_recorded_after_the_plan(self):
+        plan = self.ordered((), rest=False)
+        pending = self.assert_receipt_order(plan['id'], (), 'plan_first')
+        self.assertEqual(pending['incomplete_ids'], ['base', 'gen', 'spec', 'both'])
+        case = self.fresh()
+        plan = case.ordered(ROLES[:3], rest=False)
+        pending = case.assert_receipt_order(plan['id'], ROLES[:3], 'mixed')
+        self.assertEqual((pending['status'], pending['decision'], pending['incomplete_ids']),
+                         ('pending', 'abstain', ['both']))
+
+    def test_equal_instants_are_not_earlier_and_ids_keep_definition_order(self):
+        planned = '2026-10-30T00:00:00.400000+00:00'
+        # 'composed' is the plan's instant written with three digits: as text it
+        # sorts before the plan. 'specialized' carries the earliest stamp.
+        stamps = {'composed': '2026-10-30T00:00:00.400+00:00', 'general': planned,
+                  'baseline': '2026-10-30T00:00:00.399999+00:00',
+                  'specialized': '2026-10-29T00:00:00+00:00'}
+        self.assertLess(stamps['composed'], planned)
+        for role, stamp in stamps.items():
+            with clock(stamp):
+                self.complete(role, PASSES[role])
+        with clock(planned):
+            plan = self.plan()
+        result = improvements.compare(self.vault, plan['id'], receipt_order=True)
+        self.assertEqual((result['plan_created_at'], result['recorded_before_plan'], result['receipt_order']),
+                         (planned, ['base', 'spec'], 'mixed'))
+
+    def test_repeated_prepare_keeps_the_first_plan_receipt_time(self):
+        plan = self.ordered(ROLES)
+        with clock(LATER):
+            self.assertEqual(self.plan()['id'], plan['id'])
+        result = improvements.inspect(self.vault, plan['id'], receipt_order=True)
+        self.assertEqual((result['plan_created_at'], result['receipt_order']), (PLANNED, 'results_first'))
+
+    def test_receipt_order_flag_keeps_cli_bytes_and_exit_codes(self):
+        plan = self.ordered(('baseline', 'general'))
+        missing, opted = '0' * 64, {}
+
+        def cli(*args):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                try:
+                    code = improvements.main(['--vault', str(self.vault), *args])
+                except SystemExit as exc:
+                    code = exc.code
+            self.assertEqual(stderr.getvalue(), '')
+            return code, stdout.getvalue()
+
+        def encoded(value):
+            return runs.evidence.encode(value).decode('ascii') + '\n'
+        for verb, function in (('inspect', improvements.inspect), ('compare', improvements.compare)):
+            with self.subTest(verb=verb):
+                # Without the flag the CLI passes receipt_order=False and prints the default bytes.
+                self.assertEqual(cli(verb, plan['id']), (0, encoded(function(self.vault, plan['id']))))
+                opted[verb] = encoded(function(self.vault, plan['id'], receipt_order=True))
+                self.assertEqual(cli(verb, plan['id'], '--receipt-order'), (0, opted[verb]))
+                code, output = cli(verb, missing)
+                self.assertEqual((code, json.loads(output)['ok']), (2, False))
+                self.assertEqual(cli(verb, missing, '--receipt-order'), (code, output))
+                for value in (1, 'true', None):
+                    self.assertEqual(self.rejected(partial(function, self.vault, plan['id'],
+                                                           receipt_order=value)), 'invalid_opt_in')
+        self.assertEqual(cli('inspect-record', missing, '--receipt-order'),
+                         (2, encoded({'ok': False, 'error': 'invalid_cli_arguments'})))
+        result = subprocess.run([sys.executable, '-B', str(SCRIPTS / 'vault_improvements.py'), '--vault',
+                                 str(self.vault), 'compare', plan['id'], '--receipt-order'],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, opted['compare'], ''))
 
 
 if __name__ == '__main__':
