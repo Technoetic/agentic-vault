@@ -8,10 +8,13 @@ dev/held-out split, and --redact hashes gold-set free text in the report
 vault-relative paths; --redact-row-order token then sorts rows by their keyed
 id token). --gold-removal-twins runs every answerable query again with its gold
 notes removed and reports those twins as no-answer probes.
+--abstention-calibration conformal calibrates a refusal threshold on the dev
+side of a split and reports it on the heldout side.
 """
 from __future__ import annotations
 
 import argparse
+import bisect
 import functools
 import hashlib
 import hmac
@@ -27,6 +30,7 @@ import sys
 import time
 import unicodedata
 from collections import Counter, defaultdict
+from fractions import Fraction
 from pathlib import Path
 from typing import Sequence
 
@@ -875,12 +879,14 @@ def _twin_exclusions(item: dict, note_texts: dict | None = None, *, normalize=No
     return sorted(removed, key=lambda path: (path.casefold(), path))
 
 
-def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool) -> dict:
+def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool, raw_digests: dict | None = None) -> dict:
     """List eligible notes, and read them only when read_texts, through recall's own policy.
 
     Same root bootstrap, deny zones, exclude_dirs (with .git), file cut and
     byte budgets as the legacy recall reader, so a deny zone or an excluded
     directory is never listed or read. Never a plain recursive glob.
+    raw_digests (only --abstention-calibration passes it) receives the sha256
+    hex of each read note's raw bytes, keyed by vault-relative path.
     """
     diagnostics = recall_module._diagnostics()
     listing: list[str] = []
@@ -922,7 +928,12 @@ def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool) -> dict:
                 diagnostics['omitted_total_byte_limit'] += len(paths) - index
                 recall_module._omit(diagnostics, 'total_byte_limit')
                 break
-            text = recall_module._read_markdown(path, diagnostics, relative)
+            if raw_digests is None:
+                text = recall_module._read_markdown(path, diagnostics, relative)
+            else:
+                def record(raw: bytes, relative: str = relative) -> None:
+                    raw_digests[relative] = hashlib.sha256(raw).hexdigest()
+                text = recall_module._read_markdown(path, diagnostics, relative, raw_sink=record)
             if text is not None:
                 texts[relative] = recall_module._normalize(text)
     return {'listing': listing, 'texts': texts if read_texts else None,
@@ -1482,6 +1493,410 @@ def derive_split(queries: Sequence[dict], *, seed: int = SPLIT_SEED, previous: d
     return result
 
 
+# --- Opt-in: conformal abstention threshold (--abstention-calibration) ------
+# Nothing here runs without the flag, and the engine is untouched: retrieval
+# still returns abstention: host_decision. The section calibrates a refusal
+# rule of the evaluator on the dev side of a committed split, reports it on the
+# heldout side, and is never read by gates or the exit code.
+
+CONFORMAL_KEY = 'conformal_abstention'
+CONFORMAL_METHODS = ('conformal',)
+CONFORMAL_BUDGET = 0.05
+CONFORMAL_DELTA = 0.1
+CONFORMAL_SIGNALS = ('lexical', 'bm25', 'bm25_hangul2')
+# The signals each row kind allows; the first is its default. Legacy matches carry the lexical score as 'score'.
+_CONFORMAL_KIND_SIGNALS = {'legacy': ('lexical',), 'lexical': ('lexical',), 'hybrid': ('lexical',),
+                           'bm25': ('bm25',), 'bm25+hangul2': ('bm25_hangul2', 'bm25')}
+CONFORMAL_DEFINITIONS = {
+    'protocol': 'Split conformal calibration of a refusal threshold (Bates, Candes, Lei, Romano and Sesia, arXiv '
+                '2104.08279, Ann. Statist. 51(1), 2023) on the committed dev/heldout split file: answerable headline '
+                'dev queries calibrate; answerable headline heldout queries and their gold-removal twins test. '
+                'no_answer, inspected and unassigned queries take no part.',
+    'signal': "Fixed per arm before the run: the largest score of one kind over the returned top_k matches, read from "
+              "a second retrieval call with the row's own options (lexical: the legacy match score, or scores.lexical "
+              "on the advanced path; bm25: scores.bm25; bm25_hangul2: scores.bm25_hangul2). Legacy, lexical and "
+              "hybrid arms allow lexical only (hybrid top_k mixes lexical-only candidates whose bm25 is 0); bm25 arms "
+              "allow bm25; bm25 arms with --lexical-ngrams hangul2 allow bm25_hangul2 (the default, since candidates "
+              "found only by the bigram rank have a word bm25 of 0) or bm25. The RRF sum is never a signal. A smaller "
+              "signal is weaker evidence. A second call that does not reproduce the evaluated paths and completeness "
+              "counts in rerun_mismatch_count, and then no threshold is reported (status rerun_mismatch).",
+    'calibration': 'n counts the dev queries whose complete search returned candidates; complete empty results and '
+                   'incomplete searches never calibrate and are counted apart. k = floor(alpha * (n + 1)), with alpha '
+                   'read from its decimal text; k = 0 (n < 1/alpha - 1) means no threshold. Otherwise the threshold is '
+                   'the k-th smallest calibration signal: a query whose signal is below it is refused and a tie '
+                   'answers, the same decision as refusing when the conformal p-value (1 + #{calibration signals <= '
+                   's}) / (n + 1) is at most alpha (eq. 3 of the paper).',
+    'guarantee': 'Marginal only, for an answerable query that returns candidates and is exchangeable with the '
+                 'calibration queries: over the draw of the calibration set and that query, P(refused) <= '
+                 'marginal_refusal_bound = k / (n + 1) <= alpha. The rate one calibration set realizes follows '
+                 'Beta(k, n + 1 - k) for continuous signals and is stochastically smaller with ties, so it exceeds '
+                 'alpha with probability at most realized_rate_above_budget_probability = P(Binomial(n, alpha) <= '
+                 'k - 1). Empty results (the empty-result operating point of --gold-removal-twins) are outside the '
+                 'guarantee: the total false refusal rate is at most the empty-result rate plus alpha.',
+    'calibration_conditional': 'learn_then_test is the calibration-conditional version by Learn then Test '
+                               '(Angelopoulos, Bates, Candes, Jordan and Lei, arXiv 2110.01052). Its risk is the total '
+                               'false refusal rate of answerable queries, empty results included, so its n also '
+                               'counts the dev empty results (incomplete searches stay out). The distinct calibration '
+                               'signals are tested from the no-refusal end in a fixed sequence with the exact binomial '
+                               'p = P(Binomial(n, alpha) <= false refusals), stopping at the first p > delta; the last '
+                               'threshold passed has P(risk <= alpha) >= 1 - delta, and none passing means no '
+                               'threshold (the paper abstains), as when the dev empty results alone exceed alpha. '
+                               'These conditional versions also assume independent queries. '
+                               'simes_ccv_minimum_p_value is the smallest calibration-conditional (CCV) p-value of the '
+                               'conformal paper with the Simes adjustment (k = simes_k = floor(n / 2)), 1 - '
+                               'delta^(1/simes_k); it is shown only, and when it exceeds alpha those p-values refuse '
+                               'nothing. simultaneous_fpr_bound applies Proposition 3 of that paper with the same '
+                               'Simes sequence: with probability at least 1 - delta, at every threshold at once, the '
+                               'refusal rate of answerable queries that return candidates is at most upper_bound, '
+                               'where calibration_below counts the calibration signals under the threshold; each '
+                               'point holds up to the next one and the bound is 1 above the largest signal. '
+                               'Descriptive.',
+    'heldout': 'Answerable heldout queries: false refusals are complete empty results plus threshold refusals of '
+               'queries with candidates. Their gold-removal twins (the notes --gold-removal-twins removes) count as '
+               'refused when empty or below the threshold; twin errors are never refusals. Twin refusal recall is '
+               'power reporting only: no guarantee covers it, and fixture twins are designed cases.',
+    'validity': 'Calibrated for one vault snapshot (vault_snapshot.vault_snapshot_sha256: sha256 over the listed notes '
+                'and the sha256 of their bytes, read by the policy-checked note walk before the second calls; it '
+                'does not cover vault-config.json, a query mapping or the options) and for this gold set, split, '
+                'arm, signal and alpha only. A note change or another option needs a new calibration. '
+                'Exchangeability can fail for real queries (gold-set questions are written by people who know the '
+                'notes, and a session asks related questions), and then no bound holds. Never an engine default: '
+                'retrieval still returns abstention: host_decision. Observational: gates and the exit code never '
+                'read this section.',
+}
+
+
+class CalibrationError(GoldSetError):
+    """An --abstention-calibration option that fits no signal of an evaluated arm (exit code 2).
+
+    Messages name options, arms and row kinds only.
+    """
+
+
+def conformal_threshold(calibration, alpha: float) -> tuple:
+    """(k, threshold) of split conformal calibration: k = floor(alpha * (n + 1)) and the k-th smallest signal.
+
+    The threshold is None when k = 0. A signal below the threshold is refused
+    and a tie answers: exactly the signals whose conformal p-value
+    (1 + #{calibration <= s}) / (n + 1) is at most alpha. alpha is read from its
+    decimal text, as in eval_stats.exact_alpha, so k carries no float rounding.
+    """
+    if type(alpha) is not float or not 0 < alpha < 1:
+        raise ValueError('alpha must be a float strictly between 0 and 1')
+    ordered = sorted(calibration)
+    k = math.floor(Fraction(repr(alpha)) * (len(ordered) + 1))
+    return k, (ordered[k - 1] if k else None)
+
+
+def learn_then_test(calibration, empty_count: int, alpha: float, delta: float) -> dict:
+    """Fixed-sequence Learn then Test of the total false refusal rate over the distinct calibration signals.
+
+    Thresholds are tested from the no-refusal end; each refuses the empty
+    results plus the calibration signals below it. p = P(Binomial(n, alpha) <= x)
+    with n = len(calibration) + empty_count; testing stops at the first p > delta.
+    """
+    stats = _load_eval_stats()
+    ordered = sorted(calibration)
+    n = len(ordered) + empty_count
+    tested, selected = [], None
+    for threshold in sorted(set(ordered)):
+        refusals = empty_count + bisect.bisect_left(ordered, threshold)
+        p_value = min(1.0, stats._binomial_cdf(stats._log_binomial_coefficients(n, refusals), n, alpha))
+        tested.append({'threshold': threshold, 'false_refusal_count': refusals, 'p_value': p_value,
+                       'passed': p_value <= delta})
+        if p_value > delta:
+            break
+        selected = threshold
+    return {'n': n, 'empty_result_count': empty_count, 'tested': tested, 'threshold': selected,
+            'result': 'none' if selected is None else 'threshold'}
+
+
+def _simes_upper_bound(n: int, simes_k: int, delta: float, below: int) -> float:
+    """b_(below+1) of the generalized Simes sequence (Bates et al. Proposition 2); b_(n+1) = 1.
+
+    b_(n+1-i) = 1 - delta^(1/k) * (i (i-1) ... (i-k+1) / (n (n-1) ... (n-k+1)))^(1/k)
+    for i = 1..n, which is 1 once the product reaches a zero factor (i < k).
+    """
+    remaining = n - below
+    if remaining < simes_k:
+        return 1.0
+    log_ratio = math.fsum(math.log(remaining - m) - math.log(n - m) for m in range(simes_k)) / simes_k
+    return -math.expm1(math.log(delta) / simes_k + log_ratio)
+
+
+def _simultaneous_fpr_bound(ordered: list, simes_k: int, delta: float) -> list:
+    """Bates et al. Proposition 3 at each distinct calibration signal: refusing below it has rate <= upper_bound."""
+    points = []
+    for value in sorted(set(ordered)):
+        below = bisect.bisect_left(ordered, value)
+        points.append({'threshold': value, 'calibration_below': below,
+                       'upper_bound': _simes_upper_bound(len(ordered), simes_k, delta, below)})
+    return points
+
+
+def _conformal_kind(arm: dict, row: dict) -> str:
+    """legacy, or the backend of an advanced-arm row (bm25+hangul2 when the Hangul bigram rank is active)."""
+    if arm['method'] == 'legacy':
+        return 'legacy'
+    options = row['retrieval_options']
+    backend = options.get('backend', 'lexical')
+    if backend not in ('lexical', 'bm25', 'hybrid'):
+        return 'invalid'
+    return 'bm25+hangul2' if backend == 'bm25' and options.get('lexical_ngrams') == 'hangul2' else backend
+
+
+def _conformal_arm_signal(name, arm: dict, rows: list, signal: str | None) -> str:
+    """The one signal of an arm: the default of its row kind, or the named signal if every row allows it."""
+    label = 'the evaluated arm' if name is None else f'the {name} arm'
+    kinds = sorted({_conformal_kind(arm, row) for row in rows})
+    if not kinds:
+        return signal or 'lexical'  # nothing to calibrate or test
+    if 'invalid' in kinds:
+        raise CalibrationError(f'{label} has rows with an invalid backend option, which no signal fits')
+    if signal is None:
+        defaults = {_CONFORMAL_KIND_SIGNALS[kind][0] for kind in kinds}
+        if len(defaults) > 1:
+            raise CalibrationError(f"--abstention-calibration needs one signal per arm, but {label} has "
+                                   f"{' and '.join(kinds)} rows; give --backend")
+        return defaults.pop()
+    for kind in kinds:
+        allowed = _CONFORMAL_KIND_SIGNALS[kind]
+        if signal not in allowed:
+            raise CalibrationError(f"--abstention-signal {signal} does not fit {label}: {kind} rows allow "
+                                   f"{' or '.join(allowed)}")
+    return signal
+
+
+def _conformal_signal_value(matches: list, signal: str):
+    """The largest signal over the returned matches; None when nothing returned or a match lacks it."""
+    values = []
+    for match in matches:
+        scores = match.get('scores')
+        value = match.get('score') if scores is None and signal == 'lexical' else (scores or {}).get(signal)
+        if type(value) not in (int, float) or not math.isfinite(value):
+            return None
+        values.append(value)
+    return max(values) if values else None
+
+
+def _conformal_state(diagnostics: dict, returned) -> str:
+    """error (status not ok or incomplete search), empty (complete, nothing returned) or candidates."""
+    if diagnostics['status'] != 'ok' or not diagnostics['search_complete']:
+        return 'error'
+    return 'candidates' if returned else 'empty'
+
+
+def _conformal_rerun(recall_module, vault: Path, arm: dict, row: dict, removed=None) -> dict:
+    """Repeat the retrieval call evaluate() made for a row, or the one its gold-removal twin makes (_twin_row)."""
+    options = dict(row['retrieval_options'])
+    limits = {'limit': arm['top_k'], 'max_tokens': arm['costs']['max_context_tokens']}
+    if removed is None:
+        reader = recall_module.recall if arm['method'] == 'legacy' else recall_module._advanced_retrieval.retrieve
+        return reader(vault, row['query'], **limits, **options)
+    own = options.pop('excluded_sources', [])
+    if isinstance(own, (list, tuple)) and all(isinstance(value, str) for value in own):
+        excluded = list(dict.fromkeys([*own, *removed]))
+    else:
+        excluded = own  # invalid: retrieve() rejects it, so the twin is an error
+    return recall_module._advanced_retrieval.retrieve(vault, row['query'], **limits, **options,
+                                                      excluded_sources=excluded)
+
+
+def _conformal_heldout(rows: list, twins: list, threshold) -> dict:
+    """Heldout false refusals and twin refusals at a threshold (None: empty results only)."""
+    def below(state, value):
+        return threshold is not None and state == 'candidates' and value is not None and value < threshold
+
+    empty = sum(state == 'empty' for state, _ in rows)
+    refused = sum(below(*row) for row in rows)
+    twin_empty = sum(state == 'empty' for state, _ in twins)
+    twin_refused = sum(below(*twin) for twin in twins)
+    return {
+        'side': 'heldout',
+        'answerable_query_count': len(rows),
+        'empty_result_count': empty,
+        'threshold_refusal_count': refused,
+        'false_refusal_count': empty + refused,
+        'false_refusal_rate': _ratio(empty + refused, len(rows)),
+        'error_count': sum(state == 'error' for state, _ in rows),
+        'twins': {'twin_count': len(twins), 'empty_result_refusal_count': twin_empty,
+                  'threshold_refusal_count': twin_refused, 'refusal_count': twin_empty + twin_refused,
+                  'refusal_recall': _ratio(twin_empty + twin_refused, len(twins)),
+                  'twin_error_count': sum(state == 'error' for state, _ in twins)},
+    }
+
+
+def _conformal_section(recall_module, vault: Path, arm: dict, signal: str, split: dict, scan: dict, snapshot: dict,
+                       claim_cache: dict, *, alpha: float, delta: float) -> dict:
+    """The conformal_abstention section of one evaluate() arm, from its own per_query rows."""
+    members = {name: set(split[name]) for name in SPLIT_NAMES}
+    population = [row for row in arm['per_query'] if _twin_population(row)]
+    scan_complete = scan['summary']['status'] == 'ok' and scan['summary']['search_complete']
+    tally = Counter()
+
+    def rerun(row, removed=None):
+        result = _conformal_rerun(recall_module, vault, arm, row, removed)
+        tally['calls'] += 1
+        tally['bytes'] += result['diagnostics']['bytes_read']
+        return result, _conformal_state(result['diagnostics'], result['matches'])
+
+    def base(row):
+        """(state, signal) of an evaluated row; the signal comes from a second call that must reproduce it."""
+        state = _conformal_state(row['diagnostics'], row['retrieved_paths'])
+        if state != 'candidates':
+            return state, None
+        result, again = rerun(row)
+        value = _conformal_signal_value(result['matches'], signal)
+        returned = [match['path'] for match in result['matches']]
+        if again != state or returned != row['retrieved_paths'] or value is None:
+            tally['mismatches'] += 1
+            return state, None
+        return state, value
+
+    def twin(row):
+        removed = _twin_exclusions(row, scan['texts'], normalize=recall_module._normalize, cache=claim_cache)
+        result, state = rerun(row, removed)
+        if state == 'error' or (row['required_claims'] and not scan_complete):
+            return 'error', None
+        value = _conformal_signal_value(result['matches'], signal)
+        if state == 'candidates' and value is None:
+            return 'error', None
+        return state, value
+
+    started = time.perf_counter()
+    dev = [base(row) for row in population if row['id'] in members['dev']]
+    heldout_rows = [row for row in population if row['id'] in members['heldout']]
+    heldout = [base(row) for row in heldout_rows]
+    twins = [twin(row) for row in heldout_rows]
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    calibration = [value for state, value in dev if state == 'candidates']
+    empty = sum(state == 'empty' for state, _ in dev)
+    n = len(calibration)
+    ready = not tally['mismatches']
+    stats = _load_eval_stats()
+    k, threshold = conformal_threshold(calibration, alpha) if ready else (None, None)
+    simes_k = max(1, n // 2) if n else None
+    ordered = sorted(calibration) if ready else []
+    ids = [row['id'] for row in arm['per_query']]
+    by_split = {name: sum(query_id in members[name] for query_id in ids) for name in SPLIT_NAMES}
+    by_split['unassigned'] = sum(not any(query_id in members[name] for name in SPLIT_NAMES) for query_id in ids)
+    seed = split.get('seed')
+    return {
+        'definitions': dict(CONFORMAL_DEFINITIONS),
+        'method': 'conformal',
+        'signal': signal,
+        'false_refusal_budget': alpha,
+        'delta': delta,
+        'status': ('rerun_mismatch' if not ready else 'no_threshold' if threshold is None else 'threshold'),
+        'rerun_mismatch_count': tally['mismatches'],
+        'split': {
+            'calibration_side': 'dev', 'test_side': 'heldout',
+            'definition_canonical_sha256': _digest(split),
+            'seed': seed if type(seed) is int else None,
+            'query_count_by_split': by_split,
+            'listed_ids_not_in_queries': sum(len(members[name].difference(ids)) for name in SPLIT_NAMES),
+        },
+        'calibration': {
+            'side': 'dev',
+            'answerable_query_count': len(dev),
+            'empty_result_count': empty,
+            'error_count': sum(state == 'error' for state, _ in dev),
+            'n': n,
+            'k': k,
+            'threshold': threshold,
+            'ties_at_threshold': None if threshold is None else ordered.count(threshold),
+            'distinct_signal_count': len(set(ordered)) if ready else None,
+            'marginal_refusal_bound': k / (n + 1) if ready else None,
+            'realized_rate_above_budget_probability': (
+                stats._binomial_cdf(stats._log_binomial_coefficients(n, k - 1), n, alpha) if ready and k else None),
+        },
+        'calibration_conditional': {
+            'learn_then_test': learn_then_test(ordered, empty, alpha, delta) if ready else None,
+            'simes_k': simes_k,
+            'simes_ccv_minimum_p_value': _simes_upper_bound(n, simes_k, delta, 0) if ready and n else None,
+            'simultaneous_fpr_bound': _simultaneous_fpr_bound(ordered, simes_k, delta) if ready and n else None,
+        },
+        'heldout': _conformal_heldout(heldout, twins, threshold),
+        'vault_snapshot': {**snapshot, 'omissions': list(snapshot['omissions'])},
+        'costs': {'retrieval_calls': tally['calls'], 'total_source_bytes_read': tally['bytes'],
+                  'total_elapsed_ms': round(elapsed_ms, 3),
+                  'timing_scope': 'second calls of dev and heldout queries with candidates and heldout twin calls; '
+                                  'the shared note walk is not timed'},
+    }
+
+
+def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refusal_budget: float = CONFORMAL_BUDGET,
+                              delta: float = CONFORMAL_DELTA, signal: str | None = None) -> dict:
+    """Return an evaluate() or compare() report whose every arm gains conformal_abstention.
+
+    Opt-in (--abstention-calibration conformal). fixture is the fixture
+    directory or the EvaluationInput the report was evaluated from; split is a
+    definition from load_split() whose dev side calibrates and heldout side
+    tests. signal None takes the default of each arm's row kind; a named signal
+    must fit every arm. CalibrationError comes before any second retrieval
+    call. Existing keys and values are unchanged, the input is not mutated, and
+    gates never read the section.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('conformal abstention requires an evaluate() or compare() report')
+    if 'per_query' in report:
+        arms = {None: report}
+    elif 'baseline' in report and 'improved' in report:
+        arms = {name: report[name] for name in REPORT_ARMS if name in report}
+    else:
+        raise ValueError('conformal abstention requires an evaluate() or compare() report')
+    for label, value in (('false_refusal_budget', false_refusal_budget), ('delta', delta)):
+        if type(value) is not float or not 0 < value < 1:
+            raise ValueError(f'{label} must be a float strictly between 0 and 1')
+    if signal is not None and signal not in CONFORMAL_SIGNALS:
+        raise ValueError('invalid abstention signal')
+    if (not isinstance(split, dict) or any(not isinstance(split.get(name), list) or any(
+            not isinstance(value, str) for value in split[name]) for name in SPLIT_NAMES)
+            or set(split['dev']).intersection(split['heldout'])):
+        raise ValueError('conformal abstention requires a split definition from load_split()')
+    listed = set(split['dev']) | set(split['heldout'])
+    signals = {name: _conformal_arm_signal(name, arm, [row for row in arm['per_query']
+                                                       if _twin_population(row) and row['id'] in listed], signal)
+               for name, arm in arms.items()}
+    recall_module = _load_recall_module()
+    vault = fixture.vault if isinstance(fixture, EvaluationInput) else fixture / 'vault'
+    digests: dict = {}
+    scan = _twin_note_scan(recall_module, vault, read_texts=True, raw_digests=digests)
+    snapshot = {'vault_snapshot_sha256': _digest([[path, digests.get(path)] for path in scan['listing']]),
+                'listed_note_count': len(scan['listing']), 'hashed_note_count': len(digests),
+                'complete': scan['summary']['status'] == 'ok' and scan['summary']['search_complete'],
+                'omissions': list(scan['summary']['omissions']), 'bytes_read': scan['summary']['bytes_read'],
+                'note': 'The threshold is invalid once the vault changes: recalibrate when this digest differs.'}
+    claim_cache: dict = {}
+    sections = {name: _conformal_section(recall_module, vault, arm, signals[name], split, scan, snapshot, claim_cache,
+                                         alpha=false_refusal_budget, delta=delta)
+                for name, arm in arms.items()}
+    if None in sections:
+        return {**report, CONFORMAL_KEY: sections[None]}
+    return {**report, **{name: {**report[name], CONFORMAL_KEY: section} for name, section in sections.items()}}
+
+
+def conformal_abstention_notes(report: dict) -> list[str]:
+    """Non-blocking stderr notes for second calls that did not reproduce a row and unmeasured heldout twins."""
+    arms = ([(None, report)] if 'per_query' in report else
+            [(name, report[name]) for name in REPORT_ARMS if name in report])
+    notes = []
+    for name, arm in arms:
+        section = arm.get(CONFORMAL_KEY)
+        if not section:
+            continue
+        where = '' if name is None else name + ' arm: '
+        if section['rerun_mismatch_count']:
+            notes.append(f"conformal abstention note (non-blocking): {where}{section['rerun_mismatch_count']} second "
+                         "retrieval calls did not reproduce the evaluated rows (did the vault change during the "
+                         "run?), so no threshold is reported")
+        twins = section['heldout']['twins']
+        if twins['twin_error_count']:
+            notes.append(f"conformal abstention note (non-blocking): {where}{twins['twin_error_count']} of "
+                         f"{twins['twin_count']} heldout twins could not be measured and are not counted as refusals")
+    return notes
+
+
 _ROW_RESULT_KEYS = frozenset({
     "retrieved_paths", "source_recall_at_3", "reciprocal_rank_at_3", "source_recall_at_k",
     "reciprocal_rank_at_k", "ndcg_at_5", "returned_context_claim_coverage", "outcome",
@@ -1523,6 +1938,10 @@ _TWIN_REPLACED = ("gold-removal twin section: row id, scenario and covered_claim
                   "possibly_still_answerable_ids, scenarios also as its by_scenario keys)")
 _KEYED_TWIN_REPLACED = (_TWIN_REPLACED + "; its rows' excluded_sources, retrieved, stale and residual graded paths "
                         "like other vault-relative paths")
+# Keyed modes only, and only for a report that carries a conformal_abstention section
+# (--abstention-calibration): its one fingerprint of its own. The section holds no row id, text or path.
+_KEYED_CONFORMAL_REPLACED = ("conformal abstention section: vault_snapshot_sha256, the keyed hash of its sha256 hex "
+                             "(the section holds no row id, query text, scenario, claim or path)")
 # The default (--redact-row-order gold) row-order sentence; --redact-row-order
 # token replaces only this sentence in the printed limits.
 _GOLD_ROW_ORDER_LIMIT = (
@@ -1575,7 +1994,9 @@ _PATH_FIELDS = frozenset({
 _DATE_FIELDS = frozenset({"valid_from", "valid_until", "checked_at", "superseded_at"})
 _PATH_KEYED_MAPS = frozenset({"relevance"})
 _FINGERPRINT_FIELDS = frozenset({"sha256", "source_sha256", "goldset_canonical_sha256",
-                                 "definition_canonical_sha256"})
+                                 "definition_canonical_sha256",
+                                 # Conformal abstention section (only present with --abstention-calibration).
+                                 "vault_snapshot_sha256"})
 _WARNING_LABEL = r"queries\[\d+\]\.(?:expected_paths|forbidden_paths|stale_paths|relevance)\[\d+\]: "
 _FIXED_WARNING = re.compile(_WARNING_LABEL + "(?:" + "|".join(
     re.escape(text) for text in _LABEL_WARNING_TEXTS.values()) + ")")
@@ -1784,6 +2205,9 @@ def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = F
         description = redacted["redaction"]
         redacted["redaction"] = {**description, "replaced": [
             *description["replaced"], _TWIN_REPLACED if key is None else _KEYED_TWIN_REPLACED]}
+    if key is not None and any(CONFORMAL_KEY in arm for arm in arms):
+        description = redacted["redaction"]
+        redacted["redaction"] = {**description, "replaced": [*description["replaced"], _KEYED_CONFORMAL_REPLACED]}
     redacted["redaction_mode"] = mode
     redacted["redaction_algorithm"] = algorithm
     return redacted
@@ -2027,6 +2451,22 @@ def _parser() -> argparse.ArgumentParser:
     split.add_argument('--derive-split', action='store_true',
                        help=f'print the split derived by the documented stratified rule (seed {SPLIT_SEED}) and '
                             'exit without retrieval; with --split-file, keep its assignments and divide only new ids')
+    calibration = parser.add_argument_group('conformal abstention threshold (opt-in, observational)')
+    calibration.add_argument('--abstention-calibration', choices=CONFORMAL_METHODS,
+                             help='add conformal_abstention to every evaluated arm: a refusal threshold calibrated on '
+                                  'the dev answerable queries of the split file (default <fixture>/split.json, '
+                                  '--split-file required with --goldset) whose search returned candidates, reported '
+                                  'on the heldout ones and their gold-removal twins, with a Learn then Test version. '
+                                  'Marginal guarantee only, empty results are outside it, valid for this vault '
+                                  'snapshot only and never an engine default; cannot be combined with --split or '
+                                  '--derive-split (gates and exit code are unchanged)')
+    calibration.add_argument('--false-refusal-budget', type=float, metavar='ALPHA',
+                             help=f'with --abstention-calibration: the false refusal budget alpha, strictly between 0 '
+                                  f'and 1 (default {CONFORMAL_BUDGET})')
+    calibration.add_argument('--abstention-signal', choices=CONFORMAL_SIGNALS,
+                             help='with --abstention-calibration: the score every arm uses, fixed before the run '
+                                  '(default: lexical for legacy, lexical and hybrid arms, bm25 for bm25 arms, '
+                                  'bm25_hangul2 with --lexical-ngrams hangul2); it must fit every evaluated arm')
     return parser
 
 
@@ -2039,10 +2479,16 @@ def _mode_error(args: argparse.Namespace) -> str | None:
         return "--derive-split cannot be combined with --split or --redact"
     if args.derive_split and args.gold_removal_twins:
         return "--derive-split cannot be combined with --gold-removal-twins"
-    if args.split_file is not None and args.split is None and not args.derive_split:
+    calibrating = args.abstention_calibration is not None
+    if calibrating and (args.split is not None or args.derive_split):
+        # The calibration needs both sides of the split: dev calibrates and heldout tests.
+        return "--abstention-calibration cannot be combined with --split or --derive-split"
+    if args.split_file is not None and args.split is None and not args.derive_split and not calibrating:
         return "--split-file requires --split or --derive-split"
     if args.split is not None and args.goldset is not None and args.split_file is None:
         return "--split with --goldset requires --split-file"
+    if calibrating and args.goldset is not None and args.split_file is None:
+        return "--abstention-calibration with --goldset requires --split-file"
     return None
 
 
@@ -2086,6 +2532,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("--redact-row-order token requires --redact-key-file or --redact-ephemeral; whoever holds the gold "
               "set can recompute unkeyed sha256 ids and undo the order", file=sys.stderr)
         return 2
+    if args.abstention_calibration is None and (args.false_refusal_budget is not None
+                                                or args.abstention_signal is not None):
+        print("--false-refusal-budget and --abstention-signal require --abstention-calibration", file=sys.stderr)
+        return 2
+    if args.false_refusal_budget is not None and not 0.0 < args.false_refusal_budget < 1.0:
+        print("--false-refusal-budget must be strictly between 0 and 1", file=sys.stderr)
+        return 2
     mode_error = _mode_error(args)
     if mode_error is not None:
         print(mode_error, file=sys.stderr)
@@ -2117,6 +2570,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.split is not None:
             split_file = fixture / "split.json" if args.split_file is None else args.split_file
             source = select_split(source, args.split, split_file)
+        calibration_split = None
+        if args.abstention_calibration is not None:
+            # Read before any retrieval, so a missing or invalid split file fails fast.
+            calibration_split = load_split(fixture / "split.json" if args.split_file is None else args.split_file)
         options = dict(as_of=args.as_of, expand_links=args.expand_links, backend=args.backend,
                        top_k=args.top_k, expand_query=args.expand_query, query_mapping=args.query_mapping)
         if args.lexical_ngrams is not None:
@@ -2129,6 +2586,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                                          exact_paired=args.exact_paired, **options)
         if args.gold_removal_twins:
             report = with_gold_removal_twins(report, source)
+        if calibration_split is not None:
+            budget = CONFORMAL_BUDGET if args.false_refusal_budget is None else args.false_refusal_budget
+            report = with_conformal_abstention(report, source, calibration_split, false_refusal_budget=budget,
+                                               signal=args.abstention_signal)
         if args.rate_bounds:
             report = with_rate_bounds(report)
         if args.success_bounds:
@@ -2179,6 +2640,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"rate-bounds note (non-blocking): {note}", file=sys.stderr)
     if args.gold_removal_twins:
         for note in gold_removal_twin_notes(report):
+            print(note, file=sys.stderr)
+    if args.abstention_calibration is not None:
+        for note in conformal_abstention_notes(report):
             print(note, file=sys.stderr)
     passed = (
         gate_gap is None
