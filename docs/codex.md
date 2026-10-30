@@ -11,9 +11,9 @@ subject written right after a letter of most scripts (for example one more Hangu
 before it) no longer binds; values, default output and exit codes are unchanged. Changing
 `vault_ssot.py` gives v0.34.0 the `checker_sha256`
 `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,
-which differs from the v0.33.1 fingerprint stated in the next section. That section is
-kept as published with v0.33.1, and the v0.33.1 release/verification records retain their
-fingerprint as history.
+which differs from the v0.33.1 fingerprint stated in the next section. That section's
+migration text is kept as published with v0.33.1, and the v0.33.1 release/verification
+records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
 See the [v0.34.0 release record](verification/v0.34.0.md) and [subject boundary note](verification/subject-boundary-20261030.md).
@@ -25,7 +25,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절과 그 뒤는 이전 버전의 기록이다.
+v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 기록이고, 설치 ref·검증 기록 안내 등 나머지와 [설치](#설치) 절 이후는 v0.34.0 기준이다.
 
 ## v0.33.1 source and certificate migration
 

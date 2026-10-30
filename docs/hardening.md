@@ -25,7 +25,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절과 그 뒤는 이전 버전의 변경 이력이다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표와 이어지는 절은 v0.34.0 기준이다.
 
 ## v0.33.1 source and certificate migration
 
