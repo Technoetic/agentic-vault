@@ -34,7 +34,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 This development source is not a release. Opt-in `check-support --bind-subject` now
 requires a left edge before a subject that starts with a non-ASCII letter, so a
-subject written right after most other letters (for example one more Hangul syllable
+subject written right after a letter of most scripts (for example one more Hangul syllable
 before it) no longer binds; values, default output and exit codes are unchanged. Changing
 `vault_ssot.py` gives this source the `checker_sha256`
 `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,

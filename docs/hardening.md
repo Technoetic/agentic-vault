@@ -4,7 +4,7 @@
 
 This development source is not a release. Opt-in `check-support --bind-subject` now
 requires a left edge before a subject that starts with a non-ASCII letter, so a
-subject written right after most other letters (for example one more Hangul syllable
+subject written right after a letter of most scripts (for example one more Hangul syllable
 before it) no longer binds; values, default output and exit codes are unchanged. Changing
 `vault_ssot.py` gives this source the `checker_sha256`
 `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,
@@ -457,7 +457,9 @@ python -m unittest tests.test_vault_period_metamorphic -v
   대신 쓰는 `ㆍ`(U+318D)의 NFKC 결과라서, UAX #29 기본값(ALetter)과 달리 막지 않는 한국어 맞춤이다. 상법의 법인 형태 다섯
   (주식회사·유한회사·합명회사·합자회사·유한책임회사)을 띄우지 않고 쓴 바로 뒤도 경계로 본다. ASCII로 시작하는 주어는 기존 ASCII
   규칙을 그대로 써서 한글 한 음절 뒤에서도 일치한다(`이XY전기`의 `XY전기`). 가나·한자로 시작하는 주어도 바로 앞이 글자이면
-  막는다(UAX #29라면 끊는 자리다). 오른쪽 경계는 조사 때문에 열어 둔다. 다른 말을 띄우지
+  막는다(UAX #29라면 끊는 자리다). 렌더링하지 않은 줄도 비교하므로 글자와 주어 사이에 굵게·코드·링크 표시가 끼면
+  경계가 생긴다(`이**가나다전기**`·`이[[가나다전기]]`는 일치하고, 긴 이름 전체를 감싼 `**이가나다전기**`·`[[이가나다전기]]`는
+  일치하지 않는다). 오른쪽 경계는 조사 때문에 열어 둔다. 다른 말을 띄우지
   않고 붙여 쓴 주어(`고객사가나다전기`)는 놓쳐 `subject_absent` 경고가 될 수 있다. 값과 기본 `check-support`에는 이 경계를 쓰지 않는다.
 - 경로 없이 쓴 `[[이름]]`이 deny·exclude·runtime 구역에만 있으면 구역을 목록에 넣지 않으므로 `not_found`로 보고한다.
   구역 안 노트의 존재를 드러내지 않기 위한 동작이며 출처가 실제로 없다는 뜻이 아니다. 구역 경로를 직접 쓴 참조만 `policy`다.
