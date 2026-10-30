@@ -219,7 +219,7 @@ python -m unittest tests.test_support_row_diagnostics -v
 This checks the CLI/audit draw round trip, default serialization preservation,
 all parsed-row states, wrong-subject sources, aliases and numeric boundaries,
 the subject left edge (one character from each exempted code-point range in the
-pattern, U+119E, the five legal forms written without a space, and every kept
-limit listed above), default support of a value inside a longer name,
+pattern, U+119E, the five legal forms written without a space, and an example
+of each kept limit listed above), default support of a value inside a longer name,
 frontmatter/table/line exclusions, source budgets/refusals and stale-read checks.
 It is not a real-vault coverage or model-effectiveness measurement.
