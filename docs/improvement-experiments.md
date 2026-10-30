@@ -81,7 +81,7 @@ assertion에 `role`을 넣어 준비한 실행은 v0.30.0 이하가 읽지 못�
 
 ### 영수증 기록 순서 (선택)
 
-`inspect`·`compare`에 `--receipt-order`를 붙이면 응답 최상위에 세 필드를 더한다. Python에서는
+v0.34.0의 선택형 `--receipt-order`를 `inspect`·`compare`에 붙이면 응답 최상위에 세 필드를 더한다. Python에서는
 `inspect(vault, plan_id, receipt_order=True)`·`compare(vault, plan_id, receipt_order=True)`이고
 기본값은 `False`다. boolean이 아닌 값은 `invalid_opt_in`으로 거절한다. 옵션이 없으면 응답의
 키·순서·값과 종료 코드가 이전과 같다.

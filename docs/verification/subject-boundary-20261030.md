@@ -1,10 +1,13 @@
 # Subject left boundary: development source fingerprint (2026-10-30)
 
-This dated development record describes the `--bind-subject` subject left edge,
-implemented on top of v0.33.1 (`4b213f3ed0a314595278adb7d70eb9a0c6fc61e5`). Public
-metadata was v0.33.1 at that point. This is not a release: version badges, manifests,
-installation refs and the [v0.33.1 verification record](v0.33.1.md) still describe
-v0.33.1, and this note does not certify a release, installation or deployment.
+This historical development record describes the `--bind-subject` subject left edge
+at implementation commit `ac96d3eaeb7414080a01b1c40395dee3aae9f4c7`, on top of v0.33.1
+(`4b213f3ed0a314595278adb7d70eb9a0c6fc61e5`) and before v0.34.0 release preparation.
+Public metadata was v0.33.1 at that point. The v0.34.0 release candidate source
+`67af284583c19b050ed93a1fc77a8cc7babb9086` keeps that `vault_ssot.py` unchanged and is
+the base of release preparation. Current release metadata and pending gates are in the
+[v0.34.0 verification record](v0.34.0.md); this dated note does not certify a release,
+installation or deployment.
 
 ## Change
 

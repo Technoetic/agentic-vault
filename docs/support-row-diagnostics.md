@@ -87,6 +87,7 @@ scanned, but at most 32 line references are returned per binding observation;
 
 ### Subject left edge
 
+v0.34.0 adds a left edge for subjects of the opt-in binding diagnostic.
 The existing literal edges apply only where the first or last character of a
 literal is an ASCII letter or digit. For `--bind-subject` subjects only, a
 normalized subject form whose first character is a non-ASCII letter
@@ -205,9 +206,10 @@ copies and vault `00-meta/scripts/`), run the harmless replay on those copies,
 then regenerate the certificate with `vault_warning_policy.py --certificate`
 before re-promoting. Rollback also requires matching engine/certificate versions.
 This implementation does not update installed engines or certificates.
-The [subject left edge](#subject-left-edge) changed `vault_ssot.py` again after
-v0.33.1, so that development source has its own `checker_sha256`; the
-[subject boundary note](verification/subject-boundary-20261030.md) states it with
+The [subject left edge](#subject-left-edge) changed `vault_ssot.py` again in
+v0.34.0, so v0.34.0 has its own `checker_sha256`; the
+[v0.34.0 release note](releases/v0.34.0.md#하위호환업그레이드) and the
+[subject boundary note](verification/subject-boundary-20261030.md) state it with
 the same coordination.
 
 Focused validation uses synthetic temporary vaults:

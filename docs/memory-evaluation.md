@@ -420,7 +420,7 @@ python scripts/real_vault_audit.py bound --sample SAMPLE.json --labels LABELS.js
 
 **계획** (`plan`)
 
-- 라벨하기 전에 표본 크기를 정하는 산술이다. 입력 파일을 읽거나 출력 파일을 쓰지 않고(`draw`·`bound`처럼
+- v0.34.0의 선택형 `plan`은 라벨하기 전에 표본 크기를 정하는 산술이다. 입력 파일을 읽거나 출력 파일을 쓰지 않고(`draw`·`bound`처럼
   `scripts/eval_stats.py`는 불러온다) 볼트·네트워크·모델도 쓰지 않으며, 훅·CI·게이트에 연결하지 않는다.
   `--population-size`는 `draw`가 낼 모집단 크기 N(1~200,000), `--target-share`는 상한으로 말하려는
   놓침 몫 P(0 초과 1 미만), `--expected-misses`는 표본에 나와도 통과로 볼 놓침 수 x(기본 0), `--confidence`는 `draw`에도
@@ -600,9 +600,9 @@ legacy 실행과 같다.
 
 ## 답 없음 보정 문턱
 
-recall은 보류(abstention)를 호스트에 맡긴다(`abstention: host_decision`). 선택형 `--abstention-calibration conformal`은
-엔진을 바꾸지 않는다. 평가기 안에서만 '신호가 문턱보다 작으면 거부'라는 규칙을 두고, 그 문턱을 커밋한 분할의 dev
-쪽에서 맞춘 뒤 heldout 쪽에서 잰다. 플래그가 없으면 문서화한 어느 옵션으로 실행해도 출력·표준 오류·종료 코드는
+v0.34.0의 선택형 `--abstention-calibration conformal`은 엔진을 바꾸지 않는다. recall은 보류(abstention)를 그대로
+호스트에 맡기고(`abstention: host_decision`), 평가기 안에서만 '신호가 문턱보다 작으면 거부'라는 규칙을 두어
+그 문턱을 커밋한 분할의 dev 쪽에서 맞춘 뒤 heldout 쪽에서 잰다. 플래그가 없으면 문서화한 어느 옵션으로 실행해도 출력·표준 오류·종료 코드는
 이전과 바이트 단위로 같다. 다만 `--help`와 argparse 오류 메시지의 usage 줄에는 새 옵션이 함께 나오고, `--fixture`를
 줄여 쓴 `--f`는 이제 `--false-refusal-budget`과도 겹쳐 argparse의 `ambiguous option` 오류와 종료 코드 2가 된다.
 약어는 문서화한 인터페이스가 아니므로 `--fixture`를 쓴다.
