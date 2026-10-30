@@ -669,7 +669,8 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
   바꾸고, 이 절이 있는 보고서에서만 `redaction.replaced` 끝에 그 항목을 하나 더한다. `--redact`(키 없음)는 이 절을
   바꾸지 않는다.
 - 게이트와 종료 코드는 이 절을 읽지 않는다. 팔마다 dev·heldout에서 후보를 돌려준 문항마다 검색을 한 번, heldout
-  쌍둥이마다 한 번 더 하고, 노트를 한 번 더 읽는다(`costs`).
+  쌍둥이마다 한 번 더 한다(`costs`). 모든 팔이 함께 쓰는 노트 읽기는 실행마다 한 번 더 하고 `vault_snapshot.bytes_read`에
+  남는다.
 
 ### 2026-10-30 측정
 
