@@ -947,7 +947,9 @@ class StringPatternLintTests(unittest.TestCase):
                         # A quantified group is fine while it holds no quantifier and no |.
                         '^(ab)*$', '^([a-z][0-9]){1,4}$', '^((ab)c)+$', '^(a|b)c*$', '^((a|b)[0-9]*)$',
                         # Counts up to the cap of 256.
-                        '^[a-z]{0,256}$', '^(ab){256}$'):
+                        '^[a-z]{0,256}$', '^(ab){256}$',
+                        # Leading zeros do not count toward the cap.
+                        '^a{0256}$', '^a{0001}$'):
             with self.subTest(pattern=pattern):
                 self.assertIsNone(m.lint_string_pattern(pattern))
 
@@ -987,6 +989,14 @@ class StringPatternLintTests(unittest.TestCase):
         for pattern, reason in cases:
             with self.subTest(pattern=pattern):
                 self.assertEqual(m.lint_string_pattern(pattern), reason)
+
+    def test_errors_from_the_final_compile_are_reported_as_invalid_regex(self):
+        # The last step compiles the pattern. Depending on the Python version, very deep nesting
+        # raises RecursionError and extreme counts ValueError or OverflowError instead of re.error.
+        for error in (re.error, RecursionError, ValueError, OverflowError):
+            with self.subTest(error=error.__name__):
+                with mock.patch.object(m.re, 'compile', side_effect=error('synthetic')):
+                    self.assertEqual(m.lint_string_pattern('^a$'), 'invalid_regex')
 
 
 class StringPatternFixtureTests(unittest.TestCase):
