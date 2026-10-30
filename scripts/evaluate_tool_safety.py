@@ -321,6 +321,16 @@ def _dispatch(call, scenario, outbox, blocked):
 
 _PATTERN_ESCAPES = {'n': '\n', 'r': '\r', 't': '\t'}
 _PATTERN_QUANTIFIER = re.compile(r'\{([0-9]+)(?:,([0-9]+))?\}')
+# Fixed cap on {m} and {m,n} counts: the lint never sees maxLength, and format classes need
+# small counts (schema B uses 32 and 64).
+_PATTERN_MAX_COUNT = 256
+
+
+def _count_too_large(digits):
+    """Is a {m} or {m,n} count above _PATTERN_MAX_COUNT? Leading zeros are ignored."""
+    digits = digits.lstrip('0')
+    # Compare lengths first: int() refuses digit strings beyond its conversion limit.
+    return len(digits) > len(str(_PATTERN_MAX_COUNT)) or int(digits or '0') > _PATTERN_MAX_COUNT
 
 
 def _lint_pattern_class(body, index):
@@ -373,19 +383,23 @@ def lint_string_pattern(pattern):
     """Allow-list check of an opt-in schema B pattern: None when allowed, else a reason code.
 
     Allowed: ^ first and $ last (both required), literal characters, positive classes of
-    literals and ascending ranges, (...) groups with | only inside them, the quantifiers
-    * + ? {m} {m,n}, and the escapes \\n \\r \\t. Everything else is refused. Python
-    re.fullmatch and an ECMA-262 (u flag) validator can disagree on, or one of them rejects:
-    \\d \\w \\s \\b and every other escape (write [.] for a dot), '.', anchors inside the
-    pattern, top-level |, any (? syntax, {,n} and {m,}, lazy or possessive quantifiers, and
-    negated, empty or nested classes. Doubled - & ~ | inside a class are refused because
-    Python warns (FutureWarning) that they may become set operations.
+    literals and ascending ranges, non-empty (...) groups with | only inside them, the
+    quantifiers * + ? {m} {m,n} with counts up to 256, and the escapes \\n \\r \\t.
+    Everything else is refused. Python re.fullmatch and an ECMA-262 (u flag) validator can
+    disagree on, or one of them rejects: \\d \\w \\s \\b and every other escape (write [.]
+    for a dot), '.', anchors inside the pattern, top-level |, any (? syntax, {,n} and {m,},
+    lazy or possessive quantifiers, and negated, empty or nested classes. Doubled - & ~ |
+    inside a class are refused because Python warns (FutureWarning) that they may become set
+    operations.
 
     A quantifier on a group that holds a quantifier or | is refused too (nested_quantifier),
-    so every quantified item is one character or one fixed-length sequence that matches in a
-    single way: re.fullmatch cannot backtrack exponentially in the value length. The lint
-    does not bound polynomial backtracking: adjacent quantifiers that can match the same
-    characters, such as ^[a-z]*[a-z]*@$, pass.
+    and so is an empty group () anywhere (empty_group). Every quantified item is then one
+    character or one fixed-length sequence of at least one character that matches in a
+    single way, so each repetition consumes at least one character of the value: re.fullmatch
+    cannot backtrack exponentially in the value length, and no quantifier repeats more often
+    than the value has characters, whatever its count. Counts in {m} and {m,n} above 256 are
+    refused as well (count_too_large). The lint does not bound polynomial backtracking:
+    adjacent quantifiers that can match the same characters, such as ^[a-z]*[a-z]*@$, pass.
     """
     if not isinstance(pattern, str):
         return 'not_string'
@@ -414,6 +428,8 @@ def lint_string_pattern(pattern):
                 return 'quantifier_syntax'
             if held:
                 return 'nested_quantifier'
+            if match is not None and any(_count_too_large(count) for count in match.groups() if count is not None):
+                return 'count_too_large'
             index = match.end() if match is not None else index + 1
             if body[index:index + 1] in ('?', '+'):
                 return 'lazy_or_possessive'
@@ -433,6 +449,9 @@ def lint_string_pattern(pattern):
         elif char == ')':
             if not groups:
                 return 'unbalanced_group'
+            if body[index - 1] == '(':
+                # A repeated empty group consumes nothing: re.fullmatch time grows with the count.
+                return 'empty_group'
             held = groups.pop()
             if groups and held:
                 groups[-1] = True
@@ -452,7 +471,7 @@ def lint_string_pattern(pattern):
     try:
         re.compile(pattern)
     except (re.error, OverflowError, RecursionError, ValueError):
-        # For example {3,2}, a count beyond Python's repeat limit, or very deep nesting.
+        # For example {3,2} or very deep nesting.
         return 'invalid_regex'
     return None
 

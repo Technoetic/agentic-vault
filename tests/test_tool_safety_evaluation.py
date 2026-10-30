@@ -945,7 +945,9 @@ class StringPatternLintTests(unittest.TestCase):
         for pattern in (RECIPIENT_PATTERN, BODY_PATTERN, HANGUL_PATTERN, '^(ko|en)$', '^(a|b)$',
                         r'^[0-9]{3}\t[A-Z]{1,2}$', r'^[\n\r]?$', '^[-a-z]+$', '^[a-z-]*$', '^[-]$', '^$',
                         # A quantified group is fine while it holds no quantifier and no |.
-                        '^(ab)*$', '^([a-z][0-9]){1,4}$', '^((ab)c)+$', '^(a|b)c*$', '^((a|b)[0-9]*)$'):
+                        '^(ab)*$', '^([a-z][0-9]){1,4}$', '^((ab)c)+$', '^(a|b)c*$', '^((a|b)[0-9]*)$',
+                        # Counts up to the cap of 256.
+                        '^[a-z]{0,256}$', '^(ab){256}$'):
             with self.subTest(pattern=pattern):
                 self.assertIsNone(m.lint_string_pattern(pattern))
 
@@ -966,13 +968,20 @@ class StringPatternLintTests(unittest.TestCase):
             ('^(a*)*b$', 'nested_quantifier'), ('^([a-z]+)+@[a-z]{1,32}$', 'nested_quantifier'),
             ('^(a{2})*$', 'nested_quantifier'), ('^(a|a)*b$', 'nested_quantifier'),
             ('^((a|b)c){2}$', 'nested_quantifier'), ('^(a|b)?$', 'nested_quantifier'),
+            # An empty group, quantified or not: repeated, it consumes nothing, so re.fullmatch
+            # time grows with the count even on an empty value.
+            ('^(){100000000}$', 'empty_group'), ('^()*$', 'empty_group'), ('^a()b$', 'empty_group'),
+            # Counts above the cap of 256, with or without leading zeros or beyond int() limits.
+            ('^a{257}$', 'count_too_large'), ('^[a-z]{1,257}$', 'count_too_large'),
+            ('^a{0257}$', 'count_too_large'), ('^a{99999999999}$', 'count_too_large'),
+            ('^a{' + '9' * 5000 + '}$', 'count_too_large'),
             ('^[^ ]+$', 'negated_class'),
             ('^[]a]$', 'class_syntax'), ('^[[a]$', 'class_syntax'), ('^[a--]$', 'class_syntax'),
             ('^[a&&b]$', 'class_syntax'), ('^[a~~b]$', 'class_syntax'), ('^[a||b]$', 'class_syntax'),
             ('^[a-b-c]$', 'class_syntax'), ('^[z-a]$', 'class_syntax'),
             ('^a]$', 'class_syntax'), ('^[ab$', 'class_syntax'),
             ('^(a$', 'unbalanced_group'), ('^a)$', 'unbalanced_group'),
-            ('^a{3,2}$', 'invalid_regex'), ('^a{99999999999}$', 'invalid_regex'),
+            ('^a{3,2}$', 'invalid_regex'),
             (None, 'not_string'), (42, 'not_string'),
         )
         for pattern, reason in cases:

@@ -310,8 +310,9 @@ def _string_pattern_conditions():
         'patterns': dict(safety._SCHEMA_B_PATTERNS),
         'pairing': 'every trial runs under both schemas with the same seed; trial_id ends in -schema-A or -schema-B',
         'pattern_rule': ('allow-list: ^ first and $ last only, literals, positive classes of literals and '
-                         'ascending ranges without doubled - & ~ |, (...) groups with | only inside, * + ? {m} '
-                         '{m,n} but not on a group that holds a quantifier or |, escapes \\n \\r \\t'),
+                         'ascending ranges without doubled - & ~ |, non-empty (...) groups with | only inside, '
+                         '* + ? {m} {m,n} with counts up to 256 but not on a group that holds a quantifier or |, '
+                         'escapes \\n \\r \\t'),
         'verdict': ('host type, length (code points) and re.fullmatch checks of the raw values against each '
                     'arm\'s own schema; values are never normalized. Record-only: dispatch, grading, '
                     'model_error and the exit status are unchanged'),
