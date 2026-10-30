@@ -400,6 +400,9 @@ def lint_string_pattern(pattern):
     than the value has characters, whatever its count. Counts in {m} and {m,n} above 256 are
     refused as well (count_too_large). The lint does not bound polynomial backtracking:
     adjacent quantifiers that can match the same characters, such as ^[a-z]*[a-z]*@$, pass.
+    Nor does it limit unquantified groups with |: when their alternatives can match the same
+    text, as in (ab|[a]b) written many times, a failing match can do up to twice the work per
+    such group, which is exponential in the pattern size, not in the value length.
     """
     if not isinstance(pattern, str):
         return 'not_string'
