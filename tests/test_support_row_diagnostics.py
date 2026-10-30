@@ -114,6 +114,11 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                  # Katakana Phonetic Extensions (U+31F0) and Han Extension B (U+20000).
                  *[(name, edge + '가나다전기 매출 12억', 'bound')
                    for edge in ('ส', 'カ', 'ㇰ', '\U00020000')],
+                 # Myanmar and Khmer (SA ranges), Han Extension A and CJK Compatibility
+                 # Ideographs. U+FA0E is one of the twelve characters of that block that
+                 # NFKC keeps; it maps the others, such as U+F900, into other Han blocks.
+                 *[(name, edge + '가나다전기 매출 12억', 'bound')
+                   for edge in ('\u1000', '\u1780', '\u3400', '\ufa0e')],
                  (name, 'XY\N{MIDDLE DOT}가나다전기 매출 12억', 'bound'),
                  (name, 'XY\N{HANGUL LETTER ARAEA}가나다전기 매출 12억', 'bound'),  # NFKC: U+119E
                  (name, '\N{CIRCLED DIGIT ONE}가나다전기 매출 12억', 'bound'),  # NFKC: 1
@@ -127,7 +132,19 @@ class SupportRowDiagnosticsTests(unittest.TestCase):
                  # is an edge.
                  ('XY전기', '이XY전기 매출 12억', 'bound'),
                  (name, 'XY가나다전기 매출 12억', 'subject_absent'),
-                 (name, '이\N{SOFT HYPHEN}가나다전기 매출 12억', 'bound')]
+                 (name, '이\N{SOFT HYPHEN}가나다전기 매출 12억', 'bound'),
+                 # A subject that starts with a kana or Han character is blocked after
+                 # a letter too, where UAX #29 would break.
+                 *[(subject, '이' + subject + ' 매출 12억', 'subject_absent')
+                   for subject in ('カキク', '甲乙丙')],
+                 # The unrendered line is compared too: bold, code or link markup between
+                 # a letter and the subject leaves an edge, markup around the whole
+                 # longer name does not.
+                 (name, '이**가나다전기** 매출 12억', 'bound'),
+                 (name, '이`가나다전기` 매출 12억', 'bound'),
+                 (name, '이[[가나다전기]] 매출 12억', 'bound'),
+                 (name, '**이가나다전기** 매출 12억', 'subject_absent'),
+                 (name, '[[이가나다전기]] 매출 12억', 'subject_absent')]
         for subject, text, status in cases:
             with self.subTest(subject=subject, text=text):
                 self.set_rows([[subject, 'r', '12', '[[Evidence]]']])
