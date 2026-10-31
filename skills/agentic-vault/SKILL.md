@@ -9,6 +9,8 @@ description: "Use when working in an agentic-vault directory with Claude Code or
 
 - **볼트 감지보다 먼저:** 사용자가 직접 Jev 질문을 하거나 이미 승인한 Jev-first 선호가 현재 요청에 적용되면 아래의 **Jev-first 작업 선택**을 따른다. 자기완결적인 질문·명시적으로 선택한 인라인 문맥은 [jev-ask.md](../../commands/jev-ask.md)의 `jev_ask.py`로 연결한다. `00-meta/vault-config.json`이나 현재 볼트는 필요 없다. `1+1`처럼 쉽거나 산술이라는 이유로 건너뛰지 않는다. 단, 파일에서 얻은 근거는 기존 `vault_judge.py`의 바인딩·경로 정책을 유지한다.
 
+- **웹앱 작업:** 현재 요청이 웹앱 구현·변경·검토이거나 배포 뒤 갱신/라우팅 문제를 다루면 [webapp-principles 스킬](../webapp-principles/SKILL.md)과 [공통 기준](../../docs/webapp-principles.md)을 읽고 적용한다. 이 경로는 볼트가 없어도 사용한다. 노트에 웹앱이 언급됐다는 이유로 앱 작업을 시작하지 않으며, 읽기 전용 검토는 읽기 전용으로 유지한다. 별도 워크플로우를 자동 실행하거나 설치·운영 배포 권한을 추가하지 않는다.
+
 - **볼트** = 루트에 `00-meta/vault-config.json`이 존재하는 디렉토리. 사용자가 새 볼트 초기화 또는 기존 볼트 업그레이드를 요청하면 config가 없어도 `init`·`upgrade` 문서의 자체 가드부터 수행한다. 명시적으로 요청한 스냅샷 `verify`·`restore`도 현재 볼트 없이 실행한다. 명시적 `doctor` 요청은 설정을 직접 읽기 전에 진단 CLI로 보내 `not_vault`나 설정 오류를 보고한다. 명시적 `evidence`·`judge` 요청도 해당 절차로 직접 연결해 설정·경로 오류를 보고한다. 그 외에는 이 파일이 없으면 일반 디렉토리로 취급하고 조용히 물러난다(에러·경고 출력 금지).
 - 볼트에서 작업을 시작하기 전 `00-meta/vault-config.json`을 먼저 읽어라. 아래 규율의 구체 값(필수 키 목록·enum·deny zone·로그 태그·특수 노트 경로)은 전부 이 설정 파일이 원천이다. 이 문서의 예시는 기본값일 뿐이다.
 - `handoff_note`·`ssot_note`·`backup_target`이 빈 문자열이면 해당 기능은 생략한다(우아한 성능 저하 — 없는 기능을 요구하지 마라).

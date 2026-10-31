@@ -80,7 +80,9 @@ def run_json(
         return json.loads(stdout)
 
 
-def inspect_host(codex: str, vault: Path, environment: dict, home: Path) -> dict:
+def inspect_host(
+    codex: str, vault: Path, environment: dict, home: Path, *, installed_root: Path | None = None,
+) -> dict:
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as error_log:
         process = subprocess.Popen([resolve_codex_executable(codex), "app-server", "--stdio"], cwd=vault,
                                    env=environment, stdin=subprocess.PIPE,
@@ -137,10 +139,26 @@ def inspect_host(codex: str, vault: Path, environment: dict, home: Path) -> dict
                             if skill.get("pluginId") == PLUGIN_ID]
             owned_hooks = [hook for item in hooks["data"] for hook in item["hooks"]
                            if hook.get("pluginId") == PLUGIN_ID]
-            primary = [skill for skill in owned_skills
-                       if skill["name"] == "agentic-vault:agentic-vault" and skill["enabled"]]
-            if len(primary) != 1 or not Path(primary[0]["path"]).is_file():
-                raise RuntimeError("The shared agentic-vault skill was not discovered")
+            required_skills = {
+                "agentic-vault:agentic-vault": "skills/agentic-vault/SKILL.md",
+                "agentic-vault:webapp-principles": "skills/webapp-principles/SKILL.md",
+            }
+            resource_root = installed_root.resolve() if installed_root is not None else None
+            discovered_paths = set()
+            for name, relative in required_skills.items():
+                matches = [skill for skill in owned_skills if skill["name"] == name]
+                if (len(matches) != 1 or not matches[0]["enabled"]
+                        or not Path(matches[0]["path"]).is_file()):
+                    raise RuntimeError(f"Required enabled skill was not discovered exactly once: {name}")
+                skill_path = Path(matches[0]["path"]).resolve()
+                if resource_root is None:
+                    if skill_path.parts[-3:] != Path(relative).parts:
+                        raise RuntimeError(f"Required skill has the wrong resource path: {name}")
+                    resource_root = skill_path.parents[2]
+                if (skill_path != (resource_root / relative).resolve()
+                        or skill_path in discovered_paths):
+                    raise RuntimeError(f"Required skill has the wrong resource path: {name}")
+                discovered_paths.add(skill_path)
             expected_events = {"sessionStart": 3, "preCompact": 1, "sessionEnd": 1}
             discovered_events = {event: sum(hook["eventName"] == event for hook in owned_hooks)
                                  for event in expected_events}
@@ -148,7 +166,8 @@ def inspect_host(codex: str, vault: Path, environment: dict, home: Path) -> dict
                 raise RuntimeError("Expected startup/compact context and both checkpoint events")
             if any(hook["trustStatus"] != "untrusted" for hook in owned_hooks):
                 raise RuntimeError("Disposable-home hooks unexpectedly trusted")
-            return {"codex": initialized["userAgent"], "skill": primary[0]["name"],
+            return {"codex": initialized["userAgent"], "skill": "agentic-vault:agentic-vault",
+                    "skills": list(required_skills),
                     "session_start_hooks": discovered_events["sessionStart"],
                     "hook_events": discovered_events, "hook_trust": "untrusted"}
         finally:
@@ -188,8 +207,10 @@ def verify(codex: str) -> dict:
         cached.relative_to(home)
         if installed["version"] != expected["version"]:
             raise RuntimeError("Codex installed a different version")
-        report = inspect_host(codex, vault, environment, home)
+        report = inspect_host(codex, vault, environment, home, installed_root=cached)
         for relative in ("hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
+                         "skills/agentic-vault/SKILL.md",
+                         "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
                          "skills/agentic-vault/references/codex.md",
                          "skills/agentic-vault/scripts/vault_recall.py",
                          "skills/agentic-vault/scripts/vault_links.py",

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import platform
@@ -27,6 +28,8 @@ class CodexVerificationTests(unittest.TestCase):
         source = root / "source"
         resources = (
             "hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
+            "skills/agentic-vault/SKILL.md",
+            "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
             "skills/agentic-vault/references/codex.md",
             "skills/agentic-vault/scripts/vault_recall.py",
             "skills/agentic-vault/scripts/vault_links.py",
@@ -90,6 +93,213 @@ class CodexVerificationTests(unittest.TestCase):
         manifest.parent.mkdir()
         manifest.write_text('{"version": "0.11.0"}', encoding="utf-8")
         return source
+
+    def inspect_discovery_fixture(
+        self, mutate_skills=None, mutate_hooks=None, *, bind_installed_root=True,
+    ) -> dict:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "codex-home"
+            home.mkdir()
+            vault = root / "vault"
+            vault.mkdir()
+            skills = []
+            for directory, name in (
+                ("agentic-vault", "agentic-vault:agentic-vault"),
+                ("webapp-principles", "agentic-vault:webapp-principles"),
+            ):
+                resource = root / "installed/skills" / directory / "SKILL.md"
+                resource.parent.mkdir(parents=True)
+                resource.write_text(f"Fixture skill: {name}\n", encoding="utf-8")
+                skills.append({"name": name, "enabled": True, "path": str(resource),
+                               "pluginId": "agentic-vault@agentic-vault-local"})
+            hooks = [{"eventName": event, "trustStatus": "untrusted",
+                      "pluginId": "agentic-vault@agentic-vault-local"}
+                     for event in ("sessionStart", "sessionStart", "sessionStart",
+                                   "preCompact", "sessionEnd")]
+            if mutate_skills is not None:
+                mutate_skills(skills)
+            if mutate_hooks is not None:
+                mutate_hooks(hooks)
+            (vault / "discovery.json").write_text(json.dumps({
+                "skills/list": {"data": [{"cwd": str(vault), "skills": skills, "errors": []}]},
+                "hooks/list": {"data": [{"cwd": str(vault), "hooks": hooks, "errors": []}]},
+            }), encoding="utf-8")
+            # Python treats the app-server argument as a local script. This exercises
+            # the real stdio protocol and cleanup without a native install or model.
+            (vault / "app-server").write_text(
+                "import json, os, sys\n"
+                "from pathlib import Path\n"
+                "responses = json.loads(Path('discovery.json').read_text(encoding='utf-8'))\n"
+                "for line in sys.stdin:\n"
+                "    request = json.loads(line)\n"
+                "    if 'id' not in request:\n"
+                "        continue\n"
+                "    if request['method'] == 'initialize':\n"
+                "        result = {'codexHome': os.environ['CODEX_HOME'], 'userAgent': 'fixture-host'}\n"
+                "    else:\n"
+                "        result = responses[request['method']]\n"
+                "    print(json.dumps({'id': request['id'], 'result': result}), flush=True)\n",
+                encoding="utf-8",
+            )
+            environment = {**os.environ, "CODEX_HOME": str(home)}
+            options = {"installed_root": root / "installed"} if bind_installed_root else {}
+            return verifier.inspect_host(sys.executable, vault, environment, home.resolve(), **options)
+
+    def test_required_native_skills_preserve_primary_report_and_allow_other_owned_skills(self) -> None:
+        def add_other_skills(skills):
+            skills.append({"name": "agentic-vault:another-command", "enabled": True,
+                           "path": "unused-other-skill", "pluginId": "agentic-vault@agentic-vault-local"})
+            skills.append({**skills[0], "pluginId": "another-plugin@another-marketplace"})
+
+        report = self.inspect_discovery_fixture(mutate_skills=add_other_skills)
+
+        self.assertEqual(report, {
+            "codex": "fixture-host", "skill": "agentic-vault:agentic-vault",
+            "skills": ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"],
+            "session_start_hooks": 3,
+            "hook_events": {"sessionStart": 3, "preCompact": 1, "sessionEnd": 1},
+            "hook_trust": "untrusted",
+        })
+
+    def test_native_skill_discovery_without_installed_root_remains_compatible(self) -> None:
+        report = self.inspect_discovery_fixture(bind_installed_root=False)
+
+        self.assertEqual(report["skill"], "agentic-vault:agentic-vault")
+        self.assertEqual(report["skills"], ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"])
+
+    def test_each_required_native_skill_must_be_present(self) -> None:
+        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+            with self.subTest(skill=name):
+                def remove_skill(skills):
+                    skills[:] = [skill for skill in skills if skill["name"] != name]
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=remove_skill)
+
+    def test_each_required_native_skill_must_be_enabled(self) -> None:
+        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+            with self.subTest(skill=name):
+                def disable_skill(skills):
+                    next(skill for skill in skills if skill["name"] == name)["enabled"] = False
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=disable_skill)
+
+    def test_each_required_native_skill_must_not_be_duplicated(self) -> None:
+        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+            for duplicate_enabled in (True, False):
+                with self.subTest(skill=name, duplicate_enabled=duplicate_enabled):
+                    def duplicate_skill(skills):
+                        skill = next(skill for skill in skills if skill["name"] == name)
+                        skills.append({**skill, "enabled": duplicate_enabled})
+
+                    with self.assertRaisesRegex(RuntimeError, "skill"):
+                        self.inspect_discovery_fixture(mutate_skills=duplicate_skill)
+
+    def test_each_required_native_skill_path_must_exist(self) -> None:
+        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+            with self.subTest(skill=name):
+                def remove_skill_file(skills):
+                    skill = next(skill for skill in skills if skill["name"] == name)
+                    Path(skill["path"]).unlink()
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=remove_skill_file)
+
+    def test_required_native_skill_paths_must_identify_the_expected_resource(self) -> None:
+        for mutation in ("shared-path", "swapped", "wrong-filename", "other-package"):
+            with self.subTest(mutation=mutation):
+                def mismatch_resource(skills):
+                    if mutation == "shared-path":
+                        skills[1]["path"] = skills[0]["path"]
+                    elif mutation == "swapped":
+                        skills[0]["path"], skills[1]["path"] = skills[1]["path"], skills[0]["path"]
+                    else:
+                        expected = Path(skills[1]["path"])
+                        if mutation == "wrong-filename":
+                            wrong = expected.with_name("another-skill.md")
+                        else:
+                            wrong = expected.parents[2].with_name("other-package") / "skills/webapp-principles/SKILL.md"
+                        wrong.parent.mkdir(parents=True, exist_ok=True)
+                        wrong.write_bytes(expected.read_bytes())
+                        skills[1]["path"] = str(wrong)
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=mismatch_resource)
+
+    def test_required_native_skill_paths_must_match_installed_package(self) -> None:
+        def move_both_paths_to_another_package(skills):
+            for skill in skills:
+                expected = Path(skill["path"])
+                wrong = expected.parents[2].with_name("other-package") / "skills" / expected.parent.name / "SKILL.md"
+                wrong.parent.mkdir(parents=True, exist_ok=True)
+                wrong.write_bytes(expected.read_bytes())
+                skill["path"] = str(wrong)
+
+        with self.assertRaisesRegex(RuntimeError, "skill"):
+            self.inspect_discovery_fixture(mutate_skills=move_both_paths_to_another_package)
+
+    def test_required_native_skills_must_belong_to_this_plugin(self) -> None:
+        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+            with self.subTest(skill=name):
+                def change_owner(skills):
+                    skill = next(skill for skill in skills if skill["name"] == name)
+                    skill["pluginId"] = "another-plugin@another-marketplace"
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=change_owner)
+
+    def test_native_hook_counts_events_and_untrusted_status_remain_required(self) -> None:
+        for mutation in ("missing", "extra", "wrong-event", "trusted"):
+            with self.subTest(mutation=mutation):
+                def mutate_hooks(hooks):
+                    if mutation == "missing":
+                        hooks.pop()
+                    elif mutation == "extra":
+                        hooks.append(dict(hooks[0]))
+                    elif mutation == "wrong-event":
+                        hooks[-1]["eventName"] = "sessionStart"
+                    else:
+                        hooks[0]["trustStatus"] = "trusted"
+
+                with self.assertRaises(RuntimeError):
+                    self.inspect_discovery_fixture(mutate_hooks=mutate_hooks)
+
+    def test_installed_webapp_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/SKILL.md", "skills/webapp-principles/SKILL.md",
+                         "docs/webapp-principles.md"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed webapp resource\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_verification_does_not_write_live_codex_config_or_install_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.make_plugin_fixture(root)
+            live_home = root / "live-codex-home"
+            live_home.mkdir()
+            config = live_home / "config.toml"
+            config.write_text("# Existing live configuration\n", encoding="utf-8")
+
+            with patch.dict(os.environ, {"CODEX_HOME": str(live_home)}):
+                report = self.verify_fixture(source)
+
+            self.assertTrue(report["isolated_home"])
+            self.assertEqual(report["model_turns"], 0)
+            self.assertEqual(config.read_text(encoding="utf-8"), "# Existing live configuration\n")
+            self.assertEqual(list(live_home.iterdir()), [config])
 
     def test_installed_hardening_resources_must_exist_and_match(self) -> None:
         for relative in ('hooks/session_checkpoint.py', 'skills/agentic-vault/scripts/vault_ssot.py',

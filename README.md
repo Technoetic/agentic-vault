@@ -30,6 +30,23 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
+## 웹앱 생성 원칙 — 공개 전 소스 추가
+
+웹앱을 만들거나 수정·검토할 때 사용하는
+[공통 스킬](skills/webapp-principles/SKILL.md)과
+[여섯 원칙·검증 기준](docs/webapp-principles.md)을 추가했다.
+JS 모듈화, CSS 분리, 클래스별 책임, async/await, 화면별 URL,
+새 배포 자동 반영을 같은 계약으로 다룬다. 특히 캐시 헤더뿐 아니라
+열린 탭의 배포 감지와 다음 안전한 화면 이동에서의 자동 전체 로드,
+작성 중인 입력·저장 요청 보호까지 확인한다.
+
+Codex에서는 `$agentic-vault:webapp-principles`로 명시할 수 있고,
+Claude Code도 같은 `skills/` 문서를 탐색한다. 자동 선택 여부는 호스트의
+스킬 탐색에 따르며, 문서가 발견됐다는 사실만으로 앱의 원칙 준수를
+증명하지는 않는다. 기존 프레임워크·사용자 지시를 우선하고 현재 허용된
+작업 범위에서 적용한다. 이 소스 추가는 설치된 플러그인·운영 앱을
+갱신하거나 배포하지 않는다.
+
 ## v0.34.0 source and certificate migration
 
 v0.34.0 adds five opt-in items: a left edge for `check-support --bind-subject` subjects,

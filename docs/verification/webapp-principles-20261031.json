@@ -1,0 +1,184 @@
+{
+  "task_id": "webapp-principles-20261031",
+  "source_status": "unreleased source integration; plugin metadata remains 0.34.0",
+  "base_commit": "5c9112cb7f1c8858a051bb4e575e54156ccd3914",
+  "observed_at_kst": "2026-10-31T16:50:24.203521+09:00",
+  "artifact_paths": [
+    "README.md",
+    "docs/README.md",
+    "docs/codex.md",
+    "docs/webapp-principles.md",
+    "scripts/verify_codex_plugin.py",
+    "skills/agentic-vault/SKILL.md",
+    "skills/agentic-vault/references/codex.md",
+    "skills/webapp-principles/SKILL.md",
+    "tests/test_codex_verification.py",
+    "docs/superpowers/specs/2026-10-31-webapp-principles-design.md",
+    "docs/superpowers/plans/2026-10-31-webapp-principles.md"
+  ],
+  "verification_commands_and_results": {
+    "focused_delivery": {
+      "command": "python -B -m unittest discover -s tests -p test_codex_verification.py -v",
+      "tests": 28,
+      "passed": 26,
+      "skipped": 2,
+      "failures": 0,
+      "seconds": 44.8,
+      "skip_reason": "POSIX-only owned process-group tests on Windows",
+      "red": "Initial 14 assertion failures, then concrete path-identity reproduction and 5 expected assertions before fix."
+    },
+    "repository_checks": [
+      {
+        "pattern": "test_release_metadata.py",
+        "exit_code": 0,
+        "tests": 37,
+        "seconds": 2.047
+      },
+      {
+        "pattern": "test_readme_truth.py",
+        "exit_code": 0,
+        "tests": 11,
+        "seconds": 0.703
+      }
+    ],
+    "selected_regression_total": {
+      "tests": 76,
+      "passed": 74,
+      "skipped": 2,
+      "failed": 0,
+      "meaning": "Distinct tests in delivery,release metadata andREADME truth files; repeated runs not added."
+    },
+    "native_codex": {
+      "task_id": "av-webapp-principles-20261031",
+      "exit_code": 0,
+      "seconds": 3.703,
+      "command": "python -B scripts/verify_codex_plugin.py",
+      "report": {
+        "version": "0.34.0",
+        "installed_resources": "verified",
+        "isolated_home": true,
+        "model_turns": 0,
+        "codex": "codex_vscode/0.150.1 (Windows 10.0.26300; x86_64) dumb (agentic-vault-verification; 1.0)",
+        "skill": "agentic-vault:agentic-vault",
+        "skills": [
+          "agentic-vault:agentic-vault",
+          "agentic-vault:webapp-principles"
+        ],
+        "session_start_hooks": 3,
+        "hook_events": {
+          "sessionStart": 3,
+          "preCompact": 1,
+          "sessionEnd": 1
+        },
+        "hook_trust": "untrusted"
+      }
+    },
+    "synthetic_agent_plans": {
+      "kind": "synthetic_agent_plan_evaluation",
+      "real_app_tests": false,
+      "baseline": {
+        "actor": "/root/av_webapp_baseline",
+        "before_skill": true,
+        "observed": "Recognized open-tab issue and draft protection but proposed offering/accepting a manual reload; did not require automatic clean next-navigation update.",
+        "not_claimed": "No blanket failure of all six principles."
+      },
+      "candidate": {
+        "actor": "/root/av_webapp_candidate",
+        "after_reading_skill_and_guide": true,
+        "observations": [
+          {
+            "case": "two-screen update plan",
+            "observed": "Automatic intended-target full-document load on next clean navigation; loaded identity, source modules, async/routing and draft/save checks."
+          },
+          {
+            "case": "read-only note",
+            "observed": "Summary only; no app project/vault creation or writes."
+          },
+          {
+            "case": "existing React/save/failure/rollback",
+            "observed": "Preserve function components and framework; protect in-flight saves and new edits; retain app on failures; compare rollback identities for inequality."
+          }
+        ]
+      }
+    },
+    "independent_review": "One shared-path P2 reproduced, fixed and independently rejected; no remaining findings; fast path tests2/compatibility-resource-isolation3/README11 and338 relative links verified."
+  },
+  "verified_by": [
+    {
+      "actor": "/root/av_webapp_entry_audit",
+      "scope": "Independent code/content/path-binding review and regression reruns; no remaining findings"
+    },
+    {
+      "actor": "/root/av_webapp_candidate",
+      "scope": "Three hypothetical plan observations, not real app behavior"
+    }
+  ],
+  "assumptions": [
+    "Current user/project instructions and framework take priority",
+    "Webapp guidance is scoped and does not authorize installation/deployment/vault writes",
+    "Native source-install verification uses a disposable home; real host settings/caches remain untouched",
+    "Engine code,hook definitions/templates,manifests andcertificate source bytes are unchanged"
+  ],
+  "unresolved": [
+    "No live application update implementation/test in this feature",
+    "No guarantee the host always selects the skill or that models/apps always comply",
+    "Native discovery measured on Windows Codex only; Claude packaging convention checked structurally",
+    "Full vault-engine suite and multi-OS release CI not rerun for this documentation/discovery verifier change; required before later publication"
+  ],
+  "next_safe_action": "Commit and fast-forward clean local master; publish/install only under a later authorized release workflow. Applications require the guide acceptance tests when it is applied.",
+  "decision_support": {
+    "tool": "Jev native choice",
+    "choice": "scoped_skill",
+    "confidence": 0.99,
+    "role": "advisory",
+    "calls": 1,
+    "evidence_binding": "inline_not_file_verified"
+  },
+  "tested_source_files": [
+    {
+      "path": "README.md",
+      "sha256": "ccfac146fceb7b1e063b54801fa55e80550e51e74201456a04add6972ffbd69b"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "38cfa2d7f884c7a99316b43c2e7a6556f6ace0908f3b6451b4731d8ea3458845"
+    },
+    {
+      "path": "docs/codex.md",
+      "sha256": "15b13e9f93169ca6ca078b9317329de70a0e2e75a7f3382056253174c1c0a2d0"
+    },
+    {
+      "path": "docs/webapp-principles.md",
+      "sha256": "3f4be801e89ade194df80eaf61427ebca426b9eabd8f8c1ad961d14319bd1b79"
+    },
+    {
+      "path": "scripts/verify_codex_plugin.py",
+      "sha256": "94a329e197e53132deed07801cbc63b35a0da941c6065b46f83963ce1a7637b9"
+    },
+    {
+      "path": "skills/agentic-vault/SKILL.md",
+      "sha256": "432f2af3af3e11c7ebad8d3e5494929cf2afe98c431821fc0751147fa51f6663"
+    },
+    {
+      "path": "skills/agentic-vault/references/codex.md",
+      "sha256": "687533140de1c8392403086055c4f465c9faef24cdf527b4281253d5b0608c67"
+    },
+    {
+      "path": "skills/webapp-principles/SKILL.md",
+      "sha256": "10dd19ccb573cc09a7b4ec0788833347782f5c41f1672e6b037b3139f51728c4"
+    },
+    {
+      "path": "tests/test_codex_verification.py",
+      "sha256": "5d3b3c0350136461ec45b26f72ad67dba28882c34a06cec08134651931d990b7"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-10-31-webapp-principles-design.md",
+      "sha256": "7ab93ebb0bc2d3b4285dfe316099324b854f804b03a67024424aaa751a27ae00"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-31-webapp-principles.md",
+      "sha256": "038a087bbbbab947fa51cd444cefc68437a602987c59522872144ab0a688b3df"
+    }
+  ],
+  "snapshot_scope": "Implementation/spec/plan inputs; this verification report is an output excluded from its own snapshot."
+}

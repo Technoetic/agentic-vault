@@ -1,5 +1,19 @@
 # Claude Code · Codex 겸용 사용
 
+## 웹앱 생성 원칙 — 공개 전 소스
+
+[webapp-principles 스킬](../skills/webapp-principles/SKILL.md)은
+[여섯 원칙과 검증 기준](webapp-principles.md)을 웹앱 작업에서 읽도록 연결한다.
+이 변경을 포함한 전체 설치본에서는 `/skills`에
+`agentic-vault:webapp-principles`가 추가로 나타나며,
+`$agentic-vault:webapp-principles`로 명시할 수 있다.
+Claude Code도 같은 공통 스킬 문서를 사용한다.
+
+볼트 밖에서도 사용할 수 있고, 기존 프로젝트 지시와 프레임워크를 우선한다.
+웹앱 개발·수정·검토 때의 지침이며, 일반 볼트 세션을 앱 생성으로 전환하지 않는다.
+호스트가 스킬을 발견하는지와 실제 앱에서 원칙이 동작하는지는 각각 검증한다.
+소스 변경만으로 기존 설치본이나 운영 앱이 갱신되지는 않는다.
+
 ## v0.34.0 source and certificate migration
 
 v0.34.0 adds five opt-in items: a left edge for `check-support --bind-subject` subjects,
