@@ -272,6 +272,11 @@ class SnapshotTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("git"), "Git unavailable")
     def test_git_history_bundle_clones_without_source_repository(self):
         subprocess.run(["git", "init", "-q", str(self.vault)], check=True)
+        # Keep this disposable repository quiescent while inventory scans .git.
+        subprocess.run(["git", "-C", str(self.vault), "config", "--local",
+                        "maintenance.auto", "false"], check=True)
+        subprocess.run(["git", "-C", str(self.vault), "config", "--local",
+                        "gc.auto", "0"], check=True)
         subprocess.run(["git", "-C", str(self.vault), "add", "00-meta"], check=True)
         subprocess.run(["git", "-C", str(self.vault), "-c", "user.name=Test",
                         "-c", "user.email=test@example.invalid", "commit", "-qm", "history"], check=True)

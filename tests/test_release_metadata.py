@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.35.0"
-EXPECTED_PUBLIC_REF = "0.35.0"
+EXPECTED = "0.35.1"
+EXPECTED_PUBLIC_REF = "0.35.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.35.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.35.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.35.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.35.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.35.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.35.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -662,7 +662,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
 
     def test_current_checker_addenda_state_release_hash_and_coordination(self) -> None:
-        # v0.35.0 retains the actual v0.34.0 checker/corpus bytes; a version-only
+        # v0.35.1 retains the actual v0.34.0 checker/corpus bytes; a version-only
         # transition must not invent a certificate invalidation. Earlier migrations stay history.
         for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
             with self.subTest(path=rel_path):
