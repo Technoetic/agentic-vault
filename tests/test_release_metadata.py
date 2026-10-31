@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.34.0"
-EXPECTED_PUBLIC_REF = "0.34.0"
+EXPECTED = "0.35.0"
+EXPECTED_PUBLIC_REF = "0.35.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.34.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.34.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.35.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.35.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.34.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.35.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -358,6 +358,7 @@ CHECKER_SHA256_V0340 = "be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
 CURRENT_CHECKER_SECTION = f"## v{EXPECTED} source and certificate migration"
+V0340_CHECKER_SECTION = "## v0.34.0 source and certificate migration"
 V0331_CHECKER_SECTION = "## v0.33.1 source and certificate migration"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
     "README.md", "docs/codex.md", "docs/hardening.md",
@@ -661,27 +662,33 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
 
     def test_current_checker_addenda_state_release_hash_and_coordination(self) -> None:
-        # Each addendum opens with the current release section, above the published v0.33.1
-        # section kept as history. The current section states its fingerprint once and never the
-        # v0.33.1 one, and it replaces the development-source addendum it was prepared from.
+        # v0.35.0 retains the actual v0.34.0 checker/corpus bytes; a version-only
+        # transition must not invent a certificate invalidation. Earlier migrations stay history.
         for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
             with self.subTest(path=rel_path):
                 text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
                 start = text.index(CURRENT_CHECKER_SECTION)
-                end = text.index(V0331_CHECKER_SECTION)
+                end = text.index(V0340_CHECKER_SECTION)
                 self.assertLess(start, end)
                 section = _folded(text[start:end])
                 self.assertIn(f"`{CHECKER_SHA256_V0340}`", section)
-                self.assertEqual(text.count(CHECKER_SHA256_V0340[:8]), 1)
+                self.assertEqual(section.count(CHECKER_SHA256_V0340[:8]), 1)
                 self.assertNotIn(CHECKER_SHA256_V0330[:8], section)
                 self.assertNotIn("## Development source after v0.33.1", text)
                 self.assertNotIn("This development source is not a release.", _folded(text))
                 self.assertNotIn("unreleased development source checkout", _folded(text))
                 self.assertIn("version preparation does not certify them", section)
-                self.assertIn(SOURCE_CHECKER_COORDINATION, section)
-                self.assertIn("This coordination also applies when returning to published v0.33.1.", section)
-                self.assertIn("verification/subject-boundary-20261030.md)", section)
+                self.assertIn("retains all seven certificate-bound checker files and the harmless corpus from v0.34.0", section)
+                self.assertIn("does not invalidate an existing certificate or require promotion reset or certificate regeneration", section)
+                self.assertIn("Older transitions that change bound bytes still require", section)
                 self.assertIn(f"verification/v{EXPECTED}.md)", section)
+
+                historical = _folded(text[end:text.index(V0331_CHECKER_SECTION)])
+                self.assertEqual(historical.count(CHECKER_SHA256_V0340[:8]), 1)
+                self.assertIn(SOURCE_CHECKER_COORDINATION, historical)
+                self.assertIn("This coordination also applies when returning to published v0.33.1.", historical)
+                self.assertIn("verification/subject-boundary-20261030.md)", historical)
+                self.assertIn("verification/v0.34.0.md)", historical)
 
     def test_v0331_checker_section_and_dated_notes_stay_as_history(self) -> None:
         # The published v0.33.1 section keeps its fingerprint, its coordination back to v0.32.0
@@ -707,7 +714,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(f"`{CHECKER_SHA256_V0320}`", note)
         self.assertIn("vault_ssot.py", note)
         self.assertIn("LF", note)
-        self.assertIn(f"[v{EXPECTED} verification record](v{EXPECTED}.md)", note)
+        self.assertIn("[v0.34.0 verification record](v0.34.0.md)", note)
         # The subject-boundary note keeps its dated development statements and names the
         # implementation commit and the release candidate source.
         note = (REPO_ROOT / SOURCE_CHECKER_NOTE_20261030).read_text(encoding="utf-8")
@@ -719,7 +726,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("LF", note)
         self.assertIn("`ac96d3eaeb7414080a01b1c40395dee3aae9f4c7`", note)
         self.assertIn("`67af284583c19b050ed93a1fc77a8cc7babb9086`", note)
-        self.assertIn(f"[v{EXPECTED} verification record](v{EXPECTED}.md)", note)
+        self.assertIn("[v0.34.0 verification record](v0.34.0.md)", note)
         self.assertNotIn("This is not a release", note)
         # Published records and the earlier dated note keep their own fingerprints.
         for rel_path in ("docs/releases/v0.32.0.md", "docs/verification/v0.32.0.md",
@@ -905,6 +912,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(entry["source"]["source"], "local")
         self.assertEqual((REPO_ROOT / entry["source"]["path"]).resolve(), REPO_ROOT)
         self.assertTrue((REPO_ROOT / codex["skills"] / "agentic-vault/SKILL.md").is_file())
+        self.assertTrue((REPO_ROOT / codex["skills"] / "webapp-principles/SKILL.md").is_file())
         self.assertTrue((REPO_ROOT / "docs/releases" / f"v{EXPECTED}.md").is_file())
         self.assertIn(EXPECTED_BADGE_LINE, readme_lines)
         self.assertIn(EXPECTED_TREE_LINE, readme_lines)

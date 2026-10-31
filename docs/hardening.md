@@ -1,5 +1,24 @@
 # 출처와 공유 상태 보강
 
+## v0.35.0 source and certificate migration
+
+v0.35.0 adds the shared [webapp-principles skill](../skills/webapp-principles/SKILL.md),
+[the six-rule guide](webapp-principles.md) and stricter installed-skill discovery checks.
+It retains all seven certificate-bound checker files and the harmless corpus from v0.34.0.
+The measured `checker_sha256` remains
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`.
+Changing only between v0.34.0 and v0.35.0 does not invalidate an existing certificate
+or require promotion reset or certificate regeneration, provided the installed bound bytes match.
+The healthcheck release stamp is outside those seven bound files.
+
+Older transitions that change bound bytes still require the migration and rollback
+coordination documented in the historical sections below. The v0.34.0 features and
+its original migration record remain available; their dated observations are not
+new v0.35.0 release measurements. Final source, CI, ZIP, draft and publication gates
+are recorded separately in `verification.json` and `post-publication.json`;
+version preparation does not certify them. See the [v0.35.0 release record](verification/v0.35.0.md).
+Plugin installation, vault upgrade and application deployment remain separate operations.
+
 ## v0.34.0 source and certificate migration
 
 v0.34.0 adds five opt-in items: a left edge for `check-support --bind-subject` subjects,
@@ -25,7 +44,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표와 이어지는 절은 v0.34.0 기준이다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, 현재 v0.35.0의 인증서 호환 범위는 위 절을 따른다.
 
 ## v0.33.1 source and certificate migration
 

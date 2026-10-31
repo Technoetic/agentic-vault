@@ -29,7 +29,7 @@
 
 ## 웹앱 전용 스킬
 
-이 소스 변경을 포함하는 전체 플러그인에는
+v0.35.0부터 전체 플러그인에는
 `$agentic-vault:webapp-principles` 진입점도 있다.
 [스킬](../../webapp-principles/SKILL.md)과
 [여섯 원칙·검증 기준](../../../docs/webapp-principles.md)을 함께 읽는다.

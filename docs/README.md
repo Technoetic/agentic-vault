@@ -14,7 +14,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | 문서 | 내용 |
 |---|---|
 | [codex.md](codex.md) | Claude Code · Codex 겸용 설치, 명령 대응, 훅 신뢰, 기존 설치 갱신 |
-| [webapp-principles.md](webapp-principles.md) | 공개 전 소스: 웹앱 생성 6원칙과 검증 기준. 모듈·CSS·클래스·비동기·화면별 URL·새 배포 감지/안전한 자동 갱신; 웹앱 전용 공통 스킬과 연결 |
+| [webapp-principles.md](webapp-principles.md) | v0.35.0: 웹앱 생성 6원칙과 검증 기준. 모듈·CSS·클래스·비동기·화면별 URL·새 배포 감지/안전한 자동 갱신; 웹앱 전용 공통 스킬과 연결 |
 | [reliability.md](reliability.md) | 세션 주입 예산, 기억 주입 진단, Claude Code 권장 버전(2.1.295 이상)·선택형 호스트 버전 확인·SessionStart 실측 절차(미실행), 세션 기록으로 SessionStart 훅의 실행·실패·잘림 확인(`--session-evidence`, v0.31.0), 출처가 있는 로컬 검색, 세대별 백업의 보장 범위와 사용법 |
 | [evidence.md](evidence.md) | 검증 근거·인계 CLI (v0.11.0+) |
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+), 선택형 유지 문구 확인 `preserve-check`(v0.29.0, 읽기 전용) |
@@ -35,7 +35,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0), 다른 대장의 사실 표에만 있는 값 표시(`ledger_table_only`)·선택형 `--primary-text-only`와 기간 표현 정규화(`--normalize-periods`)(v0.31.0), 기본 경로 정규식(제목·frontmatter 줄, 인라인 코드·링크 등)의 선형 시간 처리, `check-support`의 표를 뺀 자리·줄 나눔·자기 인용 BOM 처리, 기간 정규화의 보류 보강·과잉 보류 해소와 생성 시험으로 고정한 알려진 실패 목록, 인증서 corpus 파일의 LF checkout(v0.32.0), 선택형 `--bind-subject` 주어의 왼쪽 경계와 `different_from` 행 안내(v0.34.0) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차, 고정한 action 커밋의 정확한 태그 주석(v0.32.0) |
-| [releases/](releases/) | 릴리스 노트. 최신은 [v0.34.0](releases/v0.34.0.md); [검증 기록](verification/v0.34.0.md). v0.33.0은 공개하지 않은 후보이며 그 기능은 v0.33.1로 공개했다 |
+| [releases/](releases/) | 릴리스 노트. 최신은 [v0.35.0](releases/v0.35.0.md); [검증 기록](verification/v0.35.0.md). 이전 [v0.34.0](releases/v0.34.0.md)의 선택형 기능을 유지한다. v0.33.0은 공개하지 않은 후보이며 그 기능은 v0.33.1로 공개했다 |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계(선택형 deny zone 가드 포함, v0.32.0) |
 | [../assets/adapters/deny-guard/guide.md](../assets/adapters/deny-guard/guide.md) | 선택형 deny zone 가드(Claude Code 전용 PreToolUse 훅 템플릿, 기본 설치 안 함)의 판정표·PowerShell 구문 분석·켜는 법·상태 보고(`adapters.deny_guard`)·지연 실측·한계(v0.32.0) |
 
