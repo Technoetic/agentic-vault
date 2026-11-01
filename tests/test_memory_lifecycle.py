@@ -9,6 +9,11 @@ import sys
 import tempfile
 import unittest
 
+try:
+    from _winfs import make_junction
+except ImportError:
+    from tests._winfs import make_junction
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts/evaluate_memory_lifecycle.py'
 _REPORTS = {}
@@ -209,8 +214,7 @@ class LifecycleTests(unittest.TestCase):
             sentinel.write_bytes(b'PRIVATE-SENTINEL')
             link = root / 'forget/notes'
             if os.name == 'nt':
-                import _winapi
-                _winapi.CreateJunction(str(outside), str(link))
+                make_junction(link, outside)
             else:
                 link.symlink_to(outside, target_is_directory=True)
             payload = dict(root=str(root), nonce=nonce, role='repair', case='ascii',
