@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.35.1"
-EXPECTED_PUBLIC_REF = "0.35.1"
+EXPECTED = "0.36.0"
+EXPECTED_PUBLIC_REF = "0.36.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.35.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.35.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.36.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.36.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.35.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.36.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -357,7 +357,7 @@ CHECKER_SHA256_V0330 = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7
 CHECKER_SHA256_V0340 = "be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f"
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
-CURRENT_CHECKER_SECTION = f"## v{EXPECTED} source and certificate migration"
+CURRENT_CHECKER_SECTION = "## v0.35.1 source and certificate migration"
 V0340_CHECKER_SECTION = "## v0.34.0 source and certificate migration"
 V0331_CHECKER_SECTION = "## v0.33.1 source and certificate migration"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
@@ -681,7 +681,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn("retains all seven certificate-bound checker files and the harmless corpus from v0.34.0", section)
                 self.assertIn("does not invalidate an existing certificate or require promotion reset or certificate regeneration", section)
                 self.assertIn("Older transitions that change bound bytes still require", section)
-                self.assertIn(f"verification/v{EXPECTED}.md)", section)
+                self.assertIn("verification/v0.35.1.md)", section)
 
                 historical = _folded(text[end:text.index(V0331_CHECKER_SECTION)])
                 self.assertEqual(historical.count(CHECKER_SHA256_V0340[:8]), 1)
@@ -1176,6 +1176,20 @@ class V0320ReleaseNoteTests(unittest.TestCase):
                 stamp = template.read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.32.0", stamp)
+
+
+class V0360ReleaseMetadataTests(unittest.TestCase):
+    def test_release_scope_and_pending_gates(self) -> None:
+        release = (REPO_ROOT / "docs/releases/v0.36.0.md").read_text(encoding="utf-8")
+        verification = (REPO_ROOT / "docs/verification/v0.36.0.md").read_text(encoding="utf-8")
+        for literal in ("64 KiB", "CRLF", "OKF v0.2", "frontmatter", "checkpoint",
+                        "--ref v0.36.0", CHECKER_SHA256_V0340, "2,671"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        for literal in ("pending, not passes", "three module reruns", "not a fresh monolithic",
+                        "verification.json", "post-publication.json", CHECKER_SHA256_V0340):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, verification)
 
 
 class V0330ReleaseMetadataTests(unittest.TestCase):

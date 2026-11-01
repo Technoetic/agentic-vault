@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/agentic-vau
 class ExportTests(unittest.TestCase):
     def test_selected_notes_project_links_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             vault = root / 'vault'
             (vault / '00-meta').mkdir(parents=True)
             (vault / '00-meta/vault-config.json').write_text('{"required_keys":["title"],"enums":{}}', encoding='utf-8')
