@@ -36,6 +36,11 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_evidence.py",
             "skills/agentic-vault/scripts/vault_retrieval.py",
             "skills/agentic-vault/scripts/vault_memory.py",
+            "skills/agentic-vault/scripts/vault_impact.py",
+            "skills/agentic-vault/scripts/vault_okf.py",
+            "scripts/evaluate_knowledge_evolution.py",
+            "tests/fixtures/knowledge_evolution/history.json",
+            "docs/knowledge-impact.md", "docs/okf-export.md", "docs/knowledge-evolution.md",
             "skills/agentic-vault/scripts/vault_lesson_metrics.py",
             "skills/agentic-vault/scripts/vault_runs.py",
             "skills/agentic-vault/scripts/vault_run_costs.py",
@@ -300,6 +305,26 @@ class CodexVerificationTests(unittest.TestCase):
             self.assertEqual(report["model_turns"], 0)
             self.assertEqual(config.read_text(encoding="utf-8"), "# Existing live configuration\n")
             self.assertEqual(list(live_home.iterdir()), [config])
+
+    def test_installed_knowledge_evolution_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_impact.py",
+                         "skills/agentic-vault/scripts/vault_okf.py",
+                         "scripts/evaluate_knowledge_evolution.py",
+                         "tests/fixtures/knowledge_evolution/history.json",
+                         "docs/knowledge-impact.md", "docs/okf-export.md",
+                         "docs/knowledge-evolution.md"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Corrupted knowledge resource\n", encoding="utf-8")
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
 
     def test_installed_hardening_resources_must_exist_and_match(self) -> None:
         for relative in ('hooks/session_checkpoint.py', 'skills/agentic-vault/scripts/vault_ssot.py',

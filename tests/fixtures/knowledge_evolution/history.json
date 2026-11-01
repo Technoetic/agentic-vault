@@ -1,0 +1,7 @@
+﻿{"schema_version":1,"checkpoints":[
+ {"name":"unchanged","source":"# Source\nColor: red\n","owner":"# Owner\n[[source|Source]]\n","facts":{"color":"red"},"claims":[{"key":"color","value":"red","expected":"supported"}],"expected_status":"current","expected_source":"current","expected_owner":"current"},
+ {"name":"evidencechanged","source":"# Source\nColor: blue\n","owner":"# Owner\n[[source|Source]]\n","facts":{"color":"blue"},"claims":[{"key":"color","value":"red","expected":"stale"},{"key":"color","value":"green","expected":"invented"},{"key":"color","value":"blue","expected":"supported"}],"expected_status":"review_required","expected_source":"changed","expected_owner":"current"},
+ {"name":"missing","source":null,"owner":"# Owner\n[[source|Source]]\n","facts":{},"claims":[{"key":"color","value":"red","expected":"unverified"}],"expected_status":"review_required","expected_source":"missing","expected_owner":"current"},
+ {"name":"restore","source":"# Source\nColor: red\n","owner":"# Owner\n[[source|Source]]\n","facts":{"color":"red"},"claims":[{"key":"color","value":"red","expected":"supported"}],"expected_status":"current","expected_source":"current","expected_owner":"current"},
+ {"name":"ownerdrift","source":"# Source\nColor: red\n","owner":"# Owner changed\n[[source|Source]]\n","facts":{"color":"red"},"claims":[],"expected_status":"review_required","expected_source":"current","expected_owner":"changed"}
+]}

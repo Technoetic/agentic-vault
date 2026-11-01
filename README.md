@@ -30,6 +30,32 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
+## 선택형 지식 교환·변경 검토 — 개발 소스
+
+현재 개발 소스에는 세 가지 명시적 도구가 추가되어 있다. 아래 기능의 공개 릴리스,
+활성 플러그인 설치와 실제 회사 볼트 변환은 별도 작업이다. 기존 기본 훅·회상·저장
+형식과 인증서에 묶인 검사기 바이트는 유지한다.
+
+- [변경 영향 조회](docs/knowledge-impact.md): 호스트가 등록한 `출처 → 주장 → 소유 노트`
+  관계에서 원본·노트의 변경, 누락, 차단을 구별한다. 자동 추출·수정·진실 판정은 하지 않는다.
+- [선택형 OKF v0.2 내보내기](docs/okf-export.md): 명시한 노트만 새 외부 디렉터리에
+  변환하고 원본/출력 해시·링크 대응·손실을 기록한다. 내부 상태·날짜·검토 표시를
+  OKF 승인으로 치환하지 않으며, 원본 frontmatter는 확장 필드에 보존한다.
+- [시간축 변화 시험](docs/knowledge-evolution.md): 작은 합성 이력에서 실제 두 도구를
+  재생하고, 명시적 구조화 사실의 현재 지지·과거 내용 잔존·새 반증·근거 부족을 따로
+  집계한다. 자연어 의미 추출이나 공식 LEDGER 벤치마크 재현은 아니다.
+
+```text
+python skills/agentic-vault/scripts/vault_impact.py --vault PATH capture --input 00-meta/dependencies.json
+python skills/agentic-vault/scripts/vault_impact.py --vault PATH check --input 00-meta/dependency-baseline.json
+python skills/agentic-vault/scripts/vault_okf.py --vault PATH --note 20-knowledge/example.md --output ABSOLUTE_PATH_OUTSIDE_VAULT
+python scripts/evaluate_knowledge_evolution.py
+```
+
+[OKF 사양](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)과
+[OpenWiki](https://github.com/langchain-ai/openwiki/tree/7bb583d664f2d1c2484fa44b9d591f6103ca8166)의
+버전 근거·페이지 관리·LEDGER 평가에서 설계 아이디어를 참고한 범위 제한 구현이다.
+
 ## v0.35.1 — 웹앱 생성 원칙
 
 공개하지 않은 [v0.35.0 후보](docs/releases/v0.35.0.md)를 대체한다. 임시 백업 시험

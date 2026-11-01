@@ -49,6 +49,8 @@ v0.35.1부터 전체 플러그인에는
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
 | `links <인자>` | [관련 노트 연결 제안](../../../docs/link-proposals.md), `scripts/vault_links.py` (`--vault`·`--source`·`--query` 명시, 읽기 전용) |
 | `memory <인자>` | [구조화 기억](../../../docs/memory-patterns.md), `scripts/vault_memory.py` (`--vault`·vault-relative `--input`·예산 명시, 읽기 전용) |
+| `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
+| `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |
 | `runs <하위 명령과 인자>` | [교훈 검증·복구](../../../docs/tower-reliability.md), `scripts/vault_runs.py`; 명시한 실행 조건과 관찰 결과의 준비·기록·조회·비교, 영수증 없는 사례별 뒤집힘 표(`flips`) |
 | `run-costs <하위 명령과 인자>` | [평가기·비용 근거](../../../docs/improvement-accounting.md), `scripts/vault_run_costs.py`; 명시한 실행의 호스트 사용량 기록·조회·합산·비교. 계측·효율·적용 인증 없음 |

@@ -101,6 +101,25 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 호출자가 제출한 계측 로그·직접 보고·미확인을 구별하고, 미측정 비용을 0으로 채우지 않는다.
 새 모델/명령 실행이나 자동 효율 판정·적용을 수행하지 않는다.
 
+### 선택형 변경 영향·OKF 교환
+
+`impact`는 [변경 영향 조회](../../docs/knowledge-impact.md)의
+`scripts/vault_impact.py --vault PATH capture|check --input RELATIVE.json`에 연결한다.
+호스트가 명시한 주장·소유 노트·출처의 의존관계만 검사한다. 현재/변경/누락/차단을
+구별하며, 원본 변경은 재검토 신호이지 주장 반증이나 자동 수정 권한이 아니다.
+캡처 JSON은 UTF-8로 저장하며, 체크섬은 서명이나 등록자의 신원 인증이 아니다.
+
+`okf-export`는 [선택형 OKF 내보내기](../../docs/okf-export.md)의
+`scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`로 연결한다.
+여러 노트는 `--note`를 반복하며, 볼트 밖의 새 디렉터리에만 쓴다. 명시한 허용 노트만
+읽고 원본은 바꾸지 않는다. 손실 보고를 검토하고 실제 공유 범위의 기존 사용자 승인을
+따른다. 형식 변환은 사람 검토·운영 승인·계산 실행 인증이 아니다.
+
+[시간축 변화 시험](../../docs/knowledge-evolution.md)의
+`scripts/evaluate_knowledge_evolution.py`는 개발자가 선택하는 합성 fixture 재생이다.
+기본 훅이나 회상에는 추가하지 않고, 실제 회사 업무의 정확성·개선 효과로 일반화하지 않는다.
+설치본에 도구가 없으면 현재 소스와 설치의 차이를 알리고 임의로 복사하지 않는다.
+
 ### 선택형 기억 형성 평가·근거 조립·절차 검색
 
 사용자가 `assembly`를 요청하면 [현재 값 근거 조립](../../docs/memory-assembly.md)의

@@ -13,6 +13,9 @@ point-in-time plans, designs and verification logs and may not match current beh
 
 | 문서 | 내용 |
 |---|---|
+| [knowledge-impact.md](knowledge-impact.md) | 개발 소스: 명시적 출처·주장·소유 노트 의존관계의 변경·누락·차단을 읽기 전용으로 조회 |
+| [okf-export.md](okf-export.md) | 개발 소스: 선택 노트의 OKF v0.2 교환 묶음·원본 메타데이터 보존·해시·손실 보고 |
+| [knowledge-evolution.md](knowledge-evolution.md) | 개발 소스: 합성 이력에서 실제 변경 조회·내보내기와 구조화 사실의 시간축 판정을 재생 |
 | [codex.md](codex.md) | Claude Code · Codex 겸용 설치, 명령 대응, 훅 신뢰, 기존 설치 갱신 |
 | [webapp-principles.md](webapp-principles.md) | v0.35.1: 웹앱 생성 6원칙과 검증 기준. 모듈·CSS·클래스·비동기·화면별 URL·새 배포 감지/안전한 자동 갱신; 웹앱 전용 공통 스킬과 연결 |
 | [reliability.md](reliability.md) | 세션 주입 예산, 기억 주입 진단, Claude Code 권장 버전(2.1.295 이상)·선택형 호스트 버전 확인·SessionStart 실측 절차(미실행), 세션 기록으로 SessionStart 훅의 실행·실패·잘림 확인(`--session-evidence`, v0.31.0), 출처가 있는 로컬 검색, 세대별 백업의 보장 범위와 사용법 |
