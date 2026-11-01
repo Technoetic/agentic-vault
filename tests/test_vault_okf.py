@@ -130,6 +130,9 @@ class SafetyTests(unittest.TestCase):
         from unittest import mock
         fake = mock.Mock(return_value=0)
         library = mock.Mock(renamex_np=fake)
+        # Older pathlib selects a flavour from os.name on each construction.
+        # Build host paths before mocking the process-wide platform values.
+        source, destination = Path('/tmp/source'), Path('/tmp/dest')
         with mock.patch.object(self.module.sys, 'platform', 'darwin'), mock.patch.object(self.module.os, 'name', 'posix'), mock.patch.object(self.module.ctypes, 'CDLL', return_value=library):
-            self.module._publish(Path('/tmp/source'), Path('/tmp/dest'))
+            self.module._publish(source, destination)
         self.assertEqual(fake.call_args.args[-1], 4)
