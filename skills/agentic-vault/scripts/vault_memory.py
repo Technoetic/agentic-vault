@@ -34,6 +34,7 @@ from typing import Sequence
 
 from vault_evidence import EvidenceError, decode, regular, stable_read, stamp
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
+from vault_revocation import RevocationError, RevocationPolicy
 from vault_paths import resolve_note_path
 
 
@@ -188,6 +189,7 @@ class _Policy:
         # The single bootstrap read discovers policy; learned rules must allow
         # the config itself before any source or subsequent config read.
         self.path(CONFIG_PATH, ".json")
+        self.revocations = RevocationPolicy(vault, config)
         self.sources = {}
         self.source_attempts = set()
         self.initial_bytes = 0
@@ -202,6 +204,10 @@ class _Policy:
         info, mark, _data = self._config()
         if info != self.config_info or mark != self.config_mark:
             raise EvidenceError("configuration_changed")
+        try:
+            self.revocations.recheck()
+        except RevocationError as exc:
+            raise EvidenceError("revocation_changed_or_unavailable") from exc
 
     def path(self, relative, suffix=".md"):
         try:
@@ -239,6 +245,10 @@ class _Policy:
             raise EvidenceError("invalid_utf8") from exc
         if "\r" in original.replace("\r\n", ""):
             raise EvidenceError("unsupported_line_endings")
+        try:
+            original = self.revocations.filter_text(canonical, original)
+        except RevocationError as exc:
+            raise EvidenceError("revoked_source_unavailable") from exc
         record = ({"path": canonical, **info}, mark, original)
         self.sources[canonical] = record
         return record

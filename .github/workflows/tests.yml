@@ -52,6 +52,8 @@ jobs:
         run: python scripts/evaluate_improvement_accounting.py
       - name: Paired memory formation controls (no model calls)
         run: python scripts/evaluate_memory_formation.py
+      - name: Cross-process selective memory repair controls (no model calls)
+        run: python scripts/evaluate_memory_lifecycle.py
       - name: Source-bound assembly and procedure examples (no model calls)
         run: python scripts/evaluate_memory_reliability.py
       - name: Hard bilingual recall at top3 (explicit query expansion)

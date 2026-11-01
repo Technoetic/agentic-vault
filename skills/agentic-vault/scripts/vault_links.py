@@ -23,6 +23,7 @@ from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
 from vault_paths import resolve_note_path
 import vault_recall as recall_module
 from vault_recall import recall
+from vault_revocation import RevocationPolicy
 
 
 MAX_PROPOSALS = 10
@@ -220,10 +221,15 @@ def propose_links(vault: Path, source: str, query: str, limit: int = 5,
         return _fail(result, "invalid_vault")
     try:
         policy = _Policy(vault, result)
+        revocations = RevocationPolicy(vault, policy.config)
     except (OSError, ValueError, EvidenceError, HealthcheckError, RecursionError, OverflowError):
         return _fail(result, "invalid_config_or_vault")
     try:
         source_info, _source_mark, source_data = policy.read(source)
+        if source_info['path'] in revocations.affected_paths:
+            # A diff over masked source text would propose physical deletion;
+            # a diff over raw text would disclose the revoked context.
+            return _fail(result, 'revoked_source_requires_review')
         original = source_data.decode("utf-8")  # Preserve BOM and line endings exactly.
     except UnicodeError:
         return _fail(result, "invalid_utf8")
@@ -282,7 +288,7 @@ def propose_links(vault: Path, source: str, query: str, limit: int = 5,
             break
         try:
             binding, _mark, data = policy.read(relative)
-            text = data.decode("utf-8-sig")
+            text = revocations.filter_text(binding['path'], data.decode('utf-8')).removeprefix('\ufeff')
             current = recall_module._rank_document(binding["path"], text, phrase, query_terms)
             if current is None:
                 _omit(result, "candidate_no_longer_matches")
@@ -369,6 +375,14 @@ def propose_links(vault: Path, source: str, query: str, limit: int = 5,
     else:
         result.update(context="", diff="")
     diagnostics["context_estimated_tokens"] = estimate_tokens(result["context"])
+    try:
+        revocations.recheck()
+        policy.fresh()
+        policy.check_mark(source_info['path'], source_mark)
+        for proposal in retained:
+            policy.check_mark(proposal['path'], target_marks[proposal['path']])
+    except (OSError, ValueError, EvidenceError):
+        return _fail(result, 'revocation_or_source_changed')
     return result
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import vault_runs as runs
 import vault_retrieval as retrieval
+from vault_revocation import RevocationPolicy
 
 MAX_PROCEDURES = 32
 MAX_STEPS = 16
@@ -149,7 +150,7 @@ def _execution_conditions(manifest):
         'tools_sha256': runs.evidence.digest(runs.evidence.encode(manifest['tools']))}
 
 
-def _candidate(store, record, conditions, cache):
+def _candidate(store, record, conditions, cache, revocations=None):
     if record['conditions'] != conditions:
         return None, 'reuse_conditions_mismatch'
     texts = []
@@ -158,7 +159,10 @@ def _candidate(store, record, conditions, cache):
         actual, raw = store.fingerprint(binding['path'], markdown=True)
         if actual != binding:
             return None, 'stale_source_binding'
-        texts.append((binding, raw.decode('utf-8-sig')))
+        text = raw.decode('utf-8')
+        if revocations is not None:
+            text = revocations.filter_text(binding['path'], text)
+        texts.append((binding, text.removeprefix('\ufeff')))
     steps = []
     for step in record['steps']:
         source = next((binding for binding, text in texts if step['instruction'] in text), None)
@@ -202,6 +206,7 @@ def lookup(vault, catalog, task_class, query, *, conditions, limit=5, max_bytes=
     runs._text(query, maximum=512)
     _conditions(conditions)
     store = runs.Store(vault)
+    revocations = RevocationPolicy(store.vault, store.policy.config)
     catalog_info, value = store.json_file(catalog)
     records = _catalog(value)
     eligible = {p['id']: p for p in records if p['task_class'] == task_class}
@@ -218,7 +223,7 @@ def lookup(vault, catalog, task_class, query, *, conditions, limit=5, max_bytes=
     for key in sorted(scores, key=lambda k: (-scores[k], k)):
         record = eligible[key]
         try:
-            candidate, reason = _candidate(store, record, conditions, cache)
+            candidate, reason = _candidate(store, record, conditions, cache, revocations)
         except (runs.RunError, runs.state.StateError, runs.evidence.EvidenceError, OSError, ValueError):
             candidate, reason = None, 'unsafe_stale_or_unavailable_evidence'
         if candidate is not None and len(result['matches']) >= limit:
@@ -234,18 +239,33 @@ def lookup(vault, catalog, task_class, query, *, conditions, limit=5, max_bytes=
             result['truncated'] = True
             if 'output_byte_budget' not in result['reasons']:
                 result['reasons'].append('output_byte_budget')
+    final_marks = {}
     for candidate in result['matches']:
         for item in candidate['evidence']:
             if runs.inspect(vault, item['run_id']) != cache[item['run_id']]:
                 raise ProcedureError('inputs_changed_during_lookup')
         for binding in [candidate['candidate'], *candidate['instructions']]:
+            path = store.path(binding['path'], markdown=True)
+            before = runs.evidence.stamp(path.lstat()) if revocations.enabled else None
             actual, _ = store.fingerprint(binding['path'], markdown=True)
             if actual != binding:
                 raise ProcedureError('inputs_changed_during_lookup')
+            if revocations.enabled:
+                metadata = path.lstat()
+                runs.evidence.regular(metadata)
+                if runs.evidence.stamp(metadata) != before:
+                    raise ProcedureError('inputs_changed_during_lookup')
+                final_marks[binding['path']] = before
     current_catalog, _ = store.json_file(catalog)
     if current_catalog != catalog_info:
         raise ProcedureError('catalog_changed_during_lookup')
+    revocations.recheck()
     store.policy.fresh()
+    for path, expected in final_marks.items():
+        metadata = store.path(path, markdown=True).lstat()
+        runs.evidence.regular(metadata)
+        if runs.evidence.stamp(metadata) != expected:
+            raise ProcedureError('inputs_changed_during_lookup')
     result['status'] = 'matches' if result['matches'] else 'no_match'
     if len(runs.evidence.encode(result)) > max_bytes:
         raise ProcedureError('output_budget_too_small')

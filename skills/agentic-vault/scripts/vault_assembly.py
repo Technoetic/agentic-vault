@@ -144,10 +144,12 @@ def _rows(info, text):
 
 
 def _load(vault, input_path):
+    from vault_revocation import RevocationPolicy
     store = runs.Store(vault)
+    store.revocations = RevocationPolicy(store.vault, store.policy.config)
     input_info, raw_definition = store.json_file(input_path)
     definition = _definition(store, raw_definition)
-    sources, rows, lines, total = [], {}, {}, 0
+    sources, rows, lines, withdrawn, total = [], {}, {}, {}, 0
     for binding in definition['sources']:
         info, raw = store.fingerprint(binding['path'], markdown=True)
         if info['sha256'] != binding['sha256']:
@@ -156,13 +158,30 @@ def _load(vault, input_path):
         if total > runs.MAX_TOTAL_BYTES:
             raise AssemblyError('source_set_too_large')
         sources.append(info)
-        rows[info['path']], lines[info['path']] = _rows(info, raw.decode('utf-8-sig'))
+        text = raw.decode('utf-8')
+        original_rows, original_lines = _rows(info, text.removeprefix('\ufeff'))
+        filtered = store.revocations.filter_text(info['path'], text).removeprefix('\ufeff')
+        filtered_lines = filtered.splitlines()
+        # A masked final unterminated line has no newline to emit. Retain its
+        # empty physical slot so it cannot invalidate unrelated earlier rows.
+        filtered_lines += [''] * (len(original_lines) - len(filtered_lines))
+        changed = {i for i, (before, after) in enumerate(zip(original_lines, filtered_lines), 1)
+                   if before != after}
+        # A blank withdrawn row would terminate a Markdown table if reparsed.
+        # Preserve the original parser's line identity, then remove only bound
+        # rows. Revoked headings/schema lines make the whole table unusable.
+        retained = ({line: row for line, row in original_rows.items() if line not in changed}
+                    if changed <= set(original_rows) else {})
+        rows[info['path']], lines[info['path']] = retained, filtered_lines
+        withdrawn[info['path']] = changed
     candidates = []
     hashes = {x['path']: x['sha256'] for x in sources}
     for selected in definition['candidates']:
         path, line = selected['path'], selected['line']
         if line > len(lines[path]):
             raise AssemblyError('invalid_candidate_line')
+        if line in withdrawn[path]:
+            continue
         record = rows[path].get(line)
         if record is None:
             record = {**selected, 'sha256': hashes[path], 'quote': lines[path][line - 1],
@@ -173,12 +192,27 @@ def _load(vault, input_path):
 
 def _fresh(store, input_info, sources):
     store.policy.fresh()
+    marks = {}
     for old in [input_info, *sources]:
+        path = store.path(old['path'], markdown=old is not input_info)
+        before = runs.evidence.stamp(path.lstat()) if store.revocations.enabled else None
         current, _ = store.fingerprint(old['path'], limit=runs.MAX_JSON_BYTES if old is input_info
                                        else runs.MAX_SOURCE_BYTES, markdown=old is not input_info)
         if current['sha256'] != old['sha256']:
             raise AssemblyError('source_changed')
+        if store.revocations.enabled:
+            metadata = path.lstat()
+            runs.evidence.regular(metadata)
+            if runs.evidence.stamp(metadata) != before:
+                raise AssemblyError('source_changed')
+            marks[old['path']] = (before, old is not input_info)
+    store.revocations.recheck()
     store.policy.fresh()
+    for relative, (expected, markdown) in marks.items():
+        metadata = store.path(relative, markdown=markdown).lstat()
+        runs.evidence.regular(metadata)
+        if runs.evidence.stamp(metadata) != expected:
+            raise AssemblyError('source_changed')
 
 
 def _result(definition, sources, **fields):

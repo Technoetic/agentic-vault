@@ -1,12 +1,15 @@
 ---
 description: 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정 helper를 명시적으로 실행
-argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration] [작업과 인자]"
+argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration|revocation] [작업과 인자]"
 ---
 
 # /vault-harden — 명시적 보강 도구
 
 [보강 도구 안내](../docs/hardening.md)를 읽고 요청한 작업 한 가지만 연결한다.
 Codex는 `$agentic-vault:agentic-vault harden <작업과 인자>`를 사용한다.
+
+`revocation`은 [기억 철회 안내](../docs/memory-revocation.md)의 읽기 전용 capture/check로
+연결한다. 합성 세션 간 회귀 검사는 [복구 평가 안내](../docs/memory-lifecycle.md)를 따른다.
 
 1. 요청이 읽기 전용이면 prepare/check/parse/평가만 실행한다. 적용·이동·설정 변경을 덧붙이지 않는다.
 2. 볼트 파일 작업은 설정·경로·deny 정책을 검증한다. 호출자가 명시한 파일만 바인딩하며 runtime/영수증을 일반 지식으로 읽지 않는다.

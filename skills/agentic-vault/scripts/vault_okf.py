@@ -14,7 +14,7 @@ import sys
 import tempfile
 from urllib.parse import quote, unquote, urlsplit
 
-from vault_evidence import Store, EvidenceError, MAX_FILES, MAX_FILE_BYTES, MAX_SET_BYTES
+from vault_evidence import Store, EvidenceError, MAX_FILES, MAX_FILE_BYTES, MAX_SET_BYTES, regular, stamp
 from vault_paths import relative_parts, _is_link_or_reparse
 from vault_healthcheck import HealthcheckError
 
@@ -124,6 +124,7 @@ def _project(body, source, mapping, basename, losses):
 
 
 def export_bundle(vault: Path, notes: list[str], destination: Path) -> dict:
+    from vault_revocation import RevocationPolicy
     try:
         if not isinstance(vault, Path) or not isinstance(destination, Path) or not isinstance(notes, list) or not 1 <= len(notes) <= MAX_FILES:
             raise ExportError('invalid_input')
@@ -132,6 +133,7 @@ def export_bundle(vault: Path, notes: list[str], destination: Path) -> dict:
         parent_id = _parent_identity(destination)
         store = Store(vault)
         store.denied = (*store.denied, *store.config.get('exclude_dirs', ()))
+        revocations = RevocationPolicy(vault, store.config)
         dest_resolved = destination.parent.resolve(strict=True) / destination.name
         if dest_resolved == store.root or store.root in dest_resolved.parents:
             raise ExportError('destination_inside_vault')
@@ -149,6 +151,10 @@ def export_bundle(vault: Path, notes: list[str], destination: Path) -> dict:
             store.path(note)
             info, mark, data = store.fingerprint(note, limit=MAX_FILE_BYTES, contents=True)
             key = info['path']
+            # Original fingerprints remain raw-byte bindings; only the new
+            # projection is masked. Previously exported bundles are untouched.
+            if revocations.enabled:
+                data = revocations.filter_text(key, data.decode('utf-8')).encode('utf-8')
             if key.casefold() in folded or mark[:2] in identities:
                 raise ExportError('duplicate_note')
             folded.add(key.casefold()); identities.add(mark[:2])
@@ -195,6 +201,14 @@ def export_bundle(vault: Path, notes: list[str], destination: Path) -> dict:
                 if current != original or mark != marks[original['path']]:
                     raise ExportError('source_changed')
             store.fresh_policy()
+            revocations.recheck()
+            if revocations.enabled:
+                store.fresh_policy()
+                for original in records:
+                    metadata = store.path(original['path']).lstat()
+                    regular(metadata)
+                    if stamp(metadata) != marks[original['path']]:
+                        raise ExportError('source_changed')
             if _parent_identity(destination) != parent_id:
                 raise ExportError('output_parent_changed')
             _publish(stage, destination)

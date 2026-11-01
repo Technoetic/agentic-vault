@@ -366,9 +366,15 @@ class StateRevisionEvaluationTests(unittest.TestCase):
             folder.mkdir()
             for target in (base, folder):
                 stream = str(target) + ":observations"
-                with self.subTest(target=target.name), self.assertRaises(ValueError):
-                    module._write_observations(stream, report)
-                self.assertFalse(os.path.exists(stream), "rejected export created an alternate data stream")
+                with self.subTest(target=target.name):
+                    with mock.patch.object(module.os, "open") as opened, self.assertRaises(ValueError):
+                        module._write_observations(stream, report)
+                    opened.assert_not_called()
+                    # Windows GetFileAttributes can report an existing directory
+                    # for a nonexistent named stream. An actual read must fail;
+                    # an empty created stream would open successfully as well.
+                    with self.assertRaises(FileNotFoundError), open(stream, "rb"):
+                        pass
                 self.assertEqual(base.read_text(encoding="utf-8"), "keep")
                 self.assertEqual(list(folder.iterdir()), [])
 

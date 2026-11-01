@@ -22,6 +22,7 @@ from pathlib import Path
 import vault_recall as _legacy
 from vault_paths import relative_parts, resolve_note_path
 import vault_query_expansion as _query_expansion
+from vault_revocation import RevocationError, RevocationPolicy
 
 MAX_EXTERNAL_BYTES = 64 * 1024
 MAX_EXTERNAL_CANDIDATES = 50
@@ -424,6 +425,10 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         return _legacy._empty_result(diagnostics)
     if not _same_policy_stamp(safe_vault, policy_stamp):
         return _policy_changed(diagnostics)
+    try:
+        revocations = RevocationPolicy(safe_vault, config)
+    except RevocationError:
+        return _invalid(diagnostics, "revocation_unavailable")
     deny = tuple(config.get("deny_zones") or ())
     exclude = (*tuple(config.get("exclude_dirs") or ()), ".git", *tuple(excluded_sources))
     # One bootstrap read establishes policy. If that policy forbids its own
@@ -485,6 +490,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             if before != _stamp(path) or raw.decode("utf-8-sig", errors="replace") != text:
                 _legacy._omit(diagnostics, "source_changed")
                 continue
+            if revocations.enabled and rel in revocations.affected_paths:
+                text = revocations.filter_text(rel, raw.decode("utf-8")).removeprefix("\ufeff")
             documents[rel] = {"path": rel, "disk_path": path, "text": text, "stamp": before, "sha256": hashlib.sha256(raw).hexdigest(), "metadata": _metadata(text)}
         except OverflowError:
             _legacy._omit(diagnostics, "total_byte_limit")
@@ -709,4 +716,18 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             return _invalid(diagnostics, 'source_changed')
         if not _same_policy_stamp(safe_vault, policy_stamp):
             return _policy_changed(diagnostics)
+    try:
+        revocations.recheck()
+    except RevocationError:
+        return _invalid(diagnostics, "revocation_changed_or_unavailable")
+    if revocations.enabled:
+        if (_legacy._read_config(safe_vault, _legacy._diagnostics()) != config
+                or not _same_policy_stamp(safe_vault, policy_stamp)):
+            return _policy_changed(diagnostics)
+        try:
+            for rel in final_bound:
+                if _stamp(resolve_note_path(safe_vault, rel, deny)) != documents[rel]['stamp']:
+                    raise ValueError('source_changed')
+        except (ValueError, OSError):
+            return _invalid(diagnostics, 'source_changed')
     return {"context": context, "matches": selected, "diagnostics": diagnostics}

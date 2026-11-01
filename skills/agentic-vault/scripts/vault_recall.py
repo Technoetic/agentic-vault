@@ -15,6 +15,7 @@ from typing import Sequence
 
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
 from vault_paths import resolve_note_path, zone_matches
+from vault_revocation import RevocationError, RevocationPolicy
 
 
 for _stream in (sys.stdout, sys.stderr):
@@ -497,6 +498,12 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
     config = _read_config(safe_vault, diagnostics)
     if config is None:
         return _empty_result(diagnostics)
+    try:
+        revocations = RevocationPolicy(safe_vault, config)
+    except RevocationError:
+        diagnostics["status"] = "revocation_unavailable"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
     deny_zones = tuple(config.get("deny_zones") or ())
     # Git internals are reserved metadata even when users clear optional exclusions.
     exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
@@ -524,9 +531,17 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
             diagnostics["omitted_total_byte_limit"] += len(candidates) - index
             _omit(diagnostics, "total_byte_limit")
             break
-        text = _read_markdown(path, diagnostics, rel_path)
+        raw_source = []
+        text = (_read_markdown(path, diagnostics, rel_path, raw_sink=raw_source.append)
+                if revocations.enabled else _read_markdown(path, diagnostics, rel_path))
         if text is None:
             continue
+        if revocations.enabled and rel_path in revocations.affected_paths:
+            try:
+                text = revocations.filter_text(rel_path, raw_source[0].decode("utf-8")).removeprefix("\ufeff")
+            except (RevocationError, UnicodeError):
+                _omit(diagnostics, "revoked_source_unavailable")
+                continue
         match = _rank_document(rel_path, text, phrase, query_terms)
         if match is not None:
             ranked.append(match)
@@ -534,6 +549,15 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
     ranked.sort(key=lambda match: (-match["score"], match["path"].casefold(), match["path"]))
     matches = ranked[:limit]
     context = _render_context(matches, max_tokens, diagnostics)
+    if revocations.enabled:
+        try:
+            revocations.recheck()
+            if _read_config(safe_vault, _diagnostics()) != config:
+                raise RevocationError("configuration_changed")
+        except RevocationError:
+            diagnostics["status"] = "revocation_changed_or_unavailable"
+            diagnostics["search_complete"] = False
+            return _empty_result(diagnostics)
     return {"context": context, "matches": matches, "diagnostics": diagnostics}
 
 

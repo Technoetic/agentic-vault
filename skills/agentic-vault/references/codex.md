@@ -49,6 +49,7 @@ v0.35.1부터 전체 플러그인에는
 | `recall <질의 전체>` | [vault-recall.md](../../../commands/vault-recall.md) |
 | `links <인자>` | [관련 노트 연결 제안](../../../docs/link-proposals.md), `scripts/vault_links.py` (`--vault`·`--source`·`--query` 명시, 읽기 전용) |
 | `memory <인자>` | [구조화 기억](../../../docs/memory-patterns.md), `scripts/vault_memory.py` (`--vault`·vault-relative `--input`·예산 명시, 읽기 전용) |
+| `revocations capture\|check <인자>` | [선택형 기억 철회](../../../docs/memory-revocation.md), `scripts/vault_revocation.py --vault PATH capture\|check --input RELATIVE.json`; 등록 줄·파생 관계의 준비/검사, 저장·활성화·원문 삭제 없음 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |

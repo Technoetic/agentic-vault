@@ -149,6 +149,15 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 
 검증된 실제 응답을 썼으면 짧게 **Jev 사용**이라고 표시한다. 미호출·미지원·키 누락·실패는 **호스트 대체 + 사유**로 구분한다. 낮은 확신도·보류는 `needs_review`로 밝히고 필요한 호스트 검토를 설명한다. 호스트 생성물을 Jev가 생성했다고 표시하거나 `reviewed`를 `PASS`·사실 확정·쓰기 권한으로 바꾸지 않는다. 정상 결과도 `role: advisory`이며 확신도는 정확성 보증이 아니다. 기존 권한·상태 기록기·완료 기록을 유지하고 자동 노트 쓰기를 추가하지 않는다. 모든 대화를 가로채는 훅이나 시작 시 네트워크 호출도 없다. 스키마·예제·결과 해석은 [Jev 판단 안내](../../docs/jev-judgments.md)를 따른다.
 
+### 선택형 기억 철회
+
+사용자가 기억 철회 범위의 준비·검사를 요청하면 [기억 철회 안내](../../docs/memory-revocation.md)의
+`vault_revocation.py --vault PATH capture|check --input RELATIVE.json`에 연결한다.
+원문 줄·명시 파생 관계만 선택하며 자연어 의미 추론이나 전체 사본 발견을 주장하지 않는다.
+capture/check는 읽기 전용이고 설정·대장 저장·원문 삭제를 덧붙이지 않는다. 현재 승인 범위에
+구체적인 활성화가 포함될 때만 `memory_revocation_file`을 설정한다. 기존 경로 제외·RETIRE와
+구분하며, 합성 검사는 [세션 간 복구 평가](../../docs/memory-lifecycle.md)를 따른다.
+
 ## 6. 세션 인계 워크플로우
 
 - **시작:** SessionStart 훅이 컨텍스트를 주입했으면 그 출력을 재사용하고, 없을 때만 `/vault-session-start`로 복원하라. 경로 차단이나 예산에 따른 생략을 직접 Read·Grep·셸 읽기로 우회하지 마라. 예산 0은 해당 섹션의 주입 비활성화다.
