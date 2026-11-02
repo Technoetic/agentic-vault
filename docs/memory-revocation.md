@@ -83,7 +83,7 @@ vault = Path("YOUR_VAULT").resolve()
 declarations = json.loads((vault / "00-meta/revocation-declarations.json").read_text(encoding="utf-8"))
 registry = capture_registry(vault, declarations)
 with (vault / "00-meta/revocations.json").open("x", encoding="utf-8", newline="\n") as output:
-    json.dump(registry, output, ensure_ascii=True, sort_keys=True)
+    json.dump(registry, output, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 ```
 
 The writer example is a deliberate host action; the engine does not install or
@@ -96,7 +96,9 @@ python skills/agentic-vault/scripts/vault_revocation.py --vault PATH check --inp
 `check` validates all source bindings and reports the selected graph closure. It
 does not activate its input unless configuration points to that file. Capture
 and check exit 0 on success and 1 with content-free JSON on invalid input; no note
-payload or raw exception is emitted. The Python API raises `RevocationError`.
+payload or raw exception is emitted. Successful CLI JSON intentionally has no
+trailing newline, so a registry at the 64 KiB limit can be saved and checked
+without exceeding that limit. The Python API raises `RevocationError`.
 
 ## Safety and availability
 
@@ -108,8 +110,10 @@ reparse-point, regular-file and hardlink guards.
 
 Each source is at most4 MiB; a policy reader has a cumulative32 MiB read budget,
 including freshness checks. CLI capture can use two readers, at most64 MiB total.
-Consumers keep their own smaller source/context limits as well. A stale affected
-source is omitted or rejected as a whole rather than interpreting old line offsets
+Other consumer-specific limits still apply. With revocation enabled, SessionStart
+reads and checks the whole source under the 4 MiB cap before its 256 KiB per-note
+output truncation. A stale affected source is omitted or rejected as a whole
+rather than interpreting old line offsets
 in new text. Refreshing its binding requires a new reviewed capture; refreshing a
 hash must not silently approve moved content.
 
