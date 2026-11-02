@@ -474,7 +474,9 @@ def main(argv=None):
         else:
             policy.recheck()
             policy._reader.sweep({**input_records, **policy._sources})
-        sys.stdout.write(_encode(result).decode('ascii') + '\n')
+        # Keep saved success output within the same strict JSON input limit;
+        # a trailing newline (CRLF on Windows) would break boundary round trips.
+        sys.stdout.write(_encode(result).decode('ascii'))
         return 0
     except (RevocationError, OSError, ValueError, EvidenceError, HealthcheckError,
             UnicodeError, RecursionError, RuntimeError):

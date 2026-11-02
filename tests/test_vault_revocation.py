@@ -347,6 +347,66 @@ class RevocationTests(unittest.TestCase):
         self.assertNotIn('private-password', rejected.stdout + rejected.stderr)
         json.loads(rejected.stdout)
 
+    def boundary_declarations(self, registry_bytes):
+        source = b'one source line\n'
+        self.write('20-knowledge/source.md', source)
+        ids = ['n%03d_' % index + 'x' * 123 for index in range(128)]
+        registry = {'schema_version': 1, 'nodes': [
+            {'id': node_id, 'path': '20-knowledge/source.md', 'start_line': 1,
+             'end_line': 1, 'sha256': hashlib.sha256(source).hexdigest()}
+            for node_id in ids],
+            'derivations': [{'parent': ids[index], 'child': ids[index + 1]}
+                            for index in range(108)], 'revoked': [ids[0]]}
+        compact = lambda value: json.dumps(value, ensure_ascii=True, sort_keys=True,
+                                           separators=(',', ':')).encode('utf-8')
+        excess = len(compact(registry)) - registry_bytes
+        self.assertGreaterEqual(excess, 0)
+        # These three IDs are absent from edges/revoked, so each removed byte
+        # changes serialized size by exactly one without changing the graph.
+        for index in (125, 126, 127):
+            reduction = min(123, excess)
+            if reduction:
+                registry['nodes'][index]['id'] = registry['nodes'][index]['id'][:-reduction]
+            excess -= reduction
+        self.assertEqual(excess, 0)
+        self.assertEqual(len(compact(registry)), registry_bytes)
+        for node in registry['nodes']:
+            del node['sha256']
+        return registry, compact(registry)
+
+    def test_cli_capture_boundary_registries_roundtrip_without_transport_padding(self):
+        self.module()
+        for expected_bytes in (65535, 65536):
+            with self.subTest(registry_bytes=expected_bytes):
+                _declarations, encoded = self.boundary_declarations(expected_bytes)
+                self.write('00-meta/declarations.json', encoded)
+                captured = subprocess.run(
+                    [sys.executable, str(SCRIPT), '--vault', str(self.vault), 'capture',
+                     '--input', '00-meta/declarations.json'], capture_output=True, check=False)
+                self.assertEqual(captured.returncode, 0, captured.stderr)
+                self.assertEqual(len(json.loads(captured.stdout)['nodes']), 128)
+                self.write('00-meta/captured.json', captured.stdout)
+                checked = subprocess.run(
+                    [sys.executable, str(SCRIPT), '--vault', str(self.vault), 'check',
+                     '--input', '00-meta/captured.json'], capture_output=True, check=False)
+                self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+                self.assertEqual(len(captured.stdout), expected_bytes)
+                self.assertEqual(captured.stderr, b'')
+                self.assertEqual(checked.stderr, b'')
+                self.assertEqual(json.loads(checked.stdout)['node_count'], 128)
+
+    def test_capture_rejects_first_oversized_registry_without_relaxing_input_cap(self):
+        declarations, encoded = self.boundary_declarations(65537)
+        with self.assertRaises(self.module().RevocationError):
+            self.capture(declarations)
+        self.write('00-meta/declarations.json', encoded)
+        captured = subprocess.run(
+            [sys.executable, str(SCRIPT), '--vault', str(self.vault), 'capture',
+             '--input', '00-meta/declarations.json'], capture_output=True, check=False)
+        self.assertNotEqual(captured.returncode, 0)
+        self.assertEqual(json.loads(captured.stdout), {'error': 'revocation_validation_failed'})
+        self.assertEqual(captured.stderr, b'')
+
     def test_cli_rejects_source_swap_during_final_input_checks(self):
         module = self.module()
         captured = self.capture()
