@@ -36,6 +36,9 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_evidence.py",
             "skills/agentic-vault/scripts/vault_retrieval.py",
             "skills/agentic-vault/scripts/vault_memory.py",
+            "skills/agentic-vault/scripts/vault_revocation.py",
+            "scripts/evaluate_memory_lifecycle.py",
+            "docs/memory-revocation.md", "docs/memory-lifecycle.md",
             "skills/agentic-vault/scripts/vault_impact.py",
             "skills/agentic-vault/scripts/vault_okf.py",
             "scripts/evaluate_knowledge_evolution.py",
@@ -323,6 +326,25 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Corrupted knowledge resource\n", encoding="utf-8")
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_revocation_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_revocation.py",
+                         "scripts/evaluate_memory_lifecycle.py",
+                         "docs/memory-revocation.md", "docs/memory-lifecycle.md"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Corrupted revocation resource\n", encoding="utf-8")
+
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 
