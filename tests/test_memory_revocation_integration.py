@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import importlib
 import json
 from pathlib import Path
@@ -64,6 +65,57 @@ class RevocationConsumerTests(unittest.TestCase):
         return {"subject": "Device", "predicate": "mode", "value": value,
                 "time": {"valid_from": "2026-11-01"}, "conditions": [], "uncertainty": "reported",
                 "sources": [{"path": "20-knowledge/source.md", "line": line, "quote": quote}]}
+
+    @contextmanager
+    def preserved_case_registry(self):
+        actual = self.vault / '20-knowledge/source.md'
+        alias = self.vault / '20-KNOWLEDGE/SOURCE.MD'
+        if not alias.exists() or not actual.samefile(alias):
+            self.skipTest('requires a real case-insensitive filesystem alias')
+        for node in self.registry['nodes']:
+            node['path'] = node['path'].upper()
+        self.write('00-meta/revocations.json', json.dumps(self.registry))
+        revocation = importlib.import_module('vault_revocation')
+        canonical = revocation._Reader.canonical
+
+        def preserve(reader, relative, suffix='.md'):
+            canonical(reader, relative, suffix)  # Real policy/path checks remain active.
+            return relative
+
+        # Emulate POSIX resolve preserving the requested spelling while real
+        # case-insensitive file identities, stable reads and hashes are used.
+        with mock.patch.object(revocation._Reader, 'canonical', new=preserve):
+            yield
+
+    def test_preserved_case_registry_masks_all_recall_backends_and_retains_proofs(self):
+        with self.preserved_case_registry():
+            for backend in ('lexical', 'bm25', 'hybrid'):
+                with self.subTest(backend=backend):
+                    withdrawn = self.recall.recall(self.vault, 'REVOKED', backend=backend)
+                    self.assertEqual(withdrawn['context'], '')
+                    self.assertEqual(withdrawn['matches'], [])
+                    retained = self.recall.recall(self.vault, 'SAFE', backend=backend)
+                    self.assertIn('benign-old', retained['context'])
+                    self.assertNotIn('REVOKED', retained['context'])
+                    self.assertTrue(all(match['line'] == 3 for match in retained['matches']))
+                    if backend != 'lexical':
+                        original = next(match for match in retained['matches']
+                                        if match['path'] == '20-knowledge/source.md')
+                        self.assertEqual(original['source']['sha256'], self.nodes[0]['sha256'])
+
+    def test_preserved_case_registry_refuses_link_diff_and_masks_target_snippets(self):
+        links = importlib.import_module('vault_links')
+        with self.preserved_case_registry():
+            refused = links.propose_links(self.vault, '20-knowledge/source.md', 'SAFE', max_tokens=6000)
+            self.assertEqual(refused['diff'], '')
+            self.assertEqual(refused['diagnostics']['status'], 'revoked_source_requires_review')
+            self.assertNotIn('REVOKED', json.dumps(refused))
+            self.write('20-knowledge/new.md', '# New\nSAFE origin\n')
+            proposed = links.propose_links(self.vault, '20-knowledge/new.md',
+                                           'SAFE REVOKED', max_tokens=6000)
+            self.assertTrue(proposed['proposals'])
+            self.assertNotIn('marker-old', json.dumps(proposed))
+            self.assertIn('benign-old', json.dumps(proposed))
 
     def test_lexical_and_advanced_recall_mask_target_and_descendants(self):
         for backend in ("lexical", "bm25", "hybrid"):

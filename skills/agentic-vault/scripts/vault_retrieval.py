@@ -490,7 +490,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             if before != _stamp(path) or raw.decode("utf-8-sig", errors="replace") != text:
                 _legacy._omit(diagnostics, "source_changed")
                 continue
-            if revocations.enabled and rel in revocations.affected_paths:
+            if revocations.enabled:
                 text = revocations.filter_text(rel, raw.decode("utf-8")).removeprefix("\ufeff")
             documents[rel] = {"path": rel, "disk_path": path, "text": text, "stamp": before, "sha256": hashlib.sha256(raw).hexdigest(), "metadata": _metadata(text)}
         except OverflowError:

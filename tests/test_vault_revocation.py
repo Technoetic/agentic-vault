@@ -64,6 +64,7 @@ class RevocationTests(unittest.TestCase):
         with mock.patch.object(Path, 'resolve', side_effect=AssertionError('filesystem read')):
             policy = module.RevocationPolicy(Path('missing-vault'), {})
             self.assertFalse(policy.enabled)
+            self.assertFalse(policy.is_affected('../untouched'))
             self.assertEqual(policy.filter_text('../untouched', 'literal\r\nbody'), 'literal\r\nbody')
             policy.recheck()
         self.assertEqual(policy.affected_paths, set())

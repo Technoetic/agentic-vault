@@ -226,7 +226,7 @@ def propose_links(vault: Path, source: str, query: str, limit: int = 5,
         return _fail(result, "invalid_config_or_vault")
     try:
         source_info, _source_mark, source_data = policy.read(source)
-        if source_info['path'] in revocations.affected_paths:
+        if revocations.is_affected(source_info['path']):
             # A diff over masked source text would propose physical deletion;
             # a diff over raw text would disclose the revoked context.
             return _fail(result, 'revoked_source_requires_review')

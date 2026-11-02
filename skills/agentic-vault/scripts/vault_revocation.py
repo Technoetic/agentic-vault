@@ -400,6 +400,20 @@ class RevocationPolicy:
         self._reader.sweep({**self._identity_marks, **self._sources})
         return output
 
+    def is_affected(self, relative: str) -> bool:
+        """Report affected file identity for consumers that must refuse writes.
+
+        affected_paths lists declared spellings for reporting; callers must not
+        use string membership there as an authorization or filtering shortcut.
+        """
+        if not self.enabled:
+            return False
+        self._registry_fresh()
+        nodes, _mark = self._matching_spans(self._reader.canonical(relative))
+        self._registry_fresh()
+        self._reader.sweep(self._identity_marks)
+        return bool(nodes)
+
     def filter_text(self, relative: str, text: str) -> str:
         if not self.enabled:
             return text

@@ -536,7 +536,7 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
                 if revocations.enabled else _read_markdown(path, diagnostics, rel_path))
         if text is None:
             continue
-        if revocations.enabled and rel_path in revocations.affected_paths:
+        if revocations.enabled:
             try:
                 text = revocations.filter_text(rel_path, raw_source[0].decode("utf-8")).removeprefix("\ufeff")
             except (RevocationError, UnicodeError):
