@@ -39,6 +39,9 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_revocation.py",
             "scripts/evaluate_memory_lifecycle.py",
             "docs/memory-revocation.md", "docs/memory-lifecycle.md",
+            "skills/agentic-vault/scripts/vault_memory_trust.py",
+            "scripts/evaluate_memory_trust.py", "scripts/evaluate_model_memory_lifecycle.py",
+            "docs/memory-trust.md", "docs/model-memory-lifecycle.md",
             "skills/agentic-vault/scripts/vault_impact.py",
             "skills/agentic-vault/scripts/vault_okf.py",
             "scripts/evaluate_knowledge_evolution.py",
@@ -344,6 +347,26 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Corrupted revocation resource\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_memory_trust_resources_must_exist_and_match(self) -> None:
+        resources = ("skills/agentic-vault/scripts/vault_memory_trust.py",
+                     "scripts/evaluate_memory_trust.py", "scripts/evaluate_model_memory_lifecycle.py",
+                     "docs/memory-trust.md", "docs/model-memory-lifecycle.md")
+        for relative in resources:
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Corrupted trust resource\n", encoding="utf-8")
 
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)

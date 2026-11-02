@@ -54,6 +54,10 @@ jobs:
         run: python scripts/evaluate_memory_formation.py
       - name: Cross-process selective memory repair controls (no model calls)
         run: python scripts/evaluate_memory_lifecycle.py
+      - name: Source-role and poisoned-experience contrast (no model calls)
+        run: python scripts/evaluate_memory_trust.py --check-controls
+      - name: Paired model-lifecycle contract (scripted control; no model calls)
+        run: python scripts/evaluate_model_memory_lifecycle.py --case ascii
       - name: Source-bound assembly and procedure examples (no model calls)
         run: python scripts/evaluate_memory_reliability.py
       - name: Hard bilingual recall at top3 (explicit query expansion)

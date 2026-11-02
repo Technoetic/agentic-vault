@@ -251,7 +251,7 @@ def _repair(vault, label, arm, control):
                 wiped_memory_files=len(wiped))
 
 
-def _probe(vault, max_tokens):
+def _probe(vault, max_tokens, *, _include_context=False):
     from vault_memory import compile_units
     from vault_retrieval import retrieve
     from vault_healthcheck import estimate_tokens
@@ -294,7 +294,7 @@ def _probe(vault, max_tokens):
     derived_seen = any(u['predicate'] == 'action_plan_checksum' and u['value'] == BAD
                        and any(s['path'] == 'notes/derived.md' for s in u['sources']) for u in accepted)
     retrieval_actions = deterministic_planner({'kind': 'checksum', 'goal': GOALS['checksum']}, recalled['context'])
-    return dict(target_in_context=compiled_target_seen or retrieval_target_seen,
+    result = dict(target_in_context=compiled_target_seen or retrieval_target_seen,
                 compiled_target_in_context=compiled_target_seen,
                 retrieval_target_in_context=retrieval_target_seen,
                 retrieval_task_success=execute('checksum', retrieval_actions, {})['completed'],
@@ -306,9 +306,15 @@ def _probe(vault, max_tokens):
                 derived_target_in_compiled_context=derived_seen,
                 compiled_units=len(accepted),
                 retrieved_paths=[item['path'] for item in recalled['matches']])
+    if _include_context:
+        # Private additive adapter seam: the unchanged public evaluator and its
+        # worker protocol never include raw context. This is the actual compiled
+        # consumer output, not a reconstruction from planner decisions.
+        result['_compiled_context'] = context
+    return result
 
 
-def _worker(request):
+def _worker(request, *, _include_context=False):
     """A fixed-role internal protocol, restricted to a marked direct temp child."""
     expected = {'root', 'nonce', 'role', 'case', 'control', 'max_tokens'}
     if not isinstance(request, dict) or set(request) != expected:
@@ -366,7 +372,7 @@ def _worker(request):
             diff, _ = _learn(vault, 'notes/later.md', 'sources/later.md', 'checksum', GOOD)
             result[arm] = {'later_fact_diff': diff}
         else:
-            result[arm] = _probe(vault, request['max_tokens'])
+            result[arm] = _probe(vault, request['max_tokens'], _include_context=_include_context)
     return dict(role=request['role'], pid=os.getpid(), process_token=secrets.token_hex(16), arms=result)
 
 

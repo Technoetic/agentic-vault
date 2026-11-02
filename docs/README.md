@@ -13,6 +13,8 @@ point-in-time plans, designs and verification logs and may not match current beh
 
 | 문서 | 내용 |
 |---|---|
+| [memory-trust.md](memory-trust.md) | 선택형 역할·출처 보존 문맥과 주장 근거 검토; 가짜 승인·성공 경험의 원본 합성 대조군, 권한 부여 없음 |
+| [model-memory-lifecycle.md](model-memory-lifecycle.md) | 선택형 실제 로컬 모델의 교정 전후 행동 비교; 합성 저장·철회·재주입, 정상 기억 보존, 사용량/오류 구분 |
 | [knowledge-impact.md](knowledge-impact.md) | 명시적 출처·주장·소유 노트 의존관계의 변경·누락·차단을 읽기 전용으로 조회 |
 | [okf-export.md](okf-export.md) | 선택 노트의 OKF v0.2 교환 묶음·원본 메타데이터 보존·해시·손실 보고 |
 | [knowledge-evolution.md](knowledge-evolution.md) | 합성 이력에서 실제 변경 조회·내보내기와 구조화 사실의 시간축 판정을 재생 |
