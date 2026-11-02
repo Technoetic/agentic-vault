@@ -295,6 +295,7 @@ class RevocationPolicy:
         self.affected_paths = set()
         self.revoked_ids = set()
         self._nodes, self._spans, self._sources = [], {}, {}
+        self._identity_marks = {}
         self._edge_count = 0
         self._vault, self._config = vault, config
         if type(config) is not dict:
@@ -338,9 +339,53 @@ class RevocationPolicy:
         info, mark, data = self._reader.read(relative)
         return info, mark, data
 
-    def _mask(self, relative, info, mark, data):
-        nodes = self._spans[relative]
-        if info['sha256'] != nodes[0]['sha256']:
+    def _matching_spans(self, relative):
+        """Match only guarded file identities, never filename case alone.
+
+        A case-insensitive POSIX filesystem can preserve caller spelling in
+        resolve(). Inspect at most the128 declared affected paths; distinct
+        case-sensitive files stay separate, and physical aliases share masks.
+        """
+        if not self._spans:
+            return [], None
+        nodes = list(self._spans.get(relative, ()))
+        try:
+            requested = self._reader.path(relative, '.md')
+            requested_metadata = requested.lstat()
+            regular(requested_metadata)
+            requested_mark = stamp(requested_metadata)
+            for declared, bindings in self._spans.items():
+                if declared == relative:
+                    candidate, metadata = requested, requested_metadata
+                else:
+                    candidate = self._reader.path(declared, '.md')
+                    try:
+                        metadata = candidate.lstat()
+                    except FileNotFoundError:
+                        # A previously observed binding must not disappear
+                        # between alias matching and output/recheck.
+                        if declared in self._identity_marks:
+                            raise RevocationError('source_changed')
+                        continue
+                regular(metadata)
+                mark = stamp(metadata)
+                previous = self._identity_marks.get(declared)
+                if previous is not None and previous[1] != mark:
+                    raise RevocationError('source_changed')
+                self._identity_marks[declared] = ({}, mark, '.md')
+                if declared != relative and requested.samefile(candidate):
+                    nodes.extend(bindings)
+            self._reader.sweep(self._identity_marks)
+            final = requested.lstat()
+            regular(final)
+            if stamp(final) != requested_mark:
+                raise RevocationError('source_changed')
+            return nodes, requested_mark
+        except (OSError, ValueError, EvidenceError, RuntimeError) as exc:
+            raise RevocationError('unsafe_or_changed_input') from exc
+
+    def _mask(self, relative, info, mark, data, nodes):
+        if any(info['sha256'] != node['sha256'] for node in nodes):
             raise RevocationError('stale_source_binding')
         lines = _lines(data)
         _validate_bounds(nodes, lines)
@@ -352,14 +397,15 @@ class RevocationPolicy:
                          if masked[index] else line for index, line in enumerate(lines))
         self._sources[relative] = (info, mark, '.md')
         self._registry_fresh()
-        self._reader.sweep(self._sources)
+        self._reader.sweep({**self._identity_marks, **self._sources})
         return output
 
     def filter_text(self, relative: str, text: str) -> str:
         if not self.enabled:
             return text
         canonical = self._reader.canonical(relative)
-        if canonical not in self._spans:
+        nodes, expected_mark = self._matching_spans(canonical)
+        if not nodes:
             return text
         self._registry_fresh()
         if type(text) is not str or len(text) > MAX_FILE_BYTES:
@@ -371,9 +417,9 @@ class RevocationPolicy:
         if len(encoded) > MAX_FILE_BYTES:
             raise RevocationError('input_too_large')
         info, mark, data = self._source(canonical)
-        if data != encoded:
+        if mark != expected_mark or data != encoded:
             raise RevocationError('source_text_mismatch')
-        return self._mask(canonical, info, mark, data)
+        return self._mask(canonical, info, mark, data, nodes)
 
     def filter_path(self, relative: str) -> str:
         if not self.enabled:
@@ -381,16 +427,21 @@ class RevocationPolicy:
             _info, _mark, data = reader.read(relative)
             return ''.join(_lines(data))
         canonical = self._reader.canonical(relative)
+        nodes, expected_mark = self._matching_spans(canonical)
         self._registry_fresh()
         info, mark, data = self._source(canonical)
-        if canonical in self._spans:
-            return self._mask(canonical, info, mark, data)
+        if expected_mark is not None and mark != expected_mark:
+            raise RevocationError('source_changed')
+        if nodes:
+            return self._mask(canonical, info, mark, data, nodes)
         self._sources[canonical] = (info, mark, '.md')
+        self._reader.sweep({**self._identity_marks, **self._sources})
         return ''.join(_lines(data))
 
     def recheck(self) -> None:
         if not self.enabled:
             return
+        self._reader.sweep(self._identity_marks)
         self._registry_fresh()
         marks = {}
         for relative, (expected, _mark, suffix) in self._sources.items():
@@ -398,9 +449,9 @@ class RevocationPolicy:
             if info != expected:
                 raise RevocationError('source_changed')
             marks[relative] = (info, mark, suffix)
-        self._reader.sweep(marks)
+        self._reader.sweep({**self._identity_marks, **marks})
         self._registry_fresh()
-        self._reader.sweep(marks)
+        self._reader.sweep({**self._identity_marks, **marks})
 
     def summary(self) -> dict:
         return {'enabled': self.enabled, 'registry_sha256': self.registry_sha256,

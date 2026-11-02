@@ -121,11 +121,80 @@ class RevocationTests(unittest.TestCase):
                          'withdrawn A remains undeclared\n')
         self.assertIn('explicit', policy.summary()['scope'])
 
-    @unittest.skipUnless(os.name == 'nt', 'case-insensitive Windows path alias')
     def test_case_variant_filter_path_cannot_bypass_revoked_binding(self):
+        actual = self.vault / '20-knowledge/mixed.md'
+        alias = self.vault / '20-KNOWLEDGE/MIXED.md'
+        if not alias.exists() or not actual.samefile(alias):
+            self.skipTest('requires a case-insensitive filesystem')
         policy = self.policy()
         self.assertEqual(policy.filter_path('20-KNOWLEDGE/MIXED.md'),
                          '# Mixed\r\n\r\nbenign fact\r\n\r\nlast benign')
+        self.assertEqual(policy.filter_text('20-KNOWLEDGE/MIXED.md', self.original),
+                         '# Mixed\r\n\r\nbenign fact\r\n\r\nlast benign')
+        policy.recheck()
+
+    def test_case_alias_preserved_by_resolver_cannot_bypass_revoked_binding(self):
+        actual = self.vault / '20-knowledge/mixed.md'
+        alias = self.vault / '20-KNOWLEDGE/MIXED.md'
+        if not alias.exists() or not actual.samefile(alias):
+            self.skipTest('requires a real case-insensitive filesystem alias')
+        policy = self.policy()
+        module = self.module()
+        canonical = module._Reader.canonical
+
+        def preserved_alias(reader, relative, suffix='.md'):
+            checked = canonical(reader, relative, suffix)
+            # Case-insensitive POSIX filesystems can preserve this spelling in
+            # Path.resolve. Keep actual guarded I/O/file identity checks real.
+            return relative if relative == '20-KNOWLEDGE/MIXED.md' else checked
+
+        with mock.patch.object(module._Reader, 'canonical', new=preserved_alias):
+            self.assertEqual(policy.filter_path('20-KNOWLEDGE/MIXED.md'),
+                             '# Mixed\r\n\r\nbenign fact\r\n\r\nlast benign')
+            self.assertEqual(policy.filter_text('20-KNOWLEDGE/MIXED.md', self.original),
+                             '# Mixed\r\n\r\nbenign fact\r\n\r\nlast benign')
+            policy.recheck()
+
+    def test_distinct_case_sensitive_source_keeps_its_unrevoked_content(self):
+        actual = self.vault / '20-knowledge/mixed.md'
+        alias = self.vault / '20-knowledge/MIXED.md'
+        if alias.exists() and actual.samefile(alias):
+            self.skipTest('requires a case-sensitive filesystem')
+        self.write('20-knowledge/MIXED.md', 'unrelated case-sensitive note\n')
+        policy = self.policy()
+        self.assertEqual(policy.filter_path('20-knowledge/MIXED.md'),
+                         'unrelated case-sensitive note\n')
+        self.assertEqual(policy.filter_text('20-knowledge/MIXED.md',
+                                           'unrelated case-sensitive note\n'),
+                         'unrelated case-sensitive note\n')
+        policy.recheck()
+
+    def test_file_identity_swap_between_span_matching_and_read_is_rejected(self):
+        policy = self.policy()
+        source = policy._source
+
+        def replacing_source(relative):
+            replacement = self.write('20-knowledge/replacement.md', self.original)
+            os.replace(replacement, self.vault / '20-knowledge/mixed.md')
+            return source(relative)
+
+        with mock.patch.object(policy, '_source', side_effect=replacing_source):
+            with self.assertRaises(self.module().RevocationError):
+                policy.filter_path('20-knowledge/mixed.md')
+
+    def test_unaffected_path_swapped_to_revoked_file_before_read_is_rejected(self):
+        self.write('20-knowledge/unrelated.md', 'unrelated note\n')
+        policy = self.policy()
+        source = policy._source
+
+        def replacing_source(relative):
+            os.replace(self.vault / '20-knowledge/mixed.md',
+                       self.vault / '20-knowledge/unrelated.md')
+            return source(relative)
+
+        with mock.patch.object(policy, '_source', side_effect=replacing_source):
+            with self.assertRaises(self.module().RevocationError):
+                policy.filter_path('20-knowledge/unrelated.md')
 
     def test_recheck_budget_includes_hash_rereads(self):
         self.write('20-knowledge/mixed.md', '# Mixed\n' + 'x' * 18000 + '\nbenign\nalias\n')
@@ -146,8 +215,11 @@ class RevocationTests(unittest.TestCase):
             with self.assertRaises(self.module().RevocationError):
                 policy.filter_path('20-knowledge/empty2.md')
 
-    @unittest.skipIf(os.name == 'nt', 'requires distinct case-sensitive filesystem paths')
     def test_distinct_case_sensitive_files_each_consume_source_limit(self):
+        actual = self.write('20-knowledge/AAA.md', '')
+        alias = self.vault / '20-knowledge/AAa.md'
+        if alias.exists() and actual.samefile(alias):
+            self.skipTest('requires a case-sensitive filesystem')
         policy = self.policy()
         with mock.patch.object(self.module(), 'MAX_SOURCE_FILES', 2):
             for name in ('AAA', 'AAa', 'AaA'):
