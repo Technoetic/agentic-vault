@@ -8,8 +8,8 @@ reviewable selection of source spans; the registry is not an authorization sourc
 
 Without `memory_revocation_file`, existing output and normal hooks are unchanged.
 No database, model, network call, background watcher or automatic configuration
-change is introduced. Published v0.36.1 and existing installations are separate
-from these development-source changes.
+change is introduced. Introduced in v0.37.0; updating an active installation and activating a real-vault
+registry remain separate host actions.
 
 ## Scope and existing mechanisms
 
