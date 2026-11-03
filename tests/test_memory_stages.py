@@ -107,33 +107,16 @@ class TransportContractTests(unittest.TestCase):
         self.assertNotIn('source_variant', json.dumps(requests))
 
     def test_timed_out_request_stops_later_requests(self):
-        import time
-        import threading
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         import evaluate_memory_stages as stages
-        from evaluate_model_memory_lifecycle import ModelLimits
-        hits = []
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-            def do_POST(self):
-                self.rfile.read(int(self.headers.get('Content-Length') or 0))
-                hits.append(1)
-                time.sleep(.2)
-        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
+        import evaluate_model_memory_lifecycle as runner
+        from evaluate_tool_safety import ModelError
+        from unittest.mock import patch
+        with patch.object(runner, '_bounded_request', side_effect=ModelError('request_timeout')) as send:
             result = stages.evaluate_stages(stage='writing', case='ascii', backend='local-model',
-                allow_network=True, endpoint=f'http://127.0.0.1:{server.server_port}/v1/chat/completions', model='stub',
-                limits=ModelLimits(request_timeout_seconds=.03, run_timeout_seconds=10))
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join()
-        self.assertEqual(len(hits), 1)
+                allow_network=True, endpoint='http://127.0.0.1:1/v1/chat/completions', model='stub')
+        self.assertEqual(send.call_count, 1)
         self.assertEqual(result['metrics']['requests_sent'], 1)
-        self.assertIn(result['observations'][0]['error'], ('request_timeout', 'transport_error'))
+        self.assertEqual(result['observations'][0]['error'], 'request_timeout')
         self.assertTrue(all(row['error'] == 'run_stopped' for row in result['observations'][1:]))
 
     def test_source_manifest_binds_stage_runner_and_dependencies(self):

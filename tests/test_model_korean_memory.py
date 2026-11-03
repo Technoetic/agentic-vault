@@ -2,10 +2,10 @@ import copy
 import importlib.util
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,8 +89,7 @@ class FreshKoreanTests(unittest.TestCase):
         thread.start()
         try:
             report = runner.evaluate_model_korean_memory(backend='local-model', allow_network=True,
-                endpoint=f'http://127.0.0.1:{server.server_port}/v1/chat/completions', model='fixture-model',
-                limits=runner.ModelLimits(request_timeout_seconds=1, run_timeout_seconds=120))
+                endpoint=f'http://127.0.0.1:{server.server_port}/v1/chat/completions', model='fixture-model')
         finally:
             server.shutdown()
             server.server_close()
@@ -126,29 +125,23 @@ class FreshKoreanTests(unittest.TestCase):
             self.assertIsNone(row['grade'])
 
     def test_timeout_stops_remaining_requests_without_abstentions(self):
-        received = []
-        class Slow(BaseHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-            def do_POST(self):
-                self.rfile.read(int(self.headers.get('Content-Length') or 0))
-                received.append(1)
-                time.sleep(0.5)
-        server = ThreadingHTTPServer(('127.0.0.1', 0), Slow)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            report = runner.evaluate_model_korean_memory(backend='local-model', allow_network=True,
-                endpoint=f'http://127.0.0.1:{server.server_port}/v1/chat/completions', model='fixture-model',
-                limits=runner.ModelLimits(request_timeout_seconds=0.1, run_timeout_seconds=30))
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join()
-        self.assertEqual(len(received), 1)
-        self.assertIn(report['rows'][0]['error'], ('request_timeout', 'transport_error'))
-        self.assertTrue(all(row['error'] == 'run_stopped' and row['grade'] is None for row in report['rows'][1:]))
-        self.assertEqual(report['summary']['sent'], 1)
+        for error in ('request_timeout', 'transport_error'):
+            with self.subTest(error=error):
+                with patch.object(runner, '_bounded_request', side_effect=runner.ModelError(error)) as dispatch:
+                    report = runner.evaluate_model_korean_memory(backend='local-model', allow_network=True,
+                        endpoint='http://127.0.0.1:1/v1/chat/completions', model='fixture-model')
+                self.assertEqual(dispatch.call_count, 1)
+                self.assertEqual(report['summary']['sent'], 1)
+                self.assertEqual(len(report['rows']), 100)
+                first = report['rows'][0]
+                self.assertEqual(first['error'], error)
+                self.assertEqual(first['status'], 'error')
+                self.assertTrue(first['request_sent'])
+                self.assertIsNone(first['grade'])
+                self.assertTrue(all(row['status'] == 'error' and row['error'] == 'run_stopped'
+                                    and not row['request_sent'] and row['grade'] is None
+                                    for row in report['rows'][1:]))
+                self.assertEqual(report['summary']['completed'], 0)
 
     def test_review_legacy_function_call_is_rejected(self):
         sample = runner.collect_dataset()['samples'][0]

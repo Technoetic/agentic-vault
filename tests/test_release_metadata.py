@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.39.1"
-EXPECTED_PUBLIC_REF = "0.39.1"
+EXPECTED = "0.39.2"
+EXPECTED_PUBLIC_REF = "0.39.2"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.39.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.39.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.39.2-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.39.2.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.39.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.39.2 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -1211,6 +1211,22 @@ class V0390ReleaseMetadataTests(unittest.TestCase):
                         "post-publication.json", "exact final source", "unpublished v0.39.0"):
             with self.subTest(patch_verification=literal):
                 self.assertIn(literal, verification)
+        for candidate in (patch, verification):
+            for literal in ("unpublished candidate", "v0.39.2", "41664026652", "126014409284"):
+                self.assertIn(literal, candidate)
+        latest = (REPO_ROOT / "docs/releases/v0.39.2.md").read_text(encoding="utf-8")
+        latest_record = (REPO_ROOT / "docs/verification/v0.39.2.md").read_text(encoding="utf-8")
+        for literal in ("unpublished v0.39.1", "41664026652", "126014409284", "Windows",
+                        "Python 3.12", "clock-independent", "request_timeout", "transport_error",
+                        "attempt", "server acceptance", "No actual-model inference",
+                        "--ref v0.39.2", CHECKER_SHA256_V0340):
+            with self.subTest(latest_literal=literal):
+                self.assertIn(literal, latest)
+        for literal in ("## Implementation evidence", "## Final release gates", "## Limits",
+                        "pending, not passes", "No old tag is rewritten", "verification.json",
+                        "post-publication.json", "exact final source", "unpublished v0.39.1"):
+            with self.subTest(latest_verification=literal):
+                self.assertIn(literal, latest_record)
 
     def test_ci_adds_only_offline_smokes_to_existing_matrix(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
@@ -1232,10 +1248,10 @@ class V0390ReleaseMetadataTests(unittest.TestCase):
             for guide in ("memory-stage-evaluation.md", "model-korean-memory.md"):
                 with self.subTest(guide=guide):
                     self.assertIn(guide, text)
-        self.assertIn("## v0.39.1", readme)
-        self.assertIn("## v0.39.1", codex)
+        self.assertIn("## v0.39.2", readme)
+        self.assertIn("## v0.39.2", codex)
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn("| 0.39.1 (latest) | Yes.", security)
+        self.assertIn("| 0.39.2 (latest) | Yes.", security)
 
 
 class V0360ReleaseMetadataTests(unittest.TestCase):

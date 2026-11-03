@@ -24,7 +24,8 @@ python scripts/evaluate_model_korean_memory.py --backend local-model --allow-net
 `--api-key-env NAME` optionally reads only that process environment variable.
 No server discovery, proxies, redirects or retries occur. Time, request and
 response bytes are bounded. A timeout or transport failure stops later requests;
-errors never count as abstentions. Provider usage is retained when present even
+errors never count as abstentions. A sent count records an attempted bounded
+dispatch; it does not prove server acceptance or inference. Provider usage is retained when present even
 for invalid responses, and billing remains unknown. A Korean system instruction
 requires strict scoped JSON; only question, options and retrieved evidence enter
 the user message. Synthetic labels remain on the host.
