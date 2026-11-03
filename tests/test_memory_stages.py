@@ -133,7 +133,7 @@ class TransportContractTests(unittest.TestCase):
             thread.join()
         self.assertEqual(len(hits), 1)
         self.assertEqual(result['metrics']['requests_sent'], 1)
-        self.assertEqual(result['observations'][0]['error'], 'request_timeout')
+        self.assertIn(result['observations'][0]['error'], ('request_timeout', 'transport_error'))
         self.assertTrue(all(row['error'] == 'run_stopped' for row in result['observations'][1:]))
 
     def test_source_manifest_binds_stage_runner_and_dependencies(self):
@@ -145,6 +145,20 @@ class TransportContractTests(unittest.TestCase):
             (Path(__file__).resolve().parents[1] / 'scripts/evaluate_memory_stages.py').read_bytes()).hexdigest())
         self.assertIn('skills/agentic-vault/scripts/vault_retrieval.py', manifest)
         self.assertTrue(all(s['source_tree_sha256'] == data['source_tree_sha256'] for s in data['samples']))
+
+    def test_both_transport_timeout_outcomes_stop_later_requests(self):
+        from unittest.mock import patch
+        import evaluate_memory_stages as stages
+        import evaluate_model_memory_lifecycle as runner
+        from evaluate_tool_safety import ModelError
+        for code in ('request_timeout', 'transport_error'):
+            with self.subTest(code=code), patch.object(runner, '_bounded_request', side_effect=ModelError(code)) as send:
+                result = stages.evaluate_stages(stage='retrieval', case='ascii', backend='local-model',
+                    allow_network=True, endpoint='http://127.0.0.1:1/v1/chat/completions', model='stub')
+                self.assertEqual(send.call_count, 1)
+                self.assertEqual(result['metrics']['requests_sent'], 1)
+                self.assertEqual(result['observations'][0]['error'], code)
+                self.assertTrue(all(row['error'] == 'run_stopped' for row in result['observations'][1:]))
 
 
 class EvidenceCompletenessTests(unittest.TestCase):
