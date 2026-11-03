@@ -117,6 +117,7 @@ class TransportContractTests(unittest.TestCase):
             def log_message(self, *args):
                 pass
             def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
                 hits.append(1)
                 time.sleep(.2)
         server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
