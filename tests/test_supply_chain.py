@@ -29,11 +29,11 @@ AUDIT_REQUIREMENTS_IN = ROOT / "ci" / "requirements-audit.in"
 AUDIT_REQUIREMENTS = ROOT / "ci" / "requirements-audit.txt"
 AUDIT_JOB = "supply-chain-audit"
 BLOCKING_JOBS = ("unittest", "stateful")
-# Time limits (minutes) of the blocking jobs. The slowest v0.31.0 Windows unittest cell took
-# 19.1 of the former 20 minutes, and v0.32.0's new and extended tests take about 2.7 minutes
-# more in a local Windows run (2026-10-27), so the unittest job has 35. The stateful job runs
-# an unchanged test file and keeps 10.
-BLOCKING_JOB_TIMEOUTS = {"unittest": "35", "stateful": "10"}
+# Time limits (minutes) of the blocking jobs. The v0.39.1 tag run's 1964-second
+# unit step plus measured setup/post-unit overhead gives a 2109-second planning
+# envelope, above the former 35-minute cap. The approved unit-job cap is 45;
+# the stateful job keeps 10. Exact finite caps remain required.
+BLOCKING_JOB_TIMEOUTS = {"unittest": "45", "stateful": "10"}
 AUDIT_ACTIONS = {
     "actions/checkout",
     "actions/setup-python",
