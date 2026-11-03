@@ -1,4 +1,4 @@
-﻿# Memory stage interventions
+# Memory stage interventions
 
 `scripts/evaluate_memory_stages.py` is an optional checkout-only experiment using fixed, original ASCII and Korean synthetic fixtures. It does not read a user vault, execute shell commands, deploy a memory policy, or reproduce an official benchmark. Memory generation is `deterministic_experimental_intervention`: no model writes or summarizes memory here.
 
