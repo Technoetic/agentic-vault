@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.38.1 (latest) | Yes. Security fixes target the latest source version. |
-| 0.38.0 and earlier | No. Upgrade to 0.38.1 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
+| 0.39.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.38.1 and earlier | No. Upgrade to 0.39.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).

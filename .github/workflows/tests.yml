@@ -58,6 +58,10 @@ jobs:
         run: python scripts/evaluate_memory_trust.py --check-controls
       - name: Paired model-lifecycle contract (scripted control; no model calls)
         run: python scripts/evaluate_model_memory_lifecycle.py --case ascii
+      - name: Stage-specific memory intervention controls (no model calls)
+        run: python scripts/evaluate_memory_stages.py
+      - name: Fresh paired Korean answer contracts (no model calls)
+        run: python scripts/evaluate_model_korean_memory.py
       - name: Source-bound assembly and procedure examples (no model calls)
         run: python scripts/evaluate_memory_reliability.py
       - name: Hard bilingual recall at top3 (explicit query expansion)

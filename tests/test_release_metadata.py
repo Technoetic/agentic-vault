@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.38.1"
-EXPECTED_PUBLIC_REF = "0.38.1"
+EXPECTED = "0.39.0"
+EXPECTED_PUBLIC_REF = "0.39.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.38.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.38.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.39.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.39.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.38.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.39.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -1176,6 +1176,51 @@ class V0320ReleaseNoteTests(unittest.TestCase):
                 stamp = template.read_text(encoding="utf-8").splitlines()[0]
                 self.assertIn("agentic-vault:rule engine=", stamp)
                 self.assertNotIn("engine=0.32.0", stamp)
+
+
+class V0390ReleaseMetadataTests(unittest.TestCase):
+    def test_scope_and_evidence_boundaries_are_explicit(self) -> None:
+        release = (REPO_ROOT / "docs/releases/v0.39.0.md").read_text(encoding="utf-8")
+        for literal in ("scripts/evaluate_memory_stages.py",
+                        "scripts/evaluate_model_korean_memory.py", "writing", "management", "retrieval",
+                        "deterministic_experimental_intervention", "scripted-control",
+                        "original fixtures", "not an official Inspect SDK integration",
+                        "NoMIRACL dataset is not copied", "not actual-model performance evidence",
+                        "--ref v0.39.0", CHECKER_SHA256_V0340, "harmless replay"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        record = (REPO_ROOT / "docs/verification/v0.39.0.md").read_text(encoding="utf-8")
+        for literal in ("## Implementation evidence", "## Final release gates", "## Limits",
+                        "pending, not passes", "verification.json", "post-publication.json",
+                        "exact final source", "No actual-model inference", "seven certificate-bound",
+                        "No old tag is rewritten", "Receipt hashes bind", "not authenticate"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, record)
+
+    def test_ci_adds_only_offline_smokes_to_existing_matrix(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        unittest_job = workflow.split("  unittest:", 1)[1].split("\n  stateful:", 1)[0]
+        for command in ("python scripts/evaluate_memory_stages.py",
+                        "python scripts/evaluate_model_korean_memory.py"):
+            with self.subTest(command=command):
+                self.assertEqual(workflow.count("run: " + command + "\n"), 1)
+                self.assertIn("run: " + command + "\n", unittest_job)
+        self.assertIn("os: [ubuntu-latest, windows-latest, macos-latest]", unittest_job)
+        self.assertIn("python: ['3.10', '3.12', '3.14']", unittest_job)
+        self.assertNotIn("--allow-network", workflow)
+
+    def test_current_guides_index_both_checkout_only_evaluators(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        for text in (readme, codex, index):
+            for guide in ("memory-stage-evaluation.md", "model-korean-memory.md"):
+                with self.subTest(guide=guide):
+                    self.assertIn(guide, text)
+        self.assertIn("## v0.39.0", readme)
+        self.assertIn("## v0.39.0", codex)
+        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("| 0.39.0 (latest) | Yes.", security)
 
 
 class V0360ReleaseMetadataTests(unittest.TestCase):
