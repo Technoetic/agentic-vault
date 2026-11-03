@@ -1,6 +1,7 @@
 """Contract controls for the optional model runner; no actual inference here."""
 import importlib.util
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -173,6 +174,17 @@ class ModelLifecycleTests(unittest.TestCase):
                     m.evaluate_model_lifecycle(**options)
 
     def test_actual_local_transport_preserves_provider_usage_and_hashes(self):
+        self._assert_actual_local_transport_preserves_provider_usage_and_hashes()
+
+    def test_actual_local_transport_accepts_zero_elapsed_time_from_coarse_clock(self):
+        m = self.require_module()
+        # A completed loopback request can fit within one monotonic clock tick.
+        with patch.object(m, 'time') as clock:
+            clock.monotonic.return_value = 123.0
+            row = self._assert_actual_local_transport_preserves_provider_usage_and_hashes()
+        self.assertEqual(row['latency_seconds'], 0.0)
+
+    def _assert_actual_local_transport_preserves_provider_usage_and_hashes(self):
         m = self.require_module()
         seen = []
         class Handler(BaseHTTPRequestHandler):
@@ -198,11 +210,18 @@ class ModelLifecycleTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
-        self.assertEqual(row['cost']['provider_usage']['total_tokens'], 135)
+        self.assertEqual(row['status'], 'completed')
+        self.assertIsNone(row['error'])
+        self.assertTrue(row['request_sent'])
+        self.assertEqual(row['cost']['provider_usage'], {
+            'prompt_tokens': 123, 'completion_tokens': 12, 'total_tokens': 135})
         self.assertEqual(row['request_sha256'], m._sha(seen[0]))
         self.assertTrue(row['task_success'])
-        self.assertGreater(row['latency_seconds'], 0)
+        self.assertTrue(math.isfinite(row['latency_seconds']))
+        self.assertGreaterEqual(row['latency_seconds'], 0)
+        self.assertEqual(row['context_sha256'], self.dataset['samples'][0]['context_sha256'])
         self.assertEqual(row['source_tree_sha256'], self.dataset['source_tree_sha256'])
+        return row
 
     def test_zero_context_budget_cannot_pass_selective_repair(self):
         m = self.require_module()

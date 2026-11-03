@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.38.0-10B981?style=for-the-badge)](docs/releases/v0.38.0.md)
+[![Version](https://img.shields.io/badge/v0.38.1-10B981?style=for-the-badge)](docs/releases/v0.38.1.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -30,7 +30,22 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
+## v0.38.1 — Windows 타이머 테스트 이식성
+
+v0.38.1은 공개하지 않은 [v0.38.0 후보](docs/verification/v0.38.0.md)를 대체하는
+테스트 이식성 패치다. Windows Python 3.10의 거친 monotonic 타이머에서는 짧은 측정값이
+`0.0`일 수 있으므로, 지연 시간을 반드시 양수로 요구하던 시험을 유한한 0 이상 값도
+허용하도록 고친다. 가짜 지연 시간을 만들거나 런타임 측정·평가 동작을 바꾸지 않는다.
+
+v0.38.0 후보의 선택형 출처 바인딩, 한영 합성 대조군과 로컬 모델 수명주기 평가를
+그대로 유지한다. `9d55755` 구현 체크포인트의 로컬 모델 관측은 새 측정이 아니며,
+교정 전 오염 조건을 충족하지 않아 엄격한 복구 점수는 0이고 효능은 미확인이다.
+[릴리스 범위](docs/releases/v0.38.1.md)와 [검증 기록](docs/verification/v0.38.1.md)을 참고한다.
+아래 v0.38.0 절은 공개하지 않은 후보의 준비 이력이며 현재 설치 ref는 v0.38.1이다.
+
 ## v0.38.0 — 출처 보존과 모델 행동 평가
+
+공개하지 않은 후보의 준비 이력이다. Windows Python 3.10 CI 실패 후 v0.38.1로 대체한다.
 
 [기억 신뢰 경계](docs/memory-trust.md)는 호스트가 구분한 발언 역할과 원문 해시를
 JSON 문맥에 보존한다. 외부 본문의 가짜 사용자 승인이나 `safe`·`validated` 같은
@@ -47,7 +62,7 @@ JSON 문맥에 보존한다. 외부 본문의 가짜 사용자 승인이나 `saf
 교정 전 오염 조건을 충족하지 않아 엄격한 복구 점수는 0이며 효과는 미확인이다. 기본 훅·설정을 바꾸거나
 활성 설치를 갱신하지 않는다. [릴리스 범위](docs/releases/v0.38.0.md)와
 [검증 기록](docs/verification/v0.38.0.md)을 참고한다.
-아래 버전별 설명은 이전 소스의 이력이며 현재 설치 ref는 v0.38.0이다.
+아래 버전별 설명은 이전 소스의 이력이다.
 
 ## v0.37.0 — 선택형 기억 철회·세션 간 복구 검사
 
@@ -102,7 +117,25 @@ python scripts/evaluate_knowledge_evolution.py
 버전 근거·페이지 관리·LEDGER 평가에서 설계 아이디어를 참고한 범위 제한 구현이다.
 자세한 내용은 [이번 변경·검증 범위](docs/releases/v0.36.1.md)를 참고한다.
 
+## v0.38.1 source and certificate migration
+
+This patch supersedes the unpublished v0.38.0 candidate after its Windows Python 3.10
+CI rejected a legitimate zero elapsed duration. Only the timing test becomes portable:
+finite nonnegative measurements are valid, no duration is fabricated, and evaluation
+runtime behavior remains unchanged. The candidate's three optional feature groups and
+the `9d55755` implementation-checkpoint model observation are retained; strict repair
+credit remains zero and efficacy remains unconfirmed.
+
+The seven certificate-bound checker files and committed LF harmless corpus remain
+unchanged from v0.37.0 and the v0.38.0 candidate. Matching installed bound bytes need
+no certificate regeneration for this transition alone. Older changed-byte transitions
+retain warning reset, engine alignment, certificate regeneration and harmless replay.
+See the [release](docs/releases/v0.38.1.md) and [verification](docs/verification/v0.38.1.md).
+Publication, active installation updates and real-vault configuration remain separate.
+
 ## v0.38.0 source and certificate migration
+
+Historical preparation for the unpublished v0.38.0 candidate, superseded by v0.38.1.
 
 This release adds optional host-attested role/source envelopes and claim-binding review,
 original forged-role and poisoned-experience synthetic controls, and paired local-model
@@ -353,8 +386,8 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs below target v0.38.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.38.0.md);
+budgets; new findings warn first. The installation refs below target v0.38.1.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.38.1.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
@@ -780,7 +813,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.38.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.38.1 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 │
@@ -865,7 +898,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.38.0**이며 **Claude Code, Codex 겸용**이다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)을 제공한다. JavaScript 모듈·CSS·화면/서비스 책임·비동기 로딩·화면별 URL·배포 갱신을 다루며, 열린 탭은 새 배포를 감지한 뒤 다음 안전한 화면 이동에서 자동으로 전체 문서를 읽고 작성 중 입력과 저장 요청을 보호한다. 기존 프로젝트 지시·프레임워크를 우선한다. Codex 발견 검증은 두 스킬의 활성 상태·서로 다른 올바른 설치 경로·설치 바이트를 확인한다. 앱의 실제 준수는 별도 시험으로 확인한다. v0.34.0과 인증서가 묶는 바이트가 같아 이번 전환만으로 인증서를 다시 만들 필요는 없다. [이번 변경·검증 범위](docs/releases/v0.38.0.md)를 참고한다.
+현재 버전은 **v0.38.1**이며 **Claude Code, Codex 겸용**이다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)을 제공한다. JavaScript 모듈·CSS·화면/서비스 책임·비동기 로딩·화면별 URL·배포 갱신을 다루며, 열린 탭은 새 배포를 감지한 뒤 다음 안전한 화면 이동에서 자동으로 전체 문서를 읽고 작성 중 입력과 저장 요청을 보호한다. 기존 프로젝트 지시·프레임워크를 우선한다. Codex 발견 검증은 두 스킬의 활성 상태·서로 다른 올바른 설치 경로·설치 바이트를 확인한다. 앱의 실제 준수는 별도 시험으로 확인한다. v0.34.0과 인증서가 묶는 바이트가 같아 이번 전환만으로 인증서를 다시 만들 필요는 없다. [이번 변경·검증 범위](docs/releases/v0.38.1.md)를 참고한다.
 
 v0.34.0은 다음 기능을 더했고 v0.35.1에서도 유지한다. 명시적으로 켜는 기능 다섯 가지를 더하며, 모두 훅·CI·기본 실행에 연결하지 않는다. `check-support --bind-subject`는 첫 글자가 ASCII가 아닌 글자인 주어 앞에 [왼쪽 경계](docs/support-row-diagnostics.md#subject-left-edge)가 있어야 일치로 보므로, 주어 앞에 한글 한 음절이 더 붙은 긴 이름은 더 이상 주어 일치로 세지 않는다(값·기본 출력·종료 코드는 그대로다). `evaluate_recall.py --abstention-calibration conformal`은 평가기 안에서만 [답 없음 보정 문턱](docs/memory-evaluation.md#답-없음-보정-문턱)을 커밋한 분할의 dev 쪽에서 맞추고 heldout 쪽에서 잰다. recall_hard(팔마다 보정 문항 28개 이하, α = 0.05)에서는 문턱이 있어도 보정 신호의 최솟값 한 점에 걸리고 조건부판(Learn then Test)은 문턱을 내지 못하므로, 보정 집합을 늘린 뒤에 쓸모가 있다. `scripts/real_vault_audit.py plan`은 라벨하기 전에 [표본 크기와 합격 확률](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)을 정확한 정수 산술로 계산한다. `vault_improvements.py inspect`·`compare --receipt-order`는 계획과 완료 영수증의 [기록 순서](docs/improvement-experiments.md#영수증-기록-순서-선택)를 표시하며, 이는 관찰 시점이나 서명이 아니다. `evaluate_tool_matrix.py --string-patterns`는 같은 trial을 현재 스키마와 형식 패턴을 더한 스키마로 짝지어 실행하고 호스트 판정을 기록만 한다([문자열 인자 패턴 짝 비교](docs/evaluation-stability.md#문자열-인자-패턴-짝-비교)). 새 옵션을 주지 않으면 출력·종료 코드는 v0.33.1과 같고, 이미 있던 `--bind-subject`를 켠 결과(첫 글자가 ASCII가 아닌 글자인 주어), 바뀐 CLI의 도움말·usage 줄, argparse 약어(`evaluate_recall.py --f`가 모호해진다), 일부 평가기가 싣는 소스 해시만 다르다. 주어 경계가 `vault_ssot.py`를 바꾸므로 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.34.0.md)를 따른다.
 
@@ -883,9 +916,9 @@ v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#�
 
 v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md), v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.38.0`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.38.1`이며 규칙 6종은 내용이 같아 기존 스탬프를 유지한다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.38.0) 경로는 v0.38.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.38.0 검증 기록](docs/verification/v0.38.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.38.1) 경로는 v0.38.1을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.38.1 검증 기록](docs/verification/v0.38.1.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -928,7 +961,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.38.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.38.1
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
