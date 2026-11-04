@@ -7,6 +7,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+try:
+    from _winfs import make_junction
+except ImportError:  # run as tests.<module> from repository root
+    from tests._winfs import make_junction
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from skill_routing_catalog import build_catalog, analyze_catalog
 from skill_routing_contract import RoutingError
@@ -15,7 +20,8 @@ from skill_routing_contract import RoutingError
 class CatalogTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        # Canonicalize only the trusted harness root (macOS /var is an alias).
+        self.root = Path(self.temp.name).resolve()
         self.addCleanup(self.temp.cleanup)
 
     def skill(self, folder='one', name='vault', description='Use for vault work.'):
@@ -33,6 +39,28 @@ class CatalogTests(unittest.TestCase):
             'description': 'Use for vault work.', 'source_sha256': hashlib.sha256(raw).hexdigest(),
             'source_path': 'av/one/SKILL.md'}])
         self.assertTrue(path.exists())
+
+    def test_trusted_temporary_setup_resolves_os_directory_alias(self):
+        physical = self.root / 'physical-temp'
+        physical.mkdir()
+        alias = self.root / 'temp-alias'
+        if os.name == 'nt':
+            make_junction(alias, physical)
+        else:
+            alias.symlink_to(physical, target_is_directory=True)
+        # Model macOS /var -> /private/var without weakening production policy.
+        with patch.object(tempfile, 'tempdir', str(alias)):
+            nested = CatalogTests()
+            try:
+                nested.setUp()
+                nested.skill()
+                result = build_catalog([('av', nested.root)])
+                self.assertEqual([skill['id'] for skill in result['skills']], ['av:vault'])
+                with self.assertRaises(RoutingError) as caught:
+                    build_catalog([('av', alias / nested.root.name)])
+                self.assertEqual(caught.exception.code, 'symlink_manifest_path')
+            finally:
+                nested.doCleanups()
 
     def test_quoted_descriptions_and_korean(self):
         self.skill(description="'Don''t modify 볼트 without a request.'")

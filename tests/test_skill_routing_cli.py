@@ -25,7 +25,8 @@ class SkillRoutingCliTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.directory = Path(self.temporary.name)
+        # Canonicalize only the trusted harness root (macOS /var is an alias).
+        self.directory = Path(self.temporary.name).resolve()
         self.catalog = {'kind': 'skill_routing_catalog', 'schema_version': 1,
                         'source_kind': 'synthetic', 'skills': [
                             {'id': 'test:alpha', 'name': 'alpha', 'description': 'Inspect routing.',

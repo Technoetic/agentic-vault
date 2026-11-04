@@ -414,6 +414,7 @@ class RoutingContractTests(unittest.TestCase):
 
 
 class RoutingDocumentReadTests(unittest.TestCase):
+    """Resolve trusted temp roots, then retain deliberate unsafe input paths."""
     @classmethod
     def setUpClass(cls):
         spec = importlib.util.spec_from_file_location("skill_routing_contract_read", SCRIPT)
@@ -422,13 +423,13 @@ class RoutingDocumentReadTests(unittest.TestCase):
 
     def test_utf8_json_is_read_without_canonicalizing_file_contents(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "document.json"
+            path = Path(temporary).resolve() / "document.json"
             path.write_text('{ "value": "한글" }\n', encoding="utf-8")
             self.assertEqual(self.contract.read_document(path), {"value": "한글"})
 
     def test_raw_digest_binds_the_single_read_including_whitespace(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "document.json"
+            path = Path(temporary).resolve() / "document.json"
             raw = b'{ "value": 1 }\n'
             path.write_bytes(raw)
             value, digest = self.contract.read_document_with_sha256(path)
@@ -441,7 +442,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
                      b'{"a":NaN}', b'{"a":Infinity}', b'{"a":1e999}',
                      b'{"a":"\xff"}', b'{}{}', b'')
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "document.json"
+            path = Path(temporary).resolve() / "document.json"
             for raw in documents:
                 path.write_bytes(raw)
                 with self.subTest(raw=raw), self.assertRaises(self.contract.RoutingError):
@@ -449,7 +450,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
 
     def test_oversized_and_deep_documents_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "document.json"
+            path = Path(temporary).resolve() / "document.json"
             for raw in (b' ' * (1024 * 1024 + 1), b'[' * 2000 + b']' * 2000):
                 path.write_bytes(raw)
                 with self.subTest(size=len(raw)), self.assertRaises(self.contract.RoutingError):
@@ -457,7 +458,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
 
     def test_file_boundary_errors_preserve_bounded_diagnostic_codes(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "document.json"
+            path = Path(temporary).resolve() / "document.json"
             path.write_bytes(b" " * (1024 * 1024 + 1))
             with self.assertRaises(self.contract.RoutingError) as caught:
                 self.contract.read_document(path)
@@ -467,7 +468,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows junction boundary")
     def test_ancestor_junction_is_rejected_without_symlink_privilege(self):
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             real = base / "real"
             real.mkdir()
             (real / "source.json").write_text("{}", encoding="utf-8")
@@ -479,7 +480,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
 
     def test_traversal_directory_and_missing_input_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             path = base / "document.json"
             path.write_text("{}", encoding="utf-8")
             child = base / "child"
@@ -490,7 +491,7 @@ class RoutingDocumentReadTests(unittest.TestCase):
 
     def test_file_and_ancestor_symlinks_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             real = base / "real"
             real.mkdir()
             source = real / "source.json"
