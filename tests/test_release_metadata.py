@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.39.3"
-EXPECTED_PUBLIC_REF = "0.39.3"
+EXPECTED = "0.40.0"
+EXPECTED_PUBLIC_REF = "0.40.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.39.3-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.39.3.md)"
+    "[![Version](https://img.shields.io/badge/v0.40.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.40.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.39.3 · MIT)"
+    "← plugin.json · marketplace.json (v0.40.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -1267,7 +1267,7 @@ class V0390ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("## v0.39.3", readme)
         self.assertIn("## v0.39.3", codex)
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn("| 0.39.3 (latest) | Yes.", security)
+        self.assertIn("| 0.40.0 (latest) | Yes.", security)
 
 
 class V0360ReleaseMetadataTests(unittest.TestCase):

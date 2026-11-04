@@ -1,0 +1,255 @@
+{
+  "kind": "skill_routing_trace",
+  "schema_version": 1,
+  "suite_sha256": "fe794941403561633e2dc8857e8d483d43e184d892e0b72f04220457d2097d69",
+  "catalog_sha256": "00b950a42742491970c08698d7655b405fee0282b1180210409ee4481364d92f",
+  "source_kind": "scripted_control",
+  "observation_kind": "skill_invocation",
+  "runtime": {
+    "host": "scripted-control",
+    "version": "1",
+    "model": "none"
+  },
+  "observations": [
+    {
+      "case_id": "en_plain_summary",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "ko_translation",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "en_webapp_mention",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "ko_vault_recall",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "en_backup_verify",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "ko_generic_backup",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "en_jev_direct_inline",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "ko_jev_choice_authorized",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "en_jev_score_authorized",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "ko_jev_not_authorized",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "en_webapp_review",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "ko_webapp_implementation",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "en_vault_webapp_review",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault",
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "ko_vault_webapp_implementation",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault",
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "en_explicit_harness",
+      "status": "complete",
+      "invoked": [
+        "harness14:webapp",
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "ko_harness_status",
+      "status": "complete",
+      "invoked": [
+        "harness14:webapp"
+      ]
+    },
+    {
+      "case_id": "en_helper_before_av",
+      "status": "complete",
+      "invoked": [
+        "helper:orientation",
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "ko_helper_between_composition",
+      "status": "complete",
+      "invoked": [
+        "helper:orientation",
+        "av:agentic-vault",
+        "helper:orientation",
+        "av:webapp-principles",
+        "helper:orientation",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "en_forbidden_publish_review",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "ko_no_harness_auto",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "en_owned_name_selection",
+      "status": "complete",
+      "invoked": [
+        "harness14:webapp"
+      ]
+    },
+    {
+      "case_id": "ko_decoy_explicit",
+      "status": "complete",
+      "invoked": [
+        "decoy:webapp"
+      ]
+    },
+    {
+      "case_id": "en_complete_empty_negative",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "ko_missing_composition",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault",
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "en_wrong_entrypoint",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault",
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "ko_reverse_order",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "en_repeat_valid",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:implementation",
+        "av:webapp-principles",
+        "helper:implementation"
+      ]
+    },
+    {
+      "case_id": "ko_alternative_entrypoints",
+      "status": "complete",
+      "invoked": [
+        "helper:orientation",
+        "av:webapp-principles",
+        "av:agentic-vault",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "en_unavailable_observation",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault"
+      ]
+    },
+    {
+      "case_id": "ko_unobserved_negative",
+      "status": "complete",
+      "invoked": []
+    },
+    {
+      "case_id": "en_error_observation",
+      "status": "complete",
+      "invoked": [
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    },
+    {
+      "case_id": "ko_jev_vault_review",
+      "status": "complete",
+      "invoked": [
+        "av:agentic-vault",
+        "av:webapp-principles",
+        "helper:review"
+      ]
+    }
+  ]
+}

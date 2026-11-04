@@ -63,6 +63,13 @@ jobs:
         run: python scripts/evaluate_memory_stages.py
       - name: Fresh paired Korean answer contracts (no model calls)
         run: python scripts/evaluate_model_korean_memory.py
+      - name: Source-bound skill routing controls (no model or host calls)
+        run: >-
+          python scripts/evaluate_skill_routing.py evaluate
+          --catalog tests/fixtures/skill_routing/catalog.json
+          --cases tests/fixtures/skill_routing/cases.json
+          --trace tests/fixtures/skill_routing/control-pass.json
+          --output skill-routing-control.json
       - name: Source-bound assembly and procedure examples (no model calls)
         run: python scripts/evaluate_memory_reliability.py
       - name: Hard bilingual recall at top3 (explicit query expansion)

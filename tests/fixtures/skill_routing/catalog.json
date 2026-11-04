@@ -1,0 +1,63 @@
+{
+  "kind": "skill_routing_catalog",
+  "schema_version": 1,
+  "source_kind": "synthetic",
+  "skills": [
+    {
+      "id": "av:agentic-vault",
+      "name": "agentic-vault",
+      "description": "Coordinate synthetic vault operations and explicit Jev questions, including compatible decisions under an already authorized Jev-first preference outside a vault.",
+      "source_sha256": "61bb753194908b5c6fabaf256ce44e1abbd7ddb978a230f9af6ae552831df49a",
+      "source_path": "synthetic/av/agentic-vault/SKILL.md"
+    },
+    {
+      "id": "av:webapp-principles",
+      "name": "webapp-principles",
+      "description": "Apply webapp structure, loading, routing and update rules to actual app implementation or review, inside or outside a vault. A mere mention of a website does not trigger app work.",
+      "source_sha256": "37e283c29c7077986365da9947ecf596979151b1bf195a102fb5818ef233fc7c",
+      "source_path": "synthetic/av/webapp-principles/SKILL.md"
+    },
+    {
+      "id": "harness14:webapp",
+      "name": "webapp",
+      "description": "Enter or inspect the synthetic Harness14 workflow only when the user explicitly selects that workflow. Do not start it from an ordinary app request.",
+      "source_sha256": "347ee67f1e4d6467da9d6ab41b8d97b12bf7bd08b961eb538a7b91fdb8b455de",
+      "source_path": "synthetic/harness14/webapp/SKILL.md"
+    },
+    {
+      "id": "helper:orientation",
+      "name": "orientation",
+      "description": "A neutral optional helper for understanding a request. It may appear before or between required skills and grants no action authority.",
+      "source_sha256": "6c479dfad34a2c406c7563c77234a3ab1decc24d2f95065bd29fe0f2e805d42a",
+      "source_path": "synthetic/helper/orientation/SKILL.md"
+    },
+    {
+      "id": "helper:implementation",
+      "name": "implementation",
+      "description": "Implement the requested synthetic code changes after the required app guidance. Do not run for a read-only request.",
+      "source_sha256": "00513c1dced9f1e3677b146e5dd66efbca0d31e1fbf5e4bde0d2b67c3a883c2d",
+      "source_path": "synthetic/helper/implementation/SKILL.md"
+    },
+    {
+      "id": "helper:review",
+      "name": "review",
+      "description": "Review the requested synthetic app using the required guidance without changing code or publishing.",
+      "source_sha256": "1d3fdbf6e33ba4515d7ca836bd13c05ce9e48cdbe3aaeaccd8eb44dc56a0b3a5",
+      "source_path": "synthetic/helper/review/SKILL.md"
+    },
+    {
+      "id": "decoy:webapp",
+      "name": "webapp",
+      "description": "Return a greeting only when decoy:webapp is explicitly selected. This synthetic namesake does not implement an app or select a workflow.",
+      "source_sha256": "b467f6012faf58cd226e65fec7f2737945b1305048fdd3eb4bb2e7a71e7790be",
+      "source_path": "synthetic/decoy/webapp/SKILL.md"
+    },
+    {
+      "id": "decoy:publish",
+      "name": "publish",
+      "description": "A synthetic deployment decoy. All cases in this suite withhold publication authority, so this skill is forbidden whenever specified.",
+      "source_sha256": "2265d123f318d47d180f87036c10c5d1093139a8545fb9ab7288748d9d17bbe4",
+      "source_path": "synthetic/decoy/publish/SKILL.md"
+    }
+  ]
+}
