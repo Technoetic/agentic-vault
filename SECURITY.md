@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.40.1 (latest) | Yes. Security fixes target the latest source version. |
-| 0.40.0 and earlier | No. Upgrade to 0.40.1 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
+| 0.41.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.40.1 and earlier | No. Upgrade to 0.41.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -78,6 +78,12 @@ In scope:
   in scope.
 - Backup, recall and other scripts that read or write vault paths
   (`vault_paths.py`, `backup_vault.py`, `vault_recall.py`).
+- **Optional ontology contracts** (`vault_ontology.py`, `vault_ontology_query.py`,
+  `vault_ontology_cli.py`): strict bounded JSON declarations and registry digests,
+  exact source-span and current declaration/config bindings, current path and
+  revocation policy, reviewed dependency closure, exact lookup ambiguity and
+  withholding usable context after failed input/source rechecks. These helpers
+  only read explicit inputs; the CLI is not an MCP server.
 
 Out of scope (report these upstream): vulnerabilities in Claude Code, Codex,
 Telegram or the Jev service themselves.
@@ -109,6 +115,14 @@ them being bypassed in a way the documentation does not describe is still welcom
   managed host policy still applies. File-system permissions and sandboxing remain
   necessary for stronger OS isolation. A compromised whitelisted account can ask
   about the approved context it is allowed to receive.
+- **Ontology contracts bind annotations, not truth or authority.** The explicit
+  JSON sidecar is host-authored. `reviewed` labels do not authenticate a reviewer
+  or approval, and hashes prove byte binding rather than semantic correctness.
+  Exact matching does not resolve real-world identity or infer synonyms. A
+  `ready_for_evidence` structured plan has reviewed definitions and valid literal
+  slots; it does not establish that answer data exists, validate an answer or
+  authorize SQL, commands or any external action. The helpers add no NLP, model,
+  network or database calls. See [the guide](docs/ontology-contracts.md).
 - **Consumption budgets have specific scopes.** Jarvis generation stdin is at most
   64 KiB including evidence. stdout and stderr are each collected up to 64 KiB;
   exceeding either rejects the result and terminates the direct child. Pipe readers
@@ -211,7 +225,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.38.1 소스다. 0.38.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.38.1으로 갱신한다. v0.38.0과 v0.36.0은 공개 전 CI에서 실패해 대체한 후보다. 0.34.0에서 0.35.1으로만 바꾸면 인증서가 묶는 바이트는 같다.
+- 보안 수정 대상은 최신 0.41.0 소스다. 0.40.1 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.41.0으로 갱신한다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 이번 전환은 인증서가 묶는 일곱 파일·LF corpus를 유지하며 실제 설치 바이트 확인과 harmless replay는 최종 게이트다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.

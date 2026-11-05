@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.40.1"
-EXPECTED_PUBLIC_REF = "0.40.1"
+EXPECTED = "0.41.0"
+EXPECTED_PUBLIC_REF = "0.41.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.40.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.40.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.41.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.41.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.40.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.41.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -1267,7 +1267,49 @@ class V0390ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("## v0.39.3", readme)
         self.assertIn("## v0.39.3", codex)
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn("| 0.40.1 (latest) | Yes.", security)
+        self.assertIn(f"| {EXPECTED} (latest) | Yes.", security)
+
+
+class V0410ReleaseMetadataTests(unittest.TestCase):
+    def test_scope_and_evidence_boundaries_are_explicit(self) -> None:
+        release = _folded((REPO_ROOT / "docs/releases/v0.41.0.md").read_text(encoding="utf-8"))
+        for literal in ("source-bound", "sidecar", "typed links", "metric definitions",
+                        "exact", "structured plan", "ready_for_evidence", "read-only CLI",
+                        "No NLP", "not an MCP server", "No new model-performance observation",
+                        "--ref v0.41.0", CHECKER_SHA256_V0340, "harmless replay",
+                        "2a24f5d34ef6b6e168a7f22d308504d3ab36a198", "NVIDIA",
+                        "Reused", "new", "company vault"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, release)
+        verification = _folded((REPO_ROOT / "docs/verification/v0.41.0.md").read_text(encoding="utf-8"))
+        for literal in ("## Implementation evidence", "## Final release gates",
+                        "pending, not passes", "exact final source", "master/tag CI",
+                        "verification.json", "post-publication.json", "independent",
+                        "No old tag is rewritten", CHECKER_SHA256_V0340):
+            with self.subTest(verification=literal):
+                self.assertIn(literal, verification)
+
+    def test_ontology_resources_are_bundled_and_indexed(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_ontology.py",
+                         "skills/agentic-vault/scripts/vault_ontology_query.py",
+                         "skills/agentic-vault/scripts/vault_ontology_cli.py",
+                         "docs/ontology-contracts.md"):
+            with self.subTest(resource=relative):
+                self.assertTrue((REPO_ROOT / relative).is_file(), relative)
+                for inventory in ("scripts/verify_codex_plugin.py", "tests/test_codex_verification.py"):
+                    self.assertIn(relative, (REPO_ROOT / inventory).read_text(encoding="utf-8"))
+        for relative in ("README.md", "docs/codex.md", "docs/README.md"):
+            with self.subTest(index=relative):
+                self.assertIn("ontology-contracts.md", (REPO_ROOT / relative).read_text(encoding="utf-8"))
+
+    def test_previous_release_records_keep_canonical_bytes(self) -> None:
+        for relative, expected in {
+            "docs/releases/v0.40.1.md": "49c56adcf002e75bd14905c1a865edf5d01c580f7ad183c256917acc93d09882",
+            "docs/verification/v0.40.1.md": "fafd9dd45dffea5164c410999665154056c4054470c188cd7d16b4632e0b55b7",
+        }.items():
+            with self.subTest(path=relative):
+                canonical = (REPO_ROOT / relative).read_text(encoding="utf-8").encode("utf-8")
+                self.assertEqual(hashlib.sha256(canonical).hexdigest(), expected)
 
 
 class V0360ReleaseMetadataTests(unittest.TestCase):

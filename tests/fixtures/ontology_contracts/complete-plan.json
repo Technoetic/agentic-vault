@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "entities": ["machine:alpha"],
+  "relations": [{"subject":"machine:alpha","predicate":"located_in","object":"factory:one"}],
+  "metrics": [{"id":"metric:good","slots":{
+    "unit":"piece",
+    "grain":"shift",
+    "population":"accepted_only",
+    "aggregation":"sum",
+    "period":{"start":"2026-01-01","end":"2026-01-02"}
+  }}]
+}
