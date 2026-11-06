@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Opt-in forward-recoverable Markdown bundles; no multi-file atomic visibility."""
 from __future__ import annotations
 import argparse
