@@ -51,6 +51,8 @@ v0.35.1부터 전체 플러그인에는
 | `memory <인자>` | [구조화 기억](../../../docs/memory-patterns.md), `scripts/vault_memory.py` (`--vault`·vault-relative `--input`·예산 명시, 읽기 전용) |
 | `memory-trust <인자>` | [역할·출처 보존](../../../docs/memory-trust.md), `scripts/vault_memory_trust.py`; 선택한 호스트 메시지와 주장만 검사하며 결과는 참고용, 권한 부여·저장·자동 세션 주입 없음 |
 | `revocations capture\|check <인자>` | [선택형 기억 철회](../../../docs/memory-revocation.md), `scripts/vault_revocation.py --vault PATH capture\|check --input RELATIVE.json`; 등록 줄·파생 관계의 준비/검사, 저장·활성화·원문 삭제 없음 |
+| `bundle <작업과 인자>` | [묶음 복구](../../../docs/recoverable-bundles.md), `scripts/vault_bundle.py`; prepare/status, 명시적 digest·`--apply`에 묶인 저장·적용·순방향 복구 |
+| `review-plan <인자>` | [재검토 순서](../../../docs/review-planning.md), `scripts/vault_review_plan.py --vault PATH --inventory RELATIVE.json --graph RELATIVE.json`; 읽기 전용 명시적 의존관계 순서 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |

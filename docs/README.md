@@ -13,6 +13,9 @@ point-in-time plans, designs and verification logs and may not match current beh
 
 | 문서 | 내용 |
 |---|---|
+| [recoverable-bundles.md](recoverable-bundles.md) | 선택한 Markdown 묶음의 명시적 해시 승인·저널·순방향 복구, 다중 파일 원자성 보장 없음 |
+| [review-planning.md](review-planning.md) | 기존 직접 변경 신호와 명시적 의존관계에 따른 읽기 전용 재검토 순서 |
+| [generated-memory-lifecycle.md](generated-memory-lifecycle.md) | 합성 체크섬 생성 기억의 실제 저장·새 실행 재사용·제한된 오염과 선택적 철회 대조군; 기본 오프라인 |
 | [skill-routing-evaluation.md](skill-routing-evaluation.md) | 체크아웃 전용 다중 스킬 라우팅 판정·명시한 소유자별 catalog·호환 보고서 비교; 원본 KR/EN 합성 통제 32건이며 실제 모델 라우팅 측정·실시간 Codex 어댑터는 없음 |
 | [memory-stage-evaluation.md](memory-stage-evaluation.md) | 선택형 쓰기·관리·검색 단계 개입: 실제 합성 저장·검색 문맥과 정상 업무 보존·오염 노출·잘못된 계획 채택·누락을 분리하는 대조군 |
 | [model-korean-memory.md](model-korean-memory.md) | 원본 한국어 fixture의 두 검색 팔에서 새 응답 수집·엄격한 답변 판정·소스에 묶인 재생; 기본 오프라인, 실제 추론은 명시적 로컬 허용 |
@@ -46,7 +49,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [hardening.md](hardening.md) | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·전송 경고·명시적 토큰 보정·선택형 날조 후보/출처 뒷받침 경고·선택형 동기화 충돌 사본/checkpoint 이후 변경 경고, via_bot 수집 출처·디렉터리 이름 목록 대조(v0.26.0), 다른 대장의 사실 표에만 있는 값 표시(`ledger_table_only`)·선택형 `--primary-text-only`와 기간 표현 정규화(`--normalize-periods`)(v0.31.0), 기본 경로 정규식(제목·frontmatter 줄, 인라인 코드·링크 등)의 선형 시간 처리, `check-support`의 표를 뺀 자리·줄 나눔·자기 인용 BOM 처리, 기간 정규화의 보류 보강·과잉 보류 해소와 생성 시험으로 고정한 알려진 실패 목록, 인증서 corpus 파일의 LF checkout(v0.32.0), 선택형 `--bind-subject` 주어의 왼쪽 경계와 `different_from` 행 안내(v0.34.0) |
 | [jev-judgments.md](jev-judgments.md) | Jev-first 직접 질문과 파일 근거 판단의 입력·전송·결과 해석 |
 | [release-integrity.md](release-integrity.md) | 공개 자산(ZIP·SHA256SUMS·verification.json), v0.23.0부터의 불변 릴리스 게시 절차, `TZ=UTC0` ZIP 재현 명령과 재빌드 명세(`rebuild_spec`)·선택형 L1/L2 재빌드 확인, 선택형 사용자 확인의 보장 범위, 경고 전용 CI 공급망 점검과 해시 고정 pip-audit 설치·갱신 절차, 고정한 action 커밋의 정확한 태그 주석(v0.32.0) |
-| [releases/](releases/) | 릴리스 노트. 최신 소스는 [v0.41.0](releases/v0.41.0.md); [검증 기록](verification/v0.41.0.md). 이전 [v0.40.1](releases/v0.40.1.md) / [v0.39.3](releases/v0.39.3.md)·[v0.38.1](releases/v0.38.1.md)·[v0.37.0](releases/v0.37.0.md)·[v0.36.1](releases/v0.36.1.md)을 보존한다. [v0.40.0](releases/v0.40.0.md)·[v0.39.2](releases/v0.39.2.md)·[v0.39.1](releases/v0.39.1.md)·[v0.39.0](releases/v0.39.0.md)·[v0.38.0](releases/v0.38.0.md)·[v0.36.0](releases/v0.36.0.md)·[v0.35.0](releases/v0.35.0.md)은 공개 전 CI 실패로 대체한 후보이며 태그·당시 기록을 보존한다. 이전 [v0.34.0](releases/v0.34.0.md)의 선택형 기능을 유지한다. v0.33.0은 공개하지 않은 후보이며 그 기능은 v0.33.1로 공개했다 |
+| [releases/](releases/) | 릴리스 노트. 최신 소스는 [v0.42.0](releases/v0.42.0.md); [검증 기록](verification/v0.42.0.md). 이전 [v0.41.0](releases/v0.41.0.md) / [v0.40.1](releases/v0.40.1.md) / [v0.39.3](releases/v0.39.3.md)·[v0.38.1](releases/v0.38.1.md)·[v0.37.0](releases/v0.37.0.md)·[v0.36.1](releases/v0.36.1.md)을 보존한다. [v0.40.0](releases/v0.40.0.md)·[v0.39.2](releases/v0.39.2.md)·[v0.39.1](releases/v0.39.1.md)·[v0.39.0](releases/v0.39.0.md)·[v0.38.0](releases/v0.38.0.md)·[v0.36.0](releases/v0.36.0.md)·[v0.35.0](releases/v0.35.0.md)은 공개 전 CI 실패로 대체한 후보이며 태그·당시 기록을 보존한다. 이전 [v0.34.0](releases/v0.34.0.md)의 선택형 기능을 유지한다. v0.33.0은 공개하지 않은 후보이며 그 기능은 v0.33.1로 공개했다 |
 | [../SECURITY.md](../SECURITY.md) | 지원 버전, 비공개 취약점 제보, 범위, 알려진 한계(선택형 deny zone 가드 포함, v0.32.0) |
 | [../assets/adapters/deny-guard/guide.md](../assets/adapters/deny-guard/guide.md) | 선택형 deny zone 가드(Claude Code 전용 PreToolUse 훅 템플릿, 기본 설치 안 함)의 판정표·PowerShell 구문 분석·켜는 법·상태 보고(`adapters.deny_guard`)·지연 실측·한계(v0.32.0) |
 

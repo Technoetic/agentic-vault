@@ -48,6 +48,12 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_ontology_query.py",
             "skills/agentic-vault/scripts/vault_ontology_cli.py",
             "docs/ontology-contracts.md",
+            "skills/agentic-vault/scripts/vault_bundle.py",
+            "skills/agentic-vault/scripts/vault_review_plan.py",
+            "docs/recoverable-bundles.md", "docs/review-planning.md",
+            "docs/generated-memory-lifecycle.md",
+            "scripts/evaluate_generated_memory_lifecycle.py",
+            "scripts/generated_memory_worker.py",
             "scripts/evaluate_knowledge_evolution.py",
             "tests/fixtures/knowledge_evolution/history.json",
             "docs/knowledge-impact.md", "docs/okf-export.md", "docs/knowledge-evolution.md",
@@ -333,6 +339,28 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Corrupted knowledge resource\n", encoding="utf-8")
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_recovery_review_and_generated_resources_must_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_bundle.py",
+                         "skills/agentic-vault/scripts/vault_review_plan.py",
+                         "docs/recoverable-bundles.md", "docs/review-planning.md",
+                         "docs/generated-memory-lifecycle.md",
+                         "scripts/evaluate_generated_memory_lifecycle.py",
+                         "scripts/generated_memory_worker.py"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed new resource\n", encoding="utf-8")
+
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 

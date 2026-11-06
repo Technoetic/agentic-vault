@@ -101,6 +101,21 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 호출자가 제출한 계측 로그·직접 보고·미확인을 구별하고, 미측정 비용을 0으로 채우지 않는다.
 새 모델/명령 실행이나 자동 효율 판정·적용을 수행하지 않는다.
 
+### 선택형 묶음 복구·재검토 순서
+
+`bundle` 또는 `harden bundle`은 [묶음 복구](../../docs/recoverable-bundles.md)의
+`scripts/vault_bundle.py`로 연결한다. preview·status는 읽기 전용이다. 저장·적용·복구는
+현재 변경안의 외부 확인 해시와 명시적 `--apply`를 요구하며, 실제 파일 상태와 현재 정책을
+다시 확인한다. 다중 파일이 동시에 보이는 보장·자동 롤백은 제공하지 않는다.
+
+`review-plan`은 [재검토 순서](../../docs/review-planning.md)의
+`scripts/vault_review_plan.py --vault PATH --inventory RELATIVE.json --graph RELATIVE.json`으로
+연결한다. 기존 직접 영향 검사와 호출자가 명시한 의존관계만 사용한다. 재검토 신호는
+주장의 참·거짓 판정이나 수정·재캡처 권한이 아니다.
+
+[생성 기억 시험](../../docs/generated-memory-lifecycle.md)은 체크아웃 전용 개발 평가다.
+기본 세션·회상·실제 볼트에 연결하거나 모델·네트워크를 자동 호출하지 않는다.
+
 ### 선택형 변경 영향·OKF 교환
 
 `impact`는 [변경 영향 조회](../../docs/knowledge-impact.md)의

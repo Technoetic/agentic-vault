@@ -1,5 +1,19 @@
 # Claude Code · Codex 겸용 사용
 
+## v0.42.0 - optional recovery, review planning and generated-memory experiments
+
+[Recoverable edit bundles](recoverable-bundles.md) check explicit preview digests
+and resume forward after interrupted writes; they do not provide multi-file atomic
+visibility. [Review planning](review-planning.md) propagates direct impact through
+an explicitly declared graph without editing notes or authenticating truth.
+The checkout-only [generated-memory lifecycle](generated-memory-lifecycle.md)
+persists authored checksum memories and reopens them in fresh workers. Scripted
+and mock-HTTP controls do not measure actual-model performance. Defaults remain
+offline; real local inference requires an explicit model, loopback endpoint and
+network opt-in. Current install refs target v0.42.0; publication does not update
+live installations or company vaults. See [scope](releases/v0.42.0.md) and
+[verification](verification/v0.42.0.md). Earlier sections retain their history.
+
 ## v0.41.0 - optional source-bound ontology contracts
 
 The [ontology contracts guide](ontology-contracts.md) covers an explicit JSON
@@ -129,7 +143,7 @@ files and committed LF harmless corpus remain unchanged from v0.37.0 and the v0.
 candidate when installed bound bytes match. Older changed-byte transitions retain warning
 reset, engine alignment, certificate regeneration with harmless replay and re-promotion.
 See [release scope](releases/v0.38.1.md) and [verification gates](verification/v0.38.1.md).
-The following version sections are historical; current install refs target v0.41.0.
+The following version sections are historical; current install refs target v0.42.0.
 
 ## v0.38.0 - optional source binding and local-model evaluation
 
@@ -323,7 +337,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.41.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.42.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -337,7 +351,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대�
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.41.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.42.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
