@@ -296,7 +296,7 @@ class DefectRegressionTests(unittest.TestCase):
         self.assertEqual((result["status"], result["review_reasons"], result["facts_checked"]),
                          ("needs_review", ["no_selected_literal_facts"], 0))
         self.assertTrue(result["declared_removals"][0]["removed"])
-        result = self.status(original, "# 규칙\n새 문장으로 바꾼다.\n", expected_additions=["새 문장"])
+        result = self.status(original, "# 규칙\n새 문장으로 바꾼다.\n", expected_additions=["새 문장으로"])
         self.assertEqual((result["status"], result["review_reasons"]), ("needs_review", ["no_selected_literal_facts"]))
 
     def test_failed_declaration_keeps_its_reason_on_a_note_with_no_literal_facts(self):
