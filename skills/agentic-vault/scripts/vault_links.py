@@ -21,6 +21,7 @@ from typing import Sequence
 from vault_evidence import EvidenceError, regular, stable_read, stamp
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config, wikilink_targets
 from vault_paths import resolve_note_path
+from vault_worktrees import checked_note_path
 import vault_recall as recall_module
 from vault_recall import recall
 from vault_revocation import RevocationPolicy
@@ -97,7 +98,7 @@ class _Policy:
                 or any(unicodedata.category(char).startswith("C") or char in "\u2028\u2029"
                        for char in relative)):
             raise ValueError("note path cannot contain control or line separator characters")
-        path = resolve_note_path(self.vault, relative, self.rules)
+        path = checked_note_path(self.vault, relative, self.rules)
         if path.suffix.casefold() != ".md":
             raise ValueError("source and targets must be Markdown notes")
         return path

@@ -300,11 +300,12 @@ def _markdown_paths(
     # listing so callers can fingerprint membership without a second scan.
     found: list[tuple[str, Path]] = []
     worktrees = WorktreeScope(vault)
-    pending: list[tuple[tuple[str, ...], Path]] = [((), vault)]
+    # The flag marks a folder below a linked tree that is not left out: its zones stay closed.
+    pending: list[tuple[tuple[str, ...], Path, bool]] = [((), vault, False)]
     hit_entry_limit = False
 
     while pending and not hit_entry_limit:
-        rel_parts, directory = pending.pop()
+        rel_parts, directory, in_tree = pending.pop()
         try:
             if directory_sink is not None:
                 directory_sink('/'.join(rel_parts), directory)
@@ -325,10 +326,13 @@ def _markdown_paths(
             _omit(diagnostics, "unreadable_path")
             continue
 
-        child_dirs: list[tuple[tuple[str, ...], Path]] = []
+        child_dirs: list[tuple[tuple[str, ...], Path, bool]] = []
         for entry in sorted(entries, key=lambda item: (item.name.casefold(), item.name)):
             child_parts = (*rel_parts, entry.name)
             classification = _classified_skip(child_parts, deny_zones, exclude_dirs)
+            if classification is None and in_tree:
+                classification = next(filter(None, (_classified_skip(view, deny_zones, exclude_dirs)
+                                                    for view in worktrees.views(child_parts))), None)
             if classification == "denied":
                 diagnostics["skipped_denied"] += 1
                 continue
@@ -345,13 +349,14 @@ def _markdown_paths(
                 _omit(diagnostics, "unsafe_path")
                 continue
 
-            if is_directory and worktrees.linked(safe_path):
+            linked = is_directory and worktrees.linked(safe_path)
+            if linked and worktrees.registered(safe_path):
                 # A second copy of the notes, not more notes: named, and the search stays complete.
                 skipped_worktrees = diagnostics.setdefault("skipped_worktrees", [])
                 if len(skipped_worktrees) < MAX_RESULTS:
                     skipped_worktrees.append(rel_path)
             elif is_directory:
-                child_dirs.append((child_parts, safe_path))
+                child_dirs.append((child_parts, safe_path, in_tree or linked))
             elif entry.name.casefold().endswith(".md"):
                 found.append((rel_path.replace("\\", "/"), safe_path))
 

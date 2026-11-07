@@ -30,7 +30,6 @@ from typing import Mapping, NamedTuple
 
 from vault_evidence import EvidenceError, decode, regular, stable_read
 from vault_healthcheck import HealthcheckError
-from vault_paths import resolve_note_path
 from vault_state import (BEGIN, END, StateError, _Policy, _atomic, _check_lease,
                          _cleanup_temporary, _hash, _lease_guard, advisory_lock)
 
@@ -737,7 +736,7 @@ def _read_summaries(vault, relative):
     policy = _Policy(vault)
 
     def resolve():
-        path = resolve_note_path(policy.vault, relative, policy.rules)
+        path = policy.checked(relative)
         if path.suffix.casefold() != '.json':
             raise ValueError('invalid_summary_path')
         return path

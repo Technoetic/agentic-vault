@@ -29,7 +29,7 @@ COLLECTION = 'av_eval'
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 EMBED_CACHE_FILE = 'hf_ggml-org_embeddinggemma-300M-Q8_0.gguf'
 CORE_BINDING_FILES = ('vault_recall.py', 'vault_retrieval.py', 'vault_paths.py',
-                      'vault_healthcheck.py', 'vault_query_expansion.py')
+                      'vault_healthcheck.py', 'vault_query_expansion.py', 'vault_worktrees.py')
 
 
 class BindingChanged(ValueError):

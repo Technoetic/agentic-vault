@@ -255,13 +255,14 @@ def _trigger_hits(trigger, variants):
 
 def _read_mapping(vault, mapping, deny, exclude, result, byte_limit=MAX_MAPPING_BYTES):
     import vault_recall as recall
-    from vault_paths import relative_parts, resolve_note_path
+    from vault_paths import relative_parts
+    from vault_worktrees import checked_note_path
     if not isinstance(mapping, str) or len(mapping) > 1024:
         raise ValueError('mapping must be a vault-relative plain file')
     parts = relative_parts(mapping, 'query mapping')
     if recall._classified_skip(parts, deny, exclude):
         raise ValueError('mapping denied or excluded')
-    path = resolve_note_path(vault, mapping, deny)
+    path = checked_note_path(vault, mapping, deny)
     raw, stable = recall._read_regular_bytes(path, min(MAX_MAPPING_BYTES, byte_limit))
     result['mapping_bytes_read'] += len(raw)
     if not stable:
@@ -443,7 +444,8 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
 def verify_mapping(vault, expansion, *, deny=(), exclude=(), byte_limit=MAX_MAPPING_BYTES):
     """Reread the exact mapping under policy; return counted bytes and freshness."""
     import vault_recall as recall
-    from vault_paths import relative_parts, resolve_note_path
+    from vault_paths import relative_parts
+    from vault_worktrees import checked_note_path
     source = expansion.get('mapping_source')
     if source is None:
         return 0, True
@@ -451,7 +453,7 @@ def verify_mapping(vault, expansion, *, deny=(), exclude=(), byte_limit=MAX_MAPP
         parts = relative_parts(source['path'], 'mapping recheck')
         if recall._classified_skip(parts, deny, exclude):
             return 0, False
-        path = resolve_note_path(vault, source['path'], deny)
+        path = checked_note_path(vault, source['path'], deny)
         raw, stable = recall._read_regular_bytes(path, min(MAX_MAPPING_BYTES, byte_limit))
         return len(raw), stable and hashlib.sha256(raw).hexdigest() == source['sha256']
     except (ValueError, OSError, OverflowError):

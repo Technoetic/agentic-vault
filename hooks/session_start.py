@@ -23,6 +23,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from vault_healthcheck import HealthcheckError, estimate_tokens, split_frontmatter, validate_config
 from vault_paths import resolve_note_path
 from vault_revocation import RevocationError, RevocationPolicy
+from vault_worktrees import checked_note_path
 
 
 CONFIG_REL = "00-meta/vault-config.json"
@@ -575,7 +576,7 @@ def _compact_extra_source(vault: Path, config: dict, key: str, fallback: str = '
         raise ValueError('invalid_compact_note')
     if '00-meta/.agentic-vault/runtime' in value.replace('\\', '/').casefold():
         raise ValueError('runtime_is_not_context')
-    path = resolve_note_path(vault, value, (*config['deny_zones'], '.git'))
+    path = checked_note_path(vault, value, (*config['deny_zones'], '.git'))
     text, truncated = _revocation_note(path, value, revocations)
     return None if text is None else SectionSource(key, text, 0, truncated, value)
 
@@ -699,7 +700,7 @@ def _configured_source(
     rel_path = config[path_key]
     if budget == 0 or not rel_path:
         return None
-    path = resolve_note_path(vault, rel_path, config["deny_zones"])
+    path = checked_note_path(vault, rel_path, config["deny_zones"])
     text, source_truncated = _revocation_note(path, rel_path, revocations)
     if text is None:
         return None

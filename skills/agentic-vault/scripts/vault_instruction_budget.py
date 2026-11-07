@@ -184,7 +184,8 @@ class _Inventory:
         if _secret(parts) or any(zone_matches(parts, zone) for zone in
                                  (*self.config['deny_zones'], *self.config['exclude_dirs'])):
             raise ValueError('blocked_path')
-        if self.worktrees.inside(parts):
+        if self.worktrees.inside_registered(parts) or self.worktrees.denied(
+                parts, (*self.config['deny_zones'], *self.config['exclude_dirs'])):
             raise ValueError('blocked_path')  # a linked tree is a copy, not this vault's instructions
         return resolve_note_path(self.vault, relative, self.config['deny_zones'])
 

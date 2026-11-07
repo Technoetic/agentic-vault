@@ -21,7 +21,8 @@ import sys
 
 from vault_evidence import EvidenceError, decode, regular, stable_read, stamp
 from vault_healthcheck import HealthcheckError, validate_config
-from vault_paths import relative_parts, resolve_note_path
+from vault_paths import relative_parts
+from vault_worktrees import checked_note_path
 
 
 CONFIG = '00-meta/vault-config.json'
@@ -164,7 +165,7 @@ class _Reader:
         try:
             parts = relative_parts(relative, 'fold path')
             _require(not _secret(parts), 'unsafe_path')
-            path = resolve_note_path(self.vault, relative, self.rules)
+            path = checked_note_path(self.vault, relative, self.rules)
             _require(path.suffix.casefold() == suffix, 'unsafe_path')
             return path
         except ValueError as error:

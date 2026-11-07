@@ -21,6 +21,7 @@ from pathlib import Path
 
 import vault_recall as _legacy
 from vault_paths import relative_parts, resolve_note_path
+from vault_worktrees import checked_note_path
 import vault_query_expansion as _query_expansion
 from vault_revocation import RevocationError, RevocationPolicy
 
@@ -223,7 +224,7 @@ def _sidecar(vault: Path, rel: str, deny, exclude, diagnostics) -> list[dict]:
     parts = relative_parts(rel, "candidate sidecar")
     if not rel.casefold().endswith(".json") or _legacy._classified_skip(parts, deny, exclude):
         raise ValueError("sidecar excluded by policy")
-    path = resolve_note_path(vault, rel, deny)
+    path = checked_note_path(vault, rel, deny)
     before = _stamp(path)
     content, stable = _legacy._read_regular_bytes(path, MAX_EXTERNAL_BYTES)
     diagnostics["external_bytes_read"] = len(content)

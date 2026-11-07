@@ -16,7 +16,6 @@ from pathlib import Path
 import sys
 
 import vault_lesson_delta as delta
-from vault_paths import resolve_note_path
 import vault_proposals as proposals
 import vault_state as state
 
@@ -76,7 +75,7 @@ def build_cues(vault, ledger=DEFAULT_LEDGER):
 def _write(vault, ledger):
     result = _build(vault, ledger)
     policy = state._Policy(vault)
-    path = resolve_note_path(policy.vault, OUTPUT_REL, policy.rules)
+    path = policy.checked(OUTPUT_REL)
     data = json.dumps(result['document'], ensure_ascii=False, sort_keys=True, indent=1,
                       allow_nan=False).encode('utf-8') + b'\n'
     proposals.atomic_write(path, data)

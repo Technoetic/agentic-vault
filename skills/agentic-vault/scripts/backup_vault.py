@@ -148,8 +148,9 @@ def _fingerprint(info):
 def _inventory(root: Path, excluded=(), exclude_files=(), *, skipped=None):
     """Scan even excluded directories for unsafe links; never follow a link.
 
-    With skipped (a list), a linked working tree of the vault's repository is
-    left out like an excluded directory and its relative path is added there.
+    With skipped (a list), a linked working tree that git has on record for the
+    vault's repository is left out like an excluded directory and its relative
+    path is added there. A folder with only a .git file stays in the snapshot.
     """
     files, directories = {}, []
     root = _safe_path(root)
@@ -169,7 +170,7 @@ def _inventory(root: Path, excluded=(), exclude_files=(), *, skipped=None):
                 rel = path.relative_to(root).as_posix()
                 if stat.S_ISDIR(info.st_mode):
                     skip = omitted or entry.name in excluded
-                    if not skip and worktrees is not None and worktrees.linked(path):
+                    if not skip and worktrees is not None and worktrees.registered(path):
                         skip = True
                         if rel not in skipped:
                             skipped.append(rel)

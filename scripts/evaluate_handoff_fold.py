@@ -28,7 +28,6 @@ import vault_handoff_fold as fold
 from vault_compile_quality import QualityError, check_preservation
 from vault_evidence import EvidenceError, decode, stable_read
 from vault_healthcheck import HealthcheckError
-from vault_paths import resolve_note_path
 from vault_state import StateError
 
 DEFAULT_FIXTURE = ROOT / 'tests/fixtures/handoff_fold/pack.json'
@@ -194,7 +193,7 @@ def evaluate(fixture=DEFAULT_FIXTURE, *, control='good'):
 
 def _read_vault_json(policy, relative):
     def resolve():
-        path = resolve_note_path(policy.vault, relative, policy.rules)
+        path = policy.checked(relative)
         if path.suffix.casefold() != '.json':
             raise ValueError('invalid_probe_path')
         return path

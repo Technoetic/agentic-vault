@@ -54,6 +54,7 @@ session_hook = _load_hook()
 
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
 from vault_paths import resolve_note_path
+from vault_worktrees import checked_note_path
 
 
 SECTION_SPECS = (
@@ -174,7 +175,7 @@ def _diagnose_section(
         ), None
 
     try:
-        path = resolve_note_path(vault, rel_path, config["deny_zones"])
+        path = checked_note_path(vault, rel_path, config["deny_zones"])
     except (ValueError, RuntimeError):
         return _base_section(
             "unsafe_path", "note_path_unsafe", budget,

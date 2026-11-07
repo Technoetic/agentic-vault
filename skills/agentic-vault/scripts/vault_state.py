@@ -26,6 +26,7 @@ import uuid
 from vault_evidence import MAX_FILE_BYTES, EvidenceError, decode, regular, stable_read
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import relative_parts, resolve_note_path, zone_matches
+from vault_worktrees import checked_note_path
 
 RUNTIME_DIR = '00-meta/.agentic-vault/runtime'
 CONFIG_PATH = '00-meta/vault-config.json'
@@ -104,12 +105,16 @@ class _Policy:
         except (EvidenceError, HealthcheckError, ValueError, OSError, RuntimeError) as exc:
             raise StateError('unsafe_configuration') from exc
 
+    def checked(self, relative, rules=None):
+        """The check for any path a caller names: the rules, also from inside a linked tree."""
+        return checked_note_path(self.vault, relative, self.rules if rules is None else rules)
+
     def note(self, relative):
         try:
             parts = relative_parts(relative, 'note')
             if zone_matches(parts, RUNTIME_DIR):
                 raise StateError('reserved_runtime_path')
-            path = resolve_note_path(self.vault, relative, self.rules)
+            path = self.checked(relative)
             if path.suffix.casefold() != '.md':
                 raise StateError('invalid_markdown_path')
             return path
@@ -409,7 +414,7 @@ def _cleanup_temporary(policy, relative, temporary, *, runtime=False):
         else:
             target = current.note(relative)
             selected = temporary.relative_to(current.root).as_posix()
-            checked = resolve_note_path(current.vault, selected, current.rules)
+            checked = current.checked(selected)
         if checked != temporary or checked.parent != target.parent:
             raise StateError('unsafe_temporary')
         regular(checked.lstat())

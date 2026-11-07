@@ -8,7 +8,7 @@ import uuid
 
 import vault_state as state
 from vault_evidence import EvidenceError, decode, regular
-from vault_paths import relative_parts, resolve_note_path
+from vault_paths import relative_parts
 
 MAX_JOURNAL_BYTES = 1024 * 1024
 MAX_TARGETS = 8
@@ -349,7 +349,7 @@ def main(argv=None):
             policy=state._Policy(args.vault)
             parts=relative_parts(args.input,'input')
             if parts[-1].casefold().endswith('.json') is False: _fail('invalid_input_path')
-            path=lambda:resolve_note_path(policy.vault,args.input,policy.rules)
+            path=lambda:policy.checked(args.input)
             info, mark, raw=state._read(path,MAX_INPUT_BYTES)
             request=decode(raw)
             # Do not allow input aliases of config, target or source paths.

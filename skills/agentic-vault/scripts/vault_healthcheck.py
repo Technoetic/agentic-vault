@@ -966,18 +966,22 @@ def _canonical_path(path: str) -> str:
     return text.casefold() if sys.platform == "darwin" else text
 
 
-def gitfile_target(directory: str) -> str | None:
-    """The path that a regular .git file in directory names, or None for anything else."""
-    marker = os.path.join(directory, ".git")
+def _small_text(path: str) -> str | None:
+    """The text of a small regular file, or None for anything else."""
     try:
-        info = os.lstat(marker)
+        info = os.lstat(path)
         if not stat.S_ISREG(info.st_mode) or info.st_size > GITFILE_LIMIT:
             return None
-        with open(marker, "rb") as handle:
-            text = handle.read(GITFILE_LIMIT + 1).decode("utf-8")
+        with open(path, "rb") as handle:
+            return handle.read(GITFILE_LIMIT + 1).decode("utf-8")
     except (OSError, ValueError):
         return None
-    if not text.startswith("gitdir:"):
+
+
+def gitfile_target(directory: str) -> str | None:
+    """The path that a regular .git file in directory names, or None for anything else."""
+    text = _small_text(os.path.join(directory, ".git"))
+    if text is None or not text.startswith("gitdir:"):
         return None
     value = text[len("gitdir:"):].strip()
     if not value or any(ord(char) < 32 for char in value):
@@ -1013,13 +1017,68 @@ def linked_worktree(directory: str, common: str) -> bool:
         return False
     owner = os.path.dirname(os.path.dirname(target))
     return not _other_share(owner, common) and _canonical_path(owner) == common
+
+
+def registered_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked tree and git's admin folder names it back.
+
+    git keeps <common>/worktrees/<name>/gitdir, the path of the tree's .git file.
+    A .git file written by hand has no such record, and neither has a copy whose
+    admin folder is gone. Only a walk or a backup needs this answer, because it
+    leaves the folder out: a zone stays closed on linked_worktree alone.
+    """
+    if not linked_worktree(directory, common):
+        return False
+    admin = gitfile_target(directory)
+    text = None if admin is None else _small_text(os.path.join(admin, "gitdir"))
+    value = "" if text is None else text.strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return False
+    named = os.path.normpath(os.path.join(admin, value))
+    return not _other_share(named, directory) and _canonical_path(named) == _canonical_path(
+        os.path.join(directory, ".git"))
+
+
+def vault_prefix(vault: str, top: str) -> tuple:
+    """The vault's folder inside a working tree whose top is top, case folded."""
+    relative = os.path.relpath(vault, top)
+    return () if relative == os.curdir else tuple(part.casefold() for part in relative.split(os.sep))
+
+
+def tree_tails(root: str, parts, common: str, counts=linked_worktree) -> list:
+    """What follows each tree on a path below root, outermost tree first."""
+    found: list = []
+    current = root
+    for index, part in enumerate(parts):
+        current = os.path.join(current, part)
+        if counts(current, common):
+            found.append(tuple(parts[index + 1:]))
+    return found
+
+
+def tree_views(root: str, parts, common: str, prefix: tuple) -> tuple:
+    """The path as the vault's own relative path in each linked tree it lies in."""
+    size = len(prefix)
+    return tuple(rest[size:] for rest in tree_tails(root, parts, common)
+                 if tuple(part.casefold() for part in rest[:size]) == prefix)
 # --- END SHARED WORKTREE RULE ---
+
+
+def denied_in_linked_tree(vault: Path, rel: str, deny_rules: tuple[list[str], set[str]]) -> bool:
+    """A zone covers rel as seen from a linked tree of this vault's repository."""
+    top = _git_toplevel(str(vault))
+    common = repository_common(top) if top is not None else None
+    if common is None:
+        return False
+    views = tree_views(str(vault), rel.split("/"), common, vault_prefix(str(vault), top))
+    return any(is_denied("/".join(view), *deny_rules) for view in views)
 
 
 def collect_md_files(vault: Path, exclude_names: set[str],
                      skipped: list[str] | None = None, *,
                      file_entries: list[Path] | None = None,
-                     linked_trees: list[str] | None = None) -> list[Path]:
+                     linked_trees: list[str] | None = None,
+                     unregistered_trees: list[str] | None = None) -> list[Path]:
     """exclude_dirs(이름 매칭)를 걷기 단계에서 가지치기하며 .md 를 수집한다.
     deny_zones 는 여기서 제외하지 않는다 — 링크 해석 인덱스에는 포함돼야
     아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다.
@@ -1029,7 +1088,10 @@ def collect_md_files(vault: Path, exclude_names: set[str],
     file_entries(선택, 기본 None)를 넘기면 같은 걷기에서 본 모든 파일 항목
     (확장자 무관)의 경로를 덧붙인다 — 이름 검사용이며 열거나 따라가지 않는다.
     이 볼트 저장소의 연결 작업 트리는 노트의 사본이라 내려가지 않고 linked_trees에
-    남긴다(없으면 skipped). 서브모듈과 다른 저장소의 작업 트리는 그대로 걷는다."""
+    남긴다(없으면 skipped). 서브모듈과 다른 저장소의 작업 트리는 그대로 걷는다.
+    단 git 관리 폴더가 되가리키지 않는 폴더(손으로 쓴 .git, 관리 폴더가 없는 사본)는
+    실제 노트를 가릴 수 있어 그대로 걷고 unregistered_trees에 남긴다 — 호출자가 그
+    안의 금지 구역을 사본 기준으로 다시 거른다."""
     results: list[Path] = []
     top = _git_toplevel(str(vault))
     common = repository_common(top) if top is not None else None
@@ -1049,11 +1111,14 @@ def collect_md_files(vault: Path, exclude_names: set[str],
                 continue
             if rel_posix(child, vault).casefold() == ENGINE_RUNTIME_RELPATH.casefold():
                 continue
-            if common is not None and linked_worktree(str(child), common):
+            linked = common is not None and linked_worktree(str(child), common)
+            if linked and registered_worktree(str(child), common):
                 report = linked_trees if linked_trees is not None else skipped
                 if report is not None:
                     report.append(rel_posix(child, vault) + "/")
                 continue
+            if linked and unregistered_trees is not None:
+                unregistered_trees.append(rel_posix(child, vault) + "/")
             try:
                 _ensure_vault_path(vault, child, f"scan directory {child.name}")
             except HealthcheckError:
@@ -1962,6 +2027,8 @@ def main() -> int:
             continue
         try:
             _ensure_vault_path(vault, vault / rel, key, cfg.get("deny_zones"))
+            if denied_in_linked_tree(vault, rel, build_deny_rules(cfg.get("deny_zones"))):
+                raise HealthcheckError(f"{key} must not point inside a deny zone")
         except HealthcheckError as e:
             print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
             return 1
@@ -2049,19 +2116,25 @@ def main() -> int:
     # --- 파일 수집 ------------------------------------------------------------
     link_skipped: list[str] = []
     linked_trees: list[str] = []
+    unregistered_trees: list[str] = []
     # 이름 검사가 켜졌을 때만 같은 걷기에서 모든 파일 항목(확장자 무관)을 모은다.
     file_entries: list[Path] | None = [] if sync_name_check and _EXTENSIONS_AVAILABLE else None
     all_md = collect_md_files(vault, exclude_names, link_skipped, file_entries=file_entries,
-                              linked_trees=linked_trees)
+                              linked_trees=linked_trees, unregistered_trees=unregistered_trees)
     # 링크 해석용 인덱스는 deny zone 포함 전체(아카이브로 이동한 노트 링크는 유효),
     # 린트 대상은 deny zone·도구 문서·리포트 자신을 제외한 활성 영역만.
     # 주의: 옵시디언 frontmatter aliases 는 원시 위키링크를 해석하지 못한다 —
     # 파일명(stem)만 해석 대상이다.
     name_index = {p.stem for p in all_md}
     targets: list[Path] = []
+    tree_zone_notes: set[str] = set()
     for p in all_md:
         rel = rel_posix(p, vault)
         if is_denied(rel, deny_prefixes, deny_names):
+            continue
+        if (unregistered_trees and rel.startswith(tuple(unregistered_trees))
+                and denied_in_linked_tree(vault, rel, (deny_prefixes, deny_names))):
+            tree_zone_notes.add(rel)
             continue
         if p.name.lower() in SKIP_FILENAMES:
             continue
@@ -2205,7 +2278,7 @@ def main() -> int:
         evidence_bytes += len(text.encode("utf-8"))
     for p in all_md:
         rel = rel_posix(p, vault)
-        if rel in consumer_paths or not _warning_inventory_allowed(rel, cfg):
+        if rel in consumer_paths or rel in tree_zone_notes or not _warning_inventory_allowed(rel, cfg):
             continue
         try:
             text, read_err = _read_extension_evidence(vault, p, cfg.get("deny_zones"), 8_000_000 - evidence_bytes)

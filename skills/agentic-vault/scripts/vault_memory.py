@@ -36,6 +36,7 @@ from vault_evidence import EvidenceError, decode, regular, stable_read, stamp
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
 from vault_revocation import RevocationError, RevocationPolicy
 from vault_paths import resolve_note_path
+from vault_worktrees import checked_note_path
 
 
 CONFIG_PATH = "00-meta/vault-config.json"
@@ -212,7 +213,7 @@ class _Policy:
     def path(self, relative, suffix=".md"):
         try:
             _text(relative, 1024)
-            path = resolve_note_path(self.vault, relative, self.rules)
+            path = checked_note_path(self.vault, relative, self.rules)
             if path.suffix.casefold() != suffix:
                 raise ValueError("wrong extension")
             return path

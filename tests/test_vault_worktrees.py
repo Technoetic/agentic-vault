@@ -258,7 +258,8 @@ class SharedBlockTests(unittest.TestCase):
         text = (ROOT / "docs" / "hardening.md").read_text(encoding="utf-8")
         section = text[text.index("## Linked worktree copies and deny zones"):text.index("## 측정과 보정")]
         for literal in ("`exclude_dirs` does not hold `.claude/worktrees`", "`vault_ssot.py`", "Not measured:",
-                        "https://code.claude.com/docs/en/worktrees", "`0574c192aca7bd43`", "`.worktreeinclude`"):
+                        "https://code.claude.com/docs/en/worktrees", "`0574c192aca7bd43`", "`.worktreeinclude`",
+                        "`WorktreeScope.registered`", "`vault_worktrees.checked_note_path`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, section)
 

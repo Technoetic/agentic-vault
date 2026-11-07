@@ -133,10 +133,11 @@ In scope:
   record in the system temporary folder. It sets no `onFailure`, so a failed hook lets
   the call run: it is advisory, not a control. `vault_lesson_clusters.py` only reads.
 - **Linked worktree handling** (`vault_worktrees.py` and its callers, `deny-guard.py`):
-  a linked tree is identified by reading its `.git` file. A hand-written `.git` file
-  with the right value can hide a folder from the walks, which name that folder in
-  their reports. Direct-path callers other than `vault_evidence.py`,
-  `vault_proposals.py` and `vault_lesson_metrics.py` are listed as limits in
+  a zone in a copy is closed by reading the folder's `.git` file, so a wrong file only
+  closes more. A walk or a backup leaves a folder out only when git's admin folder also
+  names that folder back, so hiding notes that way takes write access to the common git
+  directory. A tool that takes a named path applies the same zone check. The exceptions
+  are listed as limits in
   [the hardening guide](docs/hardening.md#linked-worktree-copies-and-deny-zones).
 
 Out of scope (report these upstream): vulnerabilities in Claude Code, Codex,

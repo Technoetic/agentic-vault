@@ -20,7 +20,7 @@ import vault_evidence as evidence
 import vault_state as state
 from jev_client import _matches_sensitive, contains_sensitive
 from vault_healthcheck import HealthcheckError
-from vault_paths import relative_parts, resolve_note_path, zone_matches
+from vault_paths import relative_parts, zone_matches
 
 RUNTIME_DIR = state.RUNTIME_DIR
 MAX_JSON_BYTES = 64 * 1024
@@ -173,7 +173,8 @@ class Store:
         if any(zone_matches(parts, zone) for zone in
                (RUNTIME_DIR, evidence.STORE_DIR, '00-meta/proposals')):
             raise RunError('reserved_store_path')
-        path = resolve_note_path(self.vault, relative, self.policy.rules)
+        path = self.policy.checked(
+            relative, (*self.policy.rules, evidence.STORE_DIR, '00-meta/proposals'))
         if markdown and path.suffix.casefold() != '.md':
             raise RunError('invalid_markdown_path')
         return path

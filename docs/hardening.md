@@ -989,16 +989,36 @@ so its copy fell outside the zone, and copied notes pushed real notes out of rec
   holds this vault. A submodule (`modules/<name>`), a nested repository and a linked tree of another
   repository stay ordinary folders, so their notes stay in every walk. Without a repository nothing
   is read. A UNC value on another share is not looked up.
+- **Two strengths:** closing a zone needs only the `.git` file (`WorktreeScope.linked`), because a
+  stale or hand-written file then closes more, not less. Leaving a folder out could hide real notes,
+  so it also needs `<common>/worktrees/<name>/gitdir` to name this folder's `.git`
+  (`WorktreeScope.registered`). git writes that file, as an absolute path or, with
+  `worktree.useRelativePaths`, relative to the admin folder.
 - **Walks:** `vault_recall.py`, the healthcheck note walk, `backup_vault.py` and
-  `vault_instruction_budget.py` skip such a folder and name it. Recall adds
+  `vault_instruction_budget.py` skip a registered tree and name it. Recall adds
   `diagnostics.skipped_worktrees` only when there is one, and the search stays complete.
   The healthcheck lists it in section 14b. A snapshot leaves it out, and the manifest format does
   not change, so `backup_vault.py` prints one line per copy and `create_backup(skipped=[...])`
   returns the paths. Uncommitted work in a copy is therefore not in the snapshot.
   The instruction inventory reports `skipped_instruction_path`.
-- **Paths a caller names:** `vault_evidence.py`, `vault_proposals.py` and `vault_lesson_metrics.py`
-  also check the path as seen from the top of a linked tree, against the same zones. A zone in a
-  copy is refused with the existing `unsafe_path` result. A note outside a zone stays readable.
+- **A folder with only the `.git` file:** a hand-written file, or a copy whose admin entry is gone
+  or was moved by hand, is walked like any folder and is in the snapshot. Its zones stay closed:
+  recall counts them under `skipped_denied`, the healthcheck does not read them, and the instruction
+  inventory reports them. A copy that lost its admin entry therefore puts its notes back into recall
+  next to the originals until the folder is removed or `git worktree repair` runs.
+- **Paths a caller names:** `vault_worktrees.checked_note_path` resolves the path with
+  `resolve_note_path`, then applies the same rules as seen from the top of each linked tree on the
+  path. `vault_state._Policy.checked` is that check for every tool on the shared policy, and
+  `note()` uses it, so `vault_state.py`, `vault_runs.py`, `vault_bundle.py`, `vault_handoff_fold.py`,
+  `vault_lesson_delta.py`, `vault_lesson_cues.py`, `vault_lesson_clusters.py`, `vault_capacity.py`
+  `vault_ssot.py` and `vault_operations.py` all follow it. `vault_memory.py` (with `vault_impact.py` and
+  `vault_ontology.py`), `vault_links.py`, `vault_revocation.py`, `vault_index_fold.py`,
+  `vault_doctor.py`, `hooks/session_start.py`, `jarvis_bridge.py`, `vault_query_expansion.py` and
+  the `vault_retrieval.py` sidecar call it directly. `vault_evidence.py`, `vault_proposals.py` and
+  `vault_lesson_metrics.py` keep the same check next to their own call. The healthcheck stops when a
+  configured note lies in a zone of a copy. Each tool answers as it does for the zone in the main
+  checkout, and a note outside a zone stays readable. A test walks every `resolve_note_path` call,
+  so a new caller has to use this check or state why it does not apply.
 - **Deny guard:** `deny-guard.py` keeps the shared zone block and adds a zone view from each working
   tree of the vault's repository above a target. This covers copies outside the vault and the main
   checkout when `CLAUDE_PROJECT_DIR` is a linked tree. Guard controls are not re-read through this
@@ -1036,16 +1056,16 @@ session before relying on the guard.
 ### Limits
 
 - `vault_ssot.py` is bound to the warning promotion certificate and stays unchanged, so its inventory
-  still counts copies. Keep linked trees out of the vault, or name their parent folder in
-  `exclude_dirs`, when that inventory matters.
-- `vault_paths.resolve_note_path` is bound too. Other callers that resolve a path a caller names
-  (`vault_state.py`, `vault_runs.py`, `vault_memory.py`, `vault_impact.py`, `vault_ontology.py`,
-  `vault_okf.py`, `vault_judge.py`) do not take the view above. They refuse a copy only when
-  `exclude_dirs` also names a folder on its path, such as `_processed`.
+  still counts copies, and that list of note names and paths includes names inside a copy's zones.
+  It reads note bytes only through `_Policy.note`, which refuses those notes. Keep linked trees out of
+  the vault, or name their parent folder in `exclude_dirs`, when that inventory matters.
+- The view covers tools that resolve a path through the plugin. A shell command or another program
+  is covered only by the deny guard, where it is installed.
 - Only a linked tree of this repository is covered. A plain copy of the vault folder, or a clone
   inside it, has no such marker and keeps the root contract.
-- A copy is detected by reading its `.git` file. A hand-written `.git` file with the right value hides
-  a folder from the walks, and the walks name that folder in their reports.
+- A hand-written `.git` file closes the zones under its folder for every tool here, even when the
+  folder is an ordinary one. With write access to the common git directory, a record can be forged
+  too, and the folder then leaves the walks. The walks still name it in their reports.
 
 ## 측정과 보정
 

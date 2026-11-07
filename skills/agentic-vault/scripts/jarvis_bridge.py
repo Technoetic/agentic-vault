@@ -855,8 +855,9 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
         sys.path.insert(0, scripts_dir)
     from jev_client import contains_sensitive
     from vault_healthcheck import estimate_tokens
-    from vault_paths import resolve_note_path, zone_matches
+    from vault_paths import zone_matches
     from vault_recall import recall, _read_config, _diagnostics
+    from vault_worktrees import checked_note_path
 
     if len(prompt.encode("utf-8")) > MAX_GENERATION_INPUT_BYTES:
         raise ValueError("input limit")
@@ -890,7 +891,7 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
                 if any(zone_matches(Path(rel).parts, rule)
                        for rule in config.get("exclude_dirs", [])):
                     raise ValueError("excluded source")
-                source = resolve_note_path(vault, rel, config["deny_zones"])
+                source = checked_note_path(vault, rel, config["deny_zones"])
                 text, source_truncated = _read_context_prefix(source)
                 if path_key == "log_note":
                     text = "\n".join(text.splitlines()[:10])

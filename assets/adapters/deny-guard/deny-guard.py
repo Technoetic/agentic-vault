@@ -455,18 +455,22 @@ def _canonical_path(path: str) -> str:
     return text.casefold() if sys.platform == "darwin" else text
 
 
-def gitfile_target(directory: str) -> str | None:
-    """The path that a regular .git file in directory names, or None for anything else."""
-    marker = os.path.join(directory, ".git")
+def _small_text(path: str) -> str | None:
+    """The text of a small regular file, or None for anything else."""
     try:
-        info = os.lstat(marker)
+        info = os.lstat(path)
         if not stat.S_ISREG(info.st_mode) or info.st_size > GITFILE_LIMIT:
             return None
-        with open(marker, "rb") as handle:
-            text = handle.read(GITFILE_LIMIT + 1).decode("utf-8")
+        with open(path, "rb") as handle:
+            return handle.read(GITFILE_LIMIT + 1).decode("utf-8")
     except (OSError, ValueError):
         return None
-    if not text.startswith("gitdir:"):
+
+
+def gitfile_target(directory: str) -> str | None:
+    """The path that a regular .git file in directory names, or None for anything else."""
+    text = _small_text(os.path.join(directory, ".git"))
+    if text is None or not text.startswith("gitdir:"):
         return None
     value = text[len("gitdir:"):].strip()
     if not value or any(ord(char) < 32 for char in value):
@@ -502,6 +506,50 @@ def linked_worktree(directory: str, common: str) -> bool:
         return False
     owner = os.path.dirname(os.path.dirname(target))
     return not _other_share(owner, common) and _canonical_path(owner) == common
+
+
+def registered_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked tree and git's admin folder names it back.
+
+    git keeps <common>/worktrees/<name>/gitdir, the path of the tree's .git file.
+    A .git file written by hand has no such record, and neither has a copy whose
+    admin folder is gone. Only a walk or a backup needs this answer, because it
+    leaves the folder out: a zone stays closed on linked_worktree alone.
+    """
+    if not linked_worktree(directory, common):
+        return False
+    admin = gitfile_target(directory)
+    text = None if admin is None else _small_text(os.path.join(admin, "gitdir"))
+    value = "" if text is None else text.strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return False
+    named = os.path.normpath(os.path.join(admin, value))
+    return not _other_share(named, directory) and _canonical_path(named) == _canonical_path(
+        os.path.join(directory, ".git"))
+
+
+def vault_prefix(vault: str, top: str) -> tuple:
+    """The vault's folder inside a working tree whose top is top, case folded."""
+    relative = os.path.relpath(vault, top)
+    return () if relative == os.curdir else tuple(part.casefold() for part in relative.split(os.sep))
+
+
+def tree_tails(root: str, parts, common: str, counts=linked_worktree) -> list:
+    """What follows each tree on a path below root, outermost tree first."""
+    found: list = []
+    current = root
+    for index, part in enumerate(parts):
+        current = os.path.join(current, part)
+        if counts(current, common):
+            found.append(tuple(parts[index + 1:]))
+    return found
+
+
+def tree_views(root: str, parts, common: str, prefix: tuple) -> tuple:
+    """The path as the vault's own relative path in each linked tree it lies in."""
+    size = len(prefix)
+    return tuple(rest[size:] for rest in tree_tails(root, parts, common)
+                 if tuple(part.casefold() for part in rest[:size]) == prefix)
 # --- END SHARED WORKTREE RULE ---
 
 

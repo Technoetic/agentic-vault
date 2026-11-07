@@ -24,7 +24,6 @@ import uuid
 from jev_client import contains_sensitive
 from vault_evidence import EvidenceError, decode, stable_read
 from vault_healthcheck import HealthcheckError
-from vault_paths import resolve_note_path
 from vault_state import (RUNTIME_DIR, StateError, _Policy, _atomic, _check_lease,
                          _cleanup_temporary, _encode, _ensure_runtime, _lease_guard,
                          advisory_lock)
@@ -505,7 +504,7 @@ def load_input(vault, relative):
     """Bounded, stable, explicit vault-relative CLI JSON input with note policy."""
     policy = _policy(vault)
     def resolve():
-        return resolve_note_path(policy.vault, relative, policy.rules)
+        return policy.checked(relative)
     try:
         resolve()  # Deny/exclude/runtime/link checks happen before any content read.
         _, _, raw = stable_read(resolve, MAX_INPUT_BYTES, contents=True)
