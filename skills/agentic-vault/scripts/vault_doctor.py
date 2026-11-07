@@ -621,6 +621,12 @@ def _format_text(report: dict) -> str:
         except Exception:  # fail-soft by contract: fixed lines, never exception text
             session_lines = list(SESSION_EVIDENCE_UNAVAILABLE_LINES)
         lines.extend(session_lines)
+    if "capacity" in report:
+        try:
+            from vault_capacity import text_lines as capacity_lines
+            lines.extend(capacity_lines(report["capacity"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("capacity: unavailable (probe_failed)")
     return "\n".join(lines)
 
 
@@ -654,6 +660,13 @@ def main(argv: list[str] | None = None) -> int:
             "records; they can contain account names."
         ),
     )
+    parser.add_argument(
+        "--capacity", action="store_true",
+        help=(
+            "Also compare the configured notes with the state and recall read limits and estimate "
+            "from local Git history when each reaches them. Read-only; never changes the exit code."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.session_instruction_paths and args.session_evidence is None:
         parser.error("--session-instruction-paths requires --session-evidence")
@@ -672,6 +685,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # fail-soft by contract: no exception text, which may quote content
             evidence = dict(SESSION_EVIDENCE_UNAVAILABLE)
         report["session_evidence"] = evidence
+    if args.capacity:
+        # Loaded only on request; the exit code stays the vault's here as well.
+        try:
+            from vault_capacity import diagnose_capacity
+            report["capacity"] = diagnose_capacity(args.vault)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["capacity"] = {"schema_version": 1, "status": "unavailable",
+                                  "reason_code": "probe_failed", "complete": False}
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

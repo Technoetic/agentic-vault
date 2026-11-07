@@ -69,3 +69,7 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    토큰을 훅의 몫으로, 기록을 "모델이 기억을 사용함"으로 해석하지 않는다. 지침 파일 경로는 사용자가 요청할 때만
    `--session-instruction-paths`로 보인다. 종료 코드는 바뀌지 않는다.
    [읽는 값과 한계](../docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)
+11. 사용자가 노트 용량이나 상한 도달 시점을 물을 때만 같은 Doctor에 `--capacity`를 추가한다. 설정의 handoff·hot·log·tasks·index를
+    상태 읽기 상한과 recall 파일 상한에 대조하고, 로컬 Git 이력이 있으면 상한 도달 일수를 낸다. 진단은 읽기 전용이고 종료 코드는 바뀌지
+    않는다. `estimated_days_to_limit`는 최근 커밋의 직선 외삽이므로 반드시 추정이라고 말하고 날짜로 단정하지 않는다. `git_unavailable` 등이면
+    사용률만 보고한다. 상태와 사유, 표본 수, 창 길이는 [용량 안내](../docs/capacity.md)를 따른다.
