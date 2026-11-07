@@ -880,6 +880,21 @@ def _twin_exclusions(item: dict, note_texts: dict | None = None, *, normalize=No
     return sorted(removed, key=lambda path: (path.casefold(), path))
 
 
+def _vault_snapshot_digest(scan: dict, digests: dict) -> str:
+    """Bind the notes and, only when the vault sets them, the settings that choose what recall reads."""
+    notes = [[path, digests.get(path)] for path in scan['listing']]
+    settings = scan.get('recall_settings')
+    return _digest({'notes': notes, 'recall_settings': settings} if settings else notes)
+
+
+def _recall_setting_fields(scan: dict) -> dict:
+    """Values for the report: the budget and a count, never the configured paths."""
+    if not scan.get('recall_settings'):
+        return {}
+    return {'total_read_bytes': scan['limits']['total_read_bytes'],
+            'priority_path_count': len(scan['recall_settings'].get('priority_paths') or ())}
+
+
 def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool, raw_digests: dict | None = None) -> dict:
     """List eligible notes, and read them only when read_texts, through recall's own policy.
 
@@ -905,7 +920,8 @@ def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool, raw_digests
     if config is not None:
         deny = tuple(config.get('deny_zones') or ())
         exclude = (*tuple(config.get('exclude_dirs') or ()), '.git')
-        paths = recall_module._markdown_paths(safe_vault, deny, exclude, diagnostics)
+        paths = recall_module._read_order(recall_module._markdown_paths(safe_vault, deny, exclude, diagnostics),
+                                          recall_module._priority_rules(config))
         if len(paths) > recall_module.MAX_FILES:
             diagnostics['omitted_file_limit'] = len(paths) - recall_module.MAX_FILES
             recall_module._omit(diagnostics, 'file_count_limit')
@@ -925,7 +941,7 @@ def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool, raw_digests
                 continue
             # Same budget check as the legacy reader: stop before a read that would pass the total.
             size = min(metadata.st_size, recall_module.MAX_FILE_BYTES + 1)
-            if diagnostics['bytes_read'] + size > recall_module.MAX_TOTAL_READ_BYTES:
+            if diagnostics['bytes_read'] + size > diagnostics['limits']['total_read_bytes']:
                 diagnostics['omitted_total_byte_limit'] += len(paths) - index
                 recall_module._omit(diagnostics, 'total_byte_limit')
                 break
@@ -938,6 +954,8 @@ def _twin_note_scan(recall_module, vault: Path, *, read_texts: bool, raw_digests
             if text is not None:
                 texts[relative] = recall_module._normalize(text)
     return {'listing': listing, 'texts': texts if read_texts else None,
+            'recall_settings': (config or {}).get('recall') or {},
+            'limits': diagnostics['limits'],
             'summary': {'status': diagnostics['status'], 'search_complete': diagnostics['search_complete'],
                         'omissions': list(diagnostics['omissions']), 'listed_note_count': len(listing),
                         'claim_texts_read': read_texts, 'notes_read': diagnostics['files_read'],
@@ -1354,7 +1372,8 @@ def load_goldset(vault: Path, goldset: Path) -> EvaluationInput:
     except ValueError as exc:
         # Schema messages name indices and fields only, never label text.
         raise GoldSetError(str(exc)) from exc
-    listing = [relative for relative, _ in recall._markdown_paths(safe_vault, deny, exclude, diagnostics)]
+    listing = [relative for relative, _ in recall._read_order(
+        recall._markdown_paths(safe_vault, deny, exclude, diagnostics), recall._priority_rules(config))]
     if len(listing) > recall.MAX_FILES:
         # Same cut as retrieval, which considers only the first MAX_FILES notes of this
         # order: no label resolves to a note it can never return, and the incomplete
@@ -1897,10 +1916,11 @@ def with_conformal_abstention(report: dict, fixture, split: dict, *, false_refus
     vault = fixture.vault if isinstance(fixture, EvaluationInput) else fixture / 'vault'
     digests: dict = {}
     scan = _twin_note_scan(recall_module, vault, read_texts=True, raw_digests=digests)
-    snapshot = {'vault_snapshot_sha256': _digest([[path, digests.get(path)] for path in scan['listing']]),
+    snapshot = {'vault_snapshot_sha256': _vault_snapshot_digest(scan, digests),
                 'listed_note_count': len(scan['listing']), 'hashed_note_count': len(digests),
                 'complete': scan['summary']['status'] == 'ok' and scan['summary']['search_complete'],
                 'omissions': list(scan['summary']['omissions']), 'bytes_read': scan['summary']['bytes_read'],
+                **_recall_setting_fields(scan),
                 'note': 'The threshold is invalid once the vault changes: recalibrate when this digest differs.'}
     claim_cache: dict = {}
     sections = {name: _conformal_section(recall_module, vault, arm, signals[name], split, scan, snapshot, claim_cache,
@@ -2027,6 +2047,8 @@ _PATH_FIELDS = frozenset({
     "path", "source_path", "label", "query_mapping", "external_candidates", "candidates", "source_paths",
     "excluded_sources", "expected_paths", "forbidden_paths", "stale_paths", "retrieved_paths",
     "forbidden_retrieved_paths", "stale_retrieved_paths",
+    # Recall scope diagnostics: a sample of unread note paths.
+    "omitted_paths_sample",
     # Temporal diagnostics: the raw successor wikilink, which names a note and can name folders.
     "superseded_by",
     # Gold-removal twin rows (only present with --gold-removal-twins).

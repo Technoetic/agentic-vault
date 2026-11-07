@@ -46,6 +46,9 @@ BM25는 어휘 검색이며, `hybrid`는 어휘 점수/BM25/명시적 외부 후
 `matches`는 후보 목록이고 `context`는 예산 안의 실제 반환 텍스트다. 후보가 있다고
 그 본문이 모델에게 전달됐다고 집계하지 않는다. 누락·불완전 검색은 diagnostics로
 확인한다. 시간·파일 해시는 의미적 진실이나 안전한 지시를 인증하지 않는다.
+큰 볼트의 전체 읽기 상한(`recall.max_total_read_bytes`), 먼저 읽을 경로(`recall.priority_paths`),
+읽지 못한 범위 진단(`omitted_paths_sample`·`scope_state`·`answer_state`)은
+[검색 읽기 범위](recall-scope.md)를 본다. 설정이 없으면 읽기·순위는 그대로다.
 
 ## 한글 음절 bigram BM25 채널 (선택형)
 

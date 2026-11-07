@@ -661,9 +661,11 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --sp
 - 볼트 스냅샷: `vault_snapshot.vault_snapshot_sha256`은 정책을 거친 노트 목록의 경로와 각 노트 바이트의 sha256을 묶은
   해시다. deny zone과 제외 폴더는 나열하지도 읽지도 않으며, 두 번째 검색 전에 한 번 잰다. 노트 목록이나 읽은 노트가
   하나라도 바뀌면 값이 바뀌고 그 문턱은 무효다. recall이 읽지 않는 노트(512 KiB를 넘는 노트, 안전하지 않거나 하드
-  링크된 노트, 읽을 수 없는 노트, 읽기 합계 16 MiB를 넘긴 노트)는 경로만 들어가므로, 이 값이 정책을 거친 노트 전체를
+  링크된 노트, 읽을 수 없는 노트, 읽기 합계 상한을 넘긴 노트)는 경로만 들어가므로, 이 값이 정책을 거친 노트 전체를
   보증하는 것은 `vault_snapshot.complete`가 true일 때뿐이다(이때 `hashed_note_count`가 `listed_note_count`와 같다).
-  `vault-config.json`, 질의 매핑 파일, 평가기 옵션은 이 해시에 들어가지 않는다.
+  `vault-config.json`, 질의 매핑 파일, 평가기 옵션은 이 해시에 들어가지 않는다. 예외는 읽을 범위를 정하는 `recall` 설정이다.
+  `recall.max_total_read_bytes`나 `recall.priority_paths`를 적은 볼트는 해시가 그 값까지 묶고, `vault_snapshot`에
+  `total_read_bytes`와 `priority_path_count`가 붙는다(경로 자체는 넣지 않는다). 설정이 없으면 해시 정의와 출력은 그대로다.
 - 출력: 팔마다 `conformal_abstention` 절이 붙는다. 행 id·질문 원문·시나리오·주장·경로는 넣지 않는다. 키 옵션
   (`--redact-key-file`, `--redact-ephemeral`)은 `vault_snapshot_sha256`과 분할 파일 해시를 다른 지문처럼 키 해시로
   바꾸고, 이 절이 있는 보고서에서만 `redaction.replaced` 끝에 그 항목을 하나 더한다. `--redact`(키 없음)는 이 절을
@@ -741,8 +743,10 @@ python scripts/evaluate_recall.py --vault VAULT_PATH --goldset GOLDSET.json --co
 - 네트워크·모델 호출과 파일 쓰기가 없다. 결과 JSON은 표준 출력, 경고는 표준 오류로만 나온다.
 - 질의별 옵션(`as_of` 등)과 `--advanced`·`--compare`·`--render-matched`·게이트 옵션은 fixture 모드와 같다.
   게이트 기본값(recall@3 ≥ 0.85, MRR ≥ 0.75)도 같으므로 작은 골드셋에는 의도한 기준을 직접 준다.
-- 엔진 한도(노트 2,000개, 파일당 512 KiB, 읽기 합계 16 MiB, 디렉터리 항목 20,000개)를 넘는 볼트는 검색이
-  불완전으로 기록되어 `evaluation_errors`가 생기고 종료 코드 1이 된다. 라벨 풀이도 검색과 같은 순서의 앞 2,000개
+- 엔진 한도(노트 2,000개, 파일당 512 KiB, 읽기 합계 16 MiB — `recall.max_total_read_bytes`로 조정 가능,
+  [검색 읽기 범위](recall-scope.md) 참조 — 디렉터리 항목 20,000개)를 넘는 볼트는 검색이
+  불완전으로 기록되어 `evaluation_errors`가 생기고 종료 코드 1이 된다. 라벨 풀이도 검색과 같은 순서(`recall.priority_paths`가
+  있으면 그 경로가 앞)의 앞 2,000개
   노트만 대상으로 하므로, 그 뒤의 노트를 가리키는 라벨은 `incomplete_inventory`로 남고 파일 이름 일치도 꺼진다.
   이 결과를 완전한 측정으로 읽지 않는다.
 

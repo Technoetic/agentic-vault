@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Sequence
 
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
-from vault_paths import resolve_note_path, zone_matches
+from vault_paths import relative_parts, resolve_note_path, zone_matches
 from vault_revocation import RevocationError, RevocationPolicy
 
 
@@ -36,6 +36,14 @@ MAX_QUERY_TERMS = 32
 MAX_RESULTS = 50
 MAX_SNIPPET_CHARS = 500
 MAX_TITLE_CHARS = 512
+# Optional vault-config.json "recall" block. MAX_TOTAL_READ_BYTES stays the
+# default. 2,000 notes of 512 KiB fit under the ceiling, so a larger value could
+# not buy more notes and can only be a mistake.
+RECALL_SETTING_KEYS = frozenset({"max_total_read_bytes", "priority_paths"})
+MAX_CONFIGURED_TOTAL_READ_BYTES = 1024 * 1024 * 1024
+MAX_PRIORITY_PATHS = 32
+MAX_PRIORITY_PATH_CHARS = 1024
+MAX_OMITTED_SAMPLE = 10
 
 _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 # Only the bounded line prefixes stay regexes; _title_value and _heading_label
@@ -76,7 +84,32 @@ def _diagnostics() -> dict:
     }
 
 
+def _record_scope(diagnostics: dict, match_count: int) -> None:
+    """Add the labels derived from search_complete and the result count.
+
+    Both labels restate existing facts for the reader and filter nothing:
+    no_match_in_scope is exactly search_complete=true with zero matches.
+    """
+    complete = diagnostics["search_complete"]
+    diagnostics.setdefault("omitted_paths_sample", [])
+    diagnostics["scope_state"] = "complete" if complete else "partial"
+    if match_count:
+        diagnostics["answer_state"] = "matches" if complete else "partial_matches"
+    else:
+        diagnostics["answer_state"] = "no_match_in_scope" if complete else "not_enough_scope"
+
+
+def _sample_omitted(diagnostics: dict, paths) -> None:
+    """Name an evenly spaced path-ordered sample, so the end of the list shows too."""
+    ordered = sorted(set(paths), key=lambda path: (path.casefold(), path))
+    if len(ordered) > MAX_OMITTED_SAMPLE:
+        last = len(ordered) - 1
+        ordered = [ordered[index * last // (MAX_OMITTED_SAMPLE - 1)] for index in range(MAX_OMITTED_SAMPLE)]
+    diagnostics["omitted_paths_sample"] = ordered
+
+
 def _empty_result(diagnostics: dict) -> dict:
+    _record_scope(diagnostics, 0)
     return {"context": "", "matches": [], "diagnostics": diagnostics}
 
 
@@ -132,6 +165,63 @@ def _finite_config_float(value):
     return number
 
 
+class _RecallSettingsError(ValueError):
+    """The optional recall block is unusable."""
+
+
+def _checked_recall_settings(config: dict) -> dict:
+    """Validate the optional recall block; the caller reports one fixed code.
+
+    A priority path only reorders notes that already passed every rule, so an
+    entry inside a deny or exclusion rule can never work and is a mistake.
+    """
+    if "recall" not in config:
+        return {}
+    block = config["recall"]
+    if type(block) is not dict or not RECALL_SETTING_KEYS.issuperset(block):
+        raise _RecallSettingsError
+    if "max_total_read_bytes" in block:
+        budget = block["max_total_read_bytes"]
+        if type(budget) is not int or not MAX_FILE_BYTES <= budget <= MAX_CONFIGURED_TOTAL_READ_BYTES:
+            raise _RecallSettingsError
+    priority = block.get("priority_paths", [])
+    if type(priority) is not list or len(priority) > MAX_PRIORITY_PATHS:
+        raise _RecallSettingsError
+    deny_zones = tuple(config.get("deny_zones") or ())
+    exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
+    for value in priority:
+        if type(value) is not str or len(value) > MAX_PRIORITY_PATH_CHARS:
+            raise _RecallSettingsError
+        try:
+            parts = relative_parts(value, "recall priority path")
+        except ValueError as exc:
+            raise _RecallSettingsError from exc
+        if _classified_skip(parts, deny_zones, exclude_dirs):
+            raise _RecallSettingsError
+    return block
+
+
+def _priority_rules(config: dict) -> tuple[tuple[str, ...], ...]:
+    """Case-folded path prefixes of a validated config, in their listed order."""
+    entries = (config.get("recall") or {}).get("priority_paths") or ()
+    return tuple(tuple(part.casefold() for part in relative_parts(value, "recall priority path"))
+                 for value in entries)
+
+
+def _priority_rank(rel_path: str, rules: Sequence[tuple[str, ...]]) -> int:
+    """Position of the first rule covering a path; with no rules every path is 0."""
+    folded = tuple(part.casefold() for part in rel_path.split("/"))
+    for rank, rule in enumerate(rules):
+        if folded[:len(rule)] == rule:
+            return rank
+    return len(rules)
+
+
+def _read_order(paths: list, rules: Sequence[tuple[str, ...]]) -> list:
+    """Move prioritised notes ahead; a stable sort keeps the path order otherwise."""
+    return sorted(paths, key=lambda item: _priority_rank(item[0], rules)) if rules else paths
+
+
 def _read_config(vault: Path, diagnostics: dict) -> dict | None:
     try:
         config_path = resolve_note_path(vault, CONFIG_RELPATH)
@@ -152,7 +242,18 @@ def _read_config(vault: Path, diagnostics: dict) -> dict | None:
             return None
         raw = json.loads(raw_bytes.decode("utf-8-sig"), object_pairs_hook=_unique_config_fields,
                          parse_constant=_invalid_config_constant, parse_float=_finite_config_float)
-        return validate_config(raw)
+        config = validate_config(raw)
+        settings = _checked_recall_settings(config)
+        # The caller's diagnostics carry the budget of this call: each reader
+        # takes it from there, so recall, retrieval and evaluators cannot differ.
+        if "max_total_read_bytes" in settings:
+            diagnostics["limits"]["total_read_bytes"] = settings["max_total_read_bytes"]
+        if settings.get("priority_paths"):
+            diagnostics["limits"]["priority_paths"] = len(settings["priority_paths"])
+        return config
+    except _RecallSettingsError:
+        diagnostics["status"] = "invalid_config"
+        _omit(diagnostics, "recall_config_invalid")
     except FileNotFoundError:
         diagnostics["status"] = "not_vault"
         _omit(diagnostics, "config_unavailable")
@@ -269,11 +370,12 @@ def _read_markdown(path: Path, diagnostics: dict, rel_path: str, *, raw_sink=Non
                 diagnostics["oversized_files"].append({"path": rel_path, "bytes": size})
             _omit(diagnostics, "file_byte_limit")
             return None
-        if diagnostics["bytes_read"] + size > MAX_TOTAL_READ_BYTES:
+        total_limit = diagnostics["limits"]["total_read_bytes"]
+        if diagnostics["bytes_read"] + size > total_limit:
             diagnostics["omitted_total_byte_limit"] += 1
             _omit(diagnostics, "total_byte_limit")
             return None
-        remaining = MAX_TOTAL_READ_BYTES - diagnostics["bytes_read"]
+        remaining = total_limit - diagnostics["bytes_read"]
         content, stable = _read_regular_bytes(path, min(MAX_FILE_BYTES, remaining))
         diagnostics["bytes_read"] += len(content)
         if not stable:
@@ -507,7 +609,9 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
     deny_zones = tuple(config.get("deny_zones") or ())
     # Git internals are reserved metadata even when users clear optional exclusions.
     exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
-    candidates = _markdown_paths(safe_vault, deny_zones, exclude_dirs, diagnostics)
+    priority = _priority_rules(config)
+    candidates = _read_order(_markdown_paths(safe_vault, deny_zones, exclude_dirs, diagnostics), priority)
+    omitted = [rel_path for rel_path, _ in candidates[MAX_FILES:]]
     if len(candidates) > MAX_FILES:
         diagnostics["omitted_file_limit"] = len(candidates) - MAX_FILES
         _omit(diagnostics, "file_count_limit")
@@ -521,32 +625,38 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                 diagnostics["skipped_unsafe"] += 1
                 _omit(diagnostics, "unsafe_path")
+                omitted.append(rel_path)
                 continue
             size = metadata.st_size
         except OSError:
             diagnostics["skipped_unreadable"] += 1
             _omit(diagnostics, "unreadable_file")
+            omitted.append(rel_path)
             continue
-        if diagnostics["bytes_read"] + min(size, MAX_FILE_BYTES + 1) > MAX_TOTAL_READ_BYTES:
+        if diagnostics["bytes_read"] + min(size, MAX_FILE_BYTES + 1) > diagnostics["limits"]["total_read_bytes"]:
             diagnostics["omitted_total_byte_limit"] += len(candidates) - index
             _omit(diagnostics, "total_byte_limit")
+            omitted.extend(remaining_path for remaining_path, _ in candidates[index:])
             break
         raw_source = []
         text = (_read_markdown(path, diagnostics, rel_path, raw_sink=raw_source.append)
                 if revocations.enabled else _read_markdown(path, diagnostics, rel_path))
         if text is None:
+            omitted.append(rel_path)
             continue
         if revocations.enabled:
             try:
                 text = revocations.filter_text(rel_path, raw_source[0].decode("utf-8")).removeprefix("\ufeff")
             except (RevocationError, UnicodeError):
                 _omit(diagnostics, "revoked_source_unavailable")
+                omitted.append(rel_path)
                 continue
         match = _rank_document(rel_path, text, phrase, query_terms)
         if match is not None:
             ranked.append(match)
 
-    ranked.sort(key=lambda match: (-match["score"], match["path"].casefold(), match["path"]))
+    ranked.sort(key=lambda match: (-match["score"], _priority_rank(match["path"], priority),
+                                   match["path"].casefold(), match["path"]))
     matches = ranked[:limit]
     context = _render_context(matches, max_tokens, diagnostics)
     if revocations.enabled:
@@ -558,6 +668,8 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
             diagnostics["status"] = "revocation_changed_or_unavailable"
             diagnostics["search_complete"] = False
             return _empty_result(diagnostics)
+    _sample_omitted(diagnostics, omitted)
+    _record_scope(diagnostics, len(matches))
     return {"context": context, "matches": matches, "diagnostics": diagnostics}
 
 

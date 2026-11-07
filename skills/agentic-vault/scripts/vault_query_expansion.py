@@ -374,6 +374,7 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
         bind_mark, bind_listing = directory_sinks(directories)
         paths = recall._markdown_paths(safe_vault, deny, exclude, diagnostics,
                                        directory_sink=bind_mark, listing_sink=bind_listing)
+        paths = recall._read_order(paths, recall._priority_rules(config))
         if len(paths) > recall.MAX_FILES:
             recall._omit(diagnostics, 'file_count_limit')
         documents = {}
@@ -388,7 +389,7 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
                 documents[rel] = {'text': text, 'sha256': hashlib.sha256(raw[0]).hexdigest(), 'stamp': before}
         result = _expand_documents(safe_vault, query, documents, mapping=mapping, deny=deny, exclude=exclude,
                                    inventory_complete=diagnostics['search_complete'],
-                                   mapping_byte_limit=max(0, recall.MAX_TOTAL_READ_BYTES-diagnostics['bytes_read']))
+                                   mapping_byte_limit=max(0, diagnostics['limits']['total_read_bytes']-diagnostics['bytes_read']))
         diagnostics['bytes_read'] += result['mapping_bytes_read']
         alias_binding_used = any(entry['source_kind'] == 'frontmatter_alias' for entry in result['expansions'])
         if recall._read_config(safe_vault, recall._diagnostics()) != config:
@@ -399,7 +400,7 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
             for rel, digest in sorted(sources.items()):
                 try:
                     path = resolve_note_path(safe_vault, rel, deny)
-                    remaining = max(0, recall.MAX_TOTAL_READ_BYTES-diagnostics['bytes_read'])
+                    remaining = max(0, diagnostics['limits']['total_read_bytes']-diagnostics['bytes_read'])
                     raw, stable = recall._read_regular_bytes(path, min(recall.MAX_FILE_BYTES, remaining))
                     diagnostics['bytes_read'] += len(raw)
                     if not stable or hashlib.sha256(raw).hexdigest() != digest:
@@ -408,7 +409,7 @@ def expand_query(vault: Path, query: str, *, enabled=False, mapping=None) -> dic
                     result.update(status='source_changed', terms=_base(query)['terms'], expansions=[])
                     break
             checked, fresh = verify_mapping(safe_vault, result, deny=deny, exclude=exclude,
-                byte_limit=max(0, recall.MAX_TOTAL_READ_BYTES-diagnostics['bytes_read']))
+                byte_limit=max(0, diagnostics['limits']['total_read_bytes']-diagnostics['bytes_read']))
             result['mapping_bytes_read'] += checked
             diagnostics['bytes_read'] += checked
             if not fresh:

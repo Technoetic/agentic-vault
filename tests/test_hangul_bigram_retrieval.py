@@ -133,13 +133,31 @@ def legacy_inventory_verification(value):
     return {**legacy, **LEGACY_INVENTORY_WORDING}
 
 
+# v0.43.0 added derived read-scope keys to recall diagnostics. Check that they
+# agree with the facts they restate, then take them out so the pinned digests
+# keep proving that ranking, context and every other field are unchanged.
+def legacy_recall_diagnostics(value):
+    if not isinstance(value, dict) or "scope_state" not in value:
+        return value
+    complete = value["search_complete"]
+    if value["scope_state"] != ("complete" if complete else "partial"):
+        raise AssertionError("scope_state disagrees with search_complete")
+    if value["answer_state"] not in (("matches", "no_match_in_scope") if complete
+                                     else ("partial_matches", "not_enough_scope")):
+        raise AssertionError("answer_state disagrees with search_complete")
+    if complete and value["omitted_paths_sample"]:
+        raise AssertionError("a complete search omitted a path")
+    return {key: item for key, item in value.items()
+            if key not in {"omitted_paths_sample", "scope_state", "answer_state"}}
+
+
 def _canonical(value):
     # Ten significant digits absorb last-ulp libm differences between CI platforms.
     if isinstance(value, float):
         return format(value, ".10g")
     if isinstance(value, dict):
         return {key: _canonical(legacy_inventory_verification(item) if key == "inventory_verification" else item)
-                for key, item in value.items()}
+                for key, item in legacy_recall_diagnostics(value).items()}
     if isinstance(value, (list, tuple)):
         return [_canonical(item) for item in value]
     return value

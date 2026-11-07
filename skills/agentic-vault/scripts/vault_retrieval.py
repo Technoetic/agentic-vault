@@ -320,8 +320,8 @@ def _bm25_passage(doc: dict, match: dict, phrase: str, query_terms, tokenize=Non
             match["snippet"] = _legacy._snippet(line, phrase, query_terms)
 
 
-def _ranked_paths(scores: dict) -> list[str]:
-    return sorted(scores, key=lambda path: (-scores[path], path.casefold(), path))
+def _ranked_paths(scores: dict, priority=()) -> list[str]:
+    return sorted(scores, key=lambda path: (-scores[path], _legacy._priority_rank(path, priority), path.casefold(), path))
 
 
 def _invalid(diagnostics, status="invalid_options"):
@@ -431,6 +431,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         return _invalid(diagnostics, "revocation_unavailable")
     deny = tuple(config.get("deny_zones") or ())
     exclude = (*tuple(config.get("exclude_dirs") or ()), ".git", *tuple(excluded_sources))
+    priority = _legacy._priority_rules(config)
+    if priority:
+        diagnostics["ranking"] += "; ties prefer recall.priority_paths in listed order"
     # One bootstrap read establishes policy. If that policy forbids its own
     # config, subsequent reads cannot lawfully establish freshness.
     if _legacy._classified_skip(relative_parts(_legacy.CONFIG_RELPATH, "config path"), deny, exclude):
@@ -460,10 +463,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     for rel, _ in paths:
         filenames[Path(rel).name].append(rel)
     complete_names = diagnostics["search_complete"]
+    paths = _legacy._read_order(paths, priority)
+    candidate_paths = [rel for rel, _ in paths]
     if len(paths) > _legacy.MAX_FILES:
         diagnostics["omitted_file_limit"] = len(paths) - _legacy.MAX_FILES
         _legacy._omit(diagnostics, "file_count_limit")
         paths = paths[:_legacy.MAX_FILES]
+    total_limit = diagnostics["limits"]["total_read_bytes"]
     documents = {}
     for index, (rel, path) in enumerate(paths):
         if not _same_policy_stamp(safe_vault, policy_stamp):
@@ -472,7 +478,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         try:
             resolve_note_path(safe_vault, rel, deny)
             before = _stamp(path)
-            if diagnostics["bytes_read"] + min(before[2], _legacy.MAX_FILE_BYTES + 1) > _legacy.MAX_TOTAL_READ_BYTES:
+            if diagnostics["bytes_read"] + min(before[2], _legacy.MAX_FILE_BYTES + 1) > total_limit:
                 diagnostics["omitted_total_byte_limit"] += len(paths) - index
                 _legacy._omit(diagnostics, "total_byte_limit")
                 break
@@ -513,7 +519,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     if expand_query:
         expansion = _query_expansion._expand_documents(safe_vault, query, eligible,
             mapping=query_mapping, deny=deny, exclude=exclude, inventory_complete=diagnostics["search_complete"],
-            mapping_byte_limit=max(0, _legacy.MAX_TOTAL_READ_BYTES-diagnostics["bytes_read"]))
+            mapping_byte_limit=max(0, total_limit-diagnostics["bytes_read"]))
         diagnostics["query_expansion"] = expansion
         diagnostics["bytes_read"] += expansion["mapping_bytes_read"]
         if expansion["status"] != "ok":
@@ -544,9 +550,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             external_ranks[rel] = min(item["rank"], external_ranks.get(rel, item["rank"]))
         except (ValueError, OSError):
             diagnostics["external_rejected"] += 1
-    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores), 1)}
-    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25), 1)}
-    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores), 1)}
+    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores, priority), 1)}
+    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25, priority), 1)}
+    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores, priority), 1)}
     rrf_keys = ("rrf_lexical", "rrf_bm25", "rrf_external", "rrf_bm25_hangul2") if ngram_active else ("rrf_lexical", "rrf_bm25", "rrf_external")
     active = lexical_scores if backend == "lexical" else bm25
     candidates = set(active) | set(external_ranks)
@@ -584,7 +590,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             match["score"] = active[rel]
         match.update({"scores": contributions, "ranks": ranks, "source": _source(doc, match), "temporal": doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
         matches[rel] = match
-    seeds = sorted(matches, key=lambda rel: (-matches[rel]["score"], rel.casefold(), rel))[:limit]
+    seeds = _ranked_paths({rel: match["score"] for rel, match in matches.items()}, priority)[:limit]
     if expand_links and complete_names:
         frontier = [(seed, seed, 0, (seed,)) for seed in seeds]
         while frontier:
@@ -636,8 +642,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     final_config = _legacy._read_config(safe_vault, _legacy._diagnostics())
     if final_config != config:
         return _policy_changed(diagnostics)
-    ranked = sorted(matches.values(), key=lambda match: (-match["score"], match["path"].casefold(), match["path"]))
+    ranked = [matches[rel] for rel in _ranked_paths({rel: match["score"] for rel, match in matches.items()}, priority)]
     selected = []
+    dropped = []
     verified_hashes = {}
     expansion_sources = {entry['source_path'] for entry in diagnostics.get('query_expansion', {}).get('expansions', [])
                          if entry['source_kind'] == 'frontmatter_alias'}
@@ -655,7 +662,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
                 if _legacy._classified_skip(relative_parts(rel, "source recheck"), deny, exclude) or _stamp(path) != documents[rel]["stamp"]:
                     raise ValueError("source changed")
                 if rel not in verified_hashes:
-                    remaining = _legacy.MAX_TOTAL_READ_BYTES - diagnostics["bytes_read"]
+                    remaining = total_limit - diagnostics["bytes_read"]
                     if documents[rel]["stamp"][2] > remaining:
                         raise OverflowError("source verification exceeds total read budget")
                     raw, stable = _legacy._read_regular_bytes(path, min(_legacy.MAX_FILE_BYTES, remaining))
@@ -667,9 +674,11 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
                     raise ValueError("source content changed")
         except OverflowError:
             _legacy._omit(diagnostics, "source_verification_byte_limit")
+            dropped.append(match["path"])
             continue
         except (ValueError, OSError):
             _legacy._omit(diagnostics, "source_changed")
+            dropped.append(match["path"])
             continue
         selected.append(match)
         if len(selected) >= limit:
@@ -684,7 +693,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         return _policy_changed(diagnostics)
     if expand_query:
         checked_bytes, fresh = _query_expansion.verify_mapping(safe_vault, diagnostics['query_expansion'],
-            deny=deny, exclude=exclude, byte_limit=max(0, _legacy.MAX_TOTAL_READ_BYTES-diagnostics['bytes_read']))
+            deny=deny, exclude=exclude, byte_limit=max(0, total_limit-diagnostics['bytes_read']))
         diagnostics['bytes_read'] += checked_bytes
         diagnostics['query_expansion']['mapping_bytes_read'] += checked_bytes
         if not fresh:
@@ -730,4 +739,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
                     raise ValueError('source_changed')
         except (ValueError, OSError):
             return _invalid(diagnostics, 'source_changed')
+    # Only here, past every freshness check: a failed run names no path. A note
+    # dropped by the temporal filter was read and is no omission.
+    _legacy._sample_omitted(diagnostics, [*(rel for rel in candidate_paths if rel not in documents), *dropped])
+    _legacy._record_scope(diagnostics, len(selected))
     return {"context": context, "matches": selected, "diagnostics": diagnostics}
