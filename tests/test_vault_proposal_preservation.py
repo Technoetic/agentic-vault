@@ -237,5 +237,126 @@ class PreservationCheckTests(unittest.TestCase):
             quality.check_preservation("가" * (quality.MAX_FILE_BYTES + 1), CANDIDATE)
 
 
+class DefectRegressionTests(unittest.TestCase):
+    """Three in-scope gaps: closing fence, 0/0 completion and uppercase unit spellings."""
+
+    NOTE = ("---\ntitle: 규칙\ncreated: 2026-01-05\n---\n"
+            "# 규칙\n시행일은 2026-01-05이다.\n한도 15건\n참조 [[보안 정책]]\n")
+
+    def status(self, original, candidate, **kwargs):
+        return quality.check_preservation(original, candidate, **kwargs)
+
+    def test_four_dash_closing_line_does_not_count_frontmatter_values_as_body(self):
+        changed = self.NOTE.replace("시행일은 2026-01-05", "시행일은 2027-02-06")
+        self.assertEqual(self.status(self.NOTE, changed)["status"], "needs_review")
+        masked = changed.replace("\n---\n#", "\n----\n#")
+        result = self.status(self.NOTE, masked)
+        self.assertEqual((result["status"], result["review_reasons"]), ("needs_review", ["unexpected_removals"]))
+        self.assertEqual(pairs(result["unexpected_removals"]), {("date", "2026-01-05")})
+
+    def test_four_dash_closing_line_alone_stays_a_frontmatter_change(self):
+        result = self.status(self.NOTE, self.NOTE.replace("\n---\n#", "\n----\n#"))
+        self.assertEqual((result["status"], result["unexpected_removals"]), ("complete", []))
+
+    def test_wiki_target_change_is_not_masked_by_a_four_dash_closing_line(self):
+        original = self.NOTE.replace("created: 2026-01-05", 'related: ["[[보안 정책]]"]')
+        masked = original.replace("참조 [[보안 정책]]", "참조 [[운영 정책]]").replace("\n---\n#", "\n----\n#")
+        self.assertEqual(pairs(self.status(original, masked)["unexpected_removals"]), {("name", "보안 정책")})
+
+    def test_full_body_removal_is_not_masked_by_a_four_dash_closing_line(self):
+        original = "---\ntitle: 규칙\nlimit: 15건\n---\n한도 15건\n"
+        result = self.status(original, "---\ntitle: 규칙\nlimit: 15건\n----\n")
+        self.assertEqual(pairs(result["unexpected_removals"]), {("number", "15건")})
+
+    def test_later_horizontal_rule_does_not_hide_the_body_after_a_broken_closing_line(self):
+        original = "---\ntitle: 규칙\n---\n한도 15건\n---\n기한 90일\n"
+        candidate = "---\ntitle: 규칙\n----\n한도 16건\n---\n기한 90일\n"
+        self.assertEqual(pairs(self.status(original, candidate)["unexpected_removals"]), {("number", "15건")})
+
+    def test_text_after_the_closing_dashes_stays_in_the_body(self):
+        original = "---\ntitle: 규칙\n---\n한도 15건\n"
+        candidate = "---\ntitle: 규칙\n--- 15건\n한도 16건\n"
+        self.assertEqual(self.status(original, candidate)["status"], "complete")
+        self.assertEqual(quality._body(candidate), " 15건\n한도 16건")
+
+    def test_leading_rule_without_yaml_keys_is_not_treated_as_frontmatter(self):
+        # A table separator after a leading rule is body text; hiding it would lose values.
+        note = "---\n한도 15건\n---|---\n기한 90일\n"
+        self.assertEqual(quality._body(note), note)
+        self.assertEqual(self.status(note, note.replace("15건", "16건"))["status"], "needs_review")
+
+    def test_crlf_and_bom_frontmatter_with_a_broken_closing_line(self):
+        original = "\ufeff---\r\ntitle: 규칙\r\n---\r\n시행 2026-01-05\r\n"
+        candidate = "\ufeff---\r\ntitle: 규칙\r\ncreated: 2026-01-05\r\n----\r\n시행 2027-02-06\r\n"
+        self.assertEqual(pairs(self.status(original, candidate)["unexpected_removals"]), {("date", "2026-01-05")})
+
+    def test_declared_phrase_never_completes_a_note_with_no_literal_facts(self):
+        original, candidate = "# 규칙\n문서를 확인한다.\n", "# 규칙\n"
+        result = self.status(original, candidate, expected_removals=["문서를 확인한다"])
+        self.assertEqual((result["status"], result["review_reasons"], result["facts_checked"]),
+                         ("needs_review", ["no_selected_literal_facts"], 0))
+        self.assertTrue(result["declared_removals"][0]["removed"])
+        result = self.status(original, "# 규칙\n새 문장으로 바꾼다.\n", expected_additions=["새 문장"])
+        self.assertEqual((result["status"], result["review_reasons"]), ("needs_review", ["no_selected_literal_facts"]))
+
+    def test_failed_declaration_keeps_its_reason_on_a_note_with_no_literal_facts(self):
+        result = self.status("# 규칙\n문서를 확인한다.\n", "# 규칙\n문서를 확인한다.\n", expected_additions=["없는 문구"])
+        self.assertEqual(result["review_reasons"], ["expected_addition_missing", "no_selected_literal_facts"])
+
+    def test_a_declared_claim_is_a_fact_and_still_completes(self):
+        text = "# 규칙\n문서를 확인한다.\n"
+        result = self.status(text, text, required_claims=["문서를 확인한다"])
+        self.assertEqual((result["status"], result["facts_checked"]), ("complete", 1))
+
+    def test_declarations_still_complete_when_the_note_has_facts(self):
+        result = self.status("# 규칙\n문서를 확인한다. 한도 15건\n", "# 규칙\n한도 15건\n",
+                             expected_removals=["문서를 확인한다"])
+        self.assertEqual((result["status"], result["review_reasons"]), ("complete", []))
+
+    def test_listed_unit_spellings_are_case_insensitive(self):
+        for original, candidate in (("전압 22kV\n", "전압 22MV\n"), ("용량 630kVA\n", "용량 630MVA\n"),
+                                    ("중량 5KG\n", "중량 5G\n"), ("폭 10MM\n", "폭 10M\n"),
+                                    ("전압 22kV\n", "전압 22V\n")):
+            with self.subTest(original=original):
+                self.assertEqual(self.status(original, candidate)["status"], "needs_review")
+
+    def test_unit_case_alone_is_not_a_change(self):
+        for original, candidate in (("중량 5kg\n", "중량 5KG\n"), ("전압 22kV\n", "전압 22KV\n"),
+                                    ("용량 630kVA\n", "용량 630kva\n")):
+            with self.subTest(original=original):
+                self.assertEqual(self.status(original, candidate)["status"], "complete")
+
+    def test_unit_tokens_stay_folded_in_the_report_and_declarations(self):
+        result = self.status("전압 22kV\n", "전압 22MV\n")
+        self.assertEqual(pairs(result["unexpected_removals"]), {("number", "22kv")})
+        result = self.status("전압 22kV\n", "전압 22MV\n", expected_removals=["22kV"])
+        self.assertEqual((result["status"], result["review_reasons"]), ("complete", []))
+
+    def test_unlisted_unit_suffixes_still_drop_as_documented(self):
+        self.assertEqual(self.status("기한 90일\n", "기한 90주\n")["status"], "complete")
+        self.assertEqual(self.status("전류 630A\n", "전압 630V\n")["status"], "complete")
+
+    def test_cli_rejects_the_zero_fact_completion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            vault = Path(temp).resolve()
+            (vault / "00-meta").mkdir()
+            (vault / "00-meta/vault-config.json").write_text(json.dumps({"required_keys": [], "enums": {}}),
+                                                             encoding="utf-8")
+            (vault / "CLAUDE.md").write_text("# 규칙\n문서를 확인한다.\n", encoding="utf-8")
+            (vault / "00-meta/candidate.md").write_text("# 규칙\n", encoding="utf-8")
+
+            def run(*args):
+                done = subprocess.run([sys.executable, str(SCRIPT), "--vault", str(vault), *args],
+                                      capture_output=True, encoding="utf-8")
+                return done.returncode, json.loads(done.stdout)
+
+            code, created = run("propose", "--target", "CLAUDE.md", "--candidate", "00-meta/candidate.md",
+                                "--lesson", "L-003", "--summary", "문구 삭제")
+            self.assertEqual(code, 0, created)
+            code, result = run("preserve-check", created["id"], "--expect-removed", "문서를 확인한다")
+            self.assertEqual((code, result["status"], result["review_reasons"]),
+                             (1, "needs_review", ["no_selected_literal_facts"]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,9 +30,10 @@ MAX_CLAIMS = 64
 MAX_FACTS = 512
 HASH_RE = re.compile(r'[0-9a-f]{64}')
 DATE_RE = re.compile(r'(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)')
-NUMBER_RE = re.compile(r'(?<![A-Za-z0-9_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?:%|만원|개|대|명|원|건|억|시간|분|초|kg|mm|kva|kv)?(?![0-9_])')
+NUMBER_RE = re.compile(r'(?<![A-Za-z0-9_])[-+]?\d+(?:,\d{3})*(?:\.\d+)?(?:%|만원|개|대|명|원|건|억|시간|분|초|(?i:kg|mm|kva|kv))?(?![0-9_])')
 NAME_RE = re.compile(r'(?im)^\s*(?:name|person|organization|company|이름|담당자|회사|인명)\s*:\s*([^\n]{1,128})$')
 WIKI_RE = re.compile(r'\[\[([^\]\n|#]{1,128})(?:#[^\]\n|]*)?(?:\|[^\]\n]*)?\]\]')
+YAML_KEY_RE = re.compile(r'[\w-]+:')
 
 
 class QualityError(Exception):
@@ -46,9 +47,16 @@ def _normalize(text):
 def _body(text):
     lines = text.splitlines()
     if lines and lines[0].strip() == '---':
-        end = next((i for i, line in enumerate(lines[1:65], 1) if line.strip() == '---'), None)
-        if end is not None:
-            return '\n'.join(lines[end + 1:])
+        for end, line in enumerate(lines[1:65], 1):
+            if line.strip() == '---':
+                return '\n'.join(lines[end + 1:])
+            # The schema check closes frontmatter at any line that starts with
+            # '---', so a broken closing line such as '----' passes propose.
+            # Use the same boundary here, or frontmatter values count as body
+            # values and hide a changed body value. Text after the dashes stays
+            # in the body. A leading rule without a key line is not frontmatter.
+            if line.startswith('---') and YAML_KEY_RE.match(next(filter(str.strip, lines[1:end]), '')):
+                return '\n'.join([line[3:], *lines[end + 1:]])
     return text
 
 
@@ -361,7 +369,9 @@ def check_preservation(original, candidate, *, required_claims=(), expected_remo
         reasons.append('declared_removal_not_observed')
     if any(not row['added'] for row in addition_rows):
         reasons.append('expected_addition_missing')
-    if not rows and not removal_rows and not addition_rows:
+    # A declaration does not make a note without facts checkable: its counts say
+    # nothing about the rest of the text, so 0 of 0 never reads as complete.
+    if not rows:
         reasons.append('no_selected_literal_facts')
     return {'status': 'needs_review' if reasons else 'complete', 'review_reasons': reasons,
             'original_sha256': hashlib.sha256(original.encode('utf-8')).hexdigest(),

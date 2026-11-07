@@ -218,6 +218,22 @@ class CompileQualityTests(unittest.TestCase):
             with self.assertRaisesRegex(self.module.QualityError, 'policy_changed'):
                 self.module.check_compile(self.vault, [source], [target], [])
 
+    def test_uppercase_listed_units_are_units_in_both_directions(self):
+        source = self.write('10-inbox/source.md', '전압: 22kV\n')
+        target = self.write('20-knowledge/result.md', '전압: 22MV\n')
+        result = self.module.check_compile(self.vault, [source], [target], [])
+        self.assertEqual(result['status'], 'needs_review')
+        self.assertEqual({r['literal'] for r in result['missing_facts']}, {'22kv'})
+        target = self.write('20-knowledge/result.md', '전압: 22KV\n')
+        self.assertEqual(self.module.check_compile(self.vault, [source], [target], [])['status'], 'complete')
+
+    def test_broken_closing_line_keeps_frontmatter_values_out_of_the_compile_body(self):
+        source = self.write('10-inbox/source.md', '시행 2026-01-05\n')
+        target = self.write('20-knowledge/result.md', '---\ntitle: x\ncreated: 2026-01-05\n----\n시행일 미정\n')
+        result = self.module.check_compile(self.vault, [source], [target], [])
+        self.assertEqual(result['status'], 'needs_review')
+        self.assertEqual({r['literal'] for r in result['missing_facts']}, {'2026-01-05'})
+
 
 class ReverseLiteralTests(unittest.TestCase):
     """Opt-in precision direction: target literals that no selected source contains."""
