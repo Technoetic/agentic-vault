@@ -6,7 +6,6 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
@@ -167,12 +166,17 @@ class GeneratedMemoryTests(unittest.TestCase):
         self.assertEqual(report['metrics']['stored_units'], 0)
         self.assertEqual(report['metrics']['repair_successes'], 0)
         calls.clear()
+        # The transport stays blocked until the run has returned, so a stalled
+        # caller cannot see the first request finish inside the limit.
+        release = threading.Event()
+        self.addCleanup(release.set)
         def slow(payload, **bounds):
             calls.append(payload)
-            time.sleep(.1)
+            release.wait(timeout=5)
             return m.Scripted('safe')(payload)
         report = m._evaluate(backend='test-double', control='safe', rounds=2, max_requests=24,
                              max_tokens=1500, limits=m.ModelLimits(request_timeout_seconds=.02), transport=slow)
+        release.set()
         self.assertEqual(report['error'], 'request_timeout')
         self.assertEqual(len(calls), 1)
         self.assertEqual(report['metrics']['repair_successes'], 0)
