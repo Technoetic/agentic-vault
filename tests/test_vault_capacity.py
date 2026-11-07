@@ -14,6 +14,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _git_env import isolate_git
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import isolate_git
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 DOCTOR = SCRIPTS / 'vault_doctor.py'
@@ -35,6 +40,7 @@ class CapacityCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.vault = Path(self.tmp.name).resolve() / 'vault'
         self.vault.mkdir()
+        isolate_git(self, ceiling=self.vault.parent.parent)
         self.config = {'deny_zones': ['private'], 'exclude_dirs': ['excluded'],
                        'handoff_note': '00-meta/handoff.md', 'hot_note': '00-meta/hot.md',
                        'log_note': '00-meta/log.md', 'tasks_note': '00-meta/tasks.md',
@@ -283,6 +289,24 @@ class ForecastTests(CapacityCase):
         self.assertEqual(self.limit(target, 'state_read')['estimated_days_to_limit'], 10.0)
         self.assertEqual((target['status'], target['reason_code']),
                          ('warning', 'forecast_within_horizon'))
+
+    def test_a_forecast_of_exactly_the_horizon_still_warns(self):
+        limit = vault_state.MAX_BYTES
+        step = limit // 20
+        size = limit - 14 * step
+        points = [(START + day * DAY, size - (2 - day) * step) for day in range(3)]
+        self.commit_sizes('00-meta/hot.md', points)
+        target = self.target(capacity.diagnose_capacity(self.vault), 'hot')
+        self.assertEqual(self.limit(target, 'state_read')['estimated_days_to_limit'], capacity.WARN_DAYS)
+        self.assertEqual((target['status'], target['reason_code']),
+                         ('warning', 'forecast_within_horizon'))
+
+    def test_the_horizon_edge_of_one_limit(self):
+        self.assertEqual(capacity.WARN_DAYS, 14.0)
+        for slope, days, status in ((1000.0, 14.0, 'warning'), (990.0, 14.1, 'ready')):
+            with self.subTest(slope=slope):
+                row = capacity._limit_report('state_read', 14_000, 0, slope)
+                self.assertEqual((row['estimated_days_to_limit'], row['status']), (days, status))
 
     def test_forecast_uses_the_working_file_as_the_current_size(self):
         self.commit_sizes('00-meta/hot.md', [(START, 1000), (START + DAY, 2000)])

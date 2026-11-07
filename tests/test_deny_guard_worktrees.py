@@ -18,6 +18,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _git_env import git_environment
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "assets" / "adapters" / "deny-guard" / "deny-guard.py"
@@ -36,12 +41,10 @@ def load_guard():
 
 
 def git(cwd: Path, *args: str) -> None:
-    env = {key: value for key, value in os.environ.items()
-           if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     result = subprocess.run(
         ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
          "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main", *args],
-        cwd=cwd, env=env, capture_output=True, encoding="utf-8", timeout=60, check=False)
+        cwd=cwd, env=git_environment(), capture_output=True, encoding="utf-8", timeout=60, check=False)
     if result.returncode:
         raise AssertionError(f"git {args[0]} failed: {result.stderr}")
 
@@ -229,15 +232,21 @@ class ProjectIsALinkedTree(Lab):
 
     def test_shell_words_and_globs_into_the_main_checkout(self) -> None:
         zone = (self.vault / "10-inbox" / "_processed").as_posix()
-        self.assertEqual(self.decide("Bash", {"command": f"cat {zone}/held.md"}, project=self.tree), "deny")
+        spellings = [Path(os.path.relpath(zone, self.tree)).as_posix()]
+        if "[" not in zone:  # a bracket makes the word a glob, and the guard then asks
+            spellings.append(zone)
+        for spelling in spellings:
+            with self.subTest(spelling=spelling):
+                self.assertEqual(self.decide("Bash", {"command": f'cat "{spelling}/held.md"'},
+                                             project=self.tree), "deny")
+                answer = facts(commands=["Get-Content"], strings=["Get-Content", f"{spelling}/held.md"])
+                with mock.patch.object(self.guard, "parse_powershell", return_value=(answer, "")):
+                    self.assertEqual(self.decide("PowerShell", {"command": f'Get-Content "{spelling}/held.md"'},
+                                                 project=self.tree), "deny")
         self.assertEqual(self.decide("Glob", {"path": str(self.vault), "pattern": "10-inbox/_processed/**"},
                                      project=self.tree), "deny")
         self.assertEqual(self.decide("Glob", {"path": str(self.vault), "pattern": "*/90-assets/*"},
                                      project=self.tree), "deny")
-        answer = facts(commands=["Get-Content"], strings=["Get-Content", f"{zone}/held.md"])
-        with mock.patch.object(self.guard, "parse_powershell", return_value=(answer, "")):
-            self.assertEqual(self.decide("PowerShell", {"command": f"Get-Content {zone}/held.md"},
-                                         project=self.tree), "deny")
 
     def test_a_main_checkout_beside_the_tree_is_reached_by_a_wildcard_pattern(self) -> None:
         beside = self.base / "beside"

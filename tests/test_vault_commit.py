@@ -17,6 +17,11 @@ import unicodedata
 import unittest
 from unittest import mock
 
+try:
+    from _git_env import isolate_git
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import isolate_git
+
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/agentic-vault/scripts"
 SCRIPT = SCRIPTS / "vault_commit.py"
@@ -41,58 +46,83 @@ def always_retry_sleep(_seconds):
     return None
 
 
+def run_git(cwd, *args, check=True, input=None, env=None):
+    merged = dict(os.environ)
+    merged.update(env or {})
+    result = subprocess.run(
+        ["git", *args], cwd=cwd, input=input, env=merged,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if check and result.returncode != 0:
+        raise AssertionError(result.stderr.decode("utf-8", "replace"))
+    return result
+
+
+def write_file(vault, relative, data):
+    path = vault / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+_SEED = {}
+
+
+def seed_vault():
+    """Build the synthetic repository once per process and return it. Tests copy it.
+
+    The caller has already isolated git. Most of a test's setup was git processes,
+    which are slowest on the Windows runners.
+    """
+    if "vault" in _SEED:
+        return _SEED["vault"]
+    holder = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    unittest.addModuleCleanup(holder.cleanup)
+    vault = Path(holder.name).resolve() / "seed"
+    vault.mkdir()
+    run_git(vault, "init", "-q")
+    for key, value in (("user.name", "Synthetic Writer"),
+                       ("user.email", "writer@example.invalid"),
+                       ("core.autocrlf", "false"),
+                       ("commit.gpgsign", "false")):
+        run_git(vault, "config", key, value)
+    write_file(vault, "00-meta/vault-config.json", json.dumps({
+        "required_keys": ["title"], "enums": {},
+        "hot_note": HOT, "log_note": LOG, "index_note": INDEX,
+        "handoff_note": HANDOFF,
+    }).encode())
+    write_file(vault, ".gitignore", b"*.secret\n")
+    write_file(vault, HOT, b"# hot\nslot-a\nslot-b\n")
+    write_file(vault, LOG, b"# log\n")
+    write_file(vault, INDEX, b"# index\n")
+    write_file(vault, HANDOFF, b"# handoff\n")
+    write_file(vault, "notes/mine.md", b"mine v1\n")
+    write_file(vault, "notes/other.md", b"other v1\n")
+    run_git(vault, "add", "-A")
+    run_git(vault, "commit", "-q", "-m", "seed")
+    for sample in (vault / ".git" / "hooks").glob("*.sample"):
+        sample.unlink()
+    _SEED.update(vault=vault, holder=holder)
+    return vault
+
+
 @unittest.skipUnless(shutil.which("git"), "git is required")
 class VaultCommitCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp.cleanup)
-        environment = mock.patch.dict(os.environ, {
-            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-        })
-        environment.start()
-        self.addCleanup(environment.stop)
-        for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-            os.environ.pop(name, None)
+        isolate_git(self)
         self.vault = Path(self.temp.name).resolve() / "vault"
-        self.vault.mkdir()
-        self.git("init", "-q")
-        for key, value in (("user.name", "Synthetic Writer"),
-                           ("user.email", "writer@example.invalid"),
-                           ("core.autocrlf", "false"),
-                           ("commit.gpgsign", "false")):
-            self.git("config", key, value)
-        self.write("00-meta/vault-config.json", json.dumps({
-            "required_keys": ["title"], "enums": {},
-            "hot_note": HOT, "log_note": LOG, "index_note": INDEX,
-            "handoff_note": HANDOFF,
-        }).encode())
-        self.write(".gitignore", b"*.secret\n")
-        self.write(HOT, b"# hot\nslot-a\nslot-b\n")
-        self.write(LOG, b"# log\n")
-        self.write(INDEX, b"# index\n")
-        self.write(HANDOFF, b"# handoff\n")
-        self.write("notes/mine.md", b"mine v1\n")
-        self.write("notes/other.md", b"other v1\n")
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", "seed")
-        self.git_dir = Path(self.git("rev-parse", "--absolute-git-dir").stdout.decode().strip())
+        shutil.copytree(seed_vault(), self.vault)
+        # A copied file has a new identity, so the index would call every file modified.
+        self.git("update-index", "-q", "--refresh")
+        self.git_dir = self.vault / ".git"
 
     def git(self, *args, check=True, input=None, env=None):
-        merged = dict(os.environ)
-        merged.update(env or {})
-        result = subprocess.run(
-            ["git", *args], cwd=self.vault, input=input, env=merged,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        if check and result.returncode != 0:
-            raise AssertionError(result.stderr.decode("utf-8", "replace"))
-        return result
+        return run_git(self.vault, *args, check=check, input=input, env=env)
 
     def write(self, relative, data):
-        path = self.vault / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        return path
+        return write_file(self.vault, relative, data)
 
     def entry(self, relative):
         return relative, sha((self.vault / relative).read_bytes())
@@ -126,6 +156,13 @@ class VaultCommitCase(unittest.TestCase):
 
 
 class ScopeTests(VaultCommitCase):
+    def test_a_test_starts_from_a_clean_private_copy_of_the_seed(self):
+        self.assertNotEqual(self.vault, seed_vault())
+        self.assertEqual(self.git("diff-files", "--name-only").stdout, b"")
+        self.assertEqual(self.git("status", "--porcelain").stdout, b"")
+        self.write("notes/mine.md", b"changed here\n")
+        self.assertEqual((seed_vault() / "notes/mine.md").read_bytes(), b"mine v1\n")
+
     def test_commit_carries_only_the_declared_path(self):
         self.write("notes/mine.md", b"mine v2\n")
         self.write("notes/other.md", b"other unstaged edit\n")
@@ -1175,6 +1212,16 @@ class FailureReportTests(VaultCommitCase):
                   b" 1 file changed\n")
         self.assertEqual(vault_commit._parse_commit_hash(output), last.decode())
 
+    def test_hook_output_shaped_like_a_summary_does_not_name_the_commit(self):
+        decoy = b"[decoy " + b"a" * 40 + b"] printed by a hook"
+        echo = b"echo '" + decoy + b"'; echo '" + decoy + b"' >&2"
+        self.hook("pre-commit", echo)
+        self.hook("post-commit", echo)
+        self.write("notes/mine.md", b"mine v2\n")
+        report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(report["commit"], self.head())
+
     def test_an_unreadable_summary_is_reported_with_the_commit_kept(self):
         self.write("notes/mine.md", b"mine v2\n")
         real = vault_commit._run_git
@@ -1353,8 +1400,25 @@ class EnvironmentTests(VaultCommitCase):
         self.assertEqual(self.git("rev-parse", "HEAD~1").stdout.decode().strip(), before)
         self.assertFalse((other / "stray-index").exists())
 
+    def test_every_repository_variable_stays_away_from_git(self):
+        # Spelled out here: reading the tool's own list would pass with a name removed from it.
+        names = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+                 "GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS",
+                 "GIT_ICASE_PATHSPECS", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+                 "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_12", "GIT_CONFIG_VALUE_12")
+        values = dict.fromkeys(names, "synthetic")
+        values["GIT_AUTHOR_NAME"] = "Kept Writer"
+        with mock.patch.dict(os.environ, values):
+            environment = vault_commit._git_environment()
+        for name in names:
+            with self.subTest(name=name):
+                self.assertNotIn(name, environment)
+        self.assertEqual(environment["GIT_AUTHOR_NAME"], "Kept Writer")
+
     def test_pathspec_variables_do_not_change_the_reading(self):
-        for name in ("GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS"):
+        for name in ("GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS",
+                     "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS"):
             with self.subTest(name=name):
                 self.write("notes/mine.md", f"mine {name}\n".encode())
                 with mock.patch.dict(os.environ, {name: "1"}):

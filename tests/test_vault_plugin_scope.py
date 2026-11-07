@@ -276,6 +276,20 @@ class SessionHookTests(PluginScopeTestCase):
         self.assertEqual(report["session_hooks"], {"project": 0, "local": 1})
         self.assertEqual(report["findings"], [FINDING])
 
+    def test_only_objects_count_as_hook_entries(self) -> None:
+        self.user({"enabledPlugins": {PLUGIN_ID: True}})
+        cases = (
+            ([{"type": "command"}, "text", 3, None, ["list"]], 1),
+            (["text", 3], 0),
+            ([], 0),
+        )
+        for entries, count in cases:
+            with self.subTest(entries=entries):
+                self.project({"hooks": {"SessionStart": [{"hooks": entries}]}})
+                report = self.report()
+                self.assertEqual(report["session_hooks"]["project"], count)
+                self.assertEqual(report["findings"], [FINDING] if count else [])
+
     def test_no_finding_without_a_hook_or_without_the_plugin(self) -> None:
         other_event = {"hooks": {"PreToolUse": [HOOK_GROUP]}}
         hook = {"hooks": {"SessionStart": [HOOK_GROUP]}}

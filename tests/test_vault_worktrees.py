@@ -19,6 +19,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _git_env import git_environment
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
@@ -92,12 +97,10 @@ class GitExecutableTests(unittest.TestCase):
 
 
 def git(cwd: Path, *args: str) -> str:
-    env = {key: value for key, value in os.environ.items()
-           if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     result = subprocess.run(
         ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
          "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main", *args],
-        cwd=cwd, env=env, capture_output=True, encoding="utf-8", timeout=60, check=False)
+        cwd=cwd, env=git_environment(), capture_output=True, encoding="utf-8", timeout=60, check=False)
     if result.returncode:
         raise AssertionError(f"git {args[0]} failed: {result.stderr}")
     return result.stdout
@@ -228,11 +231,30 @@ class RuleTests(Lab):
         plain = self.base / "plain"
         copy = plain / "wt"
         gitfile(copy, str(self.base / "x" / ".git" / "worktrees" / "wt"))
-        scope = vault_worktrees.WorktreeScope(plain)
+        real = vault_worktrees._git_toplevel
+
+        def inside_this_test(start):
+            # The real walk, blind to a repository that happens to hold the temporary folder.
+            found = real(start)
+            return found if found and Path(found).resolve().is_relative_to(self.base) else None
+
+        with mock.patch.object(vault_worktrees, "_git_toplevel", inside_this_test):
+            scope = vault_worktrees.WorktreeScope(plain)
         self.assertIsNone(scope.common)
         with mock.patch.object(vault_worktrees.os, "lstat", side_effect=AssertionError("no lookup")):
             self.assertFalse(scope.linked(copy))
             self.assertEqual(scope.views(("wt", "10-inbox", "_processed", "a.md")), ())
+
+    def test_a_worktrees_parent_means_a_common_folder_only_with_a_commondir_file(self) -> None:
+        admin = self.base / "store" / "worktrees" / "wt"
+        admin.mkdir(parents=True)
+        folder = self.base / "folder"
+        gitfile(folder, str(admin))
+        self.assertEqual(vault_worktrees.repository_common(str(folder)),
+                         vault_worktrees._canonical_path(str(admin)))
+        write(admin / "commondir", "../..\n")
+        self.assertEqual(vault_worktrees.repository_common(str(folder)),
+                         vault_worktrees._canonical_path(str(self.base / "store")))
 
     def test_a_vault_that_is_a_worktree_finds_sibling_trees_and_is_no_copy_of_itself(self) -> None:
         tree = self.add_worktree()

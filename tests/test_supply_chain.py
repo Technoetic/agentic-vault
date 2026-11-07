@@ -29,11 +29,10 @@ AUDIT_REQUIREMENTS_IN = ROOT / "ci" / "requirements-audit.in"
 AUDIT_REQUIREMENTS = ROOT / "ci" / "requirements-audit.txt"
 AUDIT_JOB = "supply-chain-audit"
 BLOCKING_JOBS = ("unittest", "stateful")
-# Time limits (minutes) of the blocking jobs. The v0.39.1 tag run's 1964-second
-# unit step plus measured setup/post-unit overhead gives a 2109-second planning
-# envelope, above the former 35-minute cap. The approved unit-job cap is 45;
-# the stateful job keeps 10. Exact finite caps remain required.
-BLOCKING_JOB_TIMEOUTS = {"unittest": "45", "stateful": "10"}
+# Time limits (minutes) of the blocking jobs. The workflow comment above the
+# unit-job cap holds the reason for 60; the stateful job keeps 10. Exact finite
+# caps remain required.
+BLOCKING_JOB_TIMEOUTS = {"unittest": "60", "stateful": "10"}
 AUDIT_ACTIONS = {
     "actions/checkout",
     "actions/setup-python",

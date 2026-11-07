@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts/env_vary.py'
@@ -164,6 +165,76 @@ class InvestigationTests(unittest.TestCase):
             env_vary.investigate(Scripted(lambda *a: outcome()), NAMES, control_runs=1)
 
 
+class RunnerTests(unittest.TestCase):
+    """The wrapper around child runs, with a stand-in for the child."""
+
+    def setUp(self):
+        self.assertIsNotNone(env_vary, 'scripts/env_vary.py has not been implemented')
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def runner(self, *results):
+        runner = env_vary._Runner(['sample'], [], 1, self.tmp.name)
+        patcher = mock.patch.object(runner, '_child', side_effect=list(results))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return runner
+
+    @staticmethod
+    def rows(count):
+        return {'tests': {'t.A.%d' % number: outcome() for number in range(count)}, 'probe': {}}
+
+    def test_the_test_cap_counts_the_control_run_and_its_edge_is_allowed(self):
+        limit = env_vary.MAX_TESTS
+        self.assertEqual(len(self.runner((self.rows(limit), None))(())['tests']), limit)
+        with self.assertRaises(env_vary.UsageError) as caught:
+            self.runner((self.rows(limit + 1), None))(())
+        self.assertEqual(str(caught.exception), 'invalid_test_selection')
+
+    def test_a_control_with_no_test_is_refused(self):
+        with self.assertRaises(env_vary.UsageError) as caught:
+            self.runner((self.rows(0), None))(())
+        self.assertEqual(str(caught.exception), 'invalid_test_selection')
+
+    def test_a_failed_control_run_stops_the_investigation(self):
+        with self.assertRaises(env_vary.UsageError) as caught:
+            self.runner((None, 'TimeoutExpired'))(())
+        self.assertEqual(str(caught.exception), 'control_run_failed')
+
+    def test_a_failed_varied_run_marks_every_known_test_as_an_error(self):
+        runner = self.runner((self.rows(2), None), (None, 'TimeoutExpired'))
+        runner(())
+        result = runner(('tz',))
+        self.assertEqual(sorted(result['tests']), ['t.A.0', 't.A.1'])
+        for row in result['tests'].values():
+            self.assertEqual((row['outcome'], row['signature']), ('error', 'TimeoutExpired'))
+
+    def test_a_timed_out_variation_is_reported_as_a_difference(self):
+        runner = self.runner((self.rows(1), None), (self.rows(1), None),
+                             (None, 'TimeoutExpired'), (None, 'TimeoutExpired'))
+        report = env_vary.investigate(runner, ('tz',), control_runs=2)
+        self.assertEqual(report['verdict'], 'environment_sensitive')
+        self.assertEqual(report['culprits'], ['tz'])
+        self.assertEqual(report['all_on']['differences'],
+                         [{'test_id': 't.A.0', 'control': 'pass', 'varied': 'error',
+                           'signature': 'TimeoutExpired'}])
+
+
+class CompareTests(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(env_vary, 'scripts/env_vary.py has not been implemented')
+
+    def test_a_test_that_appears_only_under_a_variation_is_a_difference(self):
+        control = {'t.A.a': outcome()}
+        varied = {'t.A.a': outcome(), 't.A.new': outcome()}
+        self.assertEqual(env_vary.compare(control, varied, ['t.A.a']),
+                         ([{'test_id': 't.A.new', 'control': 'absent', 'varied': 'pass'}], []))
+
+    def test_an_unstable_test_stays_out_even_when_it_is_in_both_runs(self):
+        run = {'t.A.a': outcome(), 't.A.b': outcome()}
+        self.assertEqual(env_vary.compare(run, {**run, 't.A.b': outcome('fail')}, ['t.A.a']), ([], []))
+
+
 class VariationTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(env_vary, 'scripts/env_vary.py has not been implemented')
@@ -256,6 +327,49 @@ SAMPLE = textwrap.dedent('''\
 ''')
 
 
+# Every test here passes in a control run. A fixed zone changes each one in its own way.
+OUTCOMES = textwrap.dedent('''\
+    import os
+    import unittest
+
+    VARIED = bool(os.environ.get('TZ'))
+
+
+    class Outcomes(unittest.TestCase):
+        def test_second_subtest_fails(self):
+            for case in ('first', 'second'):
+                with self.subTest(case=case):
+                    self.assertFalse(VARIED and case == 'second')
+
+        def test_error_before_failure(self):
+            for case in ('error', 'failure'):
+                with self.subTest(case=case):
+                    if VARIED and case == 'error':
+                        raise ValueError('synthetic')
+                    self.assertFalse(VARIED)
+
+        def test_failure_before_error(self):
+            for case in ('failure', 'error'):
+                with self.subTest(case=case):
+                    if VARIED and case == 'error':
+                        raise ValueError('synthetic')
+                    self.assertFalse(VARIED)
+
+        @unittest.expectedFailure
+        def test_expected_failure_starts_passing(self):
+            self.assertTrue(VARIED)
+
+        def test_stays_the_same(self):
+            self.assertEqual(1, 1)
+
+
+    if VARIED:
+        class OnlyWhenVaried(unittest.TestCase):
+            def test_new(self):
+                self.assertEqual(1, 1)
+''')
+
+
 class EndToEndTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(env_vary, 'scripts/env_vary.py has not been implemented')
@@ -291,6 +405,41 @@ class EndToEndTests(unittest.TestCase):
         self.assertTrue(report['variation_effect']['temp']['observed'])
         self.assertTrue(report['variation_effect']['home']['observed'])
         self.assertNotIn(self.tmp.name, done.stdout.decode('ascii'))
+
+    def test_real_child_runs_read_subtests_expected_failures_and_new_tests(self):
+        (self.folder / 'envvary_outcomes.py').write_text(OUTCOMES, encoding='utf-8')
+        done = self.run_cli('envvary_outcomes', '--variation', 'tz', '--seed', '1')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        report = json.loads(done.stdout.decode('ascii'))
+        self.assertEqual(report['verdict'], 'environment_sensitive')
+        self.assertEqual(report['culprits'], ['tz'])
+        self.assertEqual(report['control']['unstable_tests'], [])
+        rows = {row['test_id'].partition('.')[2]: (row['control'], row['varied'])
+                for row in report['all_on']['differences']}
+        self.assertEqual(rows, {
+            'Outcomes.test_second_subtest_fails': ('pass', 'fail'),
+            'Outcomes.test_error_before_failure': ('pass', 'error'),
+            'Outcomes.test_failure_before_error': ('pass', 'error'),
+            'Outcomes.test_expected_failure_starts_passing': ('pass', 'fail'),
+            'OnlyWhenVaried.test_new': ('absent', 'pass'),
+        })
+
+    def test_more_tests_than_the_cap_is_a_usage_error(self):
+        count = env_vary.MAX_TESTS + 1
+        (self.folder / 'envvary_many.py').write_text(textwrap.dedent(f'''\
+            import unittest
+
+
+            class Many(unittest.TestCase):
+                pass
+
+
+            for number in range({count}):
+                setattr(Many, 'test_%d' % number, lambda self: None)
+        '''), encoding='utf-8')
+        done = self.run_cli('envvary_many')
+        self.assertEqual(done.returncode, 2)
+        self.assertEqual(json.loads(done.stdout), {'ok': False, 'error': 'invalid_test_selection'})
 
     def test_no_test_selected_is_a_usage_error_not_a_full_run(self):
         done = self.run_cli()

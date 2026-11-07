@@ -21,6 +21,11 @@ import sys
 import tempfile
 import unittest
 
+try:
+    from _git_env import git_environment
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
@@ -70,12 +75,10 @@ finally:
 
 
 def git(cwd: Path, *args: str) -> str:
-    env = {key: value for key, value in os.environ.items()
-           if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
     result = subprocess.run(
         ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
          "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main", *args],
-        cwd=cwd, env=env, capture_output=True, encoding="utf-8", timeout=60, check=False)
+        cwd=cwd, env=git_environment(), capture_output=True, encoding="utf-8", timeout=60, check=False)
     if result.returncode:
         raise AssertionError(f"git {args[0]} failed: {result.stderr}")
     return result.stdout

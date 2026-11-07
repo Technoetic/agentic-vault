@@ -10,6 +10,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _git_env import isolate_git
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._git_env import isolate_git
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 if str(SCRIPTS) not in sys.path:
@@ -30,6 +35,7 @@ class StagedGrowthTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.repo = Path(self.tmp.name).resolve() / 'vault'
         self.repo.mkdir()
+        isolate_git(self)
         self.git('init', '-q')
         self.git('config', 'user.email', 'fixture@example.invalid')
         self.git('config', 'user.name', 'Fixture')
@@ -165,6 +171,16 @@ class StagedGrowthTests(unittest.TestCase):
                                 staged_growth_max_tokens=allowed - 1)
         self.assertEqual(len(errors), 1)
 
+    def test_a_note_exactly_on_its_budget_passes(self):
+        after = body(15)
+        budget = health.estimate_tokens(after)
+        self.commit(body(1))
+        self.stage(after)
+        self.assert_clean(staged_growth_check='block', hot_max_tokens=budget)
+        errors, _ = self.staged(staged_growth_check='block', hot_max_tokens=budget - 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn('over_budget', errors[0])
+
     def test_crossing_the_budget_counts_as_over_budget(self):
         self.commit(body(1))
         self.stage(body(100))
@@ -220,6 +236,16 @@ class StagedGrowthTests(unittest.TestCase):
                                        handoff_max_tokens=30)
         self.assertEqual(errors, [])
         self.assertEqual((warnings[0]['path'], warnings[0]['details']['budget_tokens']), (path, 30))
+
+    def test_one_file_as_hot_and_handoff_takes_the_smaller_budget(self):
+        self.commit(body(1))
+        self.stage(body(100))
+        for hot, handoff in ((10, 10_000), (10_000, 10)):
+            with self.subTest(hot=hot, handoff=handoff):
+                errors, warnings = self.staged(staged_growth_check='warn', handoff_note=NOTE,
+                                               hot_max_tokens=hot, handoff_max_tokens=handoff)
+                self.assertEqual(errors, [])
+                self.assertEqual([item['details']['budget_tokens'] for item in warnings], [10])
 
     def test_hangul_is_measured_with_the_engine_estimator(self):
         path = '00-meta/한글 메모.md'
