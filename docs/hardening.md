@@ -866,7 +866,7 @@ Python projects, with the remedy in a user-level file. Applying it to factual st
 extension, and the study does not measure it. The wording here is the engine's own.
 
 The extension was tried on invented scenarios before shipping. This is a synthetic result only: one local Qwen 3.5 9B Q8 model,
-temperature 0, thinking off, one pass. The harness is not published, so these figures cannot be rerun from this repository. Fact cases set a stale value in the rule against a command
+temperature 0, thinking off, one pass per wording. An earlier run of the first wordings under a JSON-schema harness gave different counts (no sentence 15/24, first draft 13/24, prohibitions 6/8 down to 3/8) and is not in the table. The harness is not published, so these figures cannot be rerun from this repository. Fact cases set a stale value in the rule against a command
 result; prohibition cases show a file or command output that claims the act is allowed.
 
 | Sentence added to the rules | Fact cases answered from the result | Prohibition cases answered "no" |
