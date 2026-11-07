@@ -136,6 +136,84 @@ class CheckpointTests(unittest.TestCase):
         self.assertIn('checkpoint unavailable', result.stderr)
         self.assertEqual(other.read_bytes(), original)
 
+    def test_checkpoint_hashes_a_source_over_the_write_limit(self):
+        import vault_state as state
+        large = b'x' * (state.MAX_BYTES + 1)
+        self.write('notes/handoff.md', large)
+        result = self.run_hook({'hook_event_name': 'PreCompact', 'session_id': 'large'})
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
+        saved = json.loads(self.records()[0].read_text())
+        recorded = {source['path']: source for source in saved['sources']}['notes/handoff.md']
+        self.assertEqual(recorded['sha256'], hashlib.sha256(large).hexdigest())
+        self.assertEqual(recorded['size'], len(large))
+
+    def test_checkpoint_source_hash_does_not_buffer_the_file(self):
+        import vault_state as state
+        calls = []
+        real = state.stable_read
+        def spy(resolver, limit, *, contents=False):
+            if resolver().name == 'handoff.md':
+                calls.append((limit, contents))
+            return real(resolver, limit, contents=contents)
+        with mock.patch.object(state, 'stable_read', spy):
+            state.write_checkpoint(self.vault, 'PreCompact', session_id='spy')
+        self.assertTrue(calls)
+        self.assertEqual(set(calls), {(state.MAX_CHECKPOINT_SOURCE_BYTES, False)})
+
+    def test_checkpoint_rechecks_a_large_source_before_replacing(self):
+        import vault_state as state
+        self.write('notes/handoff.md', b'x' * (state.MAX_BYTES + 1))
+        real_read = state._Policy.hash_note
+        changed = []
+        def drift(policy, selected):
+            if selected == 'notes/handoff.md' and any((self.vault / RUNTIME).glob('.vault-state-*')):
+                self.write('notes/handoff.md', b'y' * (state.MAX_BYTES + 1))
+                changed.append(True)
+            return real_read(policy, selected)
+        with mock.patch.object(state._Policy, 'hash_note', drift):
+            with self.assertRaisesRegex(state.StateError, 'source_changed'):
+                state.write_checkpoint(self.vault, 'PreCompact', session_id='drift')
+        self.assertEqual(changed, [True])
+        self.assertEqual(self.records(), [])
+
+    def test_checkpoint_source_over_the_hash_limit_names_the_size_failure(self):
+        import vault_state as state
+        output, errors = io.StringIO(), io.StringIO()
+        spec = importlib.util.spec_from_file_location('checkpoint_large_test', HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        with mock.patch.object(state, 'MAX_CHECKPOINT_SOURCE_BYTES', 4), \
+             mock.patch.object(sys, 'stdin', io.StringIO('{"hook_event_name":"PreCompact"}')), \
+             mock.patch.object(sys, 'stdout', output), mock.patch.object(sys, 'stderr', errors):
+            result = hook.main(['--vault', str(self.vault), '--event', 'PreCompact'])
+        self.assertEqual((result, output.getvalue()), (0, ''))
+        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable (input_too_large)\n')
+        self.assertEqual(self.records(), [])
+
+    def test_hook_prints_only_fixed_failure_codes(self):
+        spec = importlib.util.spec_from_file_location('checkpoint_codes_test', HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        import vault_evidence as evidence
+        import vault_healthcheck as health
+        import vault_state as state
+        cases = ((state.StateError('source_changed'), 'source_changed'),
+                 (evidence.EvidenceError('file_changed_during_read'), 'file_changed_during_read'),
+                 (state.StateError('C:/private/SECRET-NOTE.md'), 'unclassified_failure'),
+                 (evidence.EvidenceError('SECRET text with spaces'), 'unclassified_failure'),
+                 (OSError('C:/private/SECRET-NOTE.md'), 'unclassified_failure'),
+                 (ValueError('SECRET-NOTE'), 'unclassified_failure'),
+                 (health.HealthcheckError('SECRET-NOTE must not'), 'unclassified_failure'))
+        for error, code in cases:
+            with self.subTest(code=code, error=type(error).__name__):
+                output, errors = io.StringIO(), io.StringIO()
+                with mock.patch.object(hook, 'write_checkpoint', side_effect=error), \
+                     mock.patch.object(sys, 'stdin', io.StringIO('{"hook_event_name":"PreCompact"}')), \
+                     mock.patch.object(sys, 'stdout', output), mock.patch.object(sys, 'stderr', errors):
+                    result = hook.main(['--vault', str(self.vault), '--event', 'PreCompact'])
+                self.assertEqual((result, output.getvalue()), (0, ''))
+                self.assertEqual(errors.getvalue(), f'agentic-vault: checkpoint unavailable ({code})\n')
+
     def test_parallel_checkpoints_preserve_both_events(self):
         workers = [subprocess.Popen([sys.executable, str(HOOK), '--vault', str(self.vault)],
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -170,7 +248,7 @@ class CheckpointTests(unittest.TestCase):
                 self.fail(f'malformed lease escaped the safe hook boundary: {type(error).__name__}')
         self.assertEqual(result, 0)
         self.assertEqual(output.getvalue(), '')
-        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable\n')
+        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable (invalid_lease)\n')
         self.assertEqual(self.records(), [])
         self.assertEqual({p: p.read_bytes() for p in originals}, originals)
 
@@ -181,7 +259,7 @@ class CheckpointTests(unittest.TestCase):
         import vault_state as state
         original_config = (self.vault / state.CONFIG_PATH).read_bytes()
         originals = {p: p.read_bytes() for p in (self.vault / 'notes').glob('*.md')}
-        real_read = state._Policy.read_note
+        real_read = state._Policy.hash_note
         switched = []
         def drift(policy, selected):
             result = real_read(policy, selected)
@@ -192,13 +270,13 @@ class CheckpointTests(unittest.TestCase):
                 switched.append(True)
             return result
         output, errors = io.StringIO(), io.StringIO()
-        with mock.patch.object(state._Policy, 'read_note', drift), \
+        with mock.patch.object(state._Policy, 'hash_note', drift), \
              mock.patch.object(sys, 'stdin', io.StringIO('{"hook_event_name":"PreCompact"}')), \
              mock.patch.object(sys, 'stdout', output), mock.patch.object(sys, 'stderr', errors):
             result = hook.main(['--vault', str(self.vault), '--event', 'PreCompact'])
         self.assertEqual(switched, [True])
         self.assertEqual((result, output.getvalue()), (0, ''))
-        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable\n')
+        self.assertEqual(errors.getvalue(), 'agentic-vault: checkpoint unavailable (unsafe_configuration)\n')
         self.assertEqual(self.records(), [])
         self.assertEqual({p: p.read_bytes() for p in originals}, originals)
 

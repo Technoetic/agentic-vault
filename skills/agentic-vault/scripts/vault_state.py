@@ -23,13 +23,16 @@ import tempfile
 import time
 import uuid
 
-from vault_evidence import EvidenceError, decode, regular, stable_read
+from vault_evidence import MAX_FILE_BYTES, EvidenceError, decode, regular, stable_read
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import relative_parts, resolve_note_path, zone_matches
 
 RUNTIME_DIR = '00-meta/.agentic-vault/runtime'
 CONFIG_PATH = '00-meta/vault-config.json'
 MAX_BYTES = 256 * 1024
+# A checkpoint stores hashes, never note bytes, so its sources are hashed in
+# chunks under the evidence file bound rather than held to MAX_BYTES.
+MAX_CHECKPOINT_SOURCE_BYTES = MAX_FILE_BYTES
 MAX_RUNTIME_BYTES = 64 * 1024
 MAX_ITEMS = 128
 MAX_WAIT_SECONDS = 60
@@ -42,6 +45,8 @@ PENDING_ID_RE = re.compile(r'(?:[A-Za-z][A-Za-z0-9_]{0,23}-?\d{1,10}|av-[0-9a-f]
 BEGIN = '<!-- agentic-vault:handoff begin -->'
 END = '<!-- agentic-vault:handoff end -->'
 EVENTS = frozenset({'PreCompact', 'SessionEnd'})
+# Read failures a caller can act on; every other source failure stays folded.
+READ_FAILURE_CODES = frozenset({'input_too_large', 'file_changed_during_read'})
 
 
 class StateError(Exception):
@@ -71,11 +76,18 @@ def _hash(value, code='invalid_hash'):
     return value
 
 
-def _read(resolver, limit=MAX_BYTES):
+def _stable(resolver, limit, *, contents):
     try:
-        return stable_read(resolver, limit, contents=True)
-    except (EvidenceError, ValueError, OSError, RuntimeError) as exc:
+        return stable_read(resolver, limit, contents=contents)
+    except EvidenceError as exc:
+        code = str(exc)
+        raise StateError(code if code in READ_FAILURE_CODES else 'unsafe_or_changed_source') from exc
+    except (ValueError, OSError, RuntimeError) as exc:
         raise StateError('unsafe_or_changed_source') from exc
+
+
+def _read(resolver, limit=MAX_BYTES):
+    return _stable(resolver, limit, contents=True)
 
 
 class _Policy:
@@ -121,6 +133,12 @@ class _Policy:
 
     def read_note(self, relative):
         info, mark, raw = _read(lambda: self.note(relative))
+        return {'path': self.note(relative).relative_to(self.root).as_posix(), **info}, mark, raw
+
+    def hash_note(self, relative):
+        """Fingerprint a note under the checkpoint bound without keeping its bytes."""
+        info, mark, raw = _stable(lambda: self.note(relative), MAX_CHECKPOINT_SOURCE_BYTES,
+                                  contents=False)
         return {'path': self.note(relative).relative_to(self.root).as_posix(), **info}, mark, raw
 
 
@@ -783,7 +801,7 @@ def write_checkpoint(vault, event, *, session_id=None, pending_references=None):
             path = policy.note(relative)
             if not path.exists():
                 continue
-            info, _, _ = policy.read_note(relative)
+            info, _, _ = policy.hash_note(relative)
             if info['path'] not in {source['path'] for source in sources}:
                 sources.append(info)
         target = policy.runtime(name)
@@ -807,7 +825,7 @@ def write_checkpoint(vault, event, *, session_id=None, pending_references=None):
                 current = policy.fresh()
                 _check_lease(current, lease)
                 for source in sources:
-                    info, _, _ = current.read_note(source['path'])
+                    info, _, _ = current.hash_note(source['path'])
                     if info['sha256'] != source['sha256']:
                         raise StateError('source_changed')
                 checked = current.runtime(name)

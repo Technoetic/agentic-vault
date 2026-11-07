@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import sys
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
@@ -16,6 +17,7 @@ from vault_healthcheck import HealthcheckError
 from vault_state import CONFIG_PATH, EVENTS, StateError, _pending, write_checkpoint
 
 MAX_EVENT_BYTES = 64 * 1024
+FAILURE_CODE_RE = re.compile(r'[a-z][a-z0-9_]{0,63}')
 
 
 def read_hook_event(stream=None, *, expected_event=None):
@@ -51,6 +53,12 @@ def read_hook_event(stream=None, *, expected_event=None):
     return dict(event=event, session_id=session_id, pending_references=references)
 
 
+def failure_code(error):
+    """Name a failure by its fixed code; other exception text may quote a path or body."""
+    code = str(error) if isinstance(error, (StateError, EvidenceError)) else ''
+    return code if FAILURE_CODE_RE.fullmatch(code) else 'unclassified_failure'
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vault', type=Path)
@@ -69,8 +77,8 @@ def main(argv=None):
     try:
         write_checkpoint(vault, event['event'], session_id=event['session_id'],
                          pending_references=event['pending_references'])
-    except (StateError, EvidenceError, HealthcheckError, ValueError, OSError, UnicodeError, RuntimeError):
-        print('agentic-vault: checkpoint unavailable', file=sys.stderr)
+    except (StateError, EvidenceError, HealthcheckError, ValueError, OSError, UnicodeError, RuntimeError) as error:
+        print(f'agentic-vault: checkpoint unavailable ({failure_code(error)})', file=sys.stderr)
     return 0
 
 

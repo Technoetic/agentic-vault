@@ -512,6 +512,49 @@ except StateError as e: print(str(e))
                         self.fail('malformed same-token lease authorized a write')
                 self.assertEqual(target.read_bytes(), b'old\n')
 
+    def test_read_keeps_size_and_change_failures_distinct(self):
+        self.write('notes/large.md', b'x' * (state.MAX_BYTES + 1))
+        policy = state._Policy(self.vault)
+        with self.assertRaisesRegex(state.StateError, '^input_too_large$'):
+            policy.read_note('notes/large.md')
+        with mock.patch.object(state, 'stable_read',
+                               side_effect=state.EvidenceError('file_changed_during_read')):
+            with self.assertRaisesRegex(state.StateError, '^file_changed_during_read$'):
+                policy.read_note('notes/handoff.md')
+
+    def test_read_at_the_limit_still_succeeds(self):
+        self.write('notes/edge.md', b'x' * state.MAX_BYTES)
+        info, _mark, raw = state._Policy(self.vault).read_note('notes/edge.md')
+        self.assertEqual((info['size'], len(raw)), (state.MAX_BYTES, state.MAX_BYTES))
+
+    def test_read_folds_every_other_source_failure_to_one_code(self):
+        policy = state._Policy(self.vault)
+        with self.assertRaisesRegex(state.StateError, '^unsafe_or_changed_source$'):
+            policy.read_note('notes/absent.md')
+        for error in (state.EvidenceError('unsafe_file'), OSError('private/path'), ValueError('body'),
+                      RuntimeError('body')):
+            with self.subTest(error=type(error).__name__):
+                with mock.patch.object(state, 'stable_read', side_effect=error):
+                    with self.assertRaisesRegex(state.StateError, '^unsafe_or_changed_source$'):
+                        policy.read_note('notes/handoff.md')
+
+    def test_hash_note_returns_the_read_note_record_without_contents(self):
+        policy = state._Policy(self.vault)
+        hashed, _mark, raw = policy.hash_note('notes/handoff.md')
+        read, _mark, _raw = policy.read_note('notes/handoff.md')
+        self.assertEqual((hashed, raw), (read, b''))
+
+    def test_hash_note_keeps_the_note_path_policy(self):
+        policy = state._Policy(self.vault)
+        for relative in ('private/secret.md', state.RUNTIME_DIR + '/x.md', 'notes/plain.txt'):
+            with self.subTest(relative=relative):
+                with self.assertRaises(state.StateError):
+                    policy.hash_note(relative)
+
+    def test_checkpoint_limit_leaves_the_write_limit_alone(self):
+        self.assertEqual(state.MAX_BYTES, 256 * 1024)
+        self.assertGreater(state.MAX_CHECKPOINT_SOURCE_BYTES, state.MAX_BYTES)
+
     def test_fix3_policy_change_during_last_target_or_source_read_blocks_replace(self):
         original_config = (self.vault / state.CONFIG_PATH).read_bytes()
         real_read = state._Policy.read_note
