@@ -1,6 +1,6 @@
 ---
 description: 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정 helper를 명시적으로 실행
-argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration|revocation|bundle|review-plan] [작업과 인자]"
+argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration|revocation|bundle|review-plan|handoff-fold] [작업과 인자]"
 ---
 
 # /vault-harden — 명시적 보강 도구
@@ -16,6 +16,11 @@ Codex는 `$agentic-vault:agentic-vault harden <작업과 인자>`를 사용한�
 명시적 `--apply`가 필요하다. 중단된 묶음은 실제 before/after를 확인한 순방향 복구만 한다.
 `review-plan`은 [재검토 순서](../docs/review-planning.md)의 `vault_review_plan.py`로 연결한다.
 호출자가 작성한 inventory·graph만 읽으며 노트 수정·재캡처·추론을 추가하지 않는다.
+`handoff-fold`는 [handoff 접기](../docs/handoff-fold.md)의 `vault_handoff_fold.py`로 연결한다.
+기본 `analyze`는 읽기 전용이고, `apply`에는 그 결과의 `--expected-sha256`이 필요하다. 문턱과 보호
+절 수는 기본값이 없으므로 사용자가 정한 값만 쓴다. 자동 실행은 없다. 요약은 호스트가 쓰는 파생 글이며,
+없으면 제목과 미결 줄만 남긴다. `scripts/evaluate_handoff_fold.py`의 문자열 도달은 소실 경보일 뿐
+이어서 일할 수 있다는 근거가 아니다.
 
 1. 요청이 읽기 전용이면 prepare/check/parse/평가만 실행한다. 적용·이동·설정 변경을 덧붙이지 않는다.
 2. 볼트 파일 작업은 설정·경로·deny 정책을 검증한다. 호출자가 명시한 파일만 바인딩하며 runtime/영수증을 일반 지식으로 읽지 않는다.
