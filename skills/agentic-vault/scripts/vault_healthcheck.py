@@ -925,9 +925,101 @@ def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
     return any(part in names for part in rel.split("/"))
 
 
+# This file is copied into vaults and run alone by the pre-commit hook, so it
+# cannot import vault_worktrees.py. The block below is its verbatim copy;
+# tests/test_vault_worktrees.py fails if they drift.
+# --- BEGIN SHARED WORKTREE RULE (verbatim copy of vault_worktrees.py) ---
+GITFILE_LIMIT = 4096  # a .git file holds one path
+
+
+def _git_toplevel(start: str) -> str | None:
+    """The nearest folder at or above start that holds .git (a repository or worktree root), or None."""
+    current = start
+    for _ in range(256):
+        try:
+            if os.path.exists(os.path.join(current, ".git")):
+                return current
+        except (OSError, ValueError):
+            return None
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
+def _other_share(path: str, anchor: str) -> bool:
+    """True for a UNC path on another share than anchor, which is never looked up."""
+    drive = os.path.splitdrive(path)[0]
+    return drive.startswith("\\\\") and os.path.normcase(drive) != os.path.normcase(os.path.splitdrive(anchor)[0])
+
+
+def _canonical_path(path: str) -> str:
+    """The form two repository paths are compared in: links resolved, case folded as the file system does."""
+    try:
+        text = os.path.realpath(path)
+    except (OSError, ValueError):
+        text = path
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    text = os.path.normcase(text)
+    return text.casefold() if sys.platform == "darwin" else text
+
+
+def gitfile_target(directory: str) -> str | None:
+    """The path that a regular .git file in directory names, or None for anything else."""
+    marker = os.path.join(directory, ".git")
+    try:
+        info = os.lstat(marker)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > GITFILE_LIMIT:
+            return None
+        with open(marker, "rb") as handle:
+            text = handle.read(GITFILE_LIMIT + 1).decode("utf-8")
+    except (OSError, ValueError):
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    value = text[len("gitdir:"):].strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return None
+    return os.path.normpath(os.path.join(directory, value))
+
+
+def repository_common(directory: str) -> str | None:
+    """The common git directory of the working tree at directory, in _canonical_path form, or None."""
+    marker = os.path.join(directory, ".git")
+    try:
+        if stat.S_ISDIR(os.lstat(marker).st_mode):
+            return _canonical_path(marker)
+    except (OSError, ValueError):
+        return None
+    target = gitfile_target(directory)
+    if target is None or _other_share(target, directory):
+        return None
+    if os.path.basename(os.path.dirname(target)) == "worktrees" and os.path.isfile(os.path.join(target, "commondir")):
+        target = os.path.dirname(os.path.dirname(target))
+    return _canonical_path(target)
+
+
+def linked_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked working tree of the repository whose common git directory is common.
+
+    The gitdir value must be <common>/worktrees/<name>: not a submodule, whose
+    value is .../modules/<name>, and not a tree of another repository. The
+    admin folder itself may be gone: the copy of the vault is still there.
+    """
+    target = gitfile_target(directory)
+    if target is None or os.path.basename(os.path.dirname(target)) != "worktrees":
+        return False
+    owner = os.path.dirname(os.path.dirname(target))
+    return not _other_share(owner, common) and _canonical_path(owner) == common
+# --- END SHARED WORKTREE RULE ---
+
+
 def collect_md_files(vault: Path, exclude_names: set[str],
                      skipped: list[str] | None = None, *,
-                     file_entries: list[Path] | None = None) -> list[Path]:
+                     file_entries: list[Path] | None = None,
+                     linked_trees: list[str] | None = None) -> list[Path]:
     """exclude_dirs(이름 매칭)를 걷기 단계에서 가지치기하며 .md 를 수집한다.
     deny_zones 는 여기서 제외하지 않는다 — 링크 해석 인덱스에는 포함돼야
     아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다.
@@ -935,8 +1027,12 @@ def collect_md_files(vault: Path, exclude_names: set[str],
     건너뛴 디렉토리·.md 파일의 볼트 상대 경로는 skipped에 남긴다 — 조용히
     빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고).
     file_entries(선택, 기본 None)를 넘기면 같은 걷기에서 본 모든 파일 항목
-    (확장자 무관)의 경로를 덧붙인다 — 이름 검사용이며 열거나 따라가지 않는다."""
+    (확장자 무관)의 경로를 덧붙인다 — 이름 검사용이며 열거나 따라가지 않는다.
+    이 볼트 저장소의 연결 작업 트리는 노트의 사본이라 내려가지 않고 linked_trees에
+    남긴다(없으면 skipped). 서브모듈과 다른 저장소의 작업 트리는 그대로 걷는다."""
     results: list[Path] = []
+    top = _git_toplevel(str(vault))
+    common = repository_common(top) if top is not None else None
     def scan_error(error: OSError) -> None:
         if skipped is not None:
             try:
@@ -952,6 +1048,11 @@ def collect_md_files(vault: Path, exclude_names: set[str],
             if dirname in exclude_names or dirname == ".git":
                 continue
             if rel_posix(child, vault).casefold() == ENGINE_RUNTIME_RELPATH.casefold():
+                continue
+            if common is not None and linked_worktree(str(child), common):
+                report = linked_trees if linked_trees is not None else skipped
+                if report is not None:
+                    report.append(rel_posix(child, vault) + "/")
                 continue
             try:
                 _ensure_vault_path(vault, child, f"scan directory {child.name}")
@@ -1947,9 +2048,11 @@ def main() -> int:
 
     # --- 파일 수집 ------------------------------------------------------------
     link_skipped: list[str] = []
+    linked_trees: list[str] = []
     # 이름 검사가 켜졌을 때만 같은 걷기에서 모든 파일 항목(확장자 무관)을 모은다.
     file_entries: list[Path] | None = [] if sync_name_check and _EXTENSIONS_AVAILABLE else None
-    all_md = collect_md_files(vault, exclude_names, link_skipped, file_entries=file_entries)
+    all_md = collect_md_files(vault, exclude_names, link_skipped, file_entries=file_entries,
+                              linked_trees=linked_trees)
     # 링크 해석용 인덱스는 deny zone 포함 전체(아카이브로 이동한 노트 링크는 유효),
     # 린트 대상은 deny zone·도구 문서·리포트 자신을 제외한 활성 영역만.
     # 주의: 옵시디언 frontmatter aliases 는 원시 위키링크를 해석하지 못한다 —
@@ -2251,6 +2354,8 @@ def main() -> int:
         rel for rel in link_skipped
         if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names)
     })
+    linked_trees = sorted(rel for rel in linked_trees
+                          if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names))
 
     extension_diagnostics = extension_warnings(approved_note_texts, cfg,
         input_complete=not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
@@ -2279,7 +2384,7 @@ def main() -> int:
                     + len(rules_oversized) + len(rules_dup)
                     + len(injection_over)
                     + len(unreadable)
-                    + len(link_skipped)
+                    + len(link_skipped) + len(linked_trees)
                     + len(extension_diagnostics)
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
@@ -2419,12 +2524,14 @@ def main() -> int:
         "13은 결번 — 포크 볼트의 루트 allowlist 검사 번호와 충돌 회피)",
         *([f"- {rel} — {err}" for rel, err in unreadable] or ["- 없음"]),
         "",
-        f"## 14b. 링크·정션 제외 — 따라가지 않고 건너뜀(경로 확인 실패 포함) — 관리성 ({len(link_skipped)})",
+        f"## 14b. 링크·정션 제외 — 따라가지 않고 건너뜀(경로 확인 실패 포함) — 관리성 "
+        f"({len(link_skipped) + len(linked_trees)})",
         "  (심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다. "
         "끝이 /인 항목은 폴더 전체다 — 그 아래 노트는 이번 검사에서 프런트매터·링크·고아 "
         "판정을 받지 않았다. 검사하려면 볼트 안 실제 폴더로 옮기고, 의도한 제외라면 "
         "config의 exclude_dirs에 이름을 적어라)",
-        *([f"- {rel}" for rel in link_skipped] or ["- 없음"]),
+        *([*[f"- {rel}" for rel in link_skipped], *[f"- {rel} (연결 작업 트리 사본)" for rel in linked_trees]]
+          or ["- 없음"]),
         "",
     ]
     if extension_diagnostics:
@@ -2448,7 +2555,8 @@ def main() -> int:
 
     drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
     read_note = f" ⚠️읽기 실패 {len(unreadable)}건(§14)" if unreadable else ""
-    link_note = f" ⚠️링크·정션 제외 {len(link_skipped)}건(§14b)" if link_skipped else ""
+    link_total = len(link_skipped) + len(linked_trees)
+    link_note = f" ⚠️링크·정션 제외 {link_total}건(§14b)" if link_total else ""
     sync_note = (f" ⚠️동기화 충돌·임시 파일 이름 {sync_name_count}건(§15)"
                  if sync_name_count else "")
     checkpoint_note = (f" ⚠️checkpoint 이후 바뀐 엔진 노트 {checkpoint_change_count}건(§15)"

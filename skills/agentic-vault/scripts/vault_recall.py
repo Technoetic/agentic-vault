@@ -16,6 +16,7 @@ from typing import Sequence
 from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
 from vault_paths import relative_parts, resolve_note_path, zone_matches
 from vault_revocation import RevocationError, RevocationPolicy
+from vault_worktrees import WorktreeScope
 
 
 for _stream in (sys.stdout, sys.stderr):
@@ -298,6 +299,7 @@ def _markdown_paths(
     # single listing completed within the entry cap; it reuses this walk's
     # listing so callers can fingerprint membership without a second scan.
     found: list[tuple[str, Path]] = []
+    worktrees = WorktreeScope(vault)
     pending: list[tuple[tuple[str, ...], Path]] = [((), vault)]
     hit_entry_limit = False
 
@@ -343,7 +345,12 @@ def _markdown_paths(
                 _omit(diagnostics, "unsafe_path")
                 continue
 
-            if is_directory:
+            if is_directory and worktrees.linked(safe_path):
+                # A second copy of the notes, not more notes: named, and the search stays complete.
+                skipped_worktrees = diagnostics.setdefault("skipped_worktrees", [])
+                if len(skipped_worktrees) < MAX_RESULTS:
+                    skipped_worktrees.append(rel_path)
+            elif is_directory:
                 child_dirs.append((child_parts, safe_path))
             elif entry.name.casefold().endswith(".md"):
                 found.append((rel_path.replace("\\", "/"), safe_path))

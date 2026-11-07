@@ -30,6 +30,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from vault_paths import relative_parts  # noqa: E402  single source of the segment rule
+from vault_worktrees import WorktreeScope  # noqa: E402  a linked tree is a copy, not more notes
 
 
 CONFIG_REL = "00-meta/vault-config.json"
@@ -144,12 +145,17 @@ def _fingerprint(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns)
 
 
-def _inventory(root: Path, excluded=(), exclude_files=()):
-    """Scan even excluded directories for unsafe links; never follow a link."""
+def _inventory(root: Path, excluded=(), exclude_files=(), *, skipped=None):
+    """Scan even excluded directories for unsafe links; never follow a link.
+
+    With skipped (a list), a linked working tree of the vault's repository is
+    left out like an excluded directory and its relative path is added there.
+    """
     files, directories = {}, []
     root = _safe_path(root)
     if not root.is_dir():
         raise BackupError("expected a directory")
+    worktrees = WorktreeScope(root) if skipped is not None else None
     pending = [(root, False)]
     while pending:
         directory, omitted = pending.pop()
@@ -163,6 +169,10 @@ def _inventory(root: Path, excluded=(), exclude_files=()):
                 rel = path.relative_to(root).as_posix()
                 if stat.S_ISDIR(info.st_mode):
                     skip = omitted or entry.name in excluded
+                    if not skip and worktrees is not None and worktrees.linked(path):
+                        skip = True
+                        if rel not in skipped:
+                            skipped.append(rel)
                     pending.append((path, skip))
                     if not skip:
                         directories.append(_relative_name(rel))
@@ -299,8 +309,13 @@ def verify_snapshot(snapshot: Path) -> dict:
     return manifest
 
 
-def create_backup(vault: Path, target: Path) -> Path:
-    """Publish one verified snapshot with an exclusive per-target writer lock."""
+def create_backup(vault: Path, target: Path, *, skipped=None) -> Path:
+    """Publish one verified snapshot with an exclusive per-target writer lock.
+
+    Linked working trees of the vault's repository are copies of the notes and
+    stay out of the snapshot; their relative paths go to skipped, when given.
+    """
+    left_out = [] if skipped is None else skipped
     vault = _safe_path(vault)
     target = _safe_path(target if Path(target).is_absolute() else vault / target)
     _nonoverlap(vault, target)
@@ -314,7 +329,7 @@ def create_backup(vault: Path, target: Path) -> Path:
         stage = target / (".staging-" + identifier)
         stage.mkdir(mode=0o700)
         (stage / "files").mkdir()
-        before, directories = _inventory(vault, excluded, EXCLUDE_FILES)
+        before, directories = _inventory(vault, excluded, EXCLUDE_FILES, skipped=left_out)
         manifest = {"version": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
                     "files": {}, "directories": directories, "git_bundle": None}
         for name in directories:
@@ -325,7 +340,7 @@ def create_backup(vault: Path, target: Path) -> Path:
             if _digest(source) != manifest["files"][name]:
                 raise BackupError("source changed during backup")
         manifest["git_bundle"] = _make_bundle(vault, stage)
-        if _inventory(vault, excluded, EXCLUDE_FILES) != (before, directories):
+        if _inventory(vault, excluded, EXCLUDE_FILES, skipped=left_out) != (before, directories):
             raise BackupError("vault changed during backup; retry with a quiescent vault")
         with (stage / "manifest.json").open("x", encoding="utf-8") as stream:
             json.dump(manifest, stream, ensure_ascii=False, indent=2)
@@ -397,7 +412,11 @@ def main() -> int:
             if not target:
                 print("[agentic-vault] No backup_target configured; backup skipped.")
                 return 0
-            print(f"Snapshot: {create_backup(vault, Path(target))}")
+            left_out = []
+            snapshot = create_backup(vault, Path(target), skipped=left_out)
+            for name in left_out:
+                print(f"[agentic-vault] Left out linked worktree copy: {name}")
+            print(f"Snapshot: {snapshot}")
         return 0
     except (OSError, ValueError) as exc:
         print(f"[agentic-vault] Backup failed: {exc}", file=sys.stderr)

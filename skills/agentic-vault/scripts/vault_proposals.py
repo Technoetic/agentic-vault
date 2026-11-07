@@ -24,6 +24,7 @@ import uuid
 
 from vault_healthcheck import HealthcheckError, _staged_schema_errors, validate_config
 from vault_paths import resolve_note_path
+from vault_worktrees import WorktreeScope
 from vault_evidence import EvidenceError, decode, regular, stable_read, stamp
 
 
@@ -104,6 +105,8 @@ def read_stable(resolver, limit: int) -> bytes:
 class Store:
     def __init__(self, vault: Path):
         self.vault = vault
+        self.root = vault.resolve()
+        self.worktrees = WorktreeScope(self.root)
         _, self.config_mark, raw = _stable(
             lambda: resolve_note_path(vault, '00-meta/vault-config.json', ('.git',)), MAX_CONFIG_BYTES)
         self.config_sha256 = sha(raw)
@@ -115,13 +118,20 @@ class Store:
         # Config itself is checked again under its declared policy.
         self.path('00-meta/vault-config.json')
 
+    def _resolved(self, relative: str, zones) -> Path:
+        path = resolve_note_path(self.vault, relative, zones)
+        # A copy of a zone in a linked working tree is as closed as the zone.
+        if self.worktrees.denied(path.relative_to(self.root).as_posix().split('/'), zones):
+            raise ValueError('path is in a denied zone')
+        return path
+
     def path(self, relative: str) -> Path:
-        return resolve_note_path(self.vault, relative, self.denied)
+        return self._resolved(relative, self.denied)
 
     def note_path(self, relative: str, *, respect_exclusions: bool = False) -> Path:
         # Existing callers explicitly select ingest sources: retrieval exclusions
         # do not revoke that access. Undo opts into its stricter target boundary.
-        path = (resolve_note_path(self.vault, relative, (*self.denied, *self.config['exclude_dirs']))
+        path = (self._resolved(relative, (*self.denied, *self.config['exclude_dirs']))
                 if respect_exclusions else self.path(relative))
         canonical = path.relative_to(self.vault.resolve()).as_posix()
         if path.suffix.casefold() != '.md' or any(

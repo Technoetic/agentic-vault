@@ -916,6 +916,78 @@ checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`
 - 이름 규칙은 문서에 적힌 형태만 본다. 클라이언트 버전·설정에 따른 다른 이름은 놓치고, 같은 모양의 이름을 일부러 쓴 파일은 오탐이 된다.
 - 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-19 기준). 근거는 단위 테스트가 만든 임시 볼트의 합성 자료뿐이다.
 
+## Linked worktree copies and deny zones
+
+A host can create a linked working tree inside the vault. Claude Code's default location is
+`.claude/worktrees/<name>/` ([worktrees documentation](https://code.claude.com/docs/en/worktrees),
+fetched 2026-11-07, 45,321 bytes, SHA-256 prefix `0574c192aca7bd43`; a live page without a date).
+Tracked notes then exist twice. A longer zone (`10-inbox/_processed`) matches only from the root,
+so its copy fell outside the zone, and copied notes pushed real notes out of recall.
+`vault_paths.zone_matches` keeps that root contract. `vault_worktrees.py` adds a second view.
+
+- **What counts:** a folder whose `.git` is a regular file with a `gitdir:` value of
+  `<common>/worktrees/<name>`, where `<common>` is the common git directory of the repository that
+  holds this vault. A submodule (`modules/<name>`), a nested repository and a linked tree of another
+  repository stay ordinary folders, so their notes stay in every walk. Without a repository nothing
+  is read. A UNC value on another share is not looked up.
+- **Walks:** `vault_recall.py`, the healthcheck note walk, `backup_vault.py` and
+  `vault_instruction_budget.py` skip such a folder and name it. Recall adds
+  `diagnostics.skipped_worktrees` only when there is one, and the search stays complete.
+  The healthcheck lists it in section 14b. A snapshot leaves it out, and the manifest format does
+  not change, so `backup_vault.py` prints one line per copy and `create_backup(skipped=[...])`
+  returns the paths. Uncommitted work in a copy is therefore not in the snapshot.
+  The instruction inventory reports `skipped_instruction_path`.
+- **Paths a caller names:** `vault_evidence.py`, `vault_proposals.py` and `vault_lesson_metrics.py`
+  also check the path as seen from the top of a linked tree, against the same zones. A zone in a
+  copy is refused with the existing `unsafe_path` result. A note outside a zone stays readable.
+- **Deny guard:** `deny-guard.py` keeps the shared zone block and adds a zone view from each working
+  tree of the vault's repository above a target. This covers copies outside the vault and the main
+  checkout when `CLAUDE_PROJECT_DIR` is a linked tree. Guard controls are not re-read through this
+  view, so an edit of the main checkout's `00-meta/vault-config.json` from a linked-tree session
+  gets no `ask`.
+- **Standalone copies:** the rule sits between `SHARED WORKTREE RULE` markers and is copied verbatim
+  into `deny-guard.py` and `vault_healthcheck.py`, because both run alone from `00-meta/scripts`.
+  A vault keeps the old behavior until its copies are updated.
+
+Without a linked tree the output of these tools does not change.
+
+### Why `exclude_dirs` does not hold `.claude/worktrees`
+
+- `backup_vault.py` rejects an `exclude_dirs` entry that contains `/`, so the entry would stop backups.
+- The healthcheck walk compares single folder names, so the entry would not match there either.
+- The name `.claude` would make `vault_instruction_budget.py` report `unsafe_instruction_directory`
+  and drop `.claude/rules` from its inventory. The name `worktrees` would hide a user's folder of
+  that name.
+- The location is host policy and can move. The `.git` file identifies the copy wherever it sits.
+
+### Host behavior
+
+One measured run: Claude Code 2.1.252 on Windows, `claude -p --worktree s1`, in a synthetic repository
+with the guard's hooks in a git-ignored `.claude/settings.local.json` and the guard files tracked.
+The hook ran for both Read calls. `.claude/settings.local.json` was present in the new tree, and
+`CLAUDE_PROJECT_DIR` and the hook input `cwd` both named the tree, not the main checkout. The guard
+denied the zone path. This is one run, not a host guarantee.
+
+Not measured: an interactive session, other Claude Code versions, macOS and Linux, Codex,
+`EnterWorktree` during a session, subagent or background worktree isolation, and a vault whose guard
+files are untracked, so that the tree lacks them. For a session where settings do not reach the tree,
+`.worktreeinclude` is the host's documented way to copy ignored files. Check `/hooks` inside such a
+session before relying on the guard.
+
+### Limits
+
+- `vault_ssot.py` is bound to the warning promotion certificate and stays unchanged, so its inventory
+  still counts copies. Keep linked trees out of the vault, or name their parent folder in
+  `exclude_dirs`, when that inventory matters.
+- `vault_paths.resolve_note_path` is bound too. Other callers that resolve a path a caller names
+  (`vault_state.py`, `vault_runs.py`, `vault_memory.py`, `vault_impact.py`, `vault_ontology.py`,
+  `vault_okf.py`, `vault_judge.py`) do not take the view above. They refuse a copy only when
+  `exclude_dirs` also names a folder on its path, such as `_processed`.
+- Only a linked tree of this repository is covered. A plain copy of the vault folder, or a clone
+  inside it, has no such marker and keeps the root contract.
+- A copy is detected by reading its `.git` file. A hand-written `.git` file with the right value hides
+  a folder from the walks, and the walks name that folder in their reports.
+
 ## 측정과 보정
 
 `calibrate(samples,model_id,generation)`은 서로 다른 sample hash의 측정치 최소2개를 받아 두 종류의 문자 계수를 적합한다.

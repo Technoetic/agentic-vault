@@ -56,6 +56,12 @@ What it checks:
     shell), a relative path in a command that also changes the location
     (Set-Location, cd), or a zone name that is no literal path returns ask.
     PowerShell has none of the Bash exceptions.
+  - Working trees: a path also counts from the top of each working tree of the
+    vault's own repository that holds it, so a copy of a zone in a linked tree
+    is closed, in or outside the vault, and so is the main checkout when
+    CLAUDE_PROJECT_DIR is a linked tree. A linked tree is a folder whose .git
+    file names <common>/worktrees/<name>. Another repository, a submodule and a
+    nested clone keep the root rule. Guard controls are not re-read this way.
   - Edit, Write and NotebookEdit on the guard's own controls
     (00-meta/vault-config.json, the .claude folder and .claude/settings*.json,
     this script and ps-parse.ps1), and shell words that name them, return ask.
@@ -72,6 +78,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 from typing import Sequence
@@ -408,6 +415,12 @@ def _short_alias(base: str, stem: str | None) -> bool:
 _CONTROL_STEMS = tuple(_short_stem(name) for name in (*CONTROL_NAMES, ".claude"))
 
 
+# The hook runs this file alone, so it cannot import vault_worktrees.py either.
+# The block below is its verbatim copy; tests/test_vault_worktrees.py fails if they drift.
+# --- BEGIN SHARED WORKTREE RULE (verbatim copy of vault_worktrees.py) ---
+GITFILE_LIMIT = 4096  # a .git file holds one path
+
+
 def _git_toplevel(start: str) -> str | None:
     """The nearest folder at or above start that holds .git (a repository or worktree root), or None."""
     current = start
@@ -424,12 +437,84 @@ def _git_toplevel(start: str) -> str | None:
     return None
 
 
-class _Location:
-    __slots__ = ("paths", "views")
+def _other_share(path: str, anchor: str) -> bool:
+    """True for a UNC path on another share than anchor, which is never looked up."""
+    drive = os.path.splitdrive(path)[0]
+    return drive.startswith("\\\\") and os.path.normcase(drive) != os.path.normcase(os.path.splitdrive(anchor)[0])
 
-    def __init__(self, paths: list[str], views: list[tuple[str, ...]]) -> None:
+
+def _canonical_path(path: str) -> str:
+    """The form two repository paths are compared in: links resolved, case folded as the file system does."""
+    try:
+        text = os.path.realpath(path)
+    except (OSError, ValueError):
+        text = path
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    text = os.path.normcase(text)
+    return text.casefold() if sys.platform == "darwin" else text
+
+
+def gitfile_target(directory: str) -> str | None:
+    """The path that a regular .git file in directory names, or None for anything else."""
+    marker = os.path.join(directory, ".git")
+    try:
+        info = os.lstat(marker)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > GITFILE_LIMIT:
+            return None
+        with open(marker, "rb") as handle:
+            text = handle.read(GITFILE_LIMIT + 1).decode("utf-8")
+    except (OSError, ValueError):
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    value = text[len("gitdir:"):].strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return None
+    return os.path.normpath(os.path.join(directory, value))
+
+
+def repository_common(directory: str) -> str | None:
+    """The common git directory of the working tree at directory, in _canonical_path form, or None."""
+    marker = os.path.join(directory, ".git")
+    try:
+        if stat.S_ISDIR(os.lstat(marker).st_mode):
+            return _canonical_path(marker)
+    except (OSError, ValueError):
+        return None
+    target = gitfile_target(directory)
+    if target is None or _other_share(target, directory):
+        return None
+    if os.path.basename(os.path.dirname(target)) == "worktrees" and os.path.isfile(os.path.join(target, "commondir")):
+        target = os.path.dirname(os.path.dirname(target))
+    return _canonical_path(target)
+
+
+def linked_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked working tree of the repository whose common git directory is common.
+
+    The gitdir value must be <common>/worktrees/<name>: not a submodule, whose
+    value is .../modules/<name>, and not a tree of another repository. The
+    admin folder itself may be gone: the copy of the vault is still there.
+    """
+    target = gitfile_target(directory)
+    if target is None or os.path.basename(os.path.dirname(target)) != "worktrees":
+        return False
+    owner = os.path.dirname(os.path.dirname(target))
+    return not _other_share(owner, common) and _canonical_path(owner) == common
+# --- END SHARED WORKTREE RULE ---
+
+
+class _Location:
+    __slots__ = ("paths", "views", "tree_views")
+
+    def __init__(self, paths: list[str], views: list[tuple[str, ...]],
+                 tree_views: list[tuple[str, ...]] | None = None) -> None:
         self.paths = paths  # the lexical absolute path, then the resolved one
         self.views = views  # vault-relative parts of those that lie inside the vault
+        # The same path from the vault's folder in a working tree of this repository: a zone
+        # check only, so the vault's own controls and root contract stay as they are.
+        self.tree_views = tree_views or []
 
 
 # -- shell words ----------------------------------------------------------------
@@ -993,6 +1078,8 @@ class Guard:
         given = os.path.normpath(os.path.abspath(_native(vault)))
         self.vault_root = given
         self._tree_roots: list[str] | None = None
+        self._repository: tuple[str, tuple[str, ...]] | None = None
+        self._repository_known = False
         roots = [given]
         try:
             real = os.path.realpath(given)
@@ -1042,10 +1129,52 @@ class Guard:
                 parts = _relative(folded, root)
                 if parts is not None and parts not in views:
                     views.append(parts)
-        return _Location(paths, views)
+        return _Location(paths, views, self.tree_views(paths, views))
+
+    def repository(self) -> tuple[str, tuple[str, ...]] | None:
+        """(common git directory, the vault's folder in a working tree as parts), or None outside a repository."""
+        if not self._repository_known:
+            self._repository_known = True
+            top = _git_toplevel(self.vault_root)
+            common = repository_common(top) if top is not None else None
+            prefix = _relative(_fold_path(self.vault_root), _fold_path(top)) if common is not None else None
+            if common is not None and prefix is not None:
+                self._repository = (common, prefix)
+        return self._repository
+
+    def tree_views(self, paths: list[str], known: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+        """Zone views of paths from each working tree of this vault's repository that holds them.
+
+        A folder above the path counts when it is a linked tree of the same
+        repository or that repository's main checkout. The second case keeps
+        the main checkout's zones closed when CLAUDE_PROJECT_DIR is a linked
+        tree. Another repository, a submodule and a nested clone give no view.
+        """
+        repository = self.repository()
+        if repository is None:
+            return []
+        common, prefix = repository
+        views: list[tuple[str, ...]] = []
+        for path in paths:
+            if _is_unc(path) and not self.vault_on_unc:
+                continue  # no network lookup for other hosts
+            folded = _fold_path(path)
+            current = path
+            for _ in range(256):
+                if linked_worktree(current, common) or repository_common(current) == common:
+                    parts = _relative(folded, _fold_path(current))
+                    if parts is not None and parts[:len(prefix)] == prefix:
+                        view = parts[len(prefix):]
+                        if view not in known and view not in views:
+                            views.append(view)
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+        return views
 
     def zone_of(self, location: _Location) -> str | None:
-        for parts in location.views:
+        for parts in (*location.views, *location.tree_views):
             for zone in self.zones:
                 if zone_matches(parts, zone):
                     return zone
@@ -1169,7 +1298,7 @@ class Guard:
         zone = self.zone_of(location)
         if zone is not None:
             return DENY, zone
-        inside = bool(location.views)
+        inside = bool(location.views or location.tree_views)
         if not inside and not self.above_vault(location):
             return None  # the wildcard part cannot reach the vault
         segments = [segment for segment in re.split(r"[\\/]+", rest) if segment]

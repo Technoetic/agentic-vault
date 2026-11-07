@@ -23,6 +23,7 @@ import vault_evidence as evidence
 import vault_proposals as proposals
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import resolve_note_path
+from vault_worktrees import WorktreeScope
 
 
 CONFIG_PATH = '00-meta/vault-config.json'
@@ -107,6 +108,7 @@ class Store:
     def __init__(self, vault):
         self.vault = Path(vault)
         self.root = self.vault.resolve(strict=True)
+        self.worktrees = WorktreeScope(self.root)
         self.marks = {}
         self.absent = set()
         self.read_bytes = 0
@@ -125,6 +127,8 @@ class Store:
         except ValueError as exc:
             raise LessonMetricsError('unsafe_path') from exc
         canonical = result.relative_to(self.root).as_posix().casefold()
+        if self.worktrees.denied(result.relative_to(self.root).parts, self.denied):
+            raise LessonMetricsError('unsafe_path')
         if not internal and any(canonical == reserved or canonical.startswith(reserved + '/')
                                 for reserved in (proposals.RECEIPT_DIR, evidence.STORE_DIR)):
             raise LessonMetricsError('reserved_store_path')

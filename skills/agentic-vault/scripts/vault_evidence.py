@@ -22,6 +22,7 @@ import uuid
 
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import resolve_note_path
+from vault_worktrees import WorktreeScope
 
 
 STORE_DIR = '00-meta/evidence'
@@ -151,6 +152,7 @@ class Store:
     def __init__(self, vault):
         self.vault = Path(vault)
         self.root = self.vault.resolve(strict=True)
+        self.worktrees = WorktreeScope(self.root)
         info, _mark, data = stable_read(
             lambda: resolve_note_path(self.vault, CONFIG_PATH, ('.git',)),
             MAX_JSON_BYTES, contents=True)
@@ -165,6 +167,8 @@ class Store:
         except ValueError as exc:
             raise EvidenceError('unsafe_path') from exc
         canonical = resolved.relative_to(self.root).as_posix()
+        if self.worktrees.denied(canonical.split('/'), self.denied):
+            raise EvidenceError('unsafe_path')
         if not internal and (canonical.casefold() == STORE_DIR
                              or canonical.casefold().startswith(STORE_DIR + '/')):
             raise EvidenceError('reserved_evidence_path')
