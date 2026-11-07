@@ -497,7 +497,8 @@ Claude의 `.claude/settings.json` 권한을 Codex 권한으로 자동 변환하�
 v0.32.0의 선택형 [deny zone 가드 템플릿](../assets/adapters/deny-guard/guide.md)(PreToolUse 훅)은 Claude Code 전용이다.
 Codex는 훅 모델이 달라 `init`·`upgrade`가 이 가드를 제안·설치·갱신하지 않고, `doctor`는
 `vault_adapters.py`의 `adapters.deny_guard` 상태를 보고만 한다. Claude Code에서 켠 가드도 Codex 세션의
-도구 호출은 검사하지 않는다.
+도구 호출은 검사하지 않는다. 선택형 [교훈 단서 훅](../assets/adapters/lesson-cues/guide.md)도 같은 이유로
+Claude Code 전용이고, 설치 흔적이 있으면 `doctor`가 `adapters.lesson_cues`를 보고만 한다.
 [공식 플러그인 구조](https://developers.openai.com/plugins/build/plugins),
 [스킬](https://learn.chatgpt.com/docs/build-skills),
 [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)

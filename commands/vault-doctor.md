@@ -35,7 +35,12 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    `offer_deny_guard`는 나오지 않고, 설치 제안은 `/vault-init`만 한다. `incomplete`·`needs_review`와 다른
    `actions`(`offer_guard_update`·`review_guard`·`review_settings`)는 그대로 보고하고 교체·수정은
    `/vault-upgrade`(Claude Code)로 안내한다. `cli_on_path`가 false이고 Aside로 설치된 것이 없으며
-   `deny_guard.state`가 `absent`면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
+   `deny_guard.state`가 `absent`이고 `adapters.lesson_cues`가 없으면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
+   `adapters.lesson_cues`는 선택형 교훈 단서 훅(Claude Code 전용 PreToolUse 훅 템플릿)의 설치 흔적이 있을 때만 나온다:
+   `state`, 볼트에 복사한 스크립트(`script`)의 스탬프 상태, 훅의 `problems`(`"onFailure": "block"`, 중괄호 없는
+   `$CLAUDE_PROJECT_DIR`), 컴파일 목록의 존재(`compiled_present`). Doctor는 이 훅도 제안하지 않는다.
+   `--offer-lesson-cues`를 붙이지 않으므로 `offer_lesson_cues`는 나오지 않는다. `actions`(`offer_cues_update`·
+   `review_lesson_cues`·`review_settings`·`build_lesson_cues`)는 그대로 보고하고 교체·수정은 `/vault-upgrade`로 안내한다.
 7. 사용자가 Jev/Jarvis 연결 준비 상태도 요청하면 [단계별 연결 진단](../docs/tower-reliability.md)의
    `vault_connectors.py --vault PATH --format json`을 추가로 사용한다. 기본은 오프라인이며
    키 존재를 인증 성공으로 해석하지 않는다. live probe는 명시한 지원 연결과 기존 승인

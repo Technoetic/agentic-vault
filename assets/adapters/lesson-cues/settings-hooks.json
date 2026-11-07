@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["-X", "utf8", "-I", "${CLAUDE_PROJECT_DIR}/00-meta/scripts/lesson-cues.py"],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

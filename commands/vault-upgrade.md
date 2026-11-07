@@ -51,6 +51,11 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
      - `offer_guard_update`: 설치된 `00-meta/scripts/deny-guard.py`·`ps-parse.ps1`의 스탬프(`agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=`)가 번들 원본보다 낮다. `offer_helper_update`와 같이 diff를 보여 주고 로컬 수정이 없을 때만 교체하며, 두 파일은 같은 버전으로 함께 바꾼다.
      - `review_guard`: 스크립트가 로컬 수정·스탬프 없음·더 높음·읽기 실패·링크/정션이거나, 일부만 있다(`state=incomplete`: 스크립트만 있고 훅이 없거나, 훅만 있고 스크립트가 없거나, `ps-parse.ps1`이 없음). 자동 덮어쓰기·삭제 금지 — 상태와 diff만 보여 주고, 빠진 파일 복사나 남은 훅 그룹 제거는 사용자가 승인할 때만 한다. 훅이 있는데 `deny-guard.py`가 없으면 python이 종료 코드 2로 끝나 대상 도구 호출이 막힌다는 점을 함께 알린다.
      - `review_settings`: 가드 훅에 문제가 있거나(`hook.problems`) 설정 파일을 읽을 수 없다. 현재 `settings-hooks.json`의 그룹으로 바꾸는 변경안을 보여 주고 승인받아 교체한다.
+   - **교훈 단서 훅(`adapters.lesson_cues.actions`, Claude Code 전용 — Codex는 건너뛴다):** 설치 흔적이 있을 때만 이 항목이 보고된다. 업그레이드는 이 훅을 새로 설치하거나 제안하지 않는다(새 설치는 `/vault-init` 4-3이나 `assets/adapters/lesson-cues/guide.md`의 수동 병합).
+     - `offer_cues_update`: 설치된 `00-meta/scripts/lesson-cues.py`의 스탬프가 번들 원본보다 낮다. diff를 보여 주고 로컬 수정이 없을 때만 교체한다.
+     - `review_lesson_cues`: 스크립트가 로컬 수정·스탬프 없음·더 높음·읽기 실패·링크/정션이거나, 스크립트와 훅 가운데 하나만 있다. 자동 덮어쓰기·삭제 금지 — 상태와 diff만 보여 주고 사용자 승인으로 처리한다.
+     - `review_settings`: 훅에 문제가 있거나 설정 파일을 읽을 수 없다. 현재 `settings-hooks.json`의 그룹으로 바꾸는 변경안을 보여 주고 승인받아 교체한다.
+     - `build_lesson_cues`: 컴파일 목록 `00-meta/lesson-cues.json`이 없다. 대장에 단서가 있으면 `vault_lesson_cues.py --vault . build --write`를 안내한다.
 
 ## 2. 검증
 
