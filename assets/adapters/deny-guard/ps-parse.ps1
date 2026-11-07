@@ -1,4 +1,4 @@
-# agentic-vault:adapter ps-parse engine=0.32.0
+# agentic-vault:adapter ps-parse engine=0.43.0
 <#
   ps-parse.ps1 - parse one PowerShell command for the opt-in deny-zone guard
   (deny-guard.py) without running it. ASCII only, so Windows PowerShell 5.1

@@ -78,3 +78,10 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
     상태 읽기 상한과 recall 파일 상한에 대조하고, 로컬 Git 이력이 있으면 상한 도달 일수를 낸다. 진단은 읽기 전용이고 종료 코드는 바뀌지
     않는다. `estimated_days_to_limit`는 최근 커밋의 직선 외삽이므로 반드시 추정이라고 말하고 날짜로 단정하지 않는다. `git_unavailable` 등이면
     사용률만 보고한다. 상태와 사유, 표본 수, 창 길이는 [용량 안내](../docs/capacity.md)를 따른다.
+12. 사용자가 이 플러그인이 어느 설정에서 켜졌는지, 훅이 두 번 주입되는지 물을 때만 같은 Doctor에 `--plugin-scope`를 추가한다.
+    사용자·프로젝트·로컬 설정 파일의 `enabledPlugins` 값과 그중 이긴 파일을 보고하고, managed·flag·`--add-dir`은 `unknown`으로 둔다.
+    `findings`의 `plugin_and_vault_session_hooks`는 주입이 일어났다는 뜻이 아니라 두 경로가 있다는 뜻이다. 실제 이중 주입은
+    `--session-evidence`의 `session_start_hooks.double_context_observed`(하한값)로 확인한다. `healthcheck_copy_unstamped`·
+    `healthcheck_copy_outdated`는 `/vault-upgrade`로 안내한다. 호스트가 합친 값이 필요하다고 할 때만 `--plugin-scope-host`를 더하며, 이때만
+    `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 설정 변경과 훅 실행은 하지 않고 종료 코드도 바뀌지 않는다.
+    [값과 한계](../docs/reliability.md#double-injection-broken-output-and-plugin-scope-optional)

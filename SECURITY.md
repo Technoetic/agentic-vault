@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.42.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.41.0 and earlier | No. Upgrade to 0.42.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
+| 0.43.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.42.0 and earlier | No. Upgrade to 0.43.0 after reviewing the Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The v0.34.0-to-v0.35.1 transition alone preserves certificate-bound bytes. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -95,6 +95,49 @@ In scope:
   environments and source closure checks. Workers are not an OS sandbox;
   arbitrary hostile local code or a malicious same-user process is outside
   the experiment threat model. No company-vault input is accepted.
+
+- **Optional handoff folding** (`vault_handoff_fold.py`): `analyze` only reads.
+  `apply` is a write tool. It needs the current handoff hash and a caller-chosen
+  threshold and protected-section count, creates new archive notes and never
+  rewrites an existing one, replaces the handoff, and refuses before writing when
+  its own output does not rebuild the original. Only cooperating writers observe its
+  lock. The archive notes and the handoff are separate atomic replaces, not one
+  transaction; a killed run can leave unreferenced archive notes. No hook or session
+  command calls it.
+- **Optional declared-path commits** (`vault_commit.py`): writes the shared Git index
+  and history for the paths named. Scope includes the sha256 check per path, refusal
+  of deny zones, `.git`, folders, links and shared notes, the in-progress state
+  check, compare-and-swap `update-ref` in `--own-lines`, and fixed-code output that
+  carries no paths or note text unless `--show-git-output` copies failing Git output
+  to stderr. It never deletes a lock and offers no way to skip hooks. `--own-lines`
+  uses `commit-tree`, so only `pre-commit` runs: `commit-msg`, `post-commit` and
+  `commit.gpgsign` do not apply. It is not a lock and does not stop another session's
+  plain `git commit`.
+- **Optional Doctor reads and host execution** (`vault_doctor.py --capacity`,
+  `--plugin-scope`, `--plugin-scope-host`; `vault_capacity.py`,
+  `vault_plugin_scope.py`): `--capacity` reads the configured notes' sizes and
+  runs bounded local `git` reads. `--plugin-scope` reads `.claude/settings.local.json`
+  and `.claude/settings.json` in the vault, the user `settings.json`
+  (`CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`), `00-meta/vault-config.json`
+  and one health-check copy at `00-meta/scripts/vault_healthcheck.py`. It counts
+  SessionStart hook entries and must not read or print a hook command. Output is
+  counts and closed words. `--plugin-scope-host` also executes the `claude` program
+  found the same way as `--host-version`: `claude plugin list --json` once in the
+  vault, with fixed arguments, no shell and a time bound. The plugin makes no promise
+  about what the host writes in its own folders.
+- **Optional lesson cues** (`vault_lesson_cues.py`, `assets/adapters/lesson-cues/`):
+  `build --write` replaces `00-meta/lesson-cues.json`. The hook is a template a user
+  may merge into `.claude/settings.local.json`, never by default. It answers only a
+  hint or a once-per-session `deny`, and a way to make it answer `allow` or `ask` is
+  in scope. Cues are literals and globs, not regular expressions. It keeps a session
+  record in the system temporary folder. It sets no `onFailure`, so a failed hook lets
+  the call run: it is advisory, not a control. `vault_lesson_clusters.py` only reads.
+- **Linked worktree handling** (`vault_worktrees.py` and its callers, `deny-guard.py`):
+  a linked tree is identified by reading its `.git` file. A hand-written `.git` file
+  with the right value can hide a folder from the walks, which name that folder in
+  their reports. Direct-path callers other than `vault_evidence.py`,
+  `vault_proposals.py` and `vault_lesson_metrics.py` are listed as limits in
+  [the hardening guide](docs/hardening.md#linked-worktree-copies-and-deny-zones).
 
 Out of scope (report these upstream): vulnerabilities in Claude Code, Codex,
 Telegram or the Jev service themselves.
@@ -236,10 +279,11 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.42.0 소스다. 0.41.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.42.0으로 갱신한다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 이번 전환은 인증서가 묶는 일곱 파일·LF corpus를 유지하며 실제 설치 바이트 확인과 harmless replay는 최종 게이트다.
+- 보안 수정 대상은 최신 0.43.0 소스다. 0.42.0 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.43.0으로 갱신한다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 이번 전환은 인증서가 묶는 일곱 파일·LF corpus를 유지하며 실제 설치 바이트 확인과 harmless replay는 최종 게이트다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.
+- 새 쓰기 도구는 `vault_handoff_fold.py apply`와 `vault_commit.py`이며 둘 다 직접 부를 때만 돈다. `vault_doctor.py --plugin-scope`는 설정 파일 세 개·vault-config·healthcheck 사본 하나를 읽고, `--plugin-scope-host`만 `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 교훈 단서 훅은 사용자가 병합할 때만 존재하며 힌트나 세션당 1회 `deny`만 내고 실패하면 호출이 그대로 지나간다.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
 - deny zone 가드 훅은 사용자가 따로 승인해 병합한 경우에만 존재한다(기본 `.claude/settings.local.json`, `/vault-init`은 답이 없으면 설치하지 않는다). 병합하면 Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell·Monitor 호출마다 `00-meta/scripts/deny-guard.py`를 PATH의 `python`으로 실행하고, 구역 이름이나 가드 제어 파일 이름이 보이는 PowerShell 명령에는 `00-meta/scripts/ps-parse.ps1`도 `-ExecutionPolicy Bypass`로 실행한다. `deny`·`ask`만 내고 `allow`는 내지 않는다.

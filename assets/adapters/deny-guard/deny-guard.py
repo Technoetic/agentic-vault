@@ -1,4 +1,4 @@
-# agentic-vault:adapter deny-guard engine=0.32.0
+# agentic-vault:adapter deny-guard engine=0.43.0
 """deny-guard.py - opt-in deny-zone guard for Claude Code PreToolUse hooks.
 
 ASCII only, Python 3.10+ standard library only. The plugin ships this file in

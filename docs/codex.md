@@ -1,5 +1,21 @@
 # Claude Code · Codex 겸용 사용
 
+## v0.43.0 - large-vault operations, shared worktrees and verifier fidelity
+
+[Recall scope](recall-scope.md) adds optional read settings and three result
+diagnostics. [`doctor --capacity`](capacity.md) and
+[`doctor --plugin-scope`](reliability.md#double-injection-broken-output-and-plugin-scope-optional)
+are read-only reports; only `--plugin-scope-host` runs the `claude` program. These
+checks read Claude Code settings and need no Codex change. [Handoff folding](handoff-fold.md)
+and [`vault_commit.py`](concurrent-commits.md) are write tools that run only when
+called. [Lesson recurrence](lesson-recurrence.md) is read-only, and the
+[lesson cue hook](../assets/adapters/lesson-cues/guide.md) is Claude Code only.
+[Linked worktree handling](hardening.md#linked-worktree-copies-and-deny-zones) applies
+to walks in both hosts; its deny guard part is Claude Code only. Synthetic numbers in
+[verifier fidelity](verifier-fidelity.md) are not evidence of real-world safety. Current
+install refs target v0.43.0; publication does not update live installations or company
+vaults. See [scope](releases/v0.43.0.md) and [verification](verification/v0.43.0.md).
+
 ## v0.42.0 - optional recovery, review planning and generated-memory experiments
 
 [Recoverable edit bundles](recoverable-bundles.md) check explicit preview digests
@@ -143,7 +159,7 @@ files and committed LF harmless corpus remain unchanged from v0.37.0 and the v0.
 candidate when installed bound bytes match. Older changed-byte transitions retain warning
 reset, engine alignment, certificate regeneration with harmless replay and re-promotion.
 See [release scope](releases/v0.38.1.md) and [verification gates](verification/v0.38.1.md).
-The following version sections are historical; current install refs target v0.42.0.
+The following version sections are historical; current install refs target v0.43.0.
 
 ## v0.38.0 - optional source binding and local-model evaluation
 
@@ -337,7 +353,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.42.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.43.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -351,7 +367,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대�
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.42.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.43.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -475,6 +491,8 @@ v0.10.0에서 v0.11.0의 검증 근거 도구만 추가할 때는 볼트 마이�
 
 Claude에서 인계를 저장한 뒤 Codex에서 복원하거나 그 반대로 사용할 수 있다.
 동시에 같은 노트·handoff를 편집하지 않고 세션을 번갈아 마감하는 방식을 권장한다.
+한 작업 트리를 여러 세션이 함께 쓸 때는 선택형 [경로 선언 커밋](concurrent-commits.md)으로 자기 파일만 커밋할 수 있다.
+일반 `git commit`을 쓰는 다른 세션은 막지 못하고, 두 방식을 섞으면 파일이 조용히 빠질 수 있다.
 스냅샷 생성 중에도 볼트 쓰기를 멈춘다. 전체 볼트를 잠그는 동시 편집 조정 기능은 없다.
 
 ## 실행과 검증 범위

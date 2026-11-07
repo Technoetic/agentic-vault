@@ -236,6 +236,23 @@ def verify(codex: str) -> dict:
                          "docs/generated-memory-lifecycle.md",
                          "scripts/evaluate_generated_memory_lifecycle.py",
                          "scripts/generated_memory_worker.py",
+                         "skills/agentic-vault/scripts/vault_capacity.py",
+                         "skills/agentic-vault/scripts/vault_handoff_fold.py",
+                         "skills/agentic-vault/scripts/vault_plugin_scope.py",
+                         "skills/agentic-vault/scripts/vault_lesson_clusters.py",
+                         "skills/agentic-vault/scripts/vault_lesson_cues.py",
+                         "skills/agentic-vault/scripts/vault_worktrees.py",
+                         "skills/agentic-vault/scripts/vault_commit.py",
+                         "docs/recall-scope.md",
+                         "docs/capacity.md",
+                         "docs/handoff-fold.md",
+                         "docs/lesson-recurrence.md",
+                         "docs/verifier-fidelity.md",
+                         "docs/concurrent-commits.md",
+                         "scripts/evaluate_handoff_fold.py",
+                         "tests/fixtures/handoff_fold/pack.json",
+                         "scripts/evaluate_verifier_fidelity.py",
+                         "scripts/env_vary.py",
                          "scripts/evaluate_knowledge_evolution.py",
                          "tests/fixtures/knowledge_evolution/history.json",
                          "docs/knowledge-impact.md", "docs/okf-export.md", "docs/knowledge-evolution.md",
@@ -286,11 +303,14 @@ def verify(codex: str) -> dict:
                          "docs/evidence.md",
                          "docs/link-proposals.md",
                          "assets/templates/AGENTS-vault-stub.md",
-                         # doctor's adapter report reads the bundled Aside helper and deny-zone
-                         # guard for their stamps
+                         # doctor's adapter report reads the bundled Aside helper, deny-zone
+                         # guard and lesson cue hook for their stamps
                          "skills/agentic-vault/scripts/vault_adapters.py",
                          "assets/adapters/deny-guard/deny-guard.py",
                          "assets/adapters/deny-guard/ps-parse.ps1",
+                         "assets/adapters/lesson-cues/lesson-cues.py",
+                         "assets/adapters/lesson-cues/settings-hooks.json",
+                         "assets/adapters/lesson-cues/guide.md",
                          "assets/adapters/aside/aside-up.ps1"):
             if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")

@@ -53,6 +53,9 @@ v0.35.1부터 전체 플러그인에는
 | `revocations capture\|check <인자>` | [선택형 기억 철회](../../../docs/memory-revocation.md), `scripts/vault_revocation.py --vault PATH capture\|check --input RELATIVE.json`; 등록 줄·파생 관계의 준비/검사, 저장·활성화·원문 삭제 없음 |
 | `bundle <작업과 인자>` | [묶음 복구](../../../docs/recoverable-bundles.md), `scripts/vault_bundle.py`; prepare/status, 명시적 digest·`--apply`에 묶인 저장·적용·순방향 복구 |
 | `review-plan <인자>` | [재검토 순서](../../../docs/review-planning.md), `scripts/vault_review_plan.py --vault PATH --inventory RELATIVE.json --graph RELATIVE.json`; 읽기 전용 명시적 의존관계 순서 |
+| `handoff-fold analyze\|apply <인자>` | [handoff 접기](../../../docs/handoff-fold.md), `scripts/vault_handoff_fold.py --vault PATH analyze\|apply`; 기본 읽기 전용, `apply`는 사용자가 정한 문턱·보호 절 수와 `--expected-sha256` 필요, 자동 실행 없음 |
+| `commit <인자>` | [경로 선언 커밋](../../../docs/concurrent-commits.md), `scripts/vault_commit.py --vault PATH --path RELATIVE=SHA256 --message TEXT --actor NAME`; 공유 작업 트리에서 선언한 파일만 커밋, 일반 `git commit`을 막지는 못함 |
+| `lesson-clusters <인자>` | [교훈 재발 부류](../../../docs/lesson-recurrence.md), `scripts/vault_lesson_clusters.py --vault PATH --mistakes RELATIVE.md`; 읽기 전용 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |
@@ -110,6 +113,7 @@ Jev-first 선호가 적용되는 현재 요청은 볼트 존재 검사나 일반
 Aside 자동 기동 훅은 Claude Code 설정에만 병합한다. Codex는 CLAUDE.md의 Aside 조항에 적힌 기동 절차를 직접 따른다.
 deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다. Codex의 `init`·`upgrade`는 그 단계를 건너뛰고 `doctor`는 상태만 보고한다.
 교훈 단서 훅(`adapters.lesson_cues`)도 Claude Code 전용이며 같은 방식으로 다룬다.
+노트 용량과 플러그인 범위는 같은 Doctor에 `--capacity`·`--plugin-scope`를 붙여 요청할 때만 본다(읽기 전용). `--plugin-scope-host`는 `claude`를 실행하므로 Claude Code가 있는 환경에서 요청할 때만 쓴다.
 `proposals`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_proposals.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
 인자는 각각 별도 argv로 전달한다. `inspect`·`check`·`preserve-check`·`rollback-preview`는 읽기 전용이고, `apply --approve`는
 현재 사용자에게 이미 승인받은 정확한 수정안에만 사용한다. `stale`이면 최신 diff를 다시 검토하며,

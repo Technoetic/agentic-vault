@@ -1,6 +1,6 @@
 ---
 description: 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정 helper를 명시적으로 실행
-argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration|revocation|bundle|review-plan|handoff-fold] [작업과 인자]"
+argument-hint: "[provenance|state|ssot|delta|rules|quality|calibration|revocation|bundle|review-plan|handoff-fold|commit|lesson-clusters|lesson-cues] [작업과 인자]"
 ---
 
 # /vault-harden — 명시적 보강 도구
@@ -21,6 +21,11 @@ Codex는 `$agentic-vault:agentic-vault harden <작업과 인자>`를 사용한�
 절 수는 기본값이 없으므로 사용자가 정한 값만 쓴다. 자동 실행은 없다. 요약은 호스트가 쓰는 파생 글이며,
 없으면 제목과 미결 줄만 남긴다. `scripts/evaluate_handoff_fold.py`의 문자열 도달은 소실 경보일 뿐
 이어서 일할 수 있다는 근거가 아니다.
+`commit`은 [경로 선언 커밋](../docs/concurrent-commits.md)의 `vault_commit.py`로 연결한다. 파일마다 작업 파일의
+sha256을 선언하고, 공유 노트는 `--own-lines`로만 올린다. 일반 `git commit`을 쓰는 다른 세션은 막지 못한다.
+`lesson-clusters`는 [교훈 재발 부류](../docs/lesson-recurrence.md)의 읽기 전용 보고이고, 부류는 같은 원인의 증명이 아니다.
+`lesson-cues`는 `vault_lesson_cues.py build`로 연결한다. `--write`일 때만 `00-meta/lesson-cues.json`을 바꾸며,
+훅 설치는 [교훈 단서 안내](../assets/adapters/lesson-cues/guide.md)를 따른다. 훅의 효과는 측정하지 않았다.
 
 1. 요청이 읽기 전용이면 prepare/check/parse/평가만 실행한다. 적용·이동·설정 변경을 덧붙이지 않는다.
 2. 볼트 파일 작업은 설정·경로·deny 정책을 검증한다. 호출자가 명시한 파일만 바인딩하며 runtime/영수증을 일반 지식으로 읽지 않는다.

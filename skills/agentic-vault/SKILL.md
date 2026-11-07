@@ -116,6 +116,29 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 [생성 기억 시험](../../docs/generated-memory-lifecycle.md)은 체크아웃 전용 개발 평가다.
 기본 세션·회상·실제 볼트에 연결하거나 모델·네트워크를 자동 호출하지 않는다.
 
+### 선택형 큰 볼트 운영
+
+`handoff-fold` 또는 `harden handoff-fold`는 [handoff 접기](../../docs/handoff-fold.md)의
+`scripts/vault_handoff_fold.py --vault PATH analyze|apply`로 연결한다. `analyze`는 읽기 전용이다.
+`apply`에는 사용자가 정한 `--threshold-bytes`·`--protect-sections`와 analyze 결과의
+`--expected-sha256`이 필요하다. 기본 문턱은 없고 훅·세션 명령이 부르지 않는다.
+
+`commit`은 [경로 선언 커밋](../../docs/concurrent-commits.md)의
+`scripts/vault_commit.py --vault PATH --path RELATIVE=SHA256 --message TEXT --actor NAME`으로
+연결한다. 여러 세션이 한 작업 트리를 함께 쓸 때 자기 파일만 커밋하는 선택 경로다. 공유 노트는
+`--own-lines`로만 올린다. 일반 `git commit`을 쓰는 다른 세션은 막지 못한다.
+
+`lesson-clusters`는 [교훈 재발 부류](../../docs/lesson-recurrence.md)의
+`scripts/vault_lesson_clusters.py --vault PATH --mistakes RELATIVE.md`로 연결한다(읽기 전용).
+`lesson-cues`는 `scripts/vault_lesson_cues.py --vault PATH build`이고 `--write`일 때만
+`00-meta/lesson-cues.json`을 바꾼다. [교훈 단서 훅](../../assets/adapters/lesson-cues/guide.md)은
+Claude Code 전용 선택 설치이며 권고용이고 효과는 측정하지 않았다.
+
+노트 용량은 `doctor --capacity`([용량 점검](../../docs/capacity.md)), 플러그인을 켠 범위는
+`doctor --plugin-scope`로 본다. 둘 다 읽기 전용이고 요청할 때만 쓴다. `estimated_days_to_limit`는
+날짜가 아니라 추정이다. 검색 범위 설정은 [검색 읽기 범위](../../docs/recall-scope.md)를 따른다.
+`answer_state`가 `not_enough_scope`이면 "없다"고 답하지 않고 덜 읽었다고 보고한다.
+
 ### 선택형 변경 영향·OKF 교환
 
 `impact`는 [변경 영향 조회](../../docs/knowledge-impact.md)의
