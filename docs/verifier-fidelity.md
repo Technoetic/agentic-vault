@@ -141,9 +141,9 @@ value alone no longer reaches it, so `--expect-removed 22` must become
 
 Against the v0.42.0 extraction the same table gave 0 of 12 for
 `value_change_behind_broken_fence`, 11 of 14 for `unit_change_listed` and 13 of 18
-false alarms for `rewrite_literals_reformatted`, and a declared removal completed
-3 of 6 cuts of each note without facts. So the fixes gained 15 catches here and
-cost 3 false alarms, all three of them a unit written with a space.
+false alarms for `rewrite_literals_reformatted`, and every declared removal on a
+note without facts completed. So the fixes gained 15 catches here. They added 4
+false alarms, all a unit written with a space, and removed 1, `5kg` to `5KG`.
 
 Frontmatter of more than 64 lines is still read as body. That bound is unchanged.
 
