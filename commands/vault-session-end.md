@@ -75,6 +75,9 @@ description: 세션 종료 — handoff/hot/log 갱신 + git 커밋(로컬 전용
 호출하고 untouched 바이트·기존 ID·횟수를 유지한다. RETIRE는 삭제하지 않는다.
 관측/영수증 ID는 자료 연결이며 성공·승격 승인으로 계산하지 않는다. 선언 규칙은
 `vault_declarative_rules.evaluate_rules`의 literal 기본값을 쓰며 regex는 명시적으로 선택한다.
+실수 기록과 대장의 격차는 읽기 전용 `vault_lesson_clusters.py`로 볼 수 있다. `unledgered` 부류와 `candidate` 부류는
+후보일 뿐이므로 사람이 읽고 ADD/INC로 옮긴다. 준비 결과의 `ignored_rows`는 대장 형식을 벗어난 줄이다. 단서는 ADD의
+`cues`나 `CUES` 연산으로 표지에 넣고 문법은 `assets/adapters/lesson-cues/guide.md`를 따른다.
 timed-out/unavailable를 통과로 보고하지 않는다. 아래의 기존 승격·기각·롤백 규칙은 유지한다.
 
 `00-meta/lessons.md`가 존재하면 수행하라 (없으면 조용히 생략 — 켜려면 템플릿 `assets/templates/lessons.md`로 생성):
