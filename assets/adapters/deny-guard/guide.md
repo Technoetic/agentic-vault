@@ -153,6 +153,58 @@
 스크립트를 지우거나 옮기려면 그룹을 먼저 지운다. 훅이 남은 채 `deny-guard.py`가 없으면 python이 종료 코드 2로 끝나고, Claude Code는
 종료 코드 2를 차단으로 읽으므로 `onFailure`와 호스트 버전에 상관없이 대상 도구 호출이 모두 막힌다.
 
+## 내장 `permissions.ask` 표본 (가드 없이도 쓸 수 있음)
+
+위험한 명령을 사람에게 묻게 하는 것만 필요하면 이 가드보다 Claude Code 내장 규칙이 먼저다. 코드도 훅도 없이 설정 한 곳으로 끝난다. 아래는
+볼트 안전 규칙이 "먼저 확인받아라"고 하는 명령과 흔한 외부 전송 명령의 표본이다. `.claude/settings.local.json`의 `permissions.ask`에
+필요한 줄만 옮겨 넣는다(`permissions` 키가 이미 있으면 그 안에 합친다). 플러그인은 이 표본을 어디에도 쓰지 않는다.
+
+<!-- permissions-ask-sample -->
+```json
+{
+  "permissions": {
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore *)",
+      "Bash(git branch -D *)",
+      "Bash(rm *)",
+      "Bash(npm publish *)",
+      "Bash(gh release *)",
+      "Bash(gh pr merge *)",
+      "Bash(curl *)",
+      "Bash(scp *)",
+      "PowerShell(git push *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(Invoke-WebRequest *)",
+      "PowerShell(Invoke-RestMethod *)"
+    ]
+  }
+}
+```
+
+- **우회 모드에서도 묻는다:** 공식 문서의 "Actions no mode auto-approves"에 명시한 ask 규칙이 들어 있다. `bypassPermissions`를 포함한 어느
+  모드도 이 규칙에 맞는 도구를 자동 승인하지 않는다. 훅이 `allow`를 내도 ask 규칙은 그대로 묻는다. 예외는 사용자가 직접 설치한 mod의
+  `tool.check` 승인이다(문서의 Precedence 절이 조건을 적는다).
+- **복합 명령의 하위 명령에도 적용된다:** ask·deny 규칙은 하위 명령 하나만 맞아도 걸린다. 서브셸, 명령 치환, `for` 본문 안의 명령도 포함이라
+  `cd /tmp && git clean -f`와 `echo "$(git clean -f)"`도 묻는다. `timeout`·`nohup` 같은 고정 래퍼와 앞의 변수 대입도 벗기고 비교한다.
+- **명령 글자만 본다:** 문서가 스스로 보안 경계가 아니라고 적는다. 표본에 없는 명령과 다른 표기는 다른 규칙과 모드가 정한다. 그래서
+  `bypassPermissions`나 넓은 `allow` 규칙 아래에서는 표본 밖 표기가 묻지 않고 지나간다.
+- **비용:** 표본의 `Bash(rm *)`·`Bash(curl *)`는 범위가 넓다. 자주 묻게 되면 필요한 줄만 남긴다. `ask`가 잦으면 내용을 보지 않고 승인하는
+  습관이 생기는 것은 가드와 같다.
+
+**합성 재생:** `tests/test_permission_ask_sample.py`는 문서의 규칙 문법을 시험 안에 옮긴 모형으로(Claude Code를 실행한 것이 아니다) 표본의
+`Bash(...)` 규칙에 위험 명령 목록을 넣어 본다. 문서의 예시를 옮긴 22줄로 모형을 먼저 맞춘 뒤 돌린다. 합성 명령 28건 가운데 18건이 멈춘다. 멈추지
+않는 10건은 스크립트 실행 4건(`python tools/write_register.py --commit`, `make publish`처럼 위험한 일이 명령 글자가 아니라 파일 안에
+있는 경우)과 우회 표기 6건(`sh -c '...'`, `git -C . push`, 절대 경로, 플래그 있는 `xargs`)이다. 목록은 합성이고 건수는 표본과 목록을 어떻게
+고르느냐에 달려 있으므로 실제 사고의 차단율이 아니다. 이 비율이 보여 주는 것은 경계다. 내장 규칙이 못 하는 일(가리키는 스크립트의 내용 읽기,
+해석 실패 시 묻기)만 PreToolUse 훅이 맡으면 된다.
+
+**같은 층의 다른 사례:** [nah](https://github.com/manuelschipper/nah/tree/v1.7.0)(v1.7.0, MIT)는 도구 호출을 효과로 풀어 판정하되 승인을 내지
+않는다. 이 가드가 `allow`를 내지 않는 것과 같은 방향이다. 코드는 옮기지 않았다.
+
 ## 상태 보고 (`vault_adapters.py`)
 
 플러그인의 읽기 전용 어댑터 진단이 가드의 설치 상태를 `adapters.deny_guard`로 보고한다. `/vault-doctor`가 이 보고를 보여 주고,
@@ -266,6 +318,10 @@ Python 시작만이 중앙값 0.37초, 90백분위 0.43초였으므로 부하에
 - Claude Code hooks 문서(`code.claude.com/docs/en/hooks`): PreToolUse 입력(`tool_name`·`tool_input`·`cwd`), `hookSpecificOutput`의
   `permissionDecision`(allow·deny·ask·defer)과 `permissionDecisionReason`, 여러 훅의 우선순위, exec 형식(`command`+`args`)의 경로 치환,
   `if` 필터가 best-effort라는 설명, `onFailure: "block"`(v2.1.295 이상)과 실패로 치는 경우.
+- Claude Code 권한 문서(`code.claude.com/docs/en/permissions`, `code.claude.com/docs/en/permission-modes`, 2026-11-07에 읽은 판): 와일드카드 규칙
+  문법, Compound commands("Deny and ask rules apply when any subcommand matches them"), Wrappers, What a Bash rule doesn't match("isn't a
+  security boundary around the program"), Precedence among rules, hooks, and mods, Actions no mode auto-approves("Tools matched by an explicit
+  ask rule"). 훅이 낸 `ask`가 `bypassPermissions`에서 어떻게 되는지는 이 문서들에 직접 적혀 있지 않아 확인하지 못했다.
 - Claude Code 도구 참조(`code.claude.com/docs/en/tools-reference`): 도구 이름은 훅 matcher에 쓰는 글자이고, `Monitor`는 명령을 백그라운드에서
   실행하며 Bash와 같은 권한 규칙을 쓰고(Windows에서는 Git Bash가 있어야 한다), WebSocket 감시는 `command` 대신 `ws`를 받는다. Claude Code
   세션의 Monitor 도구 스키마(`command`·`ws`·`description`·`timeout_ms`, "The script runs in the same shell environment as Bash.")와도 맞춰

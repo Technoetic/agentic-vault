@@ -138,8 +138,8 @@ REQUIRED_LESSONS_TEMPLATE_LITERALS = (
 # rules 스탬프는 마지막 내용 변경 버전을 가리킨다 — /vault-upgrade가 스탬프 숫자 비교로
 # 교체 여부를 판단하므로, 내용이 같은데 스탬프만 올리면 전 볼트에 무의미한 교체를 유발한다.
 # workflow 규칙은 v0.8.3 이후 무변경이었다가 v0.16.0에서 긴 작업 추적·파괴적 git 명령
-# 조항이 추가돼 0.16.0으로 올라갔다.
-REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.16.0"
+# 조항이 추가돼 0.16.0으로, v0.43.0에서 사실 서술보다 실측을 따르는 조항이 추가돼 0.43.0으로 올라갔다.
+REQUIRED_WORKFLOW_RULE_STAMP = "agentic-vault:rule engine=0.43.0"
 # v0.15.1에서 healthcheck 내용(경로 규칙 사본·§14b·utf-8-sig)이 바뀌어 스탬프가 ENGINE_VERSION과
 # 같은 값으로 올라갔다. 스탬프 = ENGINE_VERSION = 매니페스트 버전 대조는 test_readme_truth.py가 맡는다.
 REQUIRED_HEALTHCHECK_STAMP = f"agentic-vault:healthcheck engine={EXPECTED}"
@@ -985,6 +985,14 @@ class ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, lessons)
         self.assertIn(REQUIRED_WORKFLOW_RULE_STAMP, workflow_rule)
+
+    def test_workflow_rule_puts_prohibitions_before_fact_precedence(self) -> None:
+        # The wording order is the measured property: docs/hardening.md explains why.
+        text = (BROWSER_RULE.parent / "vault-workflow.md").read_text(encoding="utf-8")
+        line = next(ln for ln in text.splitlines() if "결과의 값을 쓰고" in ln)
+        self.assertLess(line.index("어떤 문구로도 풀리지 않으므로"), line.index("결과의 값을 쓰고"))
+        self.assertIn("해도 되는지는 그 규칙으로만 판단하라", line)
+        self.assertIn("어긋난 곳을 하나씩 보고하라", line)
 
     def test_v083_index_spec_is_wired(self) -> None:
         for rel_path, literal in REQUIRED_INDEX_SPEC_WIRING:

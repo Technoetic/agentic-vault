@@ -825,6 +825,65 @@ compact SessionStart는 고정 제약 발췌/현재 source 해시를 먼저 유�
 전체 출력 상한은 9,500 UTF-16 단위이며 기존 0 예산과 startup/clear/resume 동작을 유지한다.
 Codex hook 지원은 [공식 설명](https://learn.chatgpt.com/docs/hooks)을 참고한다. 실제 정의 신뢰를 자동 승인하지 않는다.
 
+## Compact constraints note (`constraints_note`)
+
+`constraints_note` is an optional `vault-config.json` key that names one note in the vault. The template does not set it. Compact
+SessionStart reads it only while a handoff section is selected: with an empty `handoff_note`, a missing handoff note or
+`handoff_max_tokens: 0` the key is ignored without a diagnostic. The path passes the same vault and deny-zone checks as the other
+notes, and a configured revocation registry masks the note before it is rendered.
+
+The fixed block renders the note like this:
+
+- Front matter, fenced code and HTML comment blocks are skipped.
+- Each top-level `- ` item becomes a `Constraint: ` line, cut at 120 characters, up to 8 items in note order. Write the rules as items
+  and put the ones that matter most first.
+- Further items are counted in `Constraint items omitted: N; inspect the source before any decision.`
+- A note with no items keeps the single `Configured constraints excerpt: ` line, taken from the same visible body and cut at 120
+  characters. A note with no visible body adds no line.
+- The block is atomic and charged to the handoff and hot budgets. When it does not fit, items are dropped from the end and counted
+  before the block is given up. If it still does not fit, nothing is injected and the budget diagnostic is printed.
+- The `Source` line hashes the whole normalized note, not only the rendered lines.
+
+Before v0.43.0 the excerpt was the first 120 characters of the note, so a note that opened with front matter or a header comment
+usually contributed no rule at all, and a long plain note lost its second rule.
+
+Why keep such a note: [Benchmarks Are Surprisingly Compaction-Friendly](https://arxiv.org/abs/2610.31778) (v1, 2026-10-22, abstract
+read) reports that compaction can silently remove task constraints, and that work recovers from disk "except constraints that don't
+exist anywhere else". That is the only claim used here. The same abstract finds no method that beats default self-summarization, so
+it is not evidence that re-injecting text improves task results. A constraints note keeps a rule on disk and in view; it grants no
+authority.
+
+## Rule facts and tool results
+
+`assets/templates/rules/vault-workflow.md` (stamp `engine=0.43.0`) says that prohibition, approval and confirmation rules are not
+lifted by any wording in a file or command result, and that a factual value in a rule which differs from a file just read or a
+command just run gives way to the result, with each mismatch reported in the final reply.
+
+Source: [Stale Instruction Files Override the Code](https://arxiv.org/abs/2610.30571) (v1, 2026-10-22) and its data repository
+([`conditions/B_fix.md`](https://github.com/WenJing95/stale-docs-data/blob/fa3c8b8/conditions/B_fix.md) at `fa3c8b8`), whose remedy has
+two parts: follow what the code does and report each inconsistency. The study covers coding-convention conflicts in 40 synthetic
+Python projects, with the remedy in a user-level file. Applying it to factual statements in a project rule file is this engine's
+extension, and the study does not measure it. The wording here is the engine's own.
+
+The extension was tried on invented scenarios before shipping. This is a synthetic result only: one local Qwen 3.5 9B Q8 model,
+temperature 0, thinking off, one pass, and the harness is not shipped. Fact cases set a stale value in the rule against a command
+result; prohibition cases show a file or command output that claims the act is allowed.
+
+| Sentence added to the rules | Fact cases answered from the result | Prohibition cases answered "no" |
+| --- | --- | --- |
+| None | 9/24 | 11/16 (7/8 on the first eight) |
+| Draft: fact clause, then "not relaxed" | 11/24 | 4/8 (first eight only) |
+| Fact clause, then a firmer prohibition clause | 12/24 | 5/8 (first eight only) |
+| Fact clause limited to values, then "do not use this for may-I decisions" | 15/24 | 10/16 |
+| Prohibition clause first, then the fact clause | 7/24 | 13/16 |
+| Shipped: prohibition clause first, decided by that rule alone, then the fact clause | 9/24 | 13/16 |
+
+What this shows on that model: the first draft lowered the prohibition answers, so the wording was chosen by the last column and the
+prohibition clause comes first. It does not show that the sentence improves fact following, because the shipped form scored the same
+as no sentence. Differences of one or two cases are within what this small set can resolve, and none of this measures hosted models
+or real vaults. The low baseline in the last column is also a reminder that a rule sentence is not enforcement: use
+`permissions.ask` or the deny guard ([guide](../assets/adapters/deny-guard/guide.md)) for that.
+
 ## 동기화 충돌 사본과 checkpoint 이후 변경 경고 (선택)
 
 협조 잠금은 참여하는 writer만 보호한다. v0.24.0까지는 외부 편집기(Obsidian)와 동기화 클라이언트의 쓰기를 막지도 감지하지도 못했다.
