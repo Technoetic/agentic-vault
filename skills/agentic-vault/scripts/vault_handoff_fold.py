@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """Fold old handoff sections into archive notes with no byte discarded.
 
-analyze is the default and reads only. apply needs the handoff hash from analyze
-and moves every section outside the protected set, byte for byte, into new size-
-bounded archive notes. A short stub stays in place, and unresolved lines are lifted
-into one collected section with the hash of the section they came from. Host
-summaries are optional and bound to section hashes; without one, the title and the
-unresolved lines are all that stay. Nothing runs without a caller-chosen threshold
-and protected-section count, and no hook or scheduled task calls this tool.
+analyze reads only, and apply alone writes. A subcommand, a threshold and a
+protected-section count are all required, so a bare call does nothing and reports
+an error. apply needs the handoff hash from analyze and moves every section outside
+the protected set, byte for byte, into new size-bounded archive notes. A short stub
+stays in place, and unresolved lines are lifted into one collected section with the
+hash of the section they came from. Host summaries are optional and bound to section
+hashes; without one, the title and the unresolved lines are all that stay. No hook or
+scheduled task calls this tool.
 
 Sections are split on bytes, so no line ending changes. apply first rebuilds the
 original from its own output and refuses on any difference. Archive notes are never
 rewritten. Only cooperating writers observe the lock, and the archive notes and the
 handoff are separate atomic replaces, not one transaction. A failed run removes the
-archive notes it created; a killed run can leave unreferenced ones behind.
+archive notes it created only while the handoff provably still holds the original
+bytes. Otherwise the notes stay, because a landed stub has no other copy of its
+section. A killed run can leave unreferenced notes and a lock behind.
 """
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import os
@@ -31,7 +35,7 @@ from typing import Mapping, NamedTuple
 from vault_evidence import EvidenceError, decode, regular, stable_read
 from vault_healthcheck import HealthcheckError
 from vault_state import (BEGIN, END, StateError, _Policy, _atomic, _check_lease,
-                         _cleanup_temporary, _hash, _lease_guard, advisory_lock)
+                         _cleanup_temporary, _hash, _lease_guard, _remove_file, advisory_lock)
 
 SECTION_LEVEL = 2
 # The handoff is over the shared note limit on the first run, which is the case
@@ -54,6 +58,7 @@ DEFAULT_UNRESOLVED_PREFIXES = ('unresolved:',)
 ORDERS = ('top', 'bottom')
 PREVIEW_TIME = '1970-01-01T00:00:00Z'
 BOM = b'\xef\xbb\xbf'
+SYNC_FOLDERS = os.name != 'nt'
 WIKI_UNSAFE = frozenset('[]|#^')
 OWN_FRONTMATTER_KEYS = frozenset(('title', 'type', 'status', 'ai_priority', 'tags', 'related',
                                   'created', 'updated'))
@@ -501,7 +506,13 @@ def plan_fold(raw, settings, *, archive_stem, first_archive_number=1, folded_at=
             raw, section, folded_at, note_of[section], count, summaries.get(section.sha256))))
         collected.append(_tagged(lines, section.sha256, _eol_of(raw, 0)))
     if any(collected):
-        edits.append(_collected_edit(raw, sections, candidates[0], b''.join(collected)))
+        edit = _collected_edit(raw, sections, candidates[0], b''.join(collected))
+        if edit[0] == 0 and raw.startswith(BOM):
+            # A new section at the head of the file comes before the first stub,
+            # and the mark only means anything as the first bytes of the file.
+            edits[0] = (edits[0][0], edits[0][1], edits[0][2].removeprefix(BOM))
+            edit = (0, 0, BOM + edit[2])
+        edits.append(edit)
     edits.sort(key=lambda edit: (edit[0], edit[1]))
     projected = []
     position = 0
@@ -652,10 +663,39 @@ def _write_note(policy, lease, relative, target, data, check):
             cleanup_guard=lambda temporary: _cleanup_temporary(policy, relative, temporary))
 
 
-def _remove_created(paths, folder):
-    for path in paths:
+def _sync_folder(path):
+    """Commit new names in one folder (POSIX); Windows cannot open a folder this way.
+
+    File systems without folder fsync report EINVAL or ENOTSUP, and the replaces
+    are still atomic there, so only their order across a power cut stays unproven.
+    """
+    if not SYNC_FOLDERS:
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        if exc.errno not in (errno.EINVAL, errno.ENOTSUP):
+            raise
+    finally:
+        os.close(descriptor)
+
+
+def _holds(policy, relative, digest):
+    """True only when the handoff on disk provably has this hash; any doubt is False."""
+    try:
+        latest, _ = read_handoff(policy.fresh(), relative)
+    except Exception:
+        return False
+    return latest['sha256'] == digest
+
+
+def _remove_created(created, folder):
+    """Delete each (path, bytes) that still holds what this run wrote, then the folder."""
+    for path, raw in created:
         try:
-            path.unlink()
+            if path.read_bytes() == raw:
+                _remove_file(path)
         except OSError:
             pass
     if folder is not None:
@@ -700,10 +740,14 @@ def apply(vault, *, expected_sha256=None, threshold_bytes=None, protect_sections
             if os.path.lexists(checked):
                 raise StateError('archive_exists')
 
+        replacing = False
+
         def unchanged(current, _checked):
+            nonlocal replacing
             latest, _ = read_handoff(current, canonical)
             if latest['sha256'] != expected_sha256:
                 raise StateError('stale_base')
+            replacing = True
 
         folder_path = policy.vault.joinpath(*folder.split('/'))
         made_folder = None if folder_path.exists() else folder_path
@@ -715,14 +759,20 @@ def apply(vault, *, expected_sha256=None, threshold_bytes=None, protect_sections
             for note in plan.archives:
                 path = f'{folder}/{note.name}.md'
                 note_target = policy.note(path)
+                created.append((note_target, note.raw))
                 _write_note(policy, lease, path, note_target, note.raw, absent)
-                created.append(note_target)
                 os.chmod(note_target, mode)
                 reported.append({'path': path, 'sha256': _sha(note.raw), 'bytes': len(note.raw),
                                  'sections': note.sections})
+            _sync_folder(folder_path)
+            _sync_folder(folder_path.parent)
             _write_note(policy, lease, canonical, target, plan.projected, unchanged)
         except BaseException:
-            _remove_created(created, made_folder)
+            # Once the replace may have run, the stubs can be on disk and the new
+            # notes hold the only copy of those sections. Only the original bytes
+            # on disk prove otherwise; an unreferenced note costs nothing.
+            if not replacing or _holds(policy, canonical, expected_sha256):
+                _remove_created(created, made_folder)
             raise
         return {'status': 'applied', 'path': canonical, 'before_sha256': expected_sha256,
                 'after_sha256': _sha(plan.projected), 'bytes_before': len(raw),

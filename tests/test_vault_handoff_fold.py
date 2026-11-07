@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import errno
 import hashlib
 import importlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +51,62 @@ def document(count, **kwargs):
 
 def sha(raw):
     return hashlib.sha256(raw).hexdigest()
+
+
+# Raises KeyboardInterrupt at the Nth file operation of one apply, for every N.
+INTERRUPT_SWEEP = r"""
+import hashlib, json, shutil, sys
+from pathlib import Path
+scripts, work, source, handoff = sys.argv[1:5]
+sys.path.insert(0, scripts)
+import vault_handoff_fold as fold
+
+WATCHED = {'os.rename', 'os.remove', 'os.chmod', 'os.mkdir', 'os.rmdir', 'os.scandir',
+           'os.listdir', 'open', 'tempfile.mkstemp'}
+armed, seen, target = [False], [0], [0]
+
+def hook(event, _args):
+    if armed[0] and event in WATCHED:
+        seen[0] += 1
+        if seen[0] == target[0]:
+            armed[0] = False
+            raise KeyboardInterrupt
+
+sys.addaudithook(hook)
+raw = Path(source).read_bytes()
+rows = []
+for step in range(1, 2000):
+    vault = Path(work) / str(step)
+    (vault / '00-meta').mkdir(parents=True)
+    note = vault / handoff
+    note.parent.mkdir(parents=True)
+    (vault / '00-meta/vault-config.json').write_text(json.dumps({'handoff_note': handoff}))
+    note.write_bytes(raw)
+    seen[0], target[0], armed[0] = 0, step, True
+    try:
+        fold.apply(vault, expected_sha256=hashlib.sha256(raw).hexdigest(), threshold_bytes=1,
+                   protect_sections=2, folded_at='2026-02-03T04:05:06Z', archive_max_bytes=1024)
+    except BaseException:
+        # Cleanup of a file left open by the interrupt can replace it with an OSError.
+        if seen[0] < step:
+            raise
+    armed[0] = False
+    if seen[0] < step:
+        print(json.dumps({'done': True, 'rows': rows}))
+        break
+    folder = note.parent / 'handoff-archive'
+    notes = {item.stem: item.read_bytes() for item in folder.glob('*.md')} if folder.is_dir() else {}
+    current = note.read_bytes()
+    if current == raw:
+        state = 'original'
+    else:
+        try:
+            state = 'folded' if fold.restore_handoff(current, notes) == raw else 'differs'
+        except fold.StateError as exc:
+            state = 'lost:' + str(exc)
+    rows.append({'step': step, 'state': state, 'notes': len(notes)})
+    shutil.rmtree(vault, ignore_errors=True)
+"""
 
 
 class Base(unittest.TestCase):
@@ -229,6 +288,35 @@ class AnalyzeTests(Base):
         self.assertEqual(self.apply(protect_sections=1)['status'], 'no_reduction')
         self.assertEqual(self.handoff(), before)
         self.assertEqual(self.archives(), {})
+
+    def test_a_handoff_exactly_at_the_threshold_runs(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        self.assertEqual(self.analyze(threshold_bytes=len(raw))['status'], 'ready')
+        self.assertEqual(self.analyze(threshold_bytes=len(raw) + 1)['status'], 'below_threshold')
+
+    def sized(self, spare):
+        """One candidate whose stub is `spare` bytes shorter than the section it replaces."""
+        head = FRONTMATTER + '## new\nkept\n'
+        probe = (head + '## old\nbody\n').encode('utf-8')
+        _, sections = self.fold.split_sections(probe)
+        stub = self.fold._stub_bytes(probe, sections[1], FOLDED_AT, 'Demo handoff archive 0001', 0, None)
+        return (head + '## old\n' + 'y' * (len(stub) + spare - len('## old\n') - 1) + '\n').encode('utf-8')
+
+    def test_a_fold_of_equal_size_is_not_offered(self):
+        raw = self.sized(0)
+        self.write(HANDOFF, raw)
+        self.assertEqual(self.apply(protect_sections=1)['status'], 'no_reduction')
+        self.assertEqual(self.handoff(), raw)
+        self.assertEqual(self.archives(), {})
+
+    def test_a_fold_that_saves_one_byte_runs(self):
+        raw = self.sized(1)
+        self.write(HANDOFF, raw)
+        result = self.apply(protect_sections=1)
+        self.assertEqual(result['status'], 'applied')
+        self.assertEqual(result['bytes_after'], len(raw) - 1)
+        self.assertEqual(self.restore(), raw)
 
     def test_newest_at_the_bottom(self):
         raw = FRONTMATTER.encode('utf-8') + ''.join(section(number) for number in range(1, 5)).encode('utf-8')
@@ -468,6 +556,70 @@ class ApplyTests(Base):
         self.assertEqual(self.handoff(), raw)
         self.assertFalse((self.vault / ARCHIVE_DIR).exists())
 
+    def test_two_frames_sharing_a_stub_hash_are_refused(self):
+        first, second = b'## one\nbody\n', b'## two\nbody\n'
+        shared = 'a' * 12
+        fake = {first: shared + '1' * 52, second: shared + '2' * 52}
+        real = self.fold._sha
+        with mock.patch.object(self.fold, '_sha', lambda data: fake.get(data, real(data))):
+            note = (b'---\ntitle: x\n---\n' + self.fold._frame(first, fake[first])
+                    + self.fold._frame(second, fake[second]))
+            stub = (f'## one\n- [handoff-fold] {FOLDED_AT} sha256:{shared} '
+                    '[[Demo handoff archive 0001]] unresolved=0\n\n').encode('utf-8')
+            self.assertCode('ambiguous_archive_hash', self.fold.restore_handoff, stub,
+                            {'Demo handoff archive 0001': note})
+
+    def test_archive_notes_take_the_handoff_mode(self):
+        self.write(HANDOFF, document(5))
+        mode = stat.S_IMODE((self.vault / HANDOFF).lstat().st_mode)
+        with mock.patch.object(self.fold.os, 'chmod', wraps=os.chmod) as chmod:
+            self.apply()
+        note = self.vault / ARCHIVE_DIR / 'Demo handoff archive 0001.md'
+        self.assertIn(mock.call(note, mode), chmod.call_args_list)
+
+    def test_a_failed_replace_of_a_read_only_handoff_leaves_nothing(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        target = self.vault / HANDOFF
+        os.chmod(target, stat.S_IREAD)
+        self.addCleanup(os.chmod, target, stat.S_IWRITE | stat.S_IREAD)
+        replace = os.replace
+        def failing(source, destination):
+            if Path(destination).name == target.name:
+                raise PermissionError('blocked')
+            return replace(source, destination)
+        with mock.patch.object(self.fold.os, 'replace', failing):
+            with self.assertRaises((OSError, self.state.StateError)) as caught:
+                self.apply()
+        if os.name == 'nt':
+            self.assertEqual(str(caught.exception), 'replace_failed')
+        self.assertEqual(self.handoff(), raw)
+        self.assertFalse((self.vault / ARCHIVE_DIR).exists())
+        self.assertEqual(sorted(path.name for path in target.parent.iterdir()), [target.name])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows refuses to replace a read-only file')
+    def test_a_read_only_handoff_is_refused_on_windows_and_cleaned_up(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        target = self.vault / HANDOFF
+        os.chmod(target, stat.S_IREAD)
+        self.addCleanup(os.chmod, target, stat.S_IWRITE | stat.S_IREAD)
+        self.assertCode('replace_failed', self.apply)
+        self.assertEqual(self.handoff(), raw)
+        self.assertEqual(sorted(path.name for path in target.parent.iterdir()), [target.name])
+
+    def test_rollback_keeps_a_file_this_run_did_not_write(self):
+        self.write(HANDOFF, document(5))
+        real = self.fold._write_note
+        def overwritten(policy, lease, relative, target, data, check):
+            real(policy, lease, relative, target, data, check)
+            target.write_bytes(b'---\ntitle: other writer\n---\n')
+            raise PermissionError('blocked')
+        with mock.patch.object(self.fold, '_write_note', overwritten):
+            with self.assertRaises(PermissionError):
+                self.apply()
+        self.assertEqual(self.archives()['Demo handoff archive 0001'], b'---\ntitle: other writer\n---\n')
+
     def test_restore_mismatch_refuses_before_any_write(self):
         raw = document(5)
         self.write(HANDOFF, raw)
@@ -544,6 +696,42 @@ class UnresolvedTests(Base):
         titles = [item.title for item in self.fold.split_sections(self.handoff())[1]]
         self.assertEqual(titles[:3], ['2026-01-05 session 5', '2026-01-04 session 4', '미결 모음'])
 
+    def test_collected_section_sits_above_the_fresh_ones_when_newest_is_at_the_bottom(self):
+        raw = FRONTMATTER.encode('utf-8') + ''.join(section(number) for number in range(1, 6)).encode('utf-8')
+        self.write(HANDOFF, raw)
+        self.apply(newest='bottom')
+        titles = [item.title for item in self.fold.split_sections(self.handoff())[1]]
+        self.assertEqual(titles[0], '미결 모음')
+        self.assertEqual(titles[-2:], ['2026-01-04 session 4', '2026-01-05 session 5'])
+        self.assertEqual(self.restore(), raw)
+
+    def test_byte_order_mark_stays_first_when_the_collected_section_takes_the_head(self):
+        for eol in (b'\n', b'\r\n'):
+            with self.subTest(eol):
+                for name in self.archives():
+                    (self.vault / ARCHIVE_DIR / (name + '.md')).unlink()
+                plain = ''.join(section(number) for number in range(1, 6)).encode('utf-8')
+                raw = b'\xef\xbb\xbf' + plain.replace(b'\n', eol)
+                self.write(HANDOFF, raw)
+                self.assertEqual(self.apply(newest='bottom')['status'], 'applied')
+                after = self.handoff()
+                self.assertTrue(after.startswith(b'\xef\xbb\xbf' + '## 미결 모음'.encode('utf-8')))
+                self.assertEqual(after.count(b'\xef\xbb\xbf'), 1)
+                self.assertEqual(self.restore(), raw)
+                titles = [item.title for item in self.fold.split_sections(after)[1]]
+                self.assertEqual(titles[1], '2026-01-01 session 1')
+
+    def test_byte_order_mark_survives_a_second_fold(self):
+        plain = ''.join(section(number) for number in range(1, 6)).encode('utf-8')
+        raw = b'\xef\xbb\xbf' + plain
+        self.write(HANDOFF, raw)
+        self.apply(newest='bottom')
+        grown = self.handoff() + section(6).encode('utf-8') + section(7).encode('utf-8')
+        self.write(HANDOFF, grown)
+        self.assertEqual(self.apply(newest='bottom', folded_at='2026-03-04T05:06:07Z')['status'], 'applied')
+        self.assertEqual(self.handoff().count(b'\xef\xbb\xbf'), 1)
+        self.assertEqual(self.restore(), raw + section(6).encode('utf-8') + section(7).encode('utf-8'))
+
     def test_no_unresolved_lines_means_no_collected_section(self):
         raw = document(5, unresolved=False)
         self.write(HANDOFF, raw)
@@ -607,6 +795,170 @@ class UnresolvedTests(Base):
         after = self.handoff()
         self.assertEqual(after.replace(b'\r\n', b'').count(b'\n'), 0)
         self.assertEqual(self.restore(), raw)
+
+
+class InterruptTests(Base):
+    def fail_after_handoff_replace(self, error):
+        replace = os.replace
+        def replaced(source, target):
+            replace(source, target)
+            if Path(target).name == 'Demo handoff.md':
+                raise error
+        return mock.patch.object(self.fold.os, 'replace', replaced)
+
+    def test_interrupt_right_after_the_replace_keeps_the_archive(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        with self.fail_after_handoff_replace(KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply()
+        self.assertNotEqual(self.handoff(), raw)
+        self.assertEqual(self.restore(), raw)
+
+    def test_any_failure_after_the_replace_keeps_the_archive(self):
+        for error in (RuntimeError('late'), self.state.StateError('unsafe_temporary'), SystemExit(1)):
+            with self.subTest(type(error).__name__):
+                for name in self.archives():
+                    (self.vault / ARCHIVE_DIR / (name + '.md')).unlink()
+                raw = document(5)
+                self.write(HANDOFF, raw)
+                with self.fail_after_handoff_replace(error):
+                    with self.assertRaises(type(error)):
+                        self.apply()
+                self.assertEqual(self.restore(), raw)
+
+    def test_interrupt_while_the_lease_guard_is_released_keeps_the_archive(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        guard = self.fold._lease_guard
+        calls = []
+        @contextlib.contextmanager
+        def interrupted(policy, lease):
+            with guard(policy, lease):
+                yield
+            calls.append(1)
+            if len(calls) == 2:
+                raise KeyboardInterrupt
+        with mock.patch.object(self.fold, '_lease_guard', interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply()
+        self.assertEqual(self.restore(), raw)
+
+    def test_unreadable_handoff_after_a_failed_replace_keeps_the_archive(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        replace = os.replace
+        read = self.fold.read_handoff
+        broken = []
+        def failing(source, target):
+            if Path(target).name == 'Demo handoff.md':
+                broken.append(1)
+                raise PermissionError('blocked')
+            return replace(source, target)
+        def reading(policy, relative):
+            if broken:
+                raise self.state.StateError('unsafe_or_changed_source')
+            return read(policy, relative)
+        with mock.patch.object(self.fold.os, 'replace', failing), \
+                mock.patch.object(self.fold, 'read_handoff', reading):
+            with self.assertRaises((OSError, self.state.StateError)):
+                self.apply()
+        self.assertEqual(self.handoff(), raw)
+        self.assertEqual(list(self.archives()), ['Demo handoff archive 0001'])
+
+    def test_every_interruption_point_keeps_the_bytes(self):
+        source = self.write('source.bin', document(4))
+        shown = subprocess.run(
+            [sys.executable, '-B', '-X', 'utf8', '-c', INTERRUPT_SWEEP, str(SCRIPTS),
+             str(self.vault / 'sweep'), str(source), HANDOFF],
+            capture_output=True, text=True, encoding='utf-8', timeout=600)
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        report = json.loads(shown.stdout)
+        self.assertTrue(report['done'])
+        states = {row['state'] for row in report['rows']}
+        self.assertEqual(states, {'original', 'folded'})
+        self.assertEqual([row for row in report['rows'] if row['state'] == 'original' and row['notes']], [])
+
+
+class ManualRecoveryTests(Base):
+    def test_the_documented_steps_clear_a_guard_left_by_a_killed_run(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        name = 'lock-' + sha(('note:' + HANDOFF.casefold()).encode('utf-8')) + '.json'
+        runtime = self.vault / self.state.RUNTIME_DIR
+        runtime.mkdir(parents=True)
+        guard = runtime / (name + '.guard')
+        guard.write_text('{}', encoding='utf-8')
+        self.assertCode('lock_busy', self.apply)
+        guard.unlink()
+        self.assertEqual(self.apply()['status'], 'applied')
+        self.assertEqual(self.restore(), raw)
+
+    def test_the_guide_gives_the_steps(self):
+        guide = (ROOT / 'docs/handoff-fold.md').read_text(encoding='utf-8')
+        self.assertIn('## After a killed run', guide)
+        self.assertIn('lock-<hash>.json.guard', guide)
+        self.assertIn("sys.argv[1].casefold()", guide)
+        self.assertNotIn('is the default', guide)
+
+
+class FolderSyncTests(Base):
+    def test_folders_are_synced_before_the_handoff_is_replaced(self):
+        self.write(HANDOFF, document(5))
+        events = []
+        replace = os.replace
+        def replaced(source, target):
+            events.append(('replace', Path(target).name))
+            return replace(source, target)
+        with mock.patch.object(self.fold, '_sync_folder', lambda path: events.append(('sync', path.name))), \
+                mock.patch.object(self.fold.os, 'replace', replaced):
+            self.apply()
+        self.assertEqual(events, [('replace', 'Demo handoff archive 0001.md'),
+                                  ('sync', 'handoff-archive'), ('sync', 'Demo'),
+                                  ('replace', 'Demo handoff.md')])
+
+    def test_a_folder_sync_failure_stops_before_the_handoff_changes(self):
+        raw = document(5)
+        self.write(HANDOFF, raw)
+        with mock.patch.object(self.fold, '_sync_folder', side_effect=OSError(5, 'io')):
+            with self.assertRaises(OSError):
+                self.apply()
+        self.assertEqual(self.handoff(), raw)
+        self.assertFalse((self.vault / ARCHIVE_DIR).exists())
+
+    def test_sync_opens_and_closes_the_folder(self):
+        with mock.patch.object(self.fold, 'SYNC_FOLDERS', True), \
+                mock.patch.object(self.fold.os, 'open', return_value=91) as opened, \
+                mock.patch.object(self.fold.os, 'fsync') as synced, \
+                mock.patch.object(self.fold.os, 'close') as closed:
+            self.fold._sync_folder(self.vault)
+        opened.assert_called_once_with(self.vault, os.O_RDONLY)
+        synced.assert_called_once_with(91)
+        closed.assert_called_once_with(91)
+
+    def test_a_file_system_without_folder_sync_is_tolerated(self):
+        for code in (errno.EINVAL, errno.ENOTSUP):
+            with mock.patch.object(self.fold, 'SYNC_FOLDERS', True), \
+                    mock.patch.object(self.fold.os, 'open', return_value=91), \
+                    mock.patch.object(self.fold.os, 'fsync', side_effect=OSError(code, 'no')), \
+                    mock.patch.object(self.fold.os, 'close') as closed:
+                self.fold._sync_folder(self.vault)
+            closed.assert_called_once_with(91)
+
+    def test_a_real_folder_sync_error_is_raised(self):
+        with mock.patch.object(self.fold, 'SYNC_FOLDERS', True), \
+                mock.patch.object(self.fold.os, 'open', return_value=91), \
+                mock.patch.object(self.fold.os, 'fsync', side_effect=OSError(errno.EIO, 'io')), \
+                mock.patch.object(self.fold.os, 'close') as closed:
+            with self.assertRaises(OSError):
+                self.fold._sync_folder(self.vault)
+        closed.assert_called_once_with(91)
+
+    def test_windows_skips_the_folder_sync(self):
+        with mock.patch.object(self.fold, 'SYNC_FOLDERS', False), \
+                mock.patch.object(self.fold.os, 'fsync') as synced:
+            self.fold._sync_folder(self.vault)
+        synced.assert_not_called()
 
 
 class SecondFoldTests(Base):
@@ -706,6 +1058,14 @@ class CliTests(Base):
                              '--expected-sha256', '0' * 64)
         self.assertEqual(json.loads(stale.stderr), {'error': 'stale_base'})
         self.assertNotIn(str(self.vault), stale.stderr)
+
+    def test_a_subcommand_is_required(self):
+        self.write(HANDOFF, document(4))
+        before = self.tree()
+        refused = self.run_cli()
+        self.assertEqual(refused.returncode, 2)
+        self.assertEqual(json.loads(refused.stderr), {'error': 'invalid_arguments'})
+        self.assertEqual(self.tree(), before)
 
     def test_bad_arguments_exit_two(self):
         self.write(HANDOFF, document(4))

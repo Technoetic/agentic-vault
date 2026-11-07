@@ -53,7 +53,7 @@ v0.35.1부터 전체 플러그인에는
 | `revocations capture\|check <인자>` | [선택형 기억 철회](../../../docs/memory-revocation.md), `scripts/vault_revocation.py --vault PATH capture\|check --input RELATIVE.json`; 등록 줄·파생 관계의 준비/검사, 저장·활성화·원문 삭제 없음 |
 | `bundle <작업과 인자>` | [묶음 복구](../../../docs/recoverable-bundles.md), `scripts/vault_bundle.py`; prepare/status, 명시적 digest·`--apply`에 묶인 저장·적용·순방향 복구 |
 | `review-plan <인자>` | [재검토 순서](../../../docs/review-planning.md), `scripts/vault_review_plan.py --vault PATH --inventory RELATIVE.json --graph RELATIVE.json`; 읽기 전용 명시적 의존관계 순서 |
-| `handoff-fold analyze\|apply <인자>` | [handoff 접기](../../../docs/handoff-fold.md), `scripts/vault_handoff_fold.py --vault PATH analyze\|apply`; 기본 읽기 전용, `apply`는 사용자가 정한 문턱·보호 절 수와 `--expected-sha256` 필요, 자동 실행 없음 |
+| `handoff-fold analyze\|apply <인자>` | [handoff 접기](../../../docs/handoff-fold.md), `scripts/vault_handoff_fold.py --vault PATH analyze\|apply`; `analyze`는 읽기 전용이고 `apply`만 쓴다, 하위 명령과 사용자가 정한 문턱·보호 절 수는 필수, `apply`는 `--expected-sha256`도 필요, 자동 실행 없음 |
 | `commit <인자>` | [경로 선언 커밋](../../../docs/concurrent-commits.md), `scripts/vault_commit.py --vault PATH --path RELATIVE=SHA256 --message TEXT --actor NAME`; 공유 작업 트리에서 선언한 파일만 커밋, 일반 `git commit`을 막지는 못함 |
 | `lesson-clusters <인자>` | [교훈 재발 부류](../../../docs/lesson-recurrence.md), `scripts/vault_lesson_clusters.py --vault PATH --mistakes RELATIVE.md`; 읽기 전용 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |

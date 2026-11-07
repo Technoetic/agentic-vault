@@ -9,6 +9,7 @@ import importlib
 import ntpath
 import os
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import threading
@@ -109,6 +110,15 @@ class WindowsStateReplaceTests(unittest.TestCase):
         self.assertTrue(all(code in (5, 32) for code in observed_codes))
         self.assertEqual(result['status'], 'applied')
         self.assertEqual(self.target.read_bytes(), b'new\r\n')
+        self.assert_no_staged_files()
+
+    def test_read_only_target_fails_with_the_fixed_code_and_no_staged_file(self):
+        os.chmod(self.target, stat.S_IREAD)
+        self.addCleanup(os.chmod, self.target, stat.S_IWRITE | stat.S_IREAD)
+        with self.assertRaises(state.StateError) as caught:
+            self.patch()
+        self.assertEqual(str(caught.exception), 'replace_failed')
+        self.assertEqual(self.target.read_bytes(), b'old\r\n')
         self.assert_no_staged_files()
 
     def test_persistent_real_reader_fails_bounded_with_sanitized_error_and_original(self):

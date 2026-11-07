@@ -20,7 +20,7 @@ The user authorized implementing and publicly releasing this work on 2026-11-07.
 
 ## Unit 3 — handoff folding
 
-`vault_handoff_fold.py` analyzes by default. `apply` needs the analyzed hash, a threshold and a protected-section count, moves sections byte for byte into new archive notes, keeps a stub and lifts unresolved lines. It rebuilds the original from its own output and refuses on any difference. No default threshold. `scripts/evaluate_handoff_fold.py` is an offline loss alarm over a synthetic pack: literal reachability only, no model. Documented in `docs/handoff-fold.md`.
+`vault_handoff_fold.py` has two subcommands and no default action: `analyze` reads only, and `apply` alone writes. Both need a threshold and a protected-section count. `apply` also needs the analyzed hash, moves sections byte for byte into new archive notes, keeps a stub and lifts unresolved lines. It rebuilds the original from its own output and refuses on any difference. No default threshold. `scripts/evaluate_handoff_fold.py` is an offline loss alarm over a synthetic pack: literal reachability only, no model. Documented in `docs/handoff-fold.md`.
 
 ## Unit 4 — session evidence and plugin scope
 

@@ -1,6 +1,6 @@
 # Handoff folding
 
-`vault_handoff_fold.py` shrinks a long `handoff_note` by moving old sections, byte for byte, into archive notes. A short stub stays where each section was. `analyze` is the default and writes nothing; `apply` needs the hash `analyze` reported. Nothing runs by itself: no hook, session command or schedule calls this tool, and it has no default threshold.
+`vault_handoff_fold.py` shrinks a long `handoff_note` by moving old sections, byte for byte, into archive notes. A short stub stays where each section was. `analyze` reads only, and `apply` alone writes. `apply` needs the hash `analyze` reported. Nothing runs by itself: no hook, session command or schedule calls this tool. A subcommand is required, and a call without one exits 2 with `invalid_arguments`.
 
 Host-agnostic Python 3.10+ standard library. No network, model or subprocess is used.
 
@@ -10,7 +10,7 @@ python skills/agentic-vault/scripts/vault_handoff_fold.py --vault /path/to/vault
 python skills/agentic-vault/scripts/vault_handoff_fold.py --vault /path/to/vault apply --threshold-bytes 262144 --protect-sections 20 --expected-sha256 HASH --summaries 00-meta/scratch/summaries.json
 ```
 
-`--threshold-bytes` and `--protect-sections` are required, and a run without one exits with `fold_threshold_required` or `fold_protect_required`. Below the threshold nothing happens. `--newest top|bottom` (default `top`) says which end of the file is recent. `--archive-max-bytes` defaults to 256 KiB. `--folded-at` fixes the stub time; it defaults to the current UTC time.
+`--threshold-bytes` and `--protect-sections` have no default and are required for `analyze` as well as `apply`. A run without one exits with `fold_threshold_required` or `fold_protect_required`. Below the threshold nothing happens; a handoff of exactly that size is eligible. `--newest top|bottom` (default `top`) says which end of the file is recent. `--archive-max-bytes` defaults to 256 KiB. `--folded-at` fixes the stub time; it defaults to the current UTC time.
 
 Exit codes are 0 for a completed run, including `below_threshold`, `nothing_to_fold` and `no_reduction`; 1 for a refused or failed run, with `{"error":"<code>"}` on stderr; and 2 for invalid arguments. Errors are fixed codes and never carry paths or note text. `apply` without a hash exits with `expected_sha256_required`, and a changed handoff with `stale_base`; run `analyze` again.
 
@@ -27,7 +27,7 @@ A folded section keeps its heading line and gains one stub line:
 
 The line holds the fold time, the first twelve hash characters, the archive link and the unresolved line count. A host summary, when given, is one more line under it. Without one, only the title and the unresolved lines stay.
 
-Unresolved lines are copied, not removed, into one `## 미결 모음` section placed before the first folded section, each with `[fold-source: sha256:<12 hex>]` added. More deeply indented lines follow their match, stopping at a code fence, so a bare `- unresolved:` keeps its nested items. Lines inside fences do not match. Later folds extend the same section. This section preserves; it may exceed the injection window, and the fresh sections sit above it for that reason.
+Unresolved lines are copied, not removed, into one `## 미결 모음` section placed before the first folded section, each with `[fold-source: sha256:<12 hex>]` added. More deeply indented lines follow their match, stopping at a code fence, so a bare `- unresolved:` keeps its nested items. Lines inside fences do not match. Later folds extend the same section. This section preserves, and it may exceed the injection window. With `--newest top` the fresh sections sit above it for that reason. With `--newest bottom` it still goes before the first folded section, so it and the stubs sit above the fresh sections, and the session hook, which keeps the head of the note, can fill its window before it reaches them. How much of the window it takes was not measured. When this section takes the head of a file that starts with a byte order mark, the mark stays the first bytes of the file.
 
 ## Archive notes
 
@@ -59,9 +59,37 @@ Unset configuration keeps the defaults. The tool only reads this optional key fr
 
 ## Guarantees and limits
 
-`apply` takes the same advisory lock as `patch_note`, reads the handoff under its own 32 MiB limit, and rechecks the hash, lease and policy before each atomic replace. Only cooperating writers observe the lock. Archive notes and the handoff are separate replaces, not one transaction: a failed run removes the notes it created, but a killed process can leave unreferenced notes behind. Deny zones and exclusions apply to the handoff, the archive folder and the summary file.
+`apply` takes the same advisory lock as `patch_note`, reads the handoff under its own 32 MiB limit, and rechecks the hash, lease and policy before each atomic replace. Only cooperating writers observe the lock. Archive notes and the handoff are separate replaces, not one transaction. On POSIX, `apply` syncs the archive folder and its parent before it replaces the handoff, so the notes' names reach the disk first where the file system supports folder sync. Windows has no such call. No power-cut test was run. Deny zones and exclusions apply to the handoff, the archive folder and the summary file.
+
+A failed or interrupted run removes the notes it created only while the handoff on disk provably holds the original bytes, and it removes only files that still hold what the run wrote. Once the handoff replace may have run, the notes stay, whatever the error was, because a stub has no other copy of its section. So an error or Ctrl-C can arrive with the fold already complete: run `analyze` and look at `sha256` and `already_folded` before you try again. A killed process, or a removal the system refuses, can leave unreferenced notes behind.
+
+On Windows a read-only handoff cannot be replaced, so the run ends with `replace_failed`, removes its notes and leaves the handoff as it was. On POSIX the read-only mode does not stop the replace, and the archive notes copy the mode.
 
 The tool does not update the handoff's `updated` key, `index_note` or `log_note`; the caller's usual note rules apply. The handoff must be valid UTF-8. A hand edit under a stub is lost on restore, because the stub section is replaced whole. It folds nothing it cannot rebuild, including a hand-made collected section that ends the file without a newline. A fold reduces the current size only: new entries keep growing the file, so this does nothing for the rate of growth.
+
+## After a killed run
+
+A process killed during `apply` loses no bytes. The handoff is either unchanged or folded with its notes in place. It can leave four things behind:
+
+| Left behind | Where | What it does |
+|---|---|---|
+| Guard | `00-meta/.agentic-vault/runtime/lock-<hash>.json.guard` | Never expires, on purpose. Every later `apply` and every `patch_note` on this handoff stops with `lock_busy` until it is removed by hand. |
+| Lease | `00-meta/.agentic-vault/runtime/lock-<hash>.json` | Expires by itself 300 seconds after the run took it. Until then the same calls stop with `lock_busy`. |
+| Staged file | `.vault-state-*` beside the handoff or in `handoff-archive/` | Does nothing. Safe to delete. |
+| Unreferenced note | `handoff-archive/` | Takes up one archive number. Costs nothing. |
+
+To recover:
+
+1. Make sure no writer is running on this vault. A live writer holds the guard only for a moment, so a guard that stays while no process is running is a leftover.
+2. Find the file name. `<hash>` is the SHA-256 of `note:` plus the vault-relative handoff path in case-folded form:
+
+   ```console
+   python -c "import hashlib,sys; print('lock-' + hashlib.sha256(('note:' + sys.argv[1].casefold()).encode('utf-8')).hexdigest() + '.json')" "50-projects/Demo/Demo handoff.md"
+   ```
+
+3. Delete `<that name>.guard` from the runtime folder. Wait for the lease to expire if one is there.
+4. Run `analyze`. The same `sha256` as before means the fold did not land. A new `sha256` means it did.
+5. Delete `.vault-state-*` files. Delete an archive note only when no stub in the handoff links to it. A note that a stub links to holds the only copy of that section.
 
 ## Evaluation
 

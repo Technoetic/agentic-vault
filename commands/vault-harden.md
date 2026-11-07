@@ -17,8 +17,8 @@ Codex는 `$agentic-vault:agentic-vault harden <작업과 인자>`를 사용한�
 `review-plan`은 [재검토 순서](../docs/review-planning.md)의 `vault_review_plan.py`로 연결한다.
 호출자가 작성한 inventory·graph만 읽으며 노트 수정·재캡처·추론을 추가하지 않는다.
 `handoff-fold`는 [handoff 접기](../docs/handoff-fold.md)의 `vault_handoff_fold.py`로 연결한다.
-기본 `analyze`는 읽기 전용이고, `apply`에는 그 결과의 `--expected-sha256`이 필요하다. 문턱과 보호
-절 수는 기본값이 없으므로 사용자가 정한 값만 쓴다. 자동 실행은 없다. 요약은 호스트가 쓰는 파생 글이며,
+`analyze`는 읽기 전용이고 `apply`만 쓴다. 하위 명령과 문턱·보호 절 수는 필수이고 기본값이 없으므로
+사용자가 정한 값만 쓴다. `apply`에는 `analyze` 결과의 `--expected-sha256`도 필요하다. 자동 실행은 없다. 요약은 호스트가 쓰는 파생 글이며,
 없으면 제목과 미결 줄만 남긴다. `scripts/evaluate_handoff_fold.py`의 문자열 도달은 소실 경보일 뿐
 이어서 일할 수 있다는 근거가 아니다.
 `commit`은 [경로 선언 커밋](../docs/concurrent-commits.md)의 `vault_commit.py`로 연결한다. 파일마다 작업 파일의

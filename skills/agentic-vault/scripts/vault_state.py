@@ -425,6 +425,17 @@ def _cleanup_temporary(policy, relative, temporary, *, runtime=False):
     policy.fresh()
 
 
+def _remove_file(path):
+    """Delete a file this run made; Windows refuses while its read-only bit is set."""
+    try:
+        path.unlink()
+    except PermissionError:
+        if os.name != 'nt':
+            raise
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def _atomic(path, data, before_replace, *, cleanup_guard=None):
     """Retry short Windows sharing failures with a fresh validated attempt.
 
@@ -457,7 +468,7 @@ def _atomic(path, data, before_replace, *, cleanup_guard=None):
             try:
                 if cleanup_guard is not None:
                     cleanup_guard(temporary)
-                temporary.unlink()
+                _remove_file(temporary)
             except FileNotFoundError:
                 pass
             except StateError as exc:
