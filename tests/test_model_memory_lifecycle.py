@@ -6,7 +6,6 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
-import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
@@ -147,12 +146,23 @@ class ModelLifecycleTests(unittest.TestCase):
     def test_deadline_and_request_budget_errors_are_bounded_content_free(self):
         m = self.require_module()
         sample = self.dataset['samples'][0]
-        started = time.monotonic()
+        release = threading.Event()
+        finished = threading.Event()
+        self.addCleanup(release.set)
+
+        def blocked_transport(*args, **kwargs):
+            # The bound keeps a synchronous regression from hanging the suite.
+            release.wait(timeout=5)
+            finished.set()
+
         row = m.solve_sample(sample, backend='test-double',
                              limits=m.ModelLimits(request_timeout_seconds=0.01),
-                             transport=lambda *a, **kw: time.sleep(0.1))
-        self.assertLess(time.monotonic() - started, 0.1)
+                             transport=blocked_transport)
+        # solve_sample returned while the transport was still held: order, not elapsed time.
+        self.assertFalse(finished.is_set())
         self.assertEqual(row['error'], 'request_timeout')
+        release.set()
+        self.assertTrue(finished.wait(timeout=5))
         with patch.object(m, '_bounded_request', side_effect=AssertionError('must not send')):
             row = m.solve_sample(sample, backend='test-double', limits=m.ModelLimits(max_request_bytes=1),
                                  transport=lambda *a, **kw: None)

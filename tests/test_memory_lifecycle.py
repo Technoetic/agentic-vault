@@ -166,6 +166,33 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(json.loads(bad.stdout), {'error': 'lifecycle_evaluation_invalid'})
             self.assertEqual(bad.stderr, '')
 
+    def test_worker_environment_has_no_python_values_the_interpreter_ignores(self):
+        self.assertIsNotNone(subject(), 'cross-process lifecycle evaluator missing')
+        env = subject()._environment()
+        self.assertEqual([key for key in env if key.upper().startswith('PYTHON')], [])
+        for key in env:
+            self.assertNotIn('KEY', key.upper())
+            self.assertNotIn('PROXY', key.upper())
+
+    def test_worker_interpreter_is_isolated_and_writes_no_bytecode(self):
+        self.assertIsNotNone(subject(), 'cross-process lifecycle evaluator missing')
+        code = 'import sys; print(sys.flags.isolated, sys.flags.dont_write_bytecode)'
+        result = subprocess.run([sys.executable, *subject().WORKER_FLAGS, '-c', code], capture_output=True,
+                                text=True, timeout=20, env=subject()._environment())
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
+        self.assertEqual(result.stdout.split(), ['1', '1'])
+
+    def test_every_worker_command_uses_the_same_flags_without_utf8_mode(self):
+        self.assertIsNotNone(subject(), 'cross-process lifecycle evaluator missing')
+        self.assertEqual(subject().WORKER_FLAGS, ('-I', '-B'))
+        for name in ('evaluate_memory_lifecycle.py', 'evaluate_model_memory_lifecycle.py',
+                     'evaluate_generated_memory_lifecycle.py'):
+            with self.subTest(script=name):
+                text = (ROOT / 'scripts' / name).read_text(encoding='utf-8')
+                self.assertEqual(text.count('[sys.executable, *'), 1)
+                self.assertNotIn("[sys.executable, '-I'", text)
+                self.assertNotIn("'-X'", text)
+
     def test_worker_protocol_rejects_real_paths_unknown_roles_and_large_input(self):
         self.assertIsNotNone(subject(), 'cross-process lifecycle evaluator missing')
         envelope = dict(root=str(ROOT), role='before-repair', nonce='a' * 64,

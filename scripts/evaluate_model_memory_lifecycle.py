@@ -121,7 +121,7 @@ def _worker(request):
 def _run(root, nonce, role, case, control, max_tokens, source_digest):
     request = dict(root=str(root), nonce=nonce, role=role, case=case,
                    control=control, max_tokens=max_tokens)
-    completed = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve()), '--_model-lifecycle-worker'],
+    completed = subprocess.run([sys.executable, *lifecycle.WORKER_FLAGS, str(Path(__file__).resolve()), '--_model-lifecycle-worker'],
                                input=lifecycle._json(request).encode('utf-8'), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, env=lifecycle._environment(), cwd=str(ROOT),
                                timeout=30, check=False)

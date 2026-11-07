@@ -54,7 +54,7 @@ class Sessions:
         if len(raw) > 8192:
             raise ValueError('worker_failed')
         try:
-            result = subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/generated_memory_worker.py')],
+            result = subprocess.run([sys.executable, *lifecycle.WORKER_FLAGS, str(ROOT / 'scripts/generated_memory_worker.py')],
                 input=raw, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
                 env=lifecycle._environment(), cwd=ROOT, check=False)
         except (OSError, subprocess.TimeoutExpired):

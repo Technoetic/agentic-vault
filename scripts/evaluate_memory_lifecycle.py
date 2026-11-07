@@ -376,10 +376,16 @@ def _worker(request, *, _include_context=False):
     return dict(role=request['role'], pid=os.getpid(), process_token=secrets.token_hex(16), arms=result)
 
 
+# -I ignores every PYTHON* variable and the user site; -B keeps .pyc files out
+# of the source tree. UTF-8 mode stays off so a worker meets the same default
+# encoding as a user who never enabled it.
+WORKER_FLAGS = ('-I', '-B')
+
+
 def _environment():
-    # No inherited API keys, proxy variables, PYTHONPATH or user customizations.
-    env = {'PYTHONUTF8': '1', 'PYTHONDONTWRITEBYTECODE': '1', 'PYTHONNOUSERSITE': '1',
-           'TEMP': tempfile.gettempdir(), 'TMP': tempfile.gettempdir()}
+    # No inherited API keys, proxy variables or PYTHON* values. This clears
+    # inherited settings only: the OS user, profile and code page stay real.
+    env = {'TEMP': tempfile.gettempdir(), 'TMP': tempfile.gettempdir()}
     for key in ('SystemRoot', 'WINDIR'):
         if key in os.environ:
             env[key] = os.environ[key]
@@ -389,7 +395,7 @@ def _environment():
 def _run(root, nonce, role, case, control, max_tokens):
     request = dict(root=str(root), nonce=nonce, role=role, case=case,
                    control=control, max_tokens=max_tokens)
-    completed = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve()), '--_lifecycle-worker'],
+    completed = subprocess.run([sys.executable, *WORKER_FLAGS, str(Path(__file__).resolve()), '--_lifecycle-worker'],
                                input=_json(request).encode('utf-8'), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, env=_environment(), cwd=str(ROOT),
                                timeout=30, check=False)
