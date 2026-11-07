@@ -393,6 +393,25 @@ def _validate_sync_warning_keys(config: dict) -> None:
     config["sync_conflict_patterns"] = list(patterns)
 
 
+# Opt-in staged token growth check, also absent from DEFAULT_CONFIG. HEAD is the
+# baseline, so an existing over-budget note passes until it grows and no result
+# file exists to merge. staged_growth_max_tokens adds a per-commit growth limit.
+_STAGED_GROWTH_MODES = ("off", "warn", "block")
+_STAGED_GROWTH_NOTES = (("hot_note", "hot_max_tokens"), ("handoff_note", "handoff_max_tokens"))
+
+
+def _validate_staged_growth_keys(config: dict) -> None:
+    """Reject malformed opt-in staged growth settings."""
+    if "staged_growth_check" in config:
+        mode = config["staged_growth_check"]
+        if not isinstance(mode, str) or mode not in _STAGED_GROWTH_MODES:
+            raise HealthcheckError("staged_growth_check must be off, warn or block")
+    if "staged_growth_max_tokens" in config:
+        limit = config["staged_growth_max_tokens"]
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise HealthcheckError("staged_growth_max_tokens must be a non-negative integer")
+
+
 def validate_config(raw: object) -> dict:
     """Validate untrusted JSON config and return a normalized independent mapping."""
     if not isinstance(raw, dict):
@@ -402,6 +421,7 @@ def validate_config(raw: object) -> dict:
     config["gates"] = _validate_gates(config.get("gates"))
     _validated_warning_policy(config)
     _validate_sync_warning_keys(config)
+    _validate_staged_growth_keys(config)
 
     for key in _STRING_KEYS:
         value = config.get(key)
@@ -1500,6 +1520,68 @@ def staged_extension_warnings(vault: Path, config: dict, changes: list[StagedCha
             or x["details"].get("target") in changed_paths]
 
 
+def _staged_growth_budgets(config: dict, *, collecting_warnings: bool) -> dict[str, int]:
+    """Map each budgeted note to its token budget when the growth check has a use."""
+    mode = config.get("staged_growth_check", "off")
+    if mode == "off" or (mode == "warn" and not collecting_warnings):
+        return {}
+    budgets: dict[str, int] = {}
+    for path_key, budget_key in _STAGED_GROWTH_NOTES:
+        path, budget = config.get(path_key), config.get(budget_key, 0)
+        if path and budget > 0:
+            budgets[path] = min(budget, budgets.get(path, budget))
+    return budgets
+
+
+def _staged_growth_baseline(vault: Path, change: StagedChange) -> str | None:
+    """Return the HEAD text of a staged change, or None for a path new to HEAD."""
+    if change.status == "A":
+        return None
+    data = _run_git_bytes(vault, "show", f"HEAD:{change.old_path or change.path}")
+    return data.decode("utf-8-sig")
+
+
+def _staged_growth_finding(code: str, path: str, message: str, details: dict) -> dict:
+    # Built here because the copy installed in a vault has no extension modules.
+    digest = hashlib.sha256(f"{code}\0{path}".encode("utf-8")).hexdigest()
+    return {"issue_id": "lint-" + digest[:20], "code": code, "severity": "warning",
+            "path": path, "line": 0, "message": message, "details": details}
+
+
+def _check_staged_growth(vault: Path, change: StagedChange, text: str, budget: int, config: dict,
+                         errors: list[str], warning_diagnostics: list[dict] | None) -> None:
+    """Report a budgeted note that grew; the change itself is judged, not its size."""
+    block = config["staged_growth_check"] == "block"
+    try:
+        baseline = _staged_growth_baseline(vault, change)
+    except (HealthcheckError, UnicodeDecodeError):
+        # Fixed wording: a git failure message can quote repository paths.
+        code = "staged-token-growth-unverified"
+        if block:
+            errors.append(f"스테이징 차단: {change.path} — [{code}] HEAD 기준선을 읽지 못함")
+        else:
+            warning_diagnostics.append(_staged_growth_finding(
+                code, change.path, "The HEAD baseline of a budgeted note could not be read", {}))
+        return
+    if baseline is None:
+        return
+    before, after = estimate_tokens(baseline), estimate_tokens(text)
+    growth = after - before
+    limit = config.get("staged_growth_max_tokens", 0)
+    reason = "over_budget" if after > budget else "growth_limit" if limit and growth > limit else ""
+    if growth <= 0 or not reason:
+        return
+    code = "staged-token-growth"
+    if block:
+        errors.append(f"스테이징 차단: {change.path} — [{code}] {reason}: "
+                      f"추정 토큰 {before} → {after} (예산 {budget}, 증가 상한 {limit})")
+    else:
+        warning_diagnostics.append(_staged_growth_finding(
+            code, change.path, "A budgeted note grew in the staged change",
+            {"reason": reason, "before_tokens": before, "after_tokens": after,
+             "budget_tokens": budget, "max_growth_tokens": limit}))
+
+
 def validate_staged(vault: Path, config: dict, *, warning_diagnostics: list[dict] | None = None) -> list[str]:
     """Validate only the staged Markdown change surface without writing a report."""
     if not isinstance(config, dict):
@@ -1508,11 +1590,16 @@ def validate_staged(vault: Path, config: dict, *, warning_diagnostics: list[dict
     changes = list_staged_changes(vault, config)
     errors: list[str] = []
     deleted_stems: set[str] = set()
+    growth_budgets = _staged_growth_budgets(
+        config, collecting_warnings=warning_diagnostics is not None)
 
     for change in changes:
         if change.status in "ACMR":
             text = read_index_text(vault, change.path)
             errors.extend(_staged_schema_errors(change.path, text, config))
+            if change.path in growth_budgets:
+                _check_staged_growth(vault, change, text, growth_budgets[change.path], config,
+                                     errors, warning_diagnostics)
 
         if change.status == "D":
             deleted_stems.add(_posix_markdown_stem(change.path))
