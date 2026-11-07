@@ -135,7 +135,7 @@ timed-out/unavailable를 통과로 보고하지 않는다. 아래의 기존 승�
   - hot·handoff·log·index는 기본으로 거부된다. 이 파일들은 `--own-lines <패치.json>`으로 내 줄만 올린다.
   - 구역으로 옮긴 파일은 이 도구로 올리지 않는다. 폴더 경로도 받지 않으며, 경로 목록을 파일이나 stdin으로 넘겨 가드를 피하는 방법은 없다. 위 폴더 스테이징은 다른 세션이 커밋하지 않을 때 따로 수행하라.
   - **한 작업 폴더에서는 한 방식으로 통일하라.** 이 도구와 일반 `git commit`을 섞으면 모든 명령이 종료 코드 0인데 파일이 빠지는 조용한 누락이 남는다.
-  - `status`가 `committed`가 아니면 §9 보고에 그 값과 `reason`을 적어라. `committed_mismatch`·`committed_index_stale`은 커밋이 이미 있다는 뜻이다. 잠금은 지우지 말고 `lock` 값을 보고하라.
+  - `status`가 `committed`가 아니면 §9 보고에 그 값과 `reason`을 적어라. `committed_mismatch`·`committed_index_stale`은 커밋이 이미 있다는 뜻이다. `already_applied`는 같은 편집이 이미 HEAD에 있어 이번 실행이 아무것도 커밋하지 않았다는 뜻이므로 다시 실행하지 말라. 잠금은 지우지 말고 `lock` 값을 보고하라.
 - pre-commit 훅(무결성 게이트)이 커밋을 차단하면 지적된 노트를 **수정한 뒤** 재시도하라 — `--no-verify` 우회 금지.
 - 로컬 경로 미러 원격(예: `mirror`)이 설정되어 있으면 커밋 후 push로 미러를 갱신하라 — pre-push 훅이 로컬 경로 원격은 허용한다. 실패해도 세션 종료를 막지 말고 보고만 하라.
 - `.gitignore`가 제외하는 바이너리·비밀 파일은 그대로 두라.

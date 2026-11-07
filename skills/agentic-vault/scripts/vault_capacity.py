@@ -22,6 +22,7 @@ from vault_evidence import EvidenceError, regular
 from vault_recall import MAX_FILE_BYTES as RECALL_FILE_BYTES
 from vault_state import MAX_BYTES as STATE_READ_BYTES
 from vault_state import StateError, _Policy
+from vault_worktrees import git_executable
 
 
 SCHEMA_VERSION = 1
@@ -46,7 +47,10 @@ class _HistoryError(Exception):
 
 
 def _run_git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    command = ["git", "--literal-pathspecs", "-c", "core.quotepath=false", *args]
+    executable = git_executable()
+    if executable is None:
+        raise _HistoryError("git_unavailable")
+    command = [executable, "--literal-pathspecs", "-c", "core.quotepath=false", *args]
     options = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
     try:
         result = subprocess.run(

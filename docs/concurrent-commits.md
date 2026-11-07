@@ -22,11 +22,13 @@ Plain `git commit` writes the whole index as the next tree. An index that is out
 
 ## What the command does
 
-1. Validates input. Paths use the shared vault path rule, deny zones and `.git` are refused, symbolic links and junctions are refused, and folders are refused because a folder commit would carry whatever else is under it. Pathspecs are `:(literal)` per path: the global `--literal-pathspecs` option is exported to hooks, where it turns the pathspec magic of the pre-commit gate into plain text and the gate passes without checking anything.
-2. Refuses a merge, rebase, cherry-pick or revert in progress.
+1. Validates input. Paths use the shared vault path rule, deny zones and `.git` are refused, symbolic links, junctions and Windows short names are refused, and folders are refused because a folder commit would carry whatever else is under it. Anything inside a linked working tree of the repository is refused with `denied_path`, in both modes and for the patch file, because a copy of a note or a deny zone there is not a path of this vault. Git runs from an absolute path found on `PATH`, never an implicit current folder, and without the variables that would move the commit or its gate: `GIT_DIR`, `GIT_INDEX_FILE` and the like, the pathspec variables, and `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*` and `GIT_CONFIG_PARAMETERS`, which could replace `core.hooksPath`. Pathspecs are `:(literal)` per path: the global `--literal-pathspecs` option is exported to hooks, where it turns the pathspec magic of the pre-commit gate into plain text and the gate passes without checking anything.
+2. Refuses a merge, rebase, cherry-pick or revert in progress. Unresolved conflict entries in the index are refused with `unmerged_paths`, because `git stash pop` leaves them without a marker file and `git add` would mark them resolved with the conflict lines still in the file.
 3. Compares each working file with its declared sha256 on every attempt.
 4. Runs `git add -- PATHS`, then `git commit -- PATHS`. Hooks run, and `--no-verify` is not available. Ignored files stay out because `git add` is not forced.
-5. Reads the commit hash from the output of that commit and checks that commit: the changed paths against the declared paths, each committed blob against the blob the declared bytes produce under the repository's filters, and the subject against the message. HEAD is not consulted, because another session may have moved it.
+5. Reads the commit hash from the output of that commit and checks that commit: the changed paths against the declared paths, each committed blob against the blobs the declared bytes can become, and the subject against the message. HEAD is not consulted, because another session may have moved it.
+
+The declared bytes can become two blobs: the result of the repository's filters, and the bytes unchanged. `git add` leaves CRLF alone in a file whose indexed blob already has it when `core.autocrlf` or `text=auto` applies, and `git hash-object`, which reads no index, cannot tell. Either blob comes from the declared bytes, so another writer's bytes still match neither.
 
 A commit that differs from the declaration still exists. The report says `committed_mismatch` with `paths_differ`, `content_differs` or `message_differs` and exit code 1, and the caller inspects that commit. A declared path that had no change is a mismatch for this reason, not a skipped entry.
 
@@ -40,7 +42,9 @@ A commit that differs from the declaration still exists. The report says `commit
 | `pathspec ... did not match` | Start again from `git add`. An entry staged with exit code 0 can vanish when another commit overwrites the shared index, so retrying only the commit cannot recover. |
 | Anything else, including a hook refusal | Stop. |
 
-`--max-attempts` bounds the attempts (default 60). A lock is never deleted, because a live lock and an abandoned one look the same from outside. After the last attempt the report gives `index_lock_timeout` and `lock.present` and `lock.age_seconds`. Check that no git process is running before removing a lock by hand. A refused or failed commit can leave the files staged; `left_staged` says so, and `git reset -q -- PATH` undoes it.
+Hook output does not decide this. A hook prints to git's stderr, so a lock or pathspec failure counts only on a line git starts with `fatal:` or `error:`, and "nothing to commit" only on git's stdout. A hook that prints `index.lock` or `nothing to commit` is reported as `commit_rejected`.
+
+`--max-attempts` bounds the attempts (default 60). A lock is never deleted, because a live lock and an abandoned one look the same from outside. After the last attempt the report gives `index_lock_timeout` and `lock.present` and `lock.age_seconds`. Check that no git process is running before removing a lock by hand. A refused or failed commit can leave the files staged. `left_staged` is read from the index after any `git add` ran, and `git reset -q -- PATH` undoes it.
 
 ## Shared notes
 
@@ -58,13 +62,17 @@ python skills/agentic-vault/scripts/vault_commit.py --vault /path/to/vault \
 ]}
 ```
 
-Each `old` must occur exactly once in the file as it stands in HEAD, compared as exact bytes of the committed blob. Each `new` must already be in the working file, ignoring CRLF differences, or the next `git add` would revert it. The sha256 for the working file is still required.
+Each `old` must occur exactly once in the file as it stands in HEAD, compared as exact bytes of the committed blob, so one edit cannot anchor on the text of an earlier edit in the same patch. `new` takes the line ending of the blob: CRLF becomes LF in a blob without CRLF, and a bare LF becomes CRLF in a blob with only CRLF. A blob with both keeps `new` as written. The sha256 for the working file is still required.
+
+The next `git add` writes the working file over this commit, so the working file must already agree with the edit, ignoring CRLF differences. Each `new` must be in it, and text an edit removes must be gone from it. Otherwise the result is `patch_not_in_worktree`. That comparison is on the bytes of `old`, so a short anchor can also match another session's line.
+
+An edit that has already landed is refused with `already_applied`: its `new` is in HEAD and its `old` is either gone or inside that `new`. A retry after `committed_index_stale`, or a run started again after a process died between `update-ref` and the index update, ends here and does not commit the lines twice. Nothing is committed by that refusal, so run the `git reset` below before any plain commit. To add a line that already follows the same anchor, use a different anchor.
 
 The command applies the edits to the HEAD blob, builds a tree on a scratch index under the git directory, runs the `pre-commit` hook on that tree, and creates the commit with `commit-tree`. `update-ref` then moves HEAD only if it still has the value that was read. When it has moved, the whole sequence repeats on the new HEAD, inside `--max-attempts`. The working files are not touched, so other sessions' unfinished lines stay as local changes.
 
 Afterwards the shared index entries for the declared paths are pointed at HEAD. Without this the next plain commit would write the old entries and revert the commit. A writer finishing late must not leave an older blob behind a newer commit, so entries are read from HEAD and the write counts only if HEAD is still that commit afterwards.
 
-Other paths may travel in the same commit. Only shared notes may have edits, and ignored new files are refused as they are in the default mode.
+Other paths may travel in the same commit. Only shared notes may have edits, and ignored new files are refused as they are in the default mode. Those paths get their blobs from `git add` on the scratch index, which holds HEAD, so their line endings follow the same rule as a path commit. That add reads the working file again, so a blob that does not come from the checked bytes is refused with `hash_mismatch`. Only the blob is taken: the file mode stays as it is in HEAD.
 
 Differences from the default mode:
 
@@ -79,11 +87,11 @@ Differences from the default mode:
 
 **A hash is a check, not a lock.** A writer that changes a file after the last check reaches the commit, and verification then reports `content_differs` after the commit exists.
 
-**Deny zones.** Files moved into a deny zone are outside this tool. It refuses zone paths and folder paths, and it offers no path list on stdin or in a file, so it cannot be used to step around a deny-zone guard. Use the folder staging described in `commands/vault-session-end.md` for those moves, at a time no other session is committing, and read `git status` before committing.
+**Deny zones.** Files moved into a deny zone are outside this tool. It refuses zone paths, folder paths and everything inside a linked working tree, and it offers no path list on stdin or in a file, so it cannot be used to step around a deny-zone guard. Use the folder staging described in `commands/vault-session-end.md` for those moves, at a time no other session is committing, and read `git status` before committing.
 
 **Hooks can pull shared notes in.** A stricter vault-local hook may require the index or handoff in the same commit as a new note. A path commit would then sweep those files, which this tool refuses. `--own-lines` carries them with only the caller's lines.
 
-**Not an isolation tool.** Sessions that need separate working files should use separate worktrees. Each linked worktree has its own index and its own lock, and this command works inside one.
+**Not an isolation tool.** Sessions that need separate working files should use separate worktrees. Each linked worktree has its own index and its own lock, and this command works inside one when `--vault` names that tree.
 
 **No automatic fallback.** A failed commit is reported and left for the caller.
 
@@ -104,7 +112,7 @@ The numbers here measure git commands, not this tool, and they set its design an
 | Temporary index with plain commit | 93 of 1,200 commits had another commit's subject |
 | Five writers on one shared log with path commits | 97 of 240 commits ended as nothing to commit; 170 of 220 committed lines landed in another writer's commit |
 | Temporary index, `commit-tree`, `update-ref` compare | No file lost and no subject mismatch; six writers took 15.6 s without a hook and 83.7 s with a 300 ms hook, against 6.7 s and 27.2 s for path commits |
-| Uncontended commit on a 5,443-entry index | 0.13 to 0.16 s without a hook; about 1.1 s with a strict hook on 15 KB notes |
+| Uncontended commit on an index of several thousand entries | 0.13 to 0.16 s without a hook; about 1.1 s with a strict hook on 15 KB notes |
 
 With the strict hook, 2 of 144 commits failed at 60 attempts: one stage entry vanished, and one held the lock for all 60 attempts, about 21 seconds of waiting. The default limit is a measured starting point. A vault with a slow hook and many writers should raise `--max-attempts`.
 

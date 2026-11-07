@@ -198,6 +198,33 @@ class SizeTests(CapacityCase):
         self.assertIsNone(self.limit(target, 'state_read')['estimated_days_to_limit'])
         self.assertEqual(target['history']['status'], 'git_unavailable')
 
+    def test_a_git_in_the_current_folder_is_not_run(self):
+        self.write('00-meta/hot.md', b'small\n')
+        planted = self.vault / ('git.exe' if os.name == 'nt' else 'git')
+        planted.write_bytes(b'planted\n')
+        planted.chmod(0o755)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.vault)
+        seen = []
+        real = subprocess.run
+
+        def run(command, **options):
+            seen.append(command[0])
+            return real(command, **options)
+
+        with mock.patch.object(capacity.subprocess, 'run', run):
+            capacity.diagnose_capacity(self.vault)
+        self.assertTrue(seen)
+        for program in seen:
+            self.assertTrue(os.path.isabs(program))
+            self.assertNotEqual(Path(program).parent.resolve(), self.vault.resolve())
+
+    def test_no_git_on_the_path_is_git_unavailable(self):
+        self.write('00-meta/hot.md', b'small\n')
+        with mock.patch.object(capacity, 'git_executable', lambda: None):
+            report = capacity.diagnose_capacity(self.vault)
+        self.assertEqual(report['history'], 'git_unavailable')
+
     def test_a_folder_outside_git_reports_usage_only(self):
         self.write('00-meta/hot.md', b'small\n')
         report = capacity.diagnose_capacity(self.vault)

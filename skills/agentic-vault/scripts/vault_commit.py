@@ -40,6 +40,7 @@ import unicodedata
 from vault_evidence import EvidenceError, decode, encode, stable_read
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import relative_parts, resolve_note_path
+from vault_worktrees import WorktreeScope, git_executable
 
 
 ABSENT = 'absent'
@@ -67,17 +68,23 @@ MAX_DELAY_LIMIT_MS = 60000
 SHARED_NOTE_KEYS = ('hot_note', 'handoff_note', 'log_note', 'index_note')
 OPERATION_MARKERS = ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD',
                      'rebase-merge', 'rebase-apply')
-# Variables that would point this tool at another index or repository, or change
-# how a pathspec is read, when it starts inside a hook or a scripted session.
+# Variables that would point this tool at another index or repository, change how
+# a pathspec is read, or swap core.hooksPath, when it starts inside a hook or a
+# scripted session.
 CLEARED_ENVIRONMENT = (
     'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX',
     'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE',
     'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS',
-    'GIT_ICASE_PATHSPECS',
+    'GIT_ICASE_PATHSPECS', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS',
 )
-LOCK_MARKERS = (b'index.lock', b'head.lock', b'cannot lock ref', b".lock': file exists",
-                b'index file open failed', b'unable to write new index file')
+CLEARED_PREFIXES = ('GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_')
+# Hooks print to git's stderr, so a marker counts only on a line git itself starts
+# with fatal: or error:, and a lock name only inside the quotes git puts around it.
+GIT_MESSAGE_PREFIXES = (b'fatal:', b'error:')
+LOCK_MARKERS = (b".lock'", b'cannot lock ref', b'index file open failed',
+                b'unable to write new index file')
 PATHSPEC_MARKERS = (b'did not match any file',)
+# git prints these to stdout, where no hook can reach: hook stdout goes to stderr.
 NOTHING_MARKERS = (b'nothing to commit', b'nothing added to commit',
                    b'no changes added to commit')
 # core.abbrev=40 makes the commit summary carry a full hash on SHA-1 and a prefix
@@ -88,6 +95,9 @@ HASH_RE = re.compile(r'[0-9A-Fa-f]{64}')
 CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
 TREE_LINE = re.compile(rb'([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40,64})\t')
 STAGE_LINE = re.compile(rb'([0-7]{6}) ([0-9a-f]{40,64}) ([0-3])\t')
+
+HOOK_RUNNER_MISSING = re.compile(rb"^git: 'hook' is not a git command", re.MULTILINE)
+BARE_LF = re.compile(rb'(?<!\r)\n')
 
 SINGLE_OPTIONS = ('--vault', '--message', '--actor', '--max-attempts', '--max-delay-ms',
                   '--own-lines')
@@ -120,7 +130,8 @@ def _fail(reason):
 
 def _git_environment(extra=None):
     environment = {key: value for key, value in os.environ.items()
-                   if key not in CLEARED_ENVIRONMENT}
+                   if key not in CLEARED_ENVIRONMENT
+                   and not key.startswith(CLEARED_PREFIXES)}
     # Failures are told apart by git's message text, which is translated otherwise.
     environment.update(LC_ALL='C', LANGUAGE='C')
     environment.update(extra or {})
@@ -129,22 +140,26 @@ def _git_environment(extra=None):
 
 def _run_git(vault, args, *, env=None, stdin=None):
     """Run git in the vault. Pathspec literals stay per path (see _specs)."""
+    executable = git_executable()
+    if executable is None:
+        raise FileNotFoundError('git')
     return subprocess.run(
-        ['git', '-c', 'core.abbrev=40', '-c', 'core.quotepath=false', *args],
+        [executable, '-c', 'core.abbrev=40', '-c', 'core.quotepath=false', *args],
         cwd=vault, env=_git_environment(env), input=stdin,
         stdin=None if stdin is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=GIT_TIMEOUT_SECONDS,
         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
 
 
-def classify_failure(text):
-    """Return 'lock', 'pathspec', 'nothing' or None for git's combined output."""
-    lowered = text.lower()
-    if any(marker in lowered for marker in LOCK_MARKERS):
+def classify_failure(stdout, stderr):
+    """Return 'lock', 'pathspec', 'nothing' or None for one git result."""
+    messages = [line for line in stderr.lower().splitlines()
+                if line.startswith(GIT_MESSAGE_PREFIXES)]
+    if any(marker in line for line in messages for marker in LOCK_MARKERS):
         return 'lock'
-    if any(marker in lowered for marker in PATHSPEC_MARKERS):
+    if any(marker in line for line in messages for marker in PATHSPEC_MARKERS):
         return 'pathspec'
-    if any(marker in lowered for marker in NOTHING_MARKERS):
+    if any(line.startswith(NOTHING_MARKERS) for line in stdout.lower().splitlines()):
         return 'nothing'
     return None
 
@@ -204,7 +219,10 @@ class _Context:
         self.capture = capture
         self.items = []
         self.denied = ()
+        self.worktrees = None
         self.git_dir = None
+        self.add_ran = False
+        self.accepted = {}
 
     def git(self, args, *, env=None, stdin=None):
         try:
@@ -257,10 +275,24 @@ def _load_config(vault):
 
 def _resolve(context, relative, position):
     try:
-        return resolve_note_path(context.vault, relative, context.denied)
+        path = resolve_note_path(context.vault, relative, context.denied)
+        parts = relative_parts(relative, 'path')
     except ValueError as exc:
         reason = 'denied_path' if 'denied zone' in str(exc) else 'unsafe_path'
         raise _Stop('refused', reason, position) from exc
+    # A linked tree is another checkout. Refusing all of it, and not only its deny
+    # zones, also keeps a copy of a shared note from passing as an ordinary file.
+    if context.worktrees.inside(parts):
+        _refuse('denied_path', position)
+    # A Windows short name opens the same file under another name, which would pass
+    # the shared-note match and reach the tree as a second path.
+    try:
+        actual = path.resolve().relative_to(context.vault.resolve()).as_posix()
+    except ValueError as exc:
+        raise _Stop('refused', 'unsafe_path', position) from exc
+    if _fold(actual) != _fold(relative):
+        _refuse('unsafe_path', position)
+    return path
 
 
 def _parse_items(context, entries):
@@ -367,6 +399,10 @@ def _check_absent_markers(context):
 def _require_no_operation(context):
     if any((context.git_dir / marker).exists() for marker in OPERATION_MARKERS):
         _refuse('operation_in_progress')
+    # git stash pop leaves conflicts with no marker file, and git add would mark
+    # them resolved with the conflict lines still in the file.
+    if context.git(['ls-files', '-u', '-z']).stdout:
+        _refuse('unmerged_paths')
 
 
 def _read_worktree(context, item):
@@ -400,14 +436,25 @@ def _check_files(context):
     return contents
 
 
-def _blob_oid(context, relative, data, *, write):
-    args = ['hash-object', '--stdin', f'--path={relative}']
-    if write:
-        args.append('-w')
-    result = context.git(args, stdin=data)
+def _hash_blob(context, args, data):
+    result = context.git(['hash-object', *args, '--stdin'], stdin=data)
     if result.returncode != 0:
         _fail('blob_hash_failed')
     return result.stdout.decode('ascii').strip()
+
+
+def _accepted_oids(context, relative, data):
+    """The blobs these bytes may become, with the repository's filters and without.
+
+    hash-object does not read the index, so it cannot apply the rule by which git
+    add leaves CRLF alone in a file whose indexed blob already has it. Both results
+    come from the declared bytes, so another writer's bytes still match neither.
+    The bytes pass the same hash check on every attempt, so one answer per path holds.
+    """
+    if relative not in context.accepted:
+        context.accepted[relative] = {_hash_blob(context, [f'--path={relative}'], data),
+                                      _hash_blob(context, ['--no-filters'], data)}
+    return context.accepted[relative]
 
 
 def _lock_state(context):
@@ -450,7 +497,7 @@ def _verify(context, state, commit, expected):
     for item in context.items:
         entry = _tree_entry(context, commit, item.rel)
         oid = entry[2] if entry is not None else None
-        if oid != expected[item.rel]:
+        if oid not in expected[item.rel]:
             state.content_mismatch += 1
     if state.missing or state.undeclared:
         raise _Stop('committed_mismatch', 'paths_differ')
@@ -469,25 +516,24 @@ def _path_mode(context, state):
         _require_no_operation(context)
         contents = _check_files(context)
         if expected is None:
-            expected = {relative: None if data is None
-                        else _blob_oid(context, relative, data, write=False)
+            expected = {relative: {None} if data is None
+                        else _accepted_oids(context, relative, data)
                         for relative, data in contents.items()}
+        context.add_ran = True
         result = context.git(['add', '--', *specs])
         stage = 'add'
         if result.returncode == 0:
-            state.left_staged = True
             result = context.git(['commit', '-m', context.message, '-m', context.trailer,
                                   '--', *specs])
             stage = 'commit'
             if result.returncode == 0:
-                state.left_staged = False
                 commit = _parse_commit_hash(result.stdout)
                 if commit is None:
                     raise _Stop('committed_mismatch', 'commit_hash_unreadable')
                 state.commit = commit
                 _verify(context, state, commit, expected)
                 return
-        kind = classify_failure(result.stdout + result.stderr)
+        kind = classify_failure(result.stdout, result.stderr)
         last_kind = kind
         if kind == 'lock':
             state.lock_failures += 1
@@ -496,7 +542,6 @@ def _path_mode(context, state):
             # retrying only the commit never recovers: start again from git add.
             state.pathspec_restarts += 1
         elif kind == 'nothing':
-            state.left_staged = False
             _fail('nothing_to_commit')
         else:
             _fail(f'{stage}_rejected')
@@ -507,18 +552,38 @@ def _path_mode(context, state):
     _fail('pathspec_retries_exhausted')
 
 
-def _apply_edits(base, edits, working):
+def _in_blob_line_endings(new, base):
+    """`new` in the line ending of a blob that has one; a mixed blob keeps it as given."""
+    if b'\r\n' not in base:
+        return new.replace(b'\r\n', b'\n')
+    if BARE_LF.search(base) is None:
+        return BARE_LF.sub(b'\r\n', new)
+    return new
+
+
+def _lf(data):
+    return data.replace(b'\r\n', b'\n')
+
+
+def _apply_edits(base, edits, working, position):
+    edits = [(old, _in_blob_line_endings(new, base)) for old, new in edits]
+    # An edit whose result is in HEAD and whose anchor is gone or inside that result
+    # has landed: a retry after committed_index_stale or a killed run gets here, and
+    # applying it again would commit the same lines twice. Every old is matched
+    # against HEAD, so edits cannot chain past this check.
+    if any(new in base and (old in new or old not in base) for old, new in edits):
+        _refuse('already_applied', position)
     text = base
     for old, new in edits:
-        if text.count(old) != 1:
-            _refuse('patch_anchor_not_unique')
+        if base.count(old) != 1 or text.count(old) != 1:
+            _refuse('patch_anchor_not_unique', position)
         text = text.replace(old, new, 1)
-    folded = working.replace(b'\r\n', b'\n')
-    for _, new in edits:
-        if new.replace(b'\r\n', b'\n') not in folded:
-            # Lines committed here but missing from the working file would be
-            # reverted by the next `git add`.
-            _refuse('patch_not_in_worktree')
+    folded = _lf(working)
+    for old, new in edits:
+        # The next `git add` writes the working file over this commit: lines missing
+        # from it would be reverted, and removed text still in it would come back.
+        if _lf(new) not in folded or (old not in new and _lf(old) in folded):
+            _refuse('patch_not_in_worktree', position)
     return text
 
 
@@ -534,22 +599,58 @@ def _is_ignored(context, relative):
     return context.git(['check-ignore', '-q', '--', relative]).returncode == 0
 
 
+def _added_blobs(context, items, contents, scratch):
+    """The blob `git add` makes of each file, read back from the scratch index.
+
+    Only git add knows the rule for files with CRLF in the indexed blob, and the
+    scratch index holds HEAD, as it does in a path commit. It reads the working file
+    again, so a blob that does not come from the checked bytes is refused.
+    """
+    if not items:
+        return {}
+    if context.git(['add', '--', *_specs(items)], env=scratch).returncode != 0:
+        _fail('add_rejected')
+    result = context.git(['ls-files', '-s', '-z', '--', *_specs(items)], env=scratch)
+    if result.returncode != 0:
+        _fail('index_build_failed')
+    found = {}
+    for record in result.stdout.split(b'\0'):
+        match = STAGE_LINE.match(record)
+        if match:
+            name = record[match.end():].decode('utf-8', 'surrogateescape')
+            found[_fold(name)] = match.group(2).decode('ascii')
+    blobs = {}
+    for item in items:
+        oid = found.get(_fold(item.rel))
+        if oid is None:
+            _fail('add_rejected')
+        if oid not in _accepted_oids(context, item.rel, contents[item.rel]):
+            _refuse('hash_mismatch', item.position)
+        blobs[item.rel] = oid
+    return blobs
+
+
 def _build_tree(context, head, contents, index):
     """Write HEAD plus the declared changes to a scratch index; return the plan."""
     scratch = {'GIT_INDEX_FILE': index}
     if context.git(['read-tree', head], env=scratch).returncode != 0:
         _fail('index_build_failed')
+    entries = {item.rel: _tree_entry(context, head, item.rel) for item in context.items}
+    ordinary = [item for item in context.items
+                if contents[item.rel] is not None and not item.edits]
+    for item in ordinary:
+        if entries[item.rel] is None and _is_ignored(context, item.rel):
+            _fail('add_rejected')
+    blobs = _added_blobs(context, ordinary, contents, scratch)
     planned = {}
     lines = []
     for item in context.items:
         data = contents[item.rel]
-        entry = _tree_entry(context, head, item.rel)
+        entry = entries[item.rel]
         if data is None:
             lines.append((b'0', None, item.rel))
-            planned[item.rel] = None
+            planned[item.rel] = {None}
             continue
-        if entry is None and _is_ignored(context, item.rel):
-            _fail('add_rejected')
         mode = entry[0] if entry is not None and entry[1] == 'blob' else '100644'
         if item.edits:
             if entry is None or entry[1] != 'blob':
@@ -557,15 +658,12 @@ def _build_tree(context, head, contents, index):
             base = context.git(['cat-file', 'blob', entry[2]])
             if base.returncode != 0:
                 _fail('index_build_failed')
-            patched = _apply_edits(base.stdout, item.edits, data)
-            result = context.git(['hash-object', '-w', '--stdin'], stdin=patched)
-            if result.returncode != 0:
-                _fail('blob_hash_failed')
-            oid = result.stdout.decode('ascii').strip()
+            patched = _apply_edits(base.stdout, item.edits, data, item.position)
+            oid = _hash_blob(context, ['-w'], patched)
         else:
-            oid = _blob_oid(context, item.rel, data, write=True)
+            oid = blobs[item.rel]
         lines.append((mode.encode('ascii'), oid, item.rel))
-        planned[item.rel] = oid
+        planned[item.rel] = {oid}
     payload = _index_info(lines, len(head))
     if context.git(['update-index', '-z', '--index-info'], env=scratch,
                    stdin=payload).returncode != 0:
@@ -590,7 +688,7 @@ def _run_pre_commit(context, index):
                          env={'GIT_INDEX_FILE': index})
     if result.returncode == 0:
         return
-    if result.returncode == 129 or b'not a git command' in result.stderr:
+    if result.returncode == 129 or HOOK_RUNNER_MISSING.search(result.stderr):
         _refuse('hook_runner_unavailable')
     _fail('commit_rejected')
 
@@ -632,7 +730,7 @@ def _sync_shared_index(context, state, parent):
         if result.returncode == 0:
             if _resolve_head(context) == head:
                 return
-        elif classify_failure(result.stdout + result.stderr) == 'lock':
+        elif classify_failure(result.stdout, result.stderr) == 'lock':
             state.lock_failures += 1
         else:
             break
@@ -678,11 +776,24 @@ def _tree_mode(context, state):
                 if stale is not None:
                     raise stale
                 return
-            if classify_failure(result.stdout + result.stderr) != 'lock':
+            if classify_failure(result.stdout, result.stderr) != 'lock':
                 _fail('ref_update_failed')
             state.head_conflicts += 1
             context.backoff(attempt)
     _fail('head_conflict_timeout')
+
+
+def _record_left_staged(context, state):
+    """Ask the index, since a failed git add can still stage some of its paths."""
+    if state.commit is not None or not context.add_ran:
+        return
+    try:
+        result = context.git(['diff', '--cached', '--name-only', '--no-renames', '-z',
+                              '--', *_specs(context.items)])
+    except _Stop:
+        return
+    if result.returncode == 0:
+        state.left_staged = bool(result.stdout)
 
 
 def _prepare(vault, entries, message, actor, edits, patch_file, max_attempts,
@@ -698,6 +809,7 @@ def _prepare(vault, entries, message, actor, edits, patch_file, max_attempts,
     context = _Context(Path(vault), message, actor, max_attempts, max_delay_ms, sleep, capture)
     config = _load_config(context.vault)
     context.denied = (*config['deny_zones'], '.git')
+    context.worktrees = WorktreeScope(context.vault.resolve())
     _parse_items(context, entries)
     shared = {_fold(config[key]) for key in SHARED_NOTE_KEYS if config.get(key)}
     if patch_file is not None:
@@ -722,7 +834,10 @@ def commit_paths(vault, entries, message, actor, *, edits=None, patch_file=None,
         if edits is not None or patch_file is not None:
             _tree_mode(context, state)
         else:
-            _path_mode(context, state)
+            try:
+                _path_mode(context, state)
+            finally:
+                _record_left_staged(context, state)
         state.status = 'committed'
     except _Stop as stop:
         state.status, state.reason = stop.status, stop.reason

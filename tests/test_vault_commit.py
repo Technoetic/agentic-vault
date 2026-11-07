@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import ctypes
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 import shutil
@@ -12,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest import mock
 
@@ -441,21 +443,26 @@ class RetryTests(VaultCommitCase):
 
     def test_failure_classifier(self):
         cases = (
-            (b"fatal: Unable to create '/r/.git/index.lock': File exists.", "lock"),
-            (b"fatal: cannot lock ref 'HEAD': is at aaa but expected bbb", "lock"),
-            (b"error: cannot lock ref 'refs/heads/x': Unable to create '/r/.git/refs/heads/x.lock'", "lock"),
-            (b"fatal: Unable to create '/r/.git/HEAD.lock': File exists.", "lock"),
-            (b"fatal: .git/index: index file open failed: Permission denied", "lock"),
-            (b"error: pathspec 'x' did not match any file(s) known to git", "pathspec"),
-            (b"fatal: pathspec 'x' did not match any files", "pathspec"),
-            (b"nothing to commit, working tree clean", "nothing"),
-            (b"no changes added to commit", "nothing"),
-            (b"nothing added to commit but untracked files present", "nothing"),
-            (b"hook said no", None),
+            (b"", b"fatal: Unable to create '/r/.git/index.lock': File exists.", "lock"),
+            (b"", b"fatal: cannot lock ref 'HEAD': is at aaa but expected bbb", "lock"),
+            (b"", b"fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at a", "lock"),
+            (b"", b"error: cannot lock ref 'refs/heads/x': Unable to create '/r/x.lock'", "lock"),
+            (b"", b"fatal: Unable to create '/r/.git/HEAD.lock': File exists.", "lock"),
+            (b"", b"fatal: .git/index: index file open failed: Permission denied", "lock"),
+            (b"", b"hook line\nfatal: Unable to write new index file\n", "lock"),
+            (b"", b"error: pathspec 'x' did not match any file(s) known to git", "pathspec"),
+            (b"", b"fatal: pathspec 'x' did not match any files", "pathspec"),
+            (b"nothing to commit, working tree clean", b"", "nothing"),
+            (b"On branch main\nno changes added to commit\n", b"", "nothing"),
+            (b"nothing added to commit but untracked files present", b"", "nothing"),
+            (b"", b"hook said no", None),
+            (b"", b"index.lock\nnothing to commit\ndid not match any file\n", None),
+            (b"", b"error: note index.lock has no title", None),
+            (b"\tmodified:   nothing to commit.md\n", b"", None),
         )
-        for text, expected in cases:
-            with self.subTest(text=text):
-                self.assertEqual(vault_commit.classify_failure(text), expected)
+        for stdout, stderr, expected in cases:
+            with self.subTest(stdout=stdout, stderr=stderr):
+                self.assertEqual(vault_commit.classify_failure(stdout, stderr), expected)
 
 
 class VerificationTests(VaultCommitCase):
@@ -791,6 +798,593 @@ class OwnLinesTests(VaultCommitCase):
             fresh, [(HOT, sha(b"# hot\n"))], "m", "a", sleep=always_retry_sleep,
             edits=[self.edit(HOT, "# hot\n", "# hot\n")])
         self.assertEqual((report["status"], report["reason"]), ("refused", "no_head"))
+
+
+def edit(path, old, new):
+    return {"path": path, "old": old, "new": new}
+
+
+class LinkedWorktreeTests(VaultCommitCase):
+    """Nothing under a linked working tree is a path of this vault."""
+
+    TREE = ".claude/worktrees/s1"
+
+    def setUp(self):
+        super().setUp()
+        self.git("worktree", "add", "-q", "--detach", self.TREE)
+
+    def assert_refused(self, report, before):
+        self.assertEqual((report["status"], report["reason"]), ("refused", "denied_path"))
+        self.assertEqual(self.head(), before)
+        self.assertEqual(self.staged(), [])
+        tree = self.git("ls-tree", "-r", "--name-only", "HEAD", ".claude").stdout
+        self.assertEqual(tree, b"")
+
+    def test_paths_in_a_linked_tree_are_refused_in_both_modes(self):
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        before = self.head()
+        for relative in (f"{self.TREE}/90-assets/scan.md", f"{self.TREE}/notes/mine.md",
+                         f"{self.TREE}/{LOG}"):
+            self.write(relative, b"copy text\n")
+            with self.subTest(relative=relative, mode="path"):
+                report = self.commit([self.entry(relative)])
+                self.assert_refused(report, before)
+                self.assertEqual(report["path_index"], 0)
+            with self.subTest(relative=relative, mode="own-lines"):
+                report = self.commit([self.entry(HOT), self.entry(relative)],
+                                     edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+                self.assert_refused(report, before)
+                self.assertEqual(report["path_index"], 1)
+
+    def test_a_case_variant_of_the_tree_is_refused(self):
+        relative = f"{self.TREE}/notes/mine.md"
+        variant = relative.upper()
+        self.write(relative, b"copy text\n")
+        if not (self.vault / variant).exists():
+            self.skipTest("the file system tells case apart")
+        before = self.head()
+        self.assert_refused(self.commit([(variant, sha(b"copy text\n"))]), before)
+
+    def test_the_patch_file_may_not_come_from_a_linked_tree(self):
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        patch = json.dumps({"schema_version": 1,
+                            "edits": [edit(HOT, "slot-a\n", "slot-a mine\n")]}).encode()
+        before = self.head()
+        for relative in (f"{self.TREE}/90-assets/p.json", f"{self.TREE}/notes/p.json"):
+            with self.subTest(relative=relative):
+                path = self.write(relative, patch)
+                self.assert_refused(self.commit([self.entry(HOT)], patch_file=path), before)
+
+    def test_a_vault_that_is_a_linked_tree_commits_its_own_files(self):
+        tree = self.vault / self.TREE
+        data = b"mine in the tree\n"
+        (tree / "notes/mine.md").write_bytes(data)
+        report = vault_commit.commit_paths(tree, [("notes/mine.md", sha(data))], "m", "a",
+                                           sleep=always_retry_sleep)
+        self.assertEqual(report["status"], "committed", report)
+
+
+class RerunTests(VaultCommitCase):
+    """A patch that already landed is refused, never applied a second time."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(LOG, b"# log\n- my line\n")
+        self.patch = [edit(LOG, "# log\n", "# log\n- my line\n")]
+
+    def blob(self):
+        return self.show(f"HEAD:{LOG}")
+
+    def test_the_same_patch_twice_is_refused(self):
+        first = self.commit([self.entry(LOG)], edits=self.patch)
+        self.assertEqual(first["status"], "committed")
+        again = self.commit([self.entry(LOG)], edits=self.patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+        self.assertEqual(again["path_index"], 0)
+        self.assertEqual(self.head(), first["commit"])
+        self.assertEqual(self.blob(), b"# log\n- my line\n")
+
+    def test_retry_after_a_stale_index_is_refused(self):
+        lock = self.git_dir / "index.lock"
+        lock.write_bytes(b"")
+        first = self.commit([self.entry(LOG)], edits=self.patch, max_attempts=2)
+        lock.unlink()
+        self.assertEqual(first["status"], "committed_index_stale")
+        again = self.commit([self.entry(LOG)], edits=self.patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+        self.assertEqual(self.head(), first["commit"])
+        self.assertEqual(self.blob(), b"# log\n- my line\n")
+
+    def test_rerun_after_a_death_between_the_ref_and_the_index_is_refused(self):
+        real = vault_commit._run_git
+        moved = []
+
+        def run(vault, args, **options):
+            if moved:
+                raise OSError("the process ended here")
+            result = real(vault, args, **options)
+            if args[0] == "update-ref":
+                moved.append(1)
+            return result
+
+        with mock.patch.object(vault_commit, "_run_git", run):
+            first = self.commit([self.entry(LOG)], edits=self.patch)
+        self.assertNotEqual(first["status"], "committed")
+        again = self.commit([self.entry(LOG)], edits=self.patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+        self.assertEqual(self.blob(), b"# log\n- my line\n")
+
+    def test_a_replacing_edit_names_the_same_reason(self):
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        patch = [edit(HOT, "slot-a\n", "slot-a mine\n")]
+        self.assertEqual(self.commit([self.entry(HOT)], edits=patch)["status"], "committed")
+        again = self.commit([self.entry(HOT)], edits=patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+
+    def test_a_deleting_edit_names_the_same_reason(self):
+        self.write(HOT, b"# hot\nslot-a\n")
+        patch = [edit(HOT, "slot-b\n", "")]
+        self.assertEqual(self.commit([self.entry(HOT)], edits=patch)["status"], "committed")
+        self.assertEqual(self.show(f"HEAD:{HOT}"), b"# hot\nslot-a\n")
+        again = self.commit([self.entry(HOT)], edits=patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+
+    def test_an_edit_that_changes_nothing_is_refused(self):
+        self.write(HOT, b"# hot\nslot-a\nslot-b\nmine\n")
+        before = self.head()
+        report = self.commit([self.entry(HOT)], edits=[edit(HOT, "slot-a\n", "slot-a\n")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "already_applied"))
+        self.assertEqual(self.head(), before)
+
+    def test_edits_cannot_chain_past_the_rerun_check(self):
+        # The first run would land; a rerun would then pass each edit on its own.
+        self.write(HOT, b"# hot\nslot-a\nsecond\nslot-b\n")
+        report = self.commit([self.entry(HOT)], edits=[
+            edit(HOT, "slot-a\n", "slot-a\nfirst\n"), edit(HOT, "first\n", "second\n")])
+        self.assertEqual((report["status"], report["reason"]),
+                         ("refused", "patch_anchor_not_unique"))
+
+    def test_a_line_that_exists_elsewhere_can_still_be_added(self):
+        self.write(HOT, b"# hot\nslot-a\nslot-b\nslot-a\n")
+        report = self.commit([self.entry(HOT)], edits=[edit(HOT, "slot-b\n", "slot-b\nslot-a\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show(f"HEAD:{HOT}"), b"# hot\nslot-a\nslot-b\nslot-a\n")
+
+
+class RemovedTextTests(VaultCommitCase):
+    """Text taken out of HEAD and left in the working file would come back."""
+
+    def setUp(self):
+        super().setUp()
+        self.write(LOG, b"# log\n- gone\n- keep\n")
+        self.git("add", "--", LOG)
+        self.git("commit", "-q", "-m", "lines", "--", LOG)
+
+    def test_a_deletion_still_in_the_working_file_is_refused(self):
+        before = self.head()
+        report = self.commit([self.entry(LOG)], edits=[edit(LOG, "- gone\n", "")])
+        self.assertEqual((report["status"], report["reason"]),
+                         ("refused", "patch_not_in_worktree"))
+        self.assertEqual(self.head(), before)
+
+    def test_a_replaced_line_still_in_the_working_file_is_refused(self):
+        self.write(LOG, b"# log\n- gone\n- keep\n- new\n")
+        report = self.commit([self.entry(LOG)], edits=[edit(LOG, "- gone\n", "- new\n")])
+        self.assertEqual((report["status"], report["reason"]),
+                         ("refused", "patch_not_in_worktree"))
+
+    def test_a_deletion_gone_from_the_working_file_lands(self):
+        self.write(LOG, b"# log\n- keep\n- unfinished")
+        report = self.commit([self.entry(LOG)], edits=[edit(LOG, "- gone\n", "")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show(f"HEAD:{LOG}"), b"# log\n- keep\n")
+        self.assertEqual((self.vault / LOG).read_bytes(), b"# log\n- keep\n- unfinished")
+
+
+class LineEndingTests(VaultCommitCase):
+    CRLF = b"one\r\ntwo\r\n"
+
+    def seed_crlf(self):
+        self.write("notes/crlf.md", self.CRLF)
+        self.git("add", "--", "notes/crlf.md")
+        self.git("commit", "-q", "-m", "crlf blob", "--", "notes/crlf.md")
+
+    def use_autocrlf(self):
+        self.git("config", "core.autocrlf", "true")
+
+    def use_text_auto(self):
+        self.write(".gitattributes", b"*.md text=auto\n")
+        self.git("add", "--", ".gitattributes")
+        self.git("commit", "-q", "-m", "attributes", "--", ".gitattributes")
+
+    def test_path_commit_of_a_crlf_blob_under_autocrlf_is_not_a_mismatch(self):
+        self.seed_crlf()
+        self.use_autocrlf()
+        changed = self.CRLF + b"three\r\n"
+        self.write("notes/crlf.md", changed)
+        report = self.commit([self.entry("notes/crlf.md")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(report["content_mismatch"], 0)
+        self.assertEqual(self.show("HEAD:notes/crlf.md"), changed)
+
+    def test_path_commit_of_a_crlf_blob_under_text_auto_is_not_a_mismatch(self):
+        self.seed_crlf()
+        self.use_text_auto()
+        changed = self.CRLF + b"three\r\n"
+        self.write("notes/crlf.md", changed)
+        report = self.commit([self.entry("notes/crlf.md")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show("HEAD:notes/crlf.md"), changed)
+
+    def test_a_file_in_an_own_lines_commit_keeps_its_line_endings(self):
+        self.seed_crlf()
+        self.use_autocrlf()
+        changed = self.CRLF + b"three\r\n"
+        self.write("notes/crlf.md", changed)
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        report = self.commit([self.entry(HOT), self.entry("notes/crlf.md")],
+                             edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show("HEAD:notes/crlf.md"), changed)
+
+    def test_filters_still_run_where_git_add_runs_them(self):
+        self.use_autocrlf()
+        self.write("notes/new.md", b"new\r\nnote\r\n")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        report = self.commit([self.entry(HOT), self.entry("notes/new.md")],
+                             edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show("HEAD:notes/new.md"), b"new\nnote\n")
+
+    def test_an_explicit_text_attribute_converts_a_crlf_blob(self):
+        self.seed_crlf()
+        self.write(".gitattributes", b"*.md text\n")
+        self.git("add", "--", ".gitattributes")
+        self.git("commit", "-q", "-m", "attributes", "--", ".gitattributes")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        self.write("notes/crlf.md", self.CRLF + b"three\r\n")
+        report = self.commit([self.entry(HOT), self.entry("notes/crlf.md")],
+                             edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show("HEAD:notes/crlf.md"), b"one\ntwo\nthree\n")
+
+    def test_a_file_rewritten_before_the_scratch_add_is_refused(self):
+        self.write("notes/new.md", b"declared\n")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        entries = [self.entry(HOT), self.entry("notes/new.md")]
+        real = vault_commit._run_git
+        before = self.head()
+
+        def run(vault, args, **options):
+            if args[0] == "add":
+                self.write("notes/new.md", b"swept in by another writer\n")
+            return real(vault, args, **options)
+
+        with mock.patch.object(vault_commit, "_run_git", run):
+            report = self.commit(entries, edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "hash_mismatch"))
+        self.assertEqual(report["path_index"], 1)
+        self.assertEqual(self.head(), before)
+
+    def test_new_text_takes_the_line_ending_of_a_lf_blob(self):
+        self.use_autocrlf()
+        self.write(LOG, b"# log\r\n- mine\r\n")
+        report = self.commit([self.entry(LOG)],
+                             edits=[edit(LOG, "# log\n", "# log\r\n- mine\r\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show(f"HEAD:{LOG}"), b"# log\n- mine\n")
+
+    def test_new_text_takes_the_line_ending_of_a_crlf_blob(self):
+        self.write(LOG, b"# log\r\n- first\r\n")
+        self.git("add", "--", LOG)
+        self.git("commit", "-q", "-m", "crlf log", "--", LOG)
+        self.write(LOG, b"# log\r\n- mine\r\n- first\r\n")
+        patch = [edit(LOG, "# log\r\n", "# log\r\n- mine\n")]
+        report = self.commit([self.entry(LOG)], edits=patch)
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show(f"HEAD:{LOG}"), b"# log\r\n- mine\r\n- first\r\n")
+        again = self.commit([self.entry(LOG)], edits=patch)
+        self.assertEqual((again["status"], again["reason"]), ("refused", "already_applied"))
+
+    def test_a_mixed_blob_keeps_what_the_caller_wrote(self):
+        self.write(LOG, b"# log\r\n- first\n")
+        self.git("add", "--", LOG)
+        self.git("commit", "-q", "-m", "mixed log", "--", LOG)
+        self.write(LOG, b"# log\r\n- mine\r\n- first\n")
+        report = self.commit([self.entry(LOG)],
+                             edits=[edit(LOG, "# log\r\n", "# log\r\n- mine\r\n")])
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.show(f"HEAD:{LOG}"), b"# log\r\n- mine\r\n- first\n")
+
+
+class ModeTests(VaultCommitCase):
+    def test_own_lines_keeps_the_mode_of_every_declared_file(self):
+        self.git("update-index", "--chmod=+x", "--", LOG)
+        self.git("update-index", "--chmod=+x", "--", "notes/mine.md")
+        self.git("commit", "-q", "-m", "executable")
+        self.write(LOG, b"# log\n- mine\n")
+        self.write("notes/mine.md", b"mine v2\n")
+        report = self.commit([self.entry(LOG), self.entry("notes/mine.md")],
+                             edits=[edit(LOG, "# log\n", "# log\n- mine\n")])
+        self.assertEqual(report["status"], "committed", report)
+        for relative in (LOG, "notes/mine.md"):
+            with self.subTest(relative=relative):
+                self.assertTrue(self.git("ls-tree", "HEAD", "--", relative).stdout
+                                .startswith(b"100755 "))
+
+
+class FailureReportTests(VaultCommitCase):
+    """Hook output never decides what the report says."""
+
+    def test_hook_text_is_not_a_lock_failure(self):
+        lines = (b"echo nope index.lock", b"echo error: note index.lock is bad >&2",
+                 b"echo did not match any file >&2", b"echo 'cannot lock ref' >&2")
+        for number, line in enumerate(lines):
+            with self.subTest(line=line):
+                self.hook("pre-commit", line + b"\nexit 1")
+                self.write("notes/mine.md", f"mine {number}\n".encode())
+                report = self.commit([self.entry("notes/mine.md")])
+                self.assertEqual((report["status"], report["reason"]),
+                                 ("failed", "commit_rejected"))
+                self.assertEqual(report["attempts"], 1)
+                self.assertEqual(report["lock_failures"], 0)
+                self.assertTrue(report["left_staged"])
+
+    def test_hook_text_is_not_an_empty_commit(self):
+        self.hook("pre-commit", b'echo "nothing to commit here"\nexit 1')
+        self.write("notes/mine.md", b"mine v2\n")
+        report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "commit_rejected"))
+        self.assertTrue(report["left_staged"])
+        self.assertEqual(self.staged(), ["notes/mine.md"])
+
+    def test_a_real_empty_commit_is_still_named(self):
+        report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "nothing_to_commit"))
+        self.assertFalse(report["left_staged"])
+
+    def test_hook_text_does_not_read_as_a_missing_hook_runner(self):
+        self.hook("pre-commit", b'echo "not a git command" >&2\nexit 1')
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        report = self.commit([self.entry(HOT)], edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "commit_rejected"))
+
+    def test_left_staged_reads_the_index_after_a_partial_add(self):
+        self.write("notes/mine.md", b"mine v2\n")
+        self.write("notes/key.secret", b"synthetic\n")
+        report = self.commit([self.entry("notes/mine.md"), self.entry("notes/key.secret")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "add_rejected"))
+        self.assertEqual(self.staged(), ["notes/mine.md"])
+        self.assertTrue(report["left_staged"])
+
+    def test_left_staged_is_false_when_the_add_changed_nothing(self):
+        self.write("Cased/Alpha.md", b"alpha\n")
+        self.git("add", "--", "Cased/Alpha.md")
+        self.git("commit", "-q", "-m", "alpha", "--", "Cased/Alpha.md")
+        if not (self.vault / "cased/alpha.md").exists():
+            self.skipTest("the file system tells case apart")
+        self.write("Cased/Alpha.md", b"alpha v2\n")
+        report = self.commit([("cased/alpha.md", sha(b"alpha v2\n"))], max_attempts=2)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(self.staged(), [])
+        self.assertFalse(report["left_staged"])
+
+    def test_the_summary_line_is_the_last_one_that_matches(self):
+        first, last = b"a" * 40, b"b" * 40
+        output = (b"[decoy " + first + b"] printed by a hook\n[master " + last + b"] real\n"
+                  b" 1 file changed\n")
+        self.assertEqual(vault_commit._parse_commit_hash(output), last.decode())
+
+    def test_an_unreadable_summary_is_reported_with_the_commit_kept(self):
+        self.write("notes/mine.md", b"mine v2\n")
+        real = vault_commit._run_git
+
+        def run(vault, args, **options):
+            result = real(vault, args, **options)
+            if args[0] == "commit":
+                return subprocess.CompletedProcess(args, 0, b"no summary here\n", b"")
+            return result
+
+        with mock.patch.object(vault_commit, "_run_git", run):
+            report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]),
+                         ("committed_mismatch", "commit_hash_unreadable"))
+        self.assertFalse(report["left_staged"])
+
+
+    def test_a_case_variant_cannot_add_a_second_entry_in_own_lines_mode(self):
+        self.write("Cased/Alpha.md", b"alpha\n")
+        self.git("add", "--", "Cased/Alpha.md")
+        self.git("commit", "-q", "-m", "alpha", "--", "Cased/Alpha.md")
+        if not (self.vault / "cased/alpha.md").exists():
+            self.skipTest("the file system tells case apart")
+        self.write("Cased/Alpha.md", b"alpha v2\n")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        before = self.head()
+        report = self.commit([self.entry(HOT), ("cased/alpha.md", sha(b"alpha v2\n"))],
+                             edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "add_rejected"))
+        self.assertEqual(self.head(), before)
+
+
+class AliasTests(VaultCommitCase):
+    """A second name for a file is not a declared path."""
+
+    def short_name(self, relative):
+        if os.name != "nt":
+            self.skipTest("short names are a Windows feature")
+        buffer = ctypes.create_unicode_buffer(1024)
+        size = ctypes.windll.kernel32.GetShortPathNameW(str(self.vault / relative), buffer, 1024)
+        name = os.path.basename(buffer.value) if size else ""
+        if not name or name == os.path.basename(relative):
+            self.skipTest("this volume makes no short names")
+        return f"{os.path.dirname(relative)}/{name}"
+
+    def test_a_resolved_name_that_differs_from_the_declared_one_is_refused(self):
+        self.write("notes/mine.md", b"mine v2\n")
+        other = (self.vault / "notes/other.md").resolve()
+        before = self.head()
+        real = vault_commit.resolve_note_path
+
+        def resolve(vault, relative, denied):
+            return other if relative == "notes/mine.md" else real(vault, relative, denied)
+
+        with mock.patch.object(vault_commit, "resolve_note_path", resolve):
+            report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "unsafe_path"))
+        self.assertEqual(report["path_index"], 0)
+        self.assertEqual(self.head(), before)
+
+    def test_a_short_name_of_a_shared_note_is_refused_in_both_modes(self):
+        relative = "00-meta/long shared handoff name.md"
+        config = self.vault / "00-meta/vault-config.json"
+        values = json.loads(config.read_bytes())
+        values["handoff_note"] = relative
+        config.write_bytes(json.dumps(values).encode())
+        self.write(relative, b"# handoff\n")
+        self.git("add", "--", relative)
+        self.git("commit", "-q", "-m", "long name", "--", relative)
+        alias = self.short_name(relative)
+        data = b"# handoff\nedit\n"
+        self.write(relative, data)
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        before = self.head()
+        report = self.commit([(alias, sha(data))])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "unsafe_path"))
+        report = self.commit([self.entry(HOT), (alias, sha(data))],
+                             edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "unsafe_path"))
+        self.assertEqual(self.head(), before)
+
+
+class StateTests(VaultCommitCase):
+    def conflict(self):
+        self.write("notes/mine.md", b"stashed side\n")
+        self.git("stash", "push", "-q")
+        self.write("notes/mine.md", b"committed side\n")
+        self.git("add", "--", "notes/mine.md")
+        self.git("commit", "-q", "-m", "other side", "--", "notes/mine.md")
+        self.git("stash", "pop", check=False)
+        self.assertNotEqual(self.git("ls-files", "-u").stdout, b"")
+        self.assertFalse(any((self.git_dir / marker).exists()
+                             for marker in vault_commit.OPERATION_MARKERS))
+
+    def test_an_unresolved_conflict_is_refused_in_both_modes(self):
+        self.conflict()
+        before = self.head()
+        report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "unmerged_paths"))
+        self.assertEqual(self.head(), before)
+        self.assertNotEqual(self.git("ls-files", "-u").stdout, b"")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        report = self.commit([self.entry(HOT)], edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "unmerged_paths"))
+        self.assertEqual(self.head(), before)
+
+    def test_every_operation_marker_is_refused_in_both_modes(self):
+        self.write("notes/new.md", b"new\n")
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        before = self.head()
+        for name in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+            marker = self.git_dir / name
+            marker.write_bytes(before.encode() + b"\n")
+            self.addCleanup(lambda m=marker: m.exists() and m.unlink())
+            with self.subTest(name=name):
+                report = self.commit([self.entry("notes/new.md")])
+                self.assertEqual((report["status"], report["reason"]),
+                                 ("refused", "operation_in_progress"))
+                report = self.commit([self.entry(HOT)],
+                                     edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+                self.assertEqual((report["status"], report["reason"]),
+                                 ("refused", "operation_in_progress"))
+            marker.unlink()
+        self.assertEqual(self.head(), before)
+
+    def test_nfc_and_nfd_spellings_are_one_path(self):
+        nfc = unicodedata.normalize("NFC", "notes/caf" + chr(0xe9) + ".md")
+        nfd = unicodedata.normalize("NFD", nfc)
+        self.write(nfc, b"cafe\n")
+        report = self.commit([(nfc, sha(b"cafe\n")), (nfd, sha(b"cafe\n"))])
+        self.assertEqual((report["status"], report["reason"]), ("refused", "duplicate_path"))
+        self.assertEqual(report["path_index"], 1)
+
+
+class EnvironmentTests(VaultCommitCase):
+    """A caller's environment cannot steer the commit away from this repository's gate."""
+
+    def own_lines(self):
+        self.write(HOT, b"# hot\nslot-a mine\nslot-b\n")
+        return self.commit([self.entry(HOT)], edits=[edit(HOT, "slot-a\n", "slot-a mine\n")])
+
+    def path_commit(self):
+        self.write("notes/mine.md", b"mine v2\n")
+        return self.commit([self.entry("notes/mine.md")])
+
+    def test_config_variables_cannot_turn_the_hook_off(self):
+        empty = Path(self.temp.name).resolve() / "no-hooks"
+        empty.mkdir()
+        cases = (
+            {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath",
+             "GIT_CONFIG_VALUE_0": str(empty)},
+            {"GIT_CONFIG_PARAMETERS": f"'core.hooksPath={empty.as_posix()}'"},
+        )
+        self.hook("pre-commit", b"exit 1")
+        for values in cases:
+            for name, run in (("path", self.path_commit), ("own-lines", self.own_lines)):
+                with self.subTest(mode=name, keys=sorted(values)):
+                    before = self.head()
+                    with mock.patch.dict(os.environ, values):
+                        report = run()
+                    self.assertEqual((report["status"], report["reason"]),
+                                     ("failed", "commit_rejected"))
+                    self.assertEqual(self.head(), before)
+                    self.git("reset", "-q")
+
+    def test_repository_variables_do_not_move_the_commit(self):
+        other = Path(self.temp.name).resolve() / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+        before = self.head()
+        values = {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other),
+                  "GIT_INDEX_FILE": str(other / "stray-index")}
+        with mock.patch.dict(os.environ, values):
+            report = self.path_commit()
+        self.assertEqual(report["status"], "committed", report)
+        self.assertEqual(self.git("rev-parse", "HEAD~1").stdout.decode().strip(), before)
+        self.assertFalse((other / "stray-index").exists())
+
+    def test_pathspec_variables_do_not_change_the_reading(self):
+        for name in ("GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS"):
+            with self.subTest(name=name):
+                self.write("notes/mine.md", f"mine {name}\n".encode())
+                with mock.patch.dict(os.environ, {name: "1"}):
+                    report = self.commit([self.entry("notes/mine.md")])
+                self.assertEqual(report["status"], "committed", report)
+
+    def test_git_speaks_the_language_the_failure_codes_read(self):
+        with mock.patch.dict(os.environ, {"LC_ALL": "ko_KR.UTF-8", "LANGUAGE": "ko"}):
+            environment = vault_commit._git_environment({"GIT_INDEX_FILE": "scratch"})
+        self.assertEqual((environment["LC_ALL"], environment["LANGUAGE"]), ("C", "C"))
+        self.assertEqual(environment["GIT_INDEX_FILE"], "scratch")
+
+    def test_git_runs_from_an_absolute_path(self):
+        seen = []
+        real = subprocess.run
+
+        def run(command, **options):
+            seen.append(command[0])
+            return real(command, **options)
+
+        with mock.patch.object(vault_commit.subprocess, "run", run):
+            self.path_commit()
+        self.assertTrue(seen)
+        self.assertTrue(all(os.path.isabs(program) for program in seen), seen[:1])
+
+    def test_a_missing_git_is_a_failure_code(self):
+        self.write("notes/mine.md", b"mine v2\n")
+        with mock.patch.object(vault_commit, "git_executable", lambda: None):
+            report = self.commit([self.entry("notes/mine.md")])
+        self.assertEqual((report["status"], report["reason"]), ("failed", "git_unavailable"))
 
 
 class EngineGateTests(VaultCommitCase):

@@ -47,6 +47,50 @@ finally:
     sys.path.remove(str(SCRIPTS))
 
 
+class GitExecutableTests(unittest.TestCase):
+    NAME = "git.exe" if os.name == "nt" else "git"
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.on_path = self.plant("on-path")
+        self.current = self.plant("current")
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.current.parent)
+
+    def plant(self, folder: str) -> Path:
+        path = self.root / folder / self.NAME
+        path.parent.mkdir()
+        path.write_bytes(b"#!/bin/sh\n")
+        path.chmod(0o755)
+        return path
+
+    def found(self, search_path: str) -> str | None:
+        with mock.patch.dict(os.environ, {"PATH": search_path}):
+            return vault_worktrees.git_executable()
+
+    def test_the_current_folder_is_never_searched_on_its_own(self) -> None:
+        self.assertEqual(self.found(str(self.on_path.parent)), str(self.on_path))
+
+    def test_an_empty_entry_is_not_the_current_folder(self) -> None:
+        self.assertIsNone(self.found(os.pathsep))
+        self.assertIsNone(self.found(""))
+
+    def test_a_folder_named_on_path_counts(self) -> None:
+        self.assertEqual(self.found(os.curdir), str(self.current))
+        self.assertEqual(self.found(str(self.current.parent)), str(self.current))
+
+    def test_the_first_match_wins_and_quotes_are_read_off(self) -> None:
+        other = self.plant("other")
+        search = os.pathsep.join((f'"{self.on_path.parent}"', str(other.parent)))
+        self.assertEqual(self.found(search), str(self.on_path))
+
+    def test_a_folder_with_that_name_is_not_a_program(self) -> None:
+        (self.root / "folder" / self.NAME).mkdir(parents=True)
+        self.assertIsNone(self.found(str(self.root / "folder")))
+
+
 def git(cwd: Path, *args: str) -> str:
     env = {key: value for key, value in os.environ.items()
            if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}

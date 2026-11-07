@@ -170,6 +170,25 @@ def tree_views(root: str, parts, common: str, prefix: tuple) -> tuple:
 # --- END SHARED WORKTREE RULE ---
 
 
+def git_executable() -> str | None:
+    """The absolute path of git on PATH, or None.
+
+    A bare ['git', ...] can run a git.exe from the current folder on Windows, and a
+    vault root is a common current folder. This takes the first match on PATH, as
+    the bare name does, and adds no implicit folder: an empty entry is skipped and
+    the current folder counts only when PATH names it.
+    """
+    name = "git.exe" if os.name == "nt" else "git"
+    for entry in os.environ.get("PATH", os.defpath).split(os.pathsep):
+        entry = entry.strip('"')
+        if not entry:
+            continue
+        candidate = os.path.join(os.path.abspath(entry), name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 class WorktreeScope:
     """The linked working trees of the repository that holds one vault."""
 
