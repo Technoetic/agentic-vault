@@ -145,8 +145,9 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
 - **남기는 값(허용 목록):**
   - SessionStart `hook_success` 기록마다 `source`(`startup`·`resume`·`clear`·`compact`·`fork`·`other`),
     `exit_code`, `duration_ms`, `emitted_chars`(훅 stdout 길이), `injected_chars`(호스트가 대화에 넣은
-    `content` 길이), `truncated`, `command_mentions_session_start_py`(아래 **훅 명령 값**). 길이는
-    `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두 센다.
+    `content` 길이), `truncated`, `command_mentions_session_start_py`(아래 **훅 명령 값**),
+    `replacement_chars`(아래 [이중 주입, 깨진 글자, 플러그인 범위](#double-injection-broken-output-and-plugin-scope-optional)).
+    길이는 `estimated_emitted_chars`와 같은 UTF-16 단위다. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두 센다.
   - 성공하지 못한 SessionStart 훅 기록(`hook_non_blocking_error`·`hook_blocking_error`·`hook_cancelled`·
     `hook_error_during_execution`)마다 `source`, `outcome`(`non_blocking_error`·`blocking_error`·`cancelled`·
     `error_during_execution` 가운데 하나), `exit_code`, `duration_ms`, `command_mentions_session_start_py`만
@@ -156,6 +157,8 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     코드 2의 차단 오류도 이 모양으로 바뀐다), 시간 초과·취소가 `hook_cancelled`(종료 코드 없음), 훅을 실행하기
     전이나 실행하는 중의 호스트 오류가 `hook_error_during_execution`이다. 이 모양은 실행 파일에서 확인했고 실제
     세션 기록에서 관측한 것은 아니다.
+  - 비동기 훅 응답(`async_hook_response`)은 종료 코드가 0이 아닌 정수일 때만 실패로 세고 `outcome`은
+    `async_nonzero_exit`다. 이 기록에는 소요 시간이 없어 `duration_ms`는 `none`이다.
   - 지침 파일 첨부(`instructions`)마다 파일 수, 빠진 파일 수(`removed_files`), `reason`(`session_start`·
     `compaction`·`other`, 없으면 `none`), `changed`. 목록(`entries`)은 50건까지 싣고 수(`records`)는 모두
     센다. 경로 필드는 아래 **개인정보**에 있다.
@@ -232,8 +235,8 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
     `content`의 맨 끝이다(마지막 4,096자 안에서 찾는다).
 - **보이지 않는 것:** 기록은 훅이 실행됐다는 증거이지 모델이 기억을 사용했다는 증거가 아니다. 비동기
   `vault_healthcheck.py`의 출력과 resume 때 다시 붙는지(아래 절차 5)는 이 기록에 나오지 않는다. 그 밖의
-  SessionStart 첨부(JSON 훅의 추가 문맥 `hook_additional_context`, 시스템 메시지 `hook_system_message`, 처음 보는
-  종류)는 실패로 보지 않고, 해석하지 않은 채 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가 비어
+  SessionStart 첨부(JSON 훅의 추가 문맥 `hook_additional_context`, 시스템 메시지 `hook_system_message`, 종료 코드가
+  0이거나 없는 `async_hook_response`, 처음 보는 종류)는 실패로 보지 않고, 해석하지 않은 채 `other_records`로만 센다. JSON으로 출력하는 훅은 `content`가 비어
   있거나 상태 문구이고 추가 문맥은 그 별도 기록에 들어가므로 `injected_chars`가 주입량이 아니다(이 플러그인의
   `session_start.py`는 일반 텍스트로 출력한다). Codex 기록은 읽지 않는다.
 - **늦게 실행된 훅의 사본:** 세션이 시작된 뒤 불러온 플러그인(세션 중 설치·활성화 등)의 SessionStart 훅은 늦게
@@ -257,6 +260,102 @@ Claude Code는 세션 기록을 보통 `~/.claude/projects/<프로젝트 경로�
   가져오지 않았다(2026-10-24 기준 main은 Rust). 기록 모양은 위 관측에서, 실패 기록 모양·잘림 안내 문구·늦게
   실행된 훅의 사본은 2.1.309 실행 파일의 문자열에서, 기록된 `command`가 표시 문구라는 것과 표시 문구를 만드는
   방식은 2.1.309·2.1.310 실행 파일의 문자열에서 확인했다.
+
+### Double injection, broken output and plugin scope (optional)
+
+v0.43.0 adds values for three questions that the fields above leave open: did two
+hooks give context to one start, did a hook's output arrive undecodable, and did a
+background hook fail. It also adds a separate check of where this plugin's on or off
+state comes from. Everything here is opt-in: without `--session-evidence` or
+`--plugin-scope` the doctor prints what it printed before.
+
+**Added to `--session-evidence`.** The reader, its bounds and its privacy rules are
+the ones above. Only numbers and closed words are added.
+
+| Value | Meaning |
+|---|---|
+| `entries[].replacement_chars` | U+FFFD characters in that hook's recorded stdout. A decoder writes this character for bytes it cannot read, so a high count points at output decoded with the wrong code page. Counted in the stdout, not in the preview that replaces it |
+| `replacement_chars`, `records_with_replacement_chars` | The same across every record, past the 50 listed ones |
+| `starts` | Distinct starts, told apart by `toolUseID` and source, of successful and failed hooks |
+| `double_context_observed`, `double_context_sources` | Starts in which this plugin's hook and another hook both gave context, in total and by source |
+| `records_ungrouped` | Records with no usable `toolUseID` or no known source: counted, not paired |
+| `records_untracked` | Records past the 10,000 tracked starts |
+| `failed_entries[].outcome: async_nonzero_exit` | An asynchronous hook's response with a non-zero exit code. Before v0.43.0 these were only `other_records`, so a failed background hook left `status` at `observed_ran`. It is now `observed_error` |
+
+A hook gave context when the recorded `content` is its stdout with the host's trim
+applied, or one of the host's oversize notices for it. The identifier is compared
+and never printed. The async response is a host record shape seen in transcripts of
+2.1.309 to 2.1.319 on one Windows PC; a response without a non-zero integer exit code
+stays an `other_record`.
+
+Limits. `double_context_observed` is a lower bound: a JSON hook's context arrives in
+one `hook_additional_context` record for all such hooks, which names no start, so it
+is not paired, and a record with no command string is not guessed to be either side.
+An async response has no `toolUseID`, so it is not tied to a start. A non-zero exit
+of this plugin's own asynchronous health check counts too, because it is a failed
+exit; `command_mentions_session_start_py` does not tell which hook that was unless
+the record names it. None of these values shows what the model did with the context.
+
+**`--plugin-scope`.**
+
+```text
+python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --plugin-scope --format json
+python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --plugin-scope --plugin-scope-host --format json
+```
+
+The result is the `plugin_scope` block, and the doctor's exit code stays the vault's.
+Claude Code documents six sources of `enabledPlugins` and merges them per plugin id:
+the source with the highest precedence that mentions the id wins
+([plugin loading](https://code.claude.com/docs/en/plugins/loading), read 2026-11-07,
+latest Claude Code release at that time v2.1.319). So when a key is removed from a
+project file, a lower `true` takes effect with no visible change to the project. The
+report form, a value together with the scope it came from, follows
+`git config --show-scope`
+([git-config.adoc](https://github.com/git/git/blob/fb25501/Documentation/git-config.adoc),
+commit fb25501); no code was taken.
+
+- **`sources`, `precedence`:** a closed `value` (`enabled`, `disabled`, `unset`,
+  `unknown`) and `file` state for each source, highest first. The module reads
+  `.claude/settings.local.json` and `.claude/settings.json` in the vault and
+  `settings.json` in the user folder (`CLAUDE_CONFIG_DIR` when set, otherwise
+  `~/.claude`). `managed`, `flag` and `add_dir` are always `unknown` / `not_read`.
+- **`file_winner`:** the highest file that mentions the plugin. A file that cannot be
+  told (`unknown`) stops the walk, because the key may be in it. This is a winner among
+  three files, not the merged value: `trust_boundary` is
+  `settings_files_only_other_sources_unknown`.
+- **`session_hooks`:** SessionStart hook entries in the project and local files. Only
+  entries are counted; a hook's command is neither read nor printed, so no shell
+  syntax is interpreted. `null` means the section has another shape.
+- **`host`:** `not_requested` unless `--plugin-scope-host` is given. With it, the doctor
+  runs `claude plugin list --json` once in the vault, with the same rule for finding
+  `claude` as `--host-version`, fixed arguments, no shell, at most 8 seconds plus 1
+  to clean up, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Only this plugin's
+  `enabled` is kept ([field list](https://code.claude.com/docs/en/plugins/cli-reference),
+  read 2026-11-07), and `comparison` says whether it agrees with `file_winner`. Any
+  failure ends as `host_unavailable` with a closed `reason_code`. The doctor promises
+  nothing about what the host writes in its own folders.
+- **`healthcheck_copy`:** the state of `00-meta/scripts/vault_healthcheck.py`, compared
+  with this install's copy by the `agentic-vault:healthcheck engine=` stamp. That one
+  path is read; nothing is searched. A stamp that is not a version number is not printed.
+- **`findings`:** closed words, also the reason for `status: attention`.
+
+| Finding | Meaning | Next step |
+|---|---|---|
+| `plugin_and_vault_session_hooks` | The plugin is on and the vault's settings add SessionStart hooks | Check `double_context_observed`, then keep one hook as the source of the session context. `--plugin-scope` does not change settings |
+| `host_merged_value_differs` | The host's merged value differs from the file winner | A source that is not read here is deciding |
+| `healthcheck_copy_unstamped` | The copy has no engine stamp, which is what a fork looks like | Compare it with `/vault-upgrade`, which keeps local edits under its own rules |
+| `healthcheck_copy_outdated` | The copy's stamp is older than this install's | The same |
+
+Limits. A hook count shows that two sources can inject, not that they did: it may be
+a hook that prints nothing, a matcher that never fires, or settings with hooks turned
+off. The finding is decided from the three files unless the host answered. The module
+cannot tell which hook runs the copy, because that would need the command text, so
+`healthcheck_copy` describes the copy at that path whether or not a hook runs it.
+`modified` and `newer` are reported as states and raise no finding.
+
+The doctor does not run hooks to test them. It would break its read-only contract, a
+single run sees only that moment's input and branch, and the host has already recorded
+what its runs did. That record is what `--session-evidence` reads.
 
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 

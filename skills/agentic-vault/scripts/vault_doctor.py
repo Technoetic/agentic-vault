@@ -574,6 +574,16 @@ SESSION_EVIDENCE_UNAVAILABLE_LINES = (
 )
 
 
+# --plugin-scope when its reader cannot be loaded or run: fixed words, the same exit code.
+PLUGIN_SCOPE_UNAVAILABLE = {
+    "schema_version": 1,
+    "status": "unknown",
+    "reason_code": "probe_failed",
+    "next_action": "check_the_plugin_install",
+    "trust_boundary": "settings_files_only_other_sources_unknown",
+}
+
+
 def _format_text(report: dict) -> str:
     hook = report["hook"]
     lines = [
@@ -627,6 +637,12 @@ def _format_text(report: dict) -> str:
             lines.extend(capacity_lines(report["capacity"]))
         except Exception:  # fail-soft by contract: a fixed line, never exception text
             lines.append("capacity: unavailable (probe_failed)")
+    if "plugin_scope" in report:
+        try:
+            from vault_plugin_scope import text_lines as scope_lines
+            lines.extend(scope_lines(report["plugin_scope"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("plugin_scope: unknown (probe_failed)")
     return "\n".join(lines)
 
 
@@ -667,9 +683,26 @@ def main(argv: list[str] | None = None) -> int:
             "from local Git history when each reaches them. Read-only; never changes the exit code."
         ),
     )
+    parser.add_argument(
+        "--plugin-scope", action="store_true",
+        help=(
+            "Also report which settings file turns this plugin on or off, whether the vault's "
+            "settings add SessionStart hooks, and the engine stamp of the vault's health-check "
+            "copy. Reads no hook command and runs no hook. Fail-soft; never changes the exit code."
+        ),
+    )
+    parser.add_argument(
+        "--plugin-scope-host", action="store_true",
+        help=(
+            "With --plugin-scope, also run `claude plugin list --json` in the vault (fixed "
+            "arguments, no shell, bounded time) to compare the host's merged value."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.session_instruction_paths and args.session_evidence is None:
         parser.error("--session-instruction-paths requires --session-evidence")
+    if args.plugin_scope_host and not args.plugin_scope:
+        parser.error("--plugin-scope-host requires --plugin-scope")
 
     report, exit_code = diagnose(args.vault, instructions=args.instructions)
     if args.host_version:
@@ -693,6 +726,15 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # fail-soft by contract: fixed words, never exception text
             report["capacity"] = {"schema_version": 1, "status": "unavailable",
                                   "reason_code": "probe_failed", "complete": False}
+    if args.plugin_scope:
+        # Loaded only on request; the exit code stays the vault's here as well.
+        try:
+            from vault_plugin_scope import diagnose_plugin_scope
+            report["plugin_scope"] = diagnose_plugin_scope(
+                args.vault, host=args.plugin_scope_host, resolve_host=_resolve_host_executable,
+            )
+        except Exception:  # fail-soft by contract: no exception text, which may quote content
+            report["plugin_scope"] = dict(PLUGIN_SCOPE_UNAVAILABLE)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
