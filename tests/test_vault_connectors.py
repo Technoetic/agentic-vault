@@ -345,7 +345,7 @@ class ConnectorTests(unittest.TestCase):
         # Copy only the helper's fixed source dependencies. No installed plugin
         # is changed and no inherited module cache can mask a missing file.
         for name in ("vault_connectors.py", "vault_evidence.py", "vault_healthcheck.py",
-                     "vault_paths.py", "vault_state.py", "jev_ask.py", "jev_client.py",
+                     "vault_paths.py", "vault_state.py", "vault_worktrees.py", "jev_ask.py", "jev_client.py",
                      "jarvis_bridge.py"):
             if name != omit:
                 shutil.copyfile(SCRIPTS / name, directory / name)
