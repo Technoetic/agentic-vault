@@ -185,6 +185,30 @@ def context_record(*, version: object = "2.1.300") -> dict:
     return {**meta(version), "type": "attachment", "attachment": attachment}
 
 
+def async_response_record(*, exit_code: object = 127, source: str = "compact",
+                          event: str = "SessionStart", command: object = OTHER_COMMAND,
+                          version: object = "2.1.300") -> dict:
+    """An asynchronous hook's late response: no toolUseID and no duration in the record."""
+    attachment = {
+        "type": "async_hook_response", "processId": "SECRET-PROCESS-ID",
+        "hookName": f"{event}:{source}", "hookEvent": event, "command": command,
+        "response": {"SECRET-RESPONSE-KEY": "SECRET-RESPONSE-VALUE"},
+        "stdout": "SECRET-ASYNC-STDOUT", "stderr": "SECRET-ASYNC-STDERR",
+    }
+    if exit_code is not MISSING:
+        attachment["exitCode"] = exit_code
+    return {**meta(version), "type": "attachment", "attachment": attachment}
+
+
+def started(record: dict, start_id: object) -> dict:
+    """The record with the identifier the host gives every hook of one start."""
+    if start_id is MISSING:
+        del record["attachment"]["toolUseID"]
+    else:
+        record["attachment"]["toolUseID"] = start_id
+    return record
+
+
 def system_message_record(*, version: object = "2.1.300") -> dict:
     attachment = {
         "type": "hook_system_message", "content": "SECRET-SYSTEM-MESSAGE",
@@ -347,6 +371,7 @@ class SessionStartHookTests(SessionEvidenceTestCase):
             "injected_chars": utf16_units(stdout.strip()),
             "truncated": False,
             "command_mentions_session_start_py": True,
+            "replacement_chars": 0,
         }])
         # The astral character counts twice, as in the host and the doctor's estimate.
         self.assertEqual(utf16_units(stdout), len(stdout) + 1)
@@ -901,6 +926,275 @@ class SessionStartHookTests(SessionEvidenceTestCase):
         self.assertEqual((hooks["failed"], len(hooks["failed_entries"])), (60, 50))
         instructions = report["instructions"]
         self.assertEqual((instructions["records"], len(instructions["entries"])), (60, 50))
+
+
+class ReplacementCharacterTests(SessionEvidenceTestCase):
+    """U+FFFD in a hook's decoded stdout: the mark of output decoded with the wrong code page."""
+
+    def test_each_hook_reports_its_own_count(self) -> None:
+        broken = "SECRET-STDOUT " + chr(0xFFFD) * 3 + " notes\n"
+        report = self.diagnose(
+            hook_record(stdout=broken, command=OTHER_COMMAND), hook_record(),
+        )
+
+        hooks = report["session_start_hooks"]
+        self.assertEqual([entry["replacement_chars"] for entry in hooks["entries"]], [3, 0])
+        self.assertEqual(hooks["replacement_chars"], 3)
+        self.assertEqual(hooks["records_with_replacement_chars"], 1)
+
+    def test_a_replaced_stdout_is_counted_in_the_stdout_not_the_preview(self) -> None:
+        stdout = "SECRET-STDOUT " + (chr(0xFFFD) + "x") * 8_000 + "\n"
+        report = self.diagnose(hook_record(stdout=stdout, content=persisted_notice(stdout)))
+
+        hooks = report["session_start_hooks"]
+        self.assertEqual(hooks["entries"][0]["replacement_chars"], 8_000)
+        self.assertEqual(hooks["truncated"], 1)
+
+    def test_totals_count_past_the_listed_records(self) -> None:
+        records = [hook_record(stdout=chr(0xFFFD) + " notes\n") for _ in range(60)]
+        hooks = self.diagnose(*records)["session_start_hooks"]
+
+        self.assertEqual(len(hooks["entries"]), 50)
+        self.assertEqual(hooks["replacement_chars"], 60)
+        self.assertEqual(hooks["records_with_replacement_chars"], 60)
+
+    def test_an_unrecognized_record_is_not_counted(self) -> None:
+        record = hook_record(stdout=chr(0xFFFD))
+        del record["attachment"]["content"]
+        hooks = self.diagnose(record)["session_start_hooks"]
+
+        self.assertEqual((hooks["unrecognized"], hooks["replacement_chars"]), (1, 0))
+
+
+class DoubleContextTests(SessionEvidenceTestCase):
+    """This plugin's hook and another hook giving context to one start."""
+
+    def double(self, *records: dict) -> dict:
+        return self.diagnose(*records)["session_start_hooks"]
+
+    def test_two_hooks_of_one_start_are_one_observation(self) -> None:
+        hooks = self.double(
+            started(hook_record(source="compact"), "SECRET-START-1"),
+            started(hook_record(source="compact", command=OTHER_COMMAND), "SECRET-START-1"),
+        )
+
+        self.assertEqual(hooks["starts"], 1)
+        self.assertEqual(hooks["double_context_observed"], 1)
+        self.assertEqual(hooks["double_context_sources"], {"compact": 1})
+
+    def test_order_within_a_start_does_not_matter(self) -> None:
+        hooks = self.double(
+            started(hook_record(source="resume", command=OTHER_COMMAND), "SECRET-START-1"),
+            started(hook_record(source="resume"), "SECRET-START-1"),
+            started(hook_record(source="resume", command=OTHER_COMMAND), "SECRET-START-1"),
+        )
+
+        self.assertEqual(hooks["double_context_observed"], 1)
+        self.assertEqual(hooks["double_context_sources"], {"resume": 1})
+
+    def test_different_starts_are_not_paired(self) -> None:
+        hooks = self.double(
+            started(hook_record(source="compact"), "SECRET-START-1"),
+            started(hook_record(source="compact", command=OTHER_COMMAND), "SECRET-START-2"),
+            started(hook_record(source="resume"), "SECRET-START-3"),
+        )
+
+        self.assertEqual(hooks["starts"], 3)
+        self.assertEqual(hooks["double_context_observed"], 0)
+        self.assertEqual(hooks["double_context_sources"], {})
+
+    def test_one_identifier_on_two_sources_is_two_starts(self) -> None:
+        hooks = self.double(
+            started(hook_record(source="compact"), "SECRET-START-1"),
+            started(hook_record(source="resume", command=OTHER_COMMAND), "SECRET-START-1"),
+        )
+
+        self.assertEqual((hooks["starts"], hooks["double_context_observed"]), (2, 0))
+
+    def test_counts_are_by_source(self) -> None:
+        records = []
+        for number, source in enumerate(("compact", "compact", "resume")):
+            records.append(started(hook_record(source=source), f"SECRET-START-{number}"))
+            records.append(started(hook_record(source=source, command=OTHER_COMMAND),
+                                   f"SECRET-START-{number}"))
+        hooks = self.double(*records)
+
+        self.assertEqual(hooks["double_context_observed"], 3)
+        self.assertEqual(hooks["double_context_sources"], {"compact": 2, "resume": 1})
+
+    def test_a_replaced_output_still_gave_context(self) -> None:
+        stdout = OVER_CAP_STDOUT
+        hooks = self.double(
+            started(hook_record(), "SECRET-START-1"),
+            started(hook_record(stdout=stdout, content=persisted_notice(stdout),
+                                command=OTHER_COMMAND), "SECRET-START-1"),
+        )
+
+        self.assertEqual((hooks["truncated"], hooks["double_context_observed"]), (1, 1))
+
+    def test_a_hook_without_context_is_not_double(self) -> None:
+        cases = {
+            "empty_output": hook_record(stdout="", content="", command=OTHER_COMMAND),
+            "json_status": hook_record(stdout='{"hookSpecificOutput":{}}', content="SECRET-STATUS",
+                                       command=OTHER_COMMAND),
+            "held_copy": hook_record(stdout="SECRET-STDOUT\n", content="", command=OTHER_COMMAND),
+        }
+        for name, record in cases.items():
+            with self.subTest(case=name):
+                hooks = self.double(started(hook_record(), "SECRET-START-1"),
+                                    started(record, "SECRET-START-1"))
+                self.assertEqual((hooks["starts"], hooks["double_context_observed"]), (1, 0))
+
+    def test_this_plugins_own_hooks_are_not_double(self) -> None:
+        label = session_start_hooks()[0]["statusMessage"]
+        hooks = self.double(
+            started(hook_record(), "SECRET-START-1"),
+            started(labelled(hook_record(), label), "SECRET-START-1"),
+        )
+
+        self.assertEqual(hooks["double_context_observed"], 0)
+
+    def test_a_label_of_this_plugin_counts_as_this_plugin(self) -> None:
+        label = session_start_hooks()[0]["statusMessage"]
+        hooks = self.double(
+            started(labelled(hook_record(), label), "SECRET-START-1"),
+            started(labelled(hook_record(), OTHER_PLUGIN_LABEL), "SECRET-START-1"),
+        )
+
+        self.assertEqual(hooks["double_context_observed"], 1)
+
+    def test_a_record_without_a_command_is_not_guessed(self) -> None:
+        hooks = self.double(
+            started(hook_record(), "SECRET-START-1"),
+            started(hook_record(command=None), "SECRET-START-1"),
+        )
+
+        self.assertEqual((hooks["starts"], hooks["double_context_observed"]), (1, 0))
+
+    def test_a_failed_hook_gave_no_context_but_is_a_start(self) -> None:
+        hooks = self.double(
+            started(failure_record("hook_non_blocking_error", source="compact"), "SECRET-START-1"),
+            started(hook_record(source="compact"), "SECRET-START-1"),
+            started(failure_record("hook_non_blocking_error", source="compact"), "SECRET-START-2"),
+        )
+
+        self.assertEqual((hooks["starts"], hooks["double_context_observed"]), (2, 0))
+
+    def test_records_without_a_usable_identifier_are_counted_not_paired(self) -> None:
+        no_source = started(hook_record(command=OTHER_COMMAND), "SECRET-START-1")
+        no_source["attachment"]["hookName"] = "SessionStart"
+        cases = (
+            started(hook_record(command=OTHER_COMMAND), MISSING),
+            started(hook_record(command=OTHER_COMMAND), 7),
+            started(hook_record(command=OTHER_COMMAND), ""),
+            started(hook_record(command=OTHER_COMMAND), "S" * 257),
+            no_source,
+        )
+        for record in cases:
+            with self.subTest(identifier=str(record["attachment"].get("toolUseID"))[:20]):
+                hooks = self.double(started(hook_record(), "SECRET-START-1"), record)
+                self.assertEqual(hooks["records_ungrouped"], 1)
+                self.assertEqual((hooks["starts"], hooks["double_context_observed"]), (1, 0))
+
+    def test_tracked_starts_are_bounded(self) -> None:
+        records = [started(hook_record(), f"SECRET-START-{number}") for number in range(3)]
+        with mock.patch.object(self.evidence, "MAX_TRACKED_STARTS", 2):
+            hooks = self.double(*records)
+
+        self.assertEqual((hooks["starts"], hooks["records_untracked"]), (2, 1))
+
+    def test_pairs_count_past_the_listed_records(self) -> None:
+        records = []
+        for number in range(30):
+            records.append(started(hook_record(), f"SECRET-START-{number}"))
+            records.append(started(hook_record(command=OTHER_COMMAND), f"SECRET-START-{number}"))
+        hooks = self.double(*records)
+
+        self.assertEqual(len(hooks["entries"]), 50)
+        self.assertEqual(hooks["double_context_observed"], 30)
+
+    def test_a_report_without_interpreted_records_has_the_empty_values(self) -> None:
+        report = self.diagnose(hook_record(version="not-a-version"))
+
+        hooks = report["session_start_hooks"]
+        self.assertEqual((hooks["starts"], hooks["double_context_observed"],
+                          hooks["replacement_chars"]), (0, 0, 0))
+        self.assertEqual(hooks["double_context_sources"], {})
+        self.evidence.text_lines(report)
+
+    def test_the_text_lines_carry_the_same_values_and_nothing_else(self) -> None:
+        transcript = self.diagnose(
+            started(hook_record(source="compact", stdout=chr(0xFFFD) + "\n"), "SECRET-START-1"),
+            started(hook_record(source="compact", command=OTHER_COMMAND), "SECRET-START-1"),
+            started(hook_record(source="resume"), "SECRET-START-2"),
+            started(hook_record(source="resume", command=OTHER_COMMAND), "SECRET-START-2"),
+        )
+        lines = self.evidence.text_lines(transcript)
+
+        self.assertIn(
+            "session_start_context: starts=2; double_context_observed=2; compact=1; resume=1; "
+            "records_ungrouped=0; records_untracked=0; replacement_chars=1; "
+            "records_with_replacement_chars=1", lines,
+        )
+        self.assertNotIn(SECRET, "\n".join(lines))
+
+
+class AsynchronousResponseTests(SessionEvidenceTestCase):
+    """async_hook_response: a non-zero exit code is a failure, anything else is not read."""
+
+    def test_a_non_zero_exit_is_a_failure(self) -> None:
+        report = self.diagnose(async_response_record())
+
+        self.assert_status(report, "observed_error", "session_start_hook_failed")
+        self.assertEqual(report["next_action"], "check_the_failed_session_start_hook")
+        hooks = report["session_start_hooks"]
+        self.assertEqual((hooks["failed"], hooks["other_records"], hooks["records_ungrouped"]), (1, 0, 0))
+        self.assertEqual(hooks["failed_entries"], [{
+            "source": "compact", "outcome": "async_nonzero_exit", "exit_code": 127,
+            "duration_ms": None, "command_mentions_session_start_py": False,
+        }])
+
+    def test_a_negative_exit_code_is_a_failure(self) -> None:
+        hooks = self.diagnose(async_response_record(exit_code=-1))["session_start_hooks"]
+
+        self.assertEqual((hooks["failed"], hooks["other_records"]), (1, 0))
+
+    def test_this_plugins_hook_is_recognised(self) -> None:
+        hooks = self.diagnose(async_response_record(command=PLUGIN_COMMAND))["session_start_hooks"]
+
+        self.assertIs(hooks["failed_entries"][0]["command_mentions_session_start_py"], True)
+
+    def test_anything_but_a_non_zero_integer_stays_an_other_record(self) -> None:
+        for exit_code in (0, None, MISSING, True, "127", 1.5):
+            with self.subTest(exit_code=repr(exit_code)):
+                report = self.diagnose(async_response_record(exit_code=exit_code))
+
+                self.assert_status(report, "not_recorded", "no_session_start_hook_record")
+                hooks = report["session_start_hooks"]
+                self.assertEqual((hooks["failed"], hooks["other_records"]), (0, 1))
+
+    def test_a_response_without_a_hook_name_is_unrecognized(self) -> None:
+        record = async_response_record()
+        del record["attachment"]["hookName"]
+        hooks = self.diagnose(record)["session_start_hooks"]
+
+        self.assertEqual((hooks["failed"], hooks["unrecognized"]), (0, 1))
+
+    def test_another_event_is_not_read(self) -> None:
+        hooks = self.diagnose(
+            async_response_record(event="PreToolUse", source="Bash"),
+        )["session_start_hooks"]
+
+        self.assertEqual((hooks["failed"], hooks["other_records"]), (0, 0))
+
+    def test_every_failure_of_one_start_is_counted(self) -> None:
+        report = self.diagnose(
+            started(failure_record("hook_non_blocking_error", source="compact"), "SECRET-START-1"),
+            async_response_record(), async_response_record(),
+        )
+
+        self.assert_status(report, "observed_error", "session_start_hook_failed")
+        self.assertEqual(report["session_start_hooks"]["failed"], 3)
 
 
 class HostVersionRangeTests(SessionEvidenceTestCase):
@@ -1552,7 +1846,10 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
             "session_host_versions: min=2.1.300; max=2.1.300",
             "session_start_hook_records: 1; truncated=0; failed=0; unrecognized=0; other_records=0",
             "session_start_hook: source=startup; exit_code=0; duration_ms=812; emitted_chars=18; "
-            "injected_chars=17; truncated=false; command_mentions_session_start_py=true",
+            "injected_chars=17; truncated=false; command_mentions_session_start_py=true; "
+            "replacement_chars=0",
+            "session_start_context: starts=1; double_context_observed=0; records_ungrouped=0; "
+            "records_untracked=0; replacement_chars=0; records_with_replacement_chars=0",
             "session_instruction_records: 1; files=1; removed_files=0; unrecognized=0",
             "session_instruction: reason=compaction; files=1; removed_files=0; changed=true",
             "session_first_turn_prompt_tokens: 77604 (whole_prompt_not_attributable_to_hooks)",
@@ -1577,6 +1874,8 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
             "session_start_hook_records: 0; truncated=0; failed=1; unrecognized=0; other_records=0",
             "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "
             "duration_ms=40; command_mentions_session_start_py=true",
+            "session_start_context: starts=1; double_context_observed=0; records_ungrouped=0; "
+            "records_untracked=0; replacement_chars=0; records_with_replacement_chars=0",
             "session_instruction_records: 0; files=0; removed_files=0; unrecognized=0",
             "session_first_turn_prompt_tokens: none",
             "session_api_errors: 1; 529=1; without_status=0",
@@ -1595,7 +1894,8 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
         lines = text[len(READY_TEXT):].splitlines()
         self.assertEqual(lines[0], "session_evidence: observed_error (session_start_hook_failed)")
         self.assertIn("session_start_hook: source=startup; exit_code=0; duration_ms=812; emitted_chars=18; "
-                      "injected_chars=17; truncated=false; command_mentions_session_start_py=true", lines)
+                      "injected_chars=17; truncated=false; command_mentions_session_start_py=true; "
+                      "replacement_chars=0", lines)
         self.assertIn("session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=1; "
                       "duration_ms=3000; command_mentions_session_start_py=false", lines)
         self.assertEqual(lines[-1], "session_next_action: check_the_failed_session_start_hook")
@@ -1619,7 +1919,7 @@ class DoctorSessionEvidenceTests(SessionEvidenceTestCase):
             "session_start_hook_records: 1; truncated=0; failed=2; unrecognized=0; other_records=0",
             f"session_start_hook: source=compact; exit_code=0; duration_ms=812; "
             f"emitted_chars={utf16_units(stdout)}; injected_chars={utf16_units(stdout.strip())}; "
-            "truncated=false; command_mentions_session_start_py=true",
+            "truncated=false; command_mentions_session_start_py=true; replacement_chars=0",
             "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "
             "duration_ms=40; command_mentions_session_start_py=true",
             "session_start_hook_failed: source=startup; outcome=non_blocking_error; exit_code=127; "

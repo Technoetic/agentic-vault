@@ -5,7 +5,7 @@
 for its SessionStart status labels, this plugin's own ``hooks/hooks.json``: no
 directory scan, no write, no network or model call, and the doctor exit code
 never changes. The transcript is a host-internal, undocumented format, so only
-the record shapes observed on Claude Code 2.1.252 to 2.1.309, or written by the
+the record shapes observed on Claude Code 2.1.252 to 2.1.319, or written by the
 2.1.309 executable (hook failures and oversize notices), are read, whatever
 version wrote them; a record of another shape is counted, never guessed.
 
@@ -39,6 +39,7 @@ MAX_FILE_BYTES = 512 * 1024 * 1024
 MAX_LINE_BYTES = 16 * 1024 * 1024
 DISCARD_CHUNK_BYTES = 1024 * 1024
 MAX_LISTED_RECORDS = 50
+MAX_TRACKED_STARTS = 10_000
 MAX_PATHS_PER_RECORD = 50
 MAX_PATH_CHARS = 1024
 MAX_COMMAND_CHARS = 8192
@@ -115,6 +116,17 @@ _FAILURE_OUTCOMES = {
     "hook_error_during_execution": "error_during_execution",
 }
 
+# An asynchronous hook's late response (type async_hook_response) has no
+# toolUseID or duration, only a process id, its outputs and an exit code (key names
+# of one transcript of 2.1.309 to 2.1.319, 2026-11-07). It is a failure only with a
+# non-zero integer exit code; any other response stays an other record, unread.
+ASYNC_RESPONSE = "async_hook_response"
+ASYNC_FAILURE_OUTCOME = "async_nonzero_exit"
+
+# What a decoder writes for bytes it cannot read: the mark of hook output decoded
+# with the wrong code page. Only counted, in the stdout the host recorded.
+REPLACEMENT_CHAR = chr(0xFFFD)
+
 STATUSES = (
     "observed_ran", "observed_truncated", "observed_error", "not_recorded", "unparsed",
     "unsupported_host_version",
@@ -132,6 +144,7 @@ HOOK_FIELDS = (
     "source", "exit_code", "duration_ms", "emitted_chars", "injected_chars", "truncated",
     "command_mentions_session_start_py",
 )
+ADDED_HOOK_FIELDS = ("replacement_chars",)  # after the fields of the v0.31.0 release note
 FAILURE_FIELDS = (
     "source", "outcome", "exit_code", "duration_ms", "command_mentions_session_start_py",
 )
@@ -245,6 +258,15 @@ def _notice(content: str) -> bool:
     start = tail.rfind(PERSIST_FAILED_START)
     # Saving failed: the first part, then the notice as the last line.
     return start >= 0 and _PERSIST_FAILED.fullmatch(tail, start + len("\n\n")) is not None
+
+
+def _gave_context(content: str, stdout: str, truncated: bool) -> bool:
+    """True when the host put this hook's stdout, or its notice for it, in the content.
+
+    A JSON hook's content is empty or a status word, and a held copy's is empty:
+    those differ from the stdout, so they are not read as context.
+    """
+    return truncated or (content != "" and content == stdout.strip(_JS_TRIM))
 
 
 def _source(hook_name: str) -> str:
@@ -449,6 +471,14 @@ def _response_key(record: dict, message: dict) -> tuple[str, str | None] | None:
     return message_id, request_id
 
 
+def _hook_counts() -> dict:
+    return {
+        "records": 0, "truncated": 0, "failed": 0, "unrecognized": 0, "other_records": 0,
+        "starts": 0, "double_context_observed": 0, "records_ungrouped": 0,
+        "records_untracked": 0, "replacement_chars": 0, "records_with_replacement_chars": 0,
+    }
+
+
 def _empty_report(status: str, reason_code: str, include_paths: bool) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -477,7 +507,7 @@ def _empty_report(status: str, reason_code: str, include_paths: bool) -> dict:
             },
         },
         "session_start_hooks": {
-            "records": 0, "truncated": 0, "failed": 0, "unrecognized": 0, "other_records": 0,
+            **_hook_counts(), "double_context_sources": {},
             "entries": [], "failed_entries": [],
         },
         "instructions": {
@@ -490,6 +520,7 @@ def _empty_report(status: str, reason_code: str, include_paths: bool) -> dict:
             "file_bytes": MAX_FILE_BYTES,
             "line_bytes": MAX_LINE_BYTES,
             "listed_records": MAX_LISTED_RECORDS,
+            "tracked_starts": MAX_TRACKED_STARTS,
             "paths_per_record": MAX_PATHS_PER_RECORD,
             "path_chars": MAX_PATH_CHARS,
             "notice_head_chars": NOTICE_HEAD_CHARS,
@@ -515,9 +546,10 @@ class _Scan:
         self.highest: tuple[int, int, int] | None = None
         self.without_version = 0
         self.unparsed_version = 0
-        self.hooks = {
-            "records": 0, "truncated": 0, "failed": 0, "unrecognized": 0, "other_records": 0,
-        }
+        self.hooks = _hook_counts()
+        # [this plugin gave context, another hook did] by (source, toolUseID).
+        self.starts: dict[tuple[str, str], list[bool]] = {}
+        self.double_sources: dict[str, int] = {}
         self.hook_entries: list[dict] = []
         self.failed_entries: list[dict] = []
         self.instructions = {"records": 0, "files": 0, "removed_files": 0, "unrecognized": 0}
@@ -623,6 +655,8 @@ class _Scan:
             self._hook(attachment)
         elif isinstance(kind, str) and kind in _FAILURE_OUTCOMES:
             self._failure(attachment, _FAILURE_OUTCOMES[kind])
+        elif kind == ASYNC_RESPONSE and _integer(attachment.get("exitCode"), -MAX_INTEGER):
+            self._failure(attachment, ASYNC_FAILURE_OUTCOME)
         else:
             # Other SessionStart attachment types (the additional context of JSON
             # hooks, system messages and types not seen before) are not interpreted.
@@ -638,20 +672,57 @@ class _Scan:
             self.hooks["unrecognized"] += 1
             return
         truncated = _truncated(content, stdout)
+        source = _source(name)
+        mentions = _mentions_session_start(attachment.get("command"), self.labels)
+        replacement_chars = stdout.count(REPLACEMENT_CHAR)
         self.hooks["records"] += 1
         self.hooks["truncated"] += int(truncated)
+        self.hooks["replacement_chars"] += replacement_chars
+        self.hooks["records_with_replacement_chars"] += int(replacement_chars > 0)
+        start = self._start(attachment, source)
+        if start is not None and mentions is not None and _gave_context(content, stdout, truncated):
+            self._context(start, source, mentions)
         if len(self.hook_entries) >= MAX_LISTED_RECORDS:
             return
-        command = attachment.get("command")
         self.hook_entries.append({
-            "source": _source(name),
+            "source": source,
             "exit_code": _integer(attachment.get("exitCode"), -MAX_INTEGER),
             "duration_ms": _duration(attachment.get("durationMs")),
             "emitted_chars": _utf16_len(stdout),
             "injected_chars": _utf16_len(content),
             "truncated": truncated,
-            "command_mentions_session_start_py": _mentions_session_start(command, self.labels),
+            "command_mentions_session_start_py": mentions,
+            "replacement_chars": replacement_chars,
         })
+
+    def _start(self, attachment: dict, source: str) -> list[bool] | None:
+        """The state of the start a record belongs to, or None when it cannot be told.
+
+        Hooks of one start share a toolUseID; the identifier is compared here and
+        never leaves this object.
+        """
+        start_id = attachment.get("toolUseID")
+        if (source == "other" or not isinstance(start_id, str)
+                or not 0 < len(start_id) <= _MAX_ID_CHARS):
+            self.hooks["records_ungrouped"] += 1
+            return None
+        key = (source, start_id)
+        state = self.starts.get(key)
+        if state is None:
+            if len(self.starts) >= MAX_TRACKED_STARTS:
+                self.hooks["records_untracked"] += 1
+                return None
+            state = self.starts[key] = [False, False]
+            self.hooks["starts"] += 1
+        return state
+
+    def _context(self, start: list[bool], source: str, is_this_plugin: bool) -> None:
+        """Mark who gave context; a start with both sides is one double observation."""
+        already_double = all(start)
+        start[0 if is_this_plugin else 1] = True
+        if all(start) and not already_double:
+            self.hooks["double_context_observed"] += 1
+            self.double_sources[source] = self.double_sources.get(source, 0) + 1
 
     def _failure(self, attachment: dict, outcome: str) -> None:
         """A hook that did not succeed: source, outcome, exit code, duration and a boolean."""
@@ -660,6 +731,8 @@ class _Scan:
             self.hooks["unrecognized"] += 1
             return
         self.hooks["failed"] += 1
+        if outcome != ASYNC_FAILURE_OUTCOME:  # that record has no toolUseID
+            self._start(attachment, _source(name))
         if len(self.failed_entries) >= MAX_LISTED_RECORDS:
             return
         command = attachment.get("command")
@@ -776,7 +849,8 @@ class _Scan:
             # No usable version: the shapes are unknown, so nothing is guessed.
             return report
         report["session_start_hooks"] = {
-            **self.hooks, "entries": self.hook_entries, "failed_entries": self.failed_entries,
+            **self.hooks, "double_context_sources": dict(sorted(self.double_sources.items())),
+            "entries": self.hook_entries, "failed_entries": self.failed_entries,
         }
         report["instructions"] = {
             **self.instructions, "paths_included": self.include_paths,
@@ -876,13 +950,26 @@ def text_lines(report: dict) -> list[str]:
     ]
     for entry in hooks["entries"]:
         lines.append(
-            "session_start_hook: " + "; ".join(f"{key}={_text(entry[key])}" for key in HOOK_FIELDS)
+            "session_start_hook: " + "; ".join(
+                f"{key}={_text(entry[key])}" for key in (*HOOK_FIELDS, *ADDED_HOOK_FIELDS)
+            )
         )
     for entry in hooks["failed_entries"]:
         lines.append(
             "session_start_hook_failed: "
             + "; ".join(f"{key}={_text(entry[key])}" for key in FAILURE_FIELDS)
         )
+    sources = "".join(
+        f"; {source}={count}" for source, count in hooks["double_context_sources"].items()
+    )
+    lines.append(
+        f"session_start_context: starts={hooks['starts']}; "
+        f"double_context_observed={hooks['double_context_observed']}{sources}; "
+        f"records_ungrouped={hooks['records_ungrouped']}; "
+        f"records_untracked={hooks['records_untracked']}; "
+        f"replacement_chars={hooks['replacement_chars']}; "
+        f"records_with_replacement_chars={hooks['records_with_replacement_chars']}"
+    )
     lines.append(
         f"session_instruction_records: {instructions['records']}; files={instructions['files']}; "
         f"removed_files={instructions['removed_files']}; unrecognized={instructions['unrecognized']}"
