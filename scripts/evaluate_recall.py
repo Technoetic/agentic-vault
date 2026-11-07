@@ -2047,8 +2047,9 @@ _PATH_FIELDS = frozenset({
     "path", "source_path", "label", "query_mapping", "external_candidates", "candidates", "source_paths",
     "excluded_sources", "expected_paths", "forbidden_paths", "stale_paths", "retrieved_paths",
     "forbidden_retrieved_paths", "stale_retrieved_paths",
-    # Recall scope diagnostics: a sample of unread note paths.
-    "omitted_paths_sample",
+    # Recall scope diagnostics: a sample of unread note paths and the linked worktree
+    # copies left out, whose folder names are chosen by the people who created them.
+    "omitted_paths_sample", "skipped_worktrees",
     # Temporal diagnostics: the raw successor wikilink, which names a note and can name folders.
     "superseded_by",
     # Gold-removal twin rows (only present with --gold-removal-twins).

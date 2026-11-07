@@ -53,13 +53,22 @@ Priority acts in two places only:
 
 - **Read order.** Covered notes move to the front before the file-count cut and the
   byte budget apply, so they are read even when the budget stops the run.
-- **Tie-break.** Among equal scores, covered notes sort ahead of the path order that
-  decides otherwise. This includes the per-channel ranks that feed RRF.
+- **Tie-break.** Among equal final scores, covered notes sort ahead of the path order
+  that decides otherwise. This is the last step of ranking. Per-channel ranks and graph
+  seeds do not use it, so with the same notes read every score stays what it is without
+  the setting, on the lexical, `bm25` and `hybrid` paths.
 
-A priority path never lifts a note over a higher score, never adds a note that a deny
-zone, `exclude_dirs` or `--exclude-source` removes, and never grants trust. A
-configured list is reported as a count in `diagnostics.limits.priority_paths`, and
-advanced `diagnostics.ranking` says that ties use it. Whether a given list improves
+Under `hybrid` the channel ranks already separate notes that tie inside a channel, by
+path order, so two identical notes usually have different RRF scores. Priority acts
+there only when the fused scores are equal.
+
+A priority path never lifts a note over a higher score. Read order can still change
+which notes are read when a limit stops the run, and BM25 statistics are computed over
+the notes read, so scores of such a partial run are not comparable with a run without
+the setting. A priority path never adds a note that a deny zone, `exclude_dirs` or
+`--exclude-source` removes, and never grants trust. A configured list is reported as a
+count in `diagnostics.limits.priority_paths`, and advanced `diagnostics.ranking` says
+that final score ties use it. Whether a given list improves
 results on a given vault is not measured here: compare it on labeled queries with
 [`evaluate_recall.py`](memory-evaluation.md).
 

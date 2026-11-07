@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import sys
@@ -184,8 +185,15 @@ class SizeTests(CapacityCase):
         (self.vault / '00-meta/vault-config.json').unlink()
         report = capacity.diagnose_capacity(self.vault)
         self.assertEqual((report['status'], report['targets']), ('unavailable', []))
+        self.assertEqual(report['history'], 'not_read')
         self.assertRegex(report['reason_code'], r'^[a-z_]+$')
         self.assertNotIn(str(self.vault), json.dumps(report))
+
+    def test_the_guide_lists_every_report_history_value(self):
+        row = next(line for line in (ROOT / 'docs/capacity.md').read_text(encoding='utf-8').splitlines()
+                   if line.startswith('| `history` |'))
+        names = set(re.findall(r'`([a-z_]+)`', row)) - {'history'}
+        self.assertEqual(names, {'available', 'not_read', *capacity._RUN_FAILURES})
 
     def test_without_git_only_usage_is_reported(self):
         self.write('00-meta/hot.md', b'x' * (vault_state.MAX_BYTES - 10))

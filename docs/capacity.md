@@ -45,7 +45,7 @@ The targets are the configured `handoff_note`, `hot_note`, `log_note`, `tasks_no
 | --- | --- |
 | `status` | `ready`, `warning`, `fail` or `unavailable` |
 | `reason_code` | `within_limits`, `near_byte_limit`, `forecast_within_horizon`, `source_byte_limit`, `note_path_unsafe`, `note_unreadable`, or a config code |
-| `history` | `available`, `git_unavailable`, `git_timeout` or `git_history_unavailable` |
+| `history` | `available`, `git_unavailable`, `git_timeout` or `git_history_unavailable`, or `not_read` when the check could not start and made no Git call |
 | `complete` | True only when every enabled target was measured and history was read |
 | `targets[].limits[]` | `limit_bytes`, `used_percent`, `status`, `estimated_days_to_limit` |
 | `targets[].history` | `status`, `samples`, `window_days`, `slope_bytes_per_day`, `estimate` |

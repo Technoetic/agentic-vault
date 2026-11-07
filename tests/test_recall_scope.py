@@ -5,9 +5,13 @@ the clock, on elapsed time or on the operating system's directory order.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib
 import importlib.util
+import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -338,10 +342,13 @@ class PriorityTests(VaultCase):
         self.fill_front()
         target = "zz-projects/core/decisions.md"
         self.configure({"max_total_read_bytes": 2 * recall.MAX_FILE_BYTES, "priority_paths": [target]})
-        for backend in ("lexical", "bm25", "hybrid"):
+        for backend in ("lexical", "bm25"):
             with self.subTest(backend=backend):
                 result = recall.recall(self.vault, "needle", backend=backend, as_of="2026-01-01")
                 self.assertEqual(self.paths(result)[0], target)
+        # Fused scores already differ by path order here, so the note keeps that place.
+        result = recall.recall(self.vault, "needle", backend="hybrid", as_of="2026-01-01")
+        self.assertNotEqual(self.paths(result)[0], target)
 
     def test_priority_only_breaks_ties(self):
         self.write("10-early/best.md", "# needle evidence\nneedle evidence\n")
@@ -351,14 +358,94 @@ class PriorityTests(VaultCase):
         self.assertEqual(self.paths(recall.recall(self.vault, "needle evidence")),
                          ["10-early/best.md", "30-late/other.md", "20-late/tied.md"])
 
-    def test_tied_rrf_ranks_follow_the_priority(self):
+    def spread(self):
+        """Tied in the lexical channel, spread out by note length in the BM25 channel."""
+        self.write("20-knowledge/a/a.md", "atlas ledger\n" + "filler words here are many " * 60 + "\n")
+        self.write("20-knowledge/b/x.md", "atlas ledger\n")
+        self.write("20-knowledge/c/p.md", "atlas ledger\n" + "other padding text " * 10 + "\n")
+
+    def assert_only_ties_moved(self, plain, prioritised):
+        """The same notes with the same scores, in descending order; only equal scores may swap."""
+        self.assertEqual({match["path"]: match["score"] for match in prioritised["matches"]},
+                         {match["path"]: match["score"] for match in plain["matches"]})
+        scores = [match["score"] for match in prioritised["matches"]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+        self.assertGreater(len(scores), 1)
+
+    def test_priority_never_changes_a_score_on_any_route(self):
+        self.spread()
+        routes = {"lexical": {"backend": "lexical"}, "lexical_advanced": {"backend": "lexical", "as_of": "2026-01-01"},
+                  "bm25": {"backend": "bm25"}, "hybrid": {"backend": "hybrid"},
+                  "lexical_ngrams": {"backend": "lexical", "lexical_ngrams": "hangul2"},
+                  "bm25_ngrams": {"backend": "bm25", "lexical_ngrams": "hangul2"},
+                  "hybrid_ngrams": {"backend": "hybrid", "lexical_ngrams": "hangul2"},
+                  "external": {"backend": "bm25", "external_candidates": ["20-knowledge/c/p.md"]},
+                  "links": {"backend": "hybrid", "expand_links": 1},
+                  "expanded": {"backend": "hybrid", "expand_query": True}}
+        for name, options in routes.items():
+            for entry in ("20-knowledge/a", "20-knowledge/b", "20-knowledge/c"):
+                with self.subTest(route=name, priority=entry):
+                    self.configure()
+                    plain = recall.recall(self.vault, "atlas ledger", limit=5, **options)
+                    self.configure({"priority_paths": [entry]})
+                    prioritised = recall.recall(self.vault, "atlas ledger", limit=5, **options)
+                    self.assertEqual(prioritised["diagnostics"]["status"], "ok")
+                    self.assert_only_ties_moved(plain, prioritised)
+
+    def test_lexical_prefers_the_priority_among_equal_scores(self):
+        self.spread()
+        self.configure({"priority_paths": ["20-knowledge/c"]})
+        result = recall.recall(self.vault, "atlas ledger", backend="lexical", limit=5)
+        self.assertEqual(self.paths(result), ["20-knowledge/c/p.md", "20-knowledge/a/a.md", "20-knowledge/b/x.md"])
+
+    def test_bm25_keeps_a_higher_score_ahead_of_the_priority(self):
+        self.spread()
+        self.configure({"priority_paths": ["20-knowledge/a"]})
+        result = recall.recall(self.vault, "atlas ledger", backend="bm25", limit=5)
+        self.assertEqual(self.paths(result), ["20-knowledge/b/x.md", "20-knowledge/c/p.md", "20-knowledge/a/a.md"])
+
+    def test_hybrid_keeps_a_higher_fused_score_ahead_of_the_priority(self):
+        self.spread()
+        self.configure({"priority_paths": ["20-knowledge/c"]})
+        result = recall.recall(self.vault, "atlas ledger", backend="hybrid", limit=5)
+        self.assertEqual(self.paths(result), ["20-knowledge/b/x.md", "20-knowledge/a/a.md", "20-knowledge/c/p.md"])
+        self.assertEqual(result["matches"][2]["ranks"], {"lexical": 3, "bm25": 2, "external": None})
+
+    def test_hybrid_prefers_the_priority_among_equal_fused_scores(self):
+        # The first note wins the lexical channel and the second the BM25 channel, so both
+        # fuse to 1/61 + 1/62: a real tie at the final step.
+        self.write("10-early/a.md", "# needle evidence\n" + "filler words here " * 30 + "\n")
+        self.write("20-late/b.md", "needle evidence\n")
+        plain = recall.recall(self.vault, "needle evidence", backend="hybrid")
+        self.assertEqual(self.paths(plain), ["10-early/a.md", "20-late/b.md"])
+        self.assertEqual(plain["matches"][0]["score"], plain["matches"][1]["score"])
+        self.configure({"priority_paths": ["20-late"]})
+        result = recall.recall(self.vault, "needle evidence", backend="hybrid")
+        self.assertEqual(self.paths(result), ["20-late/b.md", "10-early/a.md"])
+
+    def test_identical_notes_tie_in_bm25_but_hybrid_fuses_the_path_order(self):
         self.write("10-early/a.md", "needle evidence\n")
         self.write("20-late/b.md", "needle evidence\n")
         self.configure({"priority_paths": ["20-late"]})
-        for backend in ("bm25", "hybrid"):
-            with self.subTest(backend=backend):
-                result = recall.recall(self.vault, "needle", backend=backend)
-                self.assertEqual(self.paths(result), ["20-late/b.md", "10-early/a.md"])
+        self.assertEqual(self.paths(recall.recall(self.vault, "needle", backend="bm25")),
+                         ["20-late/b.md", "10-early/a.md"])
+        # Channel ranks are the same with and without the setting, and they already differ here.
+        hybrid = recall.recall(self.vault, "needle", backend="hybrid")
+        self.assertEqual(self.paths(hybrid), ["10-early/a.md", "20-late/b.md"])
+        self.assertGreater(hybrid["matches"][0]["score"], hybrid["matches"][1]["score"])
+
+    def test_priority_does_not_choose_the_graph_seeds(self):
+        self.write("10-early/a.md", "needle evidence [[first.md]] plain plain\n")
+        self.write("20-late/b.md", "needle evidence [[second.md]] [[third.md]]\n")
+        self.write("30-other/first.md", "unrelated\n")
+        self.write("30-other/second.md", "unrelated\n")
+        self.write("30-other/third.md", "unrelated\n")
+        options = {"backend": "bm25", "expand_links": 1, "limit": 1}
+        plain = recall.recall(self.vault, "needle", **options)["diagnostics"]["graph_links_considered"]
+        self.configure({"priority_paths": ["20-late"]})
+        result = recall.recall(self.vault, "needle", **options)
+        self.assertEqual(result["diagnostics"]["graph_links_considered"], plain)
+        self.assertEqual(self.paths(result), ["20-late/b.md"])
 
     def test_folders_listed_order_and_letter_case(self):
         self.write("10-early/a.md", "needle\n")
@@ -477,6 +564,11 @@ class EvaluatorScopeTests(VaultCase):
         hashed = evaluator._keyed_paths({"diagnostics": diagnostics}, lambda value: "TOKEN")["diagnostics"]
         self.assertEqual(hashed["omitted_paths_sample"], ["TOKEN"])
 
+    def test_keyed_reports_hash_the_skipped_worktree_paths(self):
+        hashed = evaluator._keyed_paths({"diagnostics": {"skipped_worktrees": ["people/copy", "people/other"]}},
+                                        lambda value: "TOKEN")["diagnostics"]
+        self.assertEqual(hashed["skipped_worktrees"], ["TOKEN", "TOKEN"])
+
     def test_goldset_listing_cut_follows_the_same_order(self):
         for index in range(12):
             self.write(f"10-early/note-{index:02d}.md", "needle\n")
@@ -491,6 +583,57 @@ class EvaluatorScopeTests(VaultCase):
                 mock.patch.object(module, "MAX_FILES", 5):
             prepared = evaluator.load_goldset(self.vault, goldset)
         self.assertEqual(prepared.sections["goldset"]["label_match_counts"]["path"], 12)
+
+
+class KeyedReportPathTests(unittest.TestCase):
+    """A folder name stays out of a keyed report whichever diagnostic would carry it."""
+
+    MARK = "zqprivatefolder"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temp.cleanup)
+        root = Path(cls.temp.name).resolve()
+        cls.vault = root / "vault"
+        shutil.copytree(ROOT / "tests" / "fixtures" / "recall" / "vault", cls.vault)
+        mark = cls.MARK
+        notes = {f"{mark}1/big.md": "needle " + "x" * (recall.MAX_FILE_BYTES + 1),
+                 f"{mark}2/old.md": f'---\nvalid_until: 2020-01-01\nsuperseded_by: "[[{mark} new]]"\n---\nneedle\n',
+                 f"{mark}3/{mark} new.md": "---\nchecked_at: 2026-01-01\n---\nneedle\n",
+                 f"{mark}4/one.md": f"---\naliases: [{mark}alias]\n---\nneedle\n",
+                 f"{mark}4/two.md": f"---\naliases: [{mark}alias]\n---\nneedle\n"}
+        for relative, text in notes.items():
+            path = cls.vault / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="")
+        for args in (("init", "-q"), ("add", "-A"), ("commit", "-qm", "notes"),
+                     ("worktree", "add", "-q", f"{mark}5/a copy", "-b", "copy")):
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                            "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false", *args],
+                           cwd=cls.vault, capture_output=True, timeout=60, check=True)
+        cls.key = root / "report.key"
+        cls.key.write_bytes(b"k" * 32)
+
+    def report(self, *arguments):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            evaluator.main(["--vault", str(self.vault), "--goldset",
+                            str(ROOT / "tests" / "fixtures" / "recall" / "queries.json"), *arguments])
+        return output.getvalue()
+
+    def test_the_report_names_the_worktree_only_by_token(self):
+        for name, arguments in (("key_file", ("--redact-key-file", str(self.key))),
+                                ("ephemeral", ("--redact-ephemeral",)),
+                                ("advanced", ("--redact-ephemeral", "--advanced", "--backend", "hybrid",
+                                              "--expand-query", "--expand-links", "1"))):
+            with self.subTest(mode=name):
+                text = self.report(*arguments)
+                self.assertIn('"skipped_worktrees"', text)
+                self.assertNotIn(self.MARK, text)
+
+    def test_the_plain_report_keeps_the_path(self):
+        self.assertIn(f"{self.MARK}5/a copy", self.report())
 
 
 class LinkBudgetTests(VaultCase):

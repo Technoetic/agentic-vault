@@ -322,6 +322,8 @@ def _bm25_passage(doc: dict, match: dict, phrase: str, query_terms, tokenize=Non
 
 
 def _ranked_paths(scores: dict, priority=()) -> list[str]:
+    """Order by score. Only the final result order passes priority: a channel rank or a
+    graph seed that saw it would change the scores themselves and pass a higher note."""
     return sorted(scores, key=lambda path: (-scores[path], _legacy._priority_rank(path, priority), path.casefold(), path))
 
 
@@ -434,7 +436,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     exclude = (*tuple(config.get("exclude_dirs") or ()), ".git", *tuple(excluded_sources))
     priority = _legacy._priority_rules(config)
     if priority:
-        diagnostics["ranking"] += "; ties prefer recall.priority_paths in listed order"
+        diagnostics["ranking"] += "; final score ties prefer recall.priority_paths in listed order"
     # One bootstrap read establishes policy. If that policy forbids its own
     # config, subsequent reads cannot lawfully establish freshness.
     if _legacy._classified_skip(relative_parts(_legacy.CONFIG_RELPATH, "config path"), deny, exclude):
@@ -551,9 +553,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             external_ranks[rel] = min(item["rank"], external_ranks.get(rel, item["rank"]))
         except (ValueError, OSError):
             diagnostics["external_rejected"] += 1
-    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores, priority), 1)}
-    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25, priority), 1)}
-    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores, priority), 1)}
+    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores), 1)}
+    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25), 1)}
+    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores), 1)}
     rrf_keys = ("rrf_lexical", "rrf_bm25", "rrf_external", "rrf_bm25_hangul2") if ngram_active else ("rrf_lexical", "rrf_bm25", "rrf_external")
     active = lexical_scores if backend == "lexical" else bm25
     candidates = set(active) | set(external_ranks)
@@ -591,7 +593,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             match["score"] = active[rel]
         match.update({"scores": contributions, "ranks": ranks, "source": _source(doc, match), "temporal": doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
         matches[rel] = match
-    seeds = _ranked_paths({rel: match["score"] for rel, match in matches.items()}, priority)[:limit]
+    seeds = _ranked_paths({rel: match["score"] for rel, match in matches.items()})[:limit]
     if expand_links and complete_names:
         frontier = [(seed, seed, 0, (seed,)) for seed in seeds]
         while frontier:
