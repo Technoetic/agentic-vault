@@ -56,6 +56,7 @@ v0.35.1부터 전체 플러그인에는
 | `handoff-fold analyze\|apply <인자>` | [handoff 접기](../../../docs/handoff-fold.md), `scripts/vault_handoff_fold.py --vault PATH analyze\|apply`; `analyze`는 읽기 전용이고 `apply`만 쓴다, 하위 명령과 사용자가 정한 문턱·보호 절 수는 필수, `apply`는 `--expected-sha256`도 필요, 자동 실행 없음 |
 | `commit <인자>` | [경로 선언 커밋](../../../docs/concurrent-commits.md), `scripts/vault_commit.py --vault PATH --path RELATIVE=SHA256 --message TEXT --actor NAME`; 공유 작업 트리에서 선언한 파일만 커밋, 일반 `git commit`을 막지는 못함 |
 | `lesson-clusters <인자>` | [교훈 재발 부류](../../../docs/lesson-recurrence.md), `scripts/vault_lesson_clusters.py --vault PATH --mistakes RELATIVE.md`; 읽기 전용 |
+| `lesson-cues build [--write]` | [교훈 단서 컴파일](../../../assets/adapters/lesson-cues/guide.md), `scripts/vault_lesson_cues.py --vault PATH build`; `--write`일 때만 `00-meta/lesson-cues.json`을 바꾼다. 훅은 Claude Code 전용이라 Codex에는 설치하지 않고, 컴파일 도구만 같은 경로로 쓴다 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |

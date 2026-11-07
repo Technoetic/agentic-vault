@@ -119,9 +119,10 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 ### 선택형 큰 볼트 운영
 
 `handoff-fold` 또는 `harden handoff-fold`는 [handoff 접기](../../docs/handoff-fold.md)의
-`scripts/vault_handoff_fold.py --vault PATH analyze|apply`로 연결한다. `analyze`는 읽기 전용이다.
+`scripts/vault_handoff_fold.py --vault PATH analyze|apply`로 연결한다. `analyze`는 읽기 전용이고 `apply`만 쓴다.
 `apply`에는 사용자가 정한 `--threshold-bytes`·`--protect-sections`와 analyze 결과의
 `--expected-sha256`이 필요하다. 기본 문턱은 없고 훅·세션 명령이 부르지 않는다.
+오류나 중단 뒤에는 접기가 끝났을 수 있으므로 다시 시도하기 전에 `analyze`의 `sha256`을 확인한다.
 
 `commit`은 [경로 선언 커밋](../../docs/concurrent-commits.md)의
 `scripts/vault_commit.py --vault PATH --path RELATIVE=SHA256 --message TEXT --actor NAME`으로

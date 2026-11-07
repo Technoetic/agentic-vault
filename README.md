@@ -33,28 +33,42 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 ## v0.43.0 — 큰 볼트 운영 도구와 결함 수정
 
 - [검색 읽기 범위](docs/recall-scope.md): 선택 설정 `recall.max_total_read_bytes`·`recall.priority_paths`로
-  총 읽기 예산과 먼저 읽을 경로를 정한다. 모든 결과에 `omitted_paths_sample`·`scope_state`·`answer_state`가
-  더해진다. 일치 결과·순위·문맥은 그대로다.
+  총 읽기 예산과 먼저 읽을 경로를 정한다. 우선 경로는 읽는 순서와 최종 점수 동점 처리에만 작동한다. 채널별
+  순위와 그래프 시작 노트에는 쓰지 않으므로 `hybrid`에서는 융합 점수가 정확히 같을 때만 앞선다. 모든 결과에
+  `omitted_paths_sample`·`scope_state`·`answer_state`가 더해진다. 이 진단은 일치 결과·순위·문맥을 바꾸지 않는다.
 - [용량 점검](docs/capacity.md): `vault_doctor.py --capacity`가 공유 노트를 읽기 상한과 비교하고,
   로컬 Git 이력이 있으면 상한 도달 일수를 추정한다. 추정은 날짜가 아니다. 선택 설정
-  `staged_growth_check`는 `HEAD`를 기준으로 예산 노트의 커밋 증가를 본다.
+  `staged_growth_check`는 `HEAD`를 기준으로 예산 노트의 커밋 증가를 본다. 체크포인트는 256 KiB를 넘는
+  노트에서도 실패하지 않는다. 원본은 64 MiB 상한 안에서 해시만 남기고, 훅은 실패를 고정 코드로 표준 오류에
+  내며 종료 코드 0을 유지한다.
 - [handoff 접기](docs/handoff-fold.md): 오래된 절을 바이트 그대로 보관 노트로 옮기고 자리표시와 미결 줄을
-  남긴다. 쓰기 전에 원본 복원을 확인한다. 기본 문턱은 없고 자동 실행도 없다.
+  남긴다. `analyze`는 읽기만 하고 `apply`만 쓴다. 하위 명령·문턱·보호 절 수는 필수이고 자동 실행은 없다.
+  쓰기 전에 원본 복원을 확인한다. 오류나 중단 뒤에는 접기가 끝났을 수 있으므로 `analyze`의 `sha256`을
+  먼저 확인한다. 그 경우 보관 노트는 지우지 않는다.
 - [이중 주입·플러그인 범위 진단](docs/reliability.md#double-injection-broken-output-and-plugin-scope-optional):
   `--session-evidence`에 깨진 글자 수·이중 문맥 하한·비동기 훅 실패가 더해지고, 새 `--plugin-scope`는
   이 플러그인을 켠 설정 파일을 보고한다. `--plugin-scope-host`만 `claude plugin list --json`을 실행한다.
 - [교훈 재발 부류](docs/lesson-recurrence.md)와 [교훈 단서 훅](assets/adapters/lesson-cues/guide.md):
   실수 노트를 읽기 전용으로 묶고, 선택 설치한 Claude Code 훅이 도구 호출에 맞는 교훈을 알린다.
-  권고용이며 효과는 측정하지 않았다.
+  단서 컴파일은 상태 칸 전체가 유효한 형태인 줄만 넣고, 주석 블록과 `## 기각 대장` 구역의 줄은 뺀다. 훅은
+  컴파일 파일을 다시 검사하지만 출처를 증명하지는 않는다. 권고용이며 효과는 측정하지 않았다.
 - [검사기 충실도](docs/verifier-fidelity.md): 합성 변이로 유지 문구 검사가 보는 범위를 재고, 환경을 바꿔
-  선택한 시험을 비교한다. 합성 수치이며 실제 안전의 증거가 아니다. 이 측정에서 나온 결함 3건을 고쳤다.
-- [연결 작업 트리](docs/hardening.md#linked-worktree-copies-and-deny-zones): 볼트 저장소의 연결 작업 트리를
-  사본으로 다뤄 검색·검사·백업에서 빼고 이름을 보고한다. 연결 작업 트리가 없으면 달라지는 것이 없다.
+  선택한 시험을 비교한다. 플러그인 런타임은 두 도구를 불러오지 않는다. 평가기는 CI 단계이고 표는 시험이
+  고정한다. 합성 수치이므로 실제 안전의 증거가 아니다. 이 측정에서 나온 결함 3건을 고쳤다.
+- [연결 작업 트리](docs/hardening.md#linked-worktree-copies-and-deny-zones): `.git` 파일 모양이 맞으면
+  그 아래 금지 구역은 닫히고, 경로를 받는 모든 도구가 본 구역과 같은 방식으로 거부한다. 검색·검사·백업에서
+  폴더를 빼는 일은 git 관리 폴더가 그 폴더를 되가리킬 때만 한다. 손으로 쓴 `.git` 파일로는 노트를 숨길 수 없고,
+  관리 기록이 사라진 사본은 지우거나 `git worktree repair`를 돌릴 때까지 검색에 원본과 나란히 나온다.
+  키 모드 `evaluate_recall.py` 보고서는 `skipped_worktrees`를 해시로 가린다. 볼트에 설치된 healthcheck와
+  deny zone 가드 사본은 갱신하기 전까지 옛 동작이다. 연결 작업 트리가 없으면 달라지는 것이 없다.
 - [경로 선언 커밋](docs/concurrent-commits.md): `vault_commit.py`가 해시를 선언한 파일만 커밋한다.
-  일반 `git commit`을 쓰는 다른 세션은 막지 못한다.
+  연결 작업 트리 안의 경로는 `denied_path`, 짧은 이름은 `unsafe_path`, 미해결 충돌은 `unmerged_paths`,
+  같은 패치의 재실행은 `already_applied`로 거부한다. 일반 `git commit`을 쓰는 다른 세션은 막지 못한다.
 - [압축 제약 노트](docs/hardening.md#compact-constraints-note-constraints_note): `constraints_note`를 항목별로
   넣는다. 규칙 `vault-workflow.md`의 [사실과 도구 결과 문장](docs/hardening.md#rule-facts-and-tool-results)은
-  소형 로컬 모델 합성 대조에서 금지 유지를 해치지 않았을 뿐 이득이 확인되지 않았다.
+  소형 로컬 모델 합성 대조에서 금지 유지를 해치지 않았을 뿐 이득이 확인되지 않았다. 대조 도구는 공개하지
+  않았다. [deny-guard 안내](assets/adapters/deny-guard/guide.md)의 `permissions.ask` 재생 18/28은 합성 목록을
+  문법 모형에 넣은 결과이며 실제 사고 차단율이 아니다.
 
 새 기능은 선택형이다. 기본 훅 연결·설정 템플릿·인증서 대상 파일은 유지한다. 기본 결과가 바뀌는 결함
 수정은 [릴리스 범위](docs/releases/v0.43.0.md#default-result-changes)에 모았고, [검증 기록](docs/verification/v0.43.0.md)도 참고한다.
@@ -263,13 +277,30 @@ Opt-in tools for vaults that have outgrown their limits:
 [plugin scope and hook evidence](docs/reliability.md#double-injection-broken-output-and-plugin-scope-optional).
 [Lesson recurrence classes](docs/lesson-recurrence.md) are read-only, and the
 [lesson cue hook](assets/adapters/lesson-cues/guide.md) is advisory, Claude Code only and
-unmeasured. [Verifier fidelity tools](docs/verifier-fidelity.md) report synthetic numbers,
-which are not evidence of real-world safety. [Linked worktrees](docs/hardening.md#linked-worktree-copies-and-deny-zones)
-of the vault's repository now count as copies, and [`vault_commit.py`](docs/concurrent-commits.md)
-commits declared files from a shared tree, though it cannot stop another session's plain
-`git commit`. Default hook bindings, the configuration template and certificate-bound
-checker bytes are preserved. Defect fixes that change a default result are
-[listed in the scope](docs/releases/v0.43.0.md#default-result-changes). See
+unmeasured. The compiler takes only whole in-force status cells and leaves out comment
+blocks and the rejected-drafts section. [Verifier fidelity tools](docs/verifier-fidelity.md)
+report synthetic numbers, which are not evidence of real-world safety. The fidelity
+evaluator is a CI step whose table a test pins, and the plugin runtime does not load it.
+
+[Linked worktrees](docs/hardening.md#linked-worktree-copies-and-deny-zones) of the vault's
+repository now count as copies: every tool that takes a named path closes their deny
+zones, and a walk or backup leaves a folder out only when git's admin folder names it
+back. A pruned copy returns to recall until it is removed or repaired, and keyed
+`evaluate_recall.py` reports hash `skipped_worktrees`. Installed healthcheck and deny
+guard copies keep the old behavior until updated. `recall.priority_paths` acts on read
+order and on final score ties only, so under `hybrid` it decides only when fused scores
+are exactly equal. Checkpoints no longer fail on notes over 256 KiB. `analyze` reads only
+and `apply` alone writes in handoff folding.
+
+[`vault_commit.py`](docs/concurrent-commits.md) commits declared files from a shared tree, refuses paths in a linked tree (`denied_path`),
+unresolved conflicts (`unmerged_paths`) and a repeated patch (`already_applied`), and
+cannot stop another session's plain `git commit`. The rule wording contrast is synthetic
+with an unpublished harness and shows no gain, and the `permissions.ask` replay of 18 of
+28 comes from a grammar model.
+
+Default hook bindings, the configuration template and
+certificate-bound checker bytes are preserved. Defect fixes that change a default result
+are [listed in the scope](docs/releases/v0.43.0.md#default-result-changes). See
 [verification](docs/verification/v0.43.0.md). Earlier sections are historical.
 
 ## v0.42.0 — recoverable bundles, review worklists and generated memory
@@ -1352,7 +1383,7 @@ claude
 | `checkpoint_drift_check` | `true`면 마지막 PreCompact·SessionEnd checkpoint 이후 바뀌거나 없어진 hot·handoff·log·tasks 노트를 §15 경고로 보고 — 미설정 시 꺼짐 |
 | `constraints_note` | 압축 세션 시작의 고정 블록에 넣을 제약 노트 경로. 맨 위 `- ` 항목을 최대 8개 `Constraint:` 줄로 낸다. **handoff 절이 선택될 때만 읽으며** `handoff_note`가 비었거나 노트가 없거나 `handoff_max_tokens`가 0이면 진단 없이 무시한다 — [hardening.md](docs/hardening.md#compact-constraints-note-constraints_note) |
 | `tasks_note` | 작업 노트 경로. 압축 세션 시작의 고정 블록(`Blocked:`·`Now:` 줄), checkpoint, `--capacity`가 읽는다. 없으면 고정 블록은 handoff 옆의 `… tasks.md`를 쓰고, handoff가 없으면 진단 없이 무시한다 |
-| `recall` | 검색 읽기 설정 객체. `max_total_read_bytes`(512 KiB~1 GiB, 없으면 16 MiB)와 `priority_paths`(볼트 상대 파일·폴더 최대 32개). 알 수 없는 키나 잘못된 값은 `invalid_config`로 검색을 멈춘다 — [recall-scope.md](docs/recall-scope.md) |
+| `recall` | 검색 읽기 설정 객체. `max_total_read_bytes`(512 KiB~1 GiB, 없으면 16 MiB)와 `priority_paths`(볼트 상대 파일·폴더 최대 32개, 읽는 순서와 최종 점수 동점에만 작동). 알 수 없는 키나 잘못된 값은 `invalid_config`로 검색을 멈춘다 — [recall-scope.md](docs/recall-scope.md) |
 | `staged_growth_check` | `off`·`warn`·`block` — `vault_healthcheck.py --staged`가 예산 있는 hot·handoff의 증가를 `HEAD`와 비교. 미설정 시 꺼짐 — [capacity.md](docs/capacity.md) |
 | `staged_growth_max_tokens` | 위 검사의 한 커밋 증가 상한(0 이상 정수). 없거나 0이면 증가 상한 없음 |
 | `handoff_fold` | `vault_handoff_fold.py` 선택 설정 객체. `unresolved_prefixes`(기본 `unresolved:`)와 `protect_titles`(기본 없음) — [handoff-fold.md](docs/handoff-fold.md) |

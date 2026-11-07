@@ -20,8 +20,12 @@
 - A fold must refuse before writing when its output does not rebuild the original.
 - Diagnostics must print closed words and counts, never commands or note text.
 - A cue hook must never answer `allow` or `ask`, and a failure must let the call run.
+- `recall.priority_paths` must act only at the final score tie-break, never on channel ranks or graph seeds.
 - A linked tree of another repository must stay an ordinary folder.
+- A walk or backup must leave a folder out only when git's admin folder names it back.
+- A tool that takes a named path must treat a zone in a copy like the same zone in the main checkout.
 - `vault_commit.py` must check the commit Git named, never a fresh look at `HEAD`.
+- `vault_commit.py` must refuse every path inside a linked tree, and must not commit a repeated patch twice.
 - The rule wording must keep prohibitions first and must not be reported as a gain.
 
 ### Task1: Recall scope
@@ -77,7 +81,7 @@
 **Files:** `vault_worktrees.py`, walkers, direct-path callers, `assets/adapters/deny-guard/`, tests, `docs/hardening.md`.
 
 - [ ] Write failing tests on real linked trees, submodules and foreign trees.
-- [ ] Implement identification, walks, refusals and the guard view.
+- [ ] Implement the two strengths (a `.git` file closes zones, git's record decides walks), refusals for every named path and the guard view.
 - [ ] Run one synthetic host check; commit owned files.
 
 ### Task8: Declared-path commits
@@ -85,7 +89,7 @@
 **Files:** `vault_commit.py`, tests, `docs/concurrent-commits.md`, `commands/vault-session-end.md`.
 
 - [ ] Write failing hash, state, retry and multi-process tests.
-- [ ] Implement default mode and `--own-lines`.
+- [ ] Implement default mode and `--own-lines`, with `denied_path`, `unsafe_path`, `unmerged_paths`, `already_applied` and `patch_anchor_not_unique`.
 - [ ] Run focused regressions; commit owned files.
 
 ### Task9: Constraints note, rule and sample

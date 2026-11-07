@@ -4,7 +4,11 @@ A check that passes tells you little until you know what it can fail on.
 `scripts/evaluate_verifier_fidelity.py` measures that for the literal
 preservation check, and `scripts/env_vary.py` measures whether selected tests
 pass only because of the environment they ran in. Both are development tools.
-Nothing in the plugin imports them, and neither gates a release.
+The plugin runtime does not load them, though the Codex plugin check lists both
+as required files. The fidelity evaluator is a CI step, and
+`tests.test_verifier_fidelity_evaluation` pins the table below, so a table that
+drifts fails CI. `env_vary.py` reaches CI only through its own tests. Passing
+that test does not make the numbers proof of safety.
 
 **A rate on this page describes a small hand-written fixture. It is not evidence
 of real-world safety.** The notes and mutations were written with the checker

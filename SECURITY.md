@@ -102,17 +102,23 @@ In scope:
   rewrites an existing one, replaces the handoff, and refuses before writing when
   its own output does not rebuild the original. Only cooperating writers observe its
   lock. The archive notes and the handoff are separate atomic replaces, not one
-  transaction; a killed run can leave unreferenced archive notes. No hook or session
-  command calls it.
+  transaction. A failed run keeps the notes unless the handoff provably holds the
+  original bytes, and a killed run can leave unreferenced archive notes and a guard
+  that needs manual removal. No hook or session command calls it.
 - **Optional declared-path commits** (`vault_commit.py`): writes the shared Git index
   and history for the paths named. Scope includes the sha256 check per path, refusal
-  of deny zones, `.git`, folders, links and shared notes, the in-progress state
+  of deny zones, `.git`, folders, links, Windows short names, shared notes, every path
+  inside a linked working tree and unresolved conflict entries, the in-progress state
   check, compare-and-swap `update-ref` in `--own-lines`, and fixed-code output that
   carries no paths or note text unless `--show-git-output` copies failing Git output
-  to stderr. It never deletes a lock and offers no way to skip hooks. `--own-lines`
-  uses `commit-tree`, so only `pre-commit` runs: `commit-msg`, `post-commit` and
-  `commit.gpgsign` do not apply. It is not a lock and does not stop another session's
-  plain `git commit`.
+  to stderr. It never deletes a lock and offers no way to skip hooks. It clears
+  `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*` and
+  `GIT_CONFIG_PARAMETERS`, which could replace `core.hooksPath`, and runs git from an
+  absolute path, never an implicit current folder. `GIT_CONFIG_GLOBAL`,
+  `GIT_CONFIG_SYSTEM` and repository settings can still change `core.hooksPath`, and
+  this tool does not block that path. `--own-lines` uses `commit-tree`, so only
+  `pre-commit` runs: `commit-msg`, `post-commit` and `commit.gpgsign` do not apply. It
+  is not a lock and does not stop another session's plain `git commit`.
 - **Optional Doctor reads and host execution** (`vault_doctor.py --capacity`,
   `--plugin-scope`, `--plugin-scope-host`; `vault_capacity.py`,
   `vault_plugin_scope.py`): `--capacity` reads the configured notes' sizes and
@@ -125,14 +131,20 @@ In scope:
   found the same way as `--host-version`: `claude plugin list --json` once in the
   vault, with fixed arguments, no shell and a time bound. The plugin makes no promise
   about what the host writes in its own folders.
+- **Checkpoints** (`hooks/session_checkpoint.py`, `vault_state.py`): a checkpoint hashes
+  each source under a 64 MiB bound and stores no note bytes. The hook prints only a
+  fixed code on stderr and exits 0, so a failed checkpoint stops nothing.
 - **Optional lesson cues** (`vault_lesson_cues.py`, `assets/adapters/lesson-cues/`):
-  `build --write` replaces `00-meta/lesson-cues.json`. The hook is a template a user
+  `build --write` replaces `00-meta/lesson-cues.json` and refuses a list over 256 KiB
+  with `lesson_cues_too_large`. The hook is a template a user
   may merge into `.claude/settings.local.json`, never by default. It answers only a
   hint or a once-per-session `deny`, and a way to make it answer `allow` or `ask` is
   in scope. Cues are literals and globs, not regular expressions. It keeps a session
   record in the system temporary folder. It sets no `onFailure`, so a failed hook lets
-  the call run: it is advisory, not a control. The compiler takes only rows with a known
-  status, outside comment blocks and the rejected-drafts section. The hook checks each
+  the call run: it is advisory, not a control. The compiler takes only rows whose whole
+  status cell is a known in-force form, outside comment blocks and the rejected-drafts
+  section. Cue values cannot hold format marks, Unicode line or paragraph separators or
+  C1 control characters. The hook checks each
   compiled cue again and drops one the compiler could not have written, but it does not
   prove that a well-formed cue came from the ledger. The compiled file is not a
   deny-guard control. `vault_lesson_clusters.py` only reads.
@@ -140,8 +152,13 @@ In scope:
   a zone in a copy is closed by reading the folder's `.git` file, so a wrong file only
   closes more. A walk or a backup leaves a folder out only when git's admin folder also
   names that folder back, so hiding notes that way takes write access to the common git
-  directory. A tool that takes a named path applies the same zone check. The exceptions
-  are listed as limits in
+  directory. A tool that takes a named path applies the same zone check, and
+  `vault_commit.py` refuses every path inside a linked tree. A copy whose admin entry is
+  gone returns to recall and snapshots until it is removed or repaired, with its zones
+  still closed. Copies of the deny guard and the healthcheck installed in a vault keep
+  the old behavior until they are updated. Keyed and ephemeral `evaluate_recall.py`
+  reports hash `skipped_worktrees`; plain and keyless `--redact` reports show the folder
+  names. The exceptions are listed as limits in
   [the hardening guide](docs/hardening.md#linked-worktree-copies-and-deny-zones).
 
 Out of scope (report these upstream): vulnerabilities in Claude Code, Codex,
@@ -288,6 +305,8 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.
+- 연결 작업 트리 안의 금지 구역은 경로를 받는 모든 도구에서 본 구역과 같은 방식으로 거부한다. `vault_commit.py`는 그 안의 경로를 모두 `denied_path`로, Windows 짧은 이름을 `unsafe_path`로, 미해결 충돌을 `unmerged_paths`로 거부하고, 같은 패치의 재실행은 `already_applied`로 거부한다. `GIT_CONFIG_COUNT`·`GIT_CONFIG_KEY_*`·`GIT_CONFIG_VALUE_*`·`GIT_CONFIG_PARAMETERS`는 비우지만 `GIT_CONFIG_GLOBAL`·`GIT_CONFIG_SYSTEM`·저장소 설정으로 `core.hooksPath`를 바꾸는 길은 막지 못한다. 폴더를 걷기에서 빼는 일은 git 관리 폴더가 그 폴더를 되가리킬 때만 하므로, 관리 기록이 사라진 사본은 지우거나 복구할 때까지 검색과 스냅숏에 돌아온다. 볼트에 설치된 healthcheck와 deny zone 가드 사본은 갱신하기 전까지 옛 동작이다. 키 모드 `evaluate_recall.py` 보고서는 `skipped_worktrees`를 해시로 가린다.
+- 체크포인트는 64 MiB 상한 안에서 원본 해시만 남기고 노트 내용을 저장하지 않는다. 훅은 고정 코드만 표준 오류에 내고 종료 코드 0을 유지한다. 교훈 단서 컴파일은 상태 칸 전체가 유효한 형태인 줄만 넣고 주석 블록과 `## 기각 대장` 구역을 뺀다. 접기 실행이 실패하면 handoff가 원본임을 확인하지 못하는 한 보관 노트를 지우지 않고, 강제 종료는 사람이 지워야 하는 guard를 남길 수 있다.
 - 새 쓰기 도구는 `vault_handoff_fold.py apply`와 `vault_commit.py`이며 둘 다 직접 부를 때만 돈다. `vault_doctor.py --plugin-scope`는 설정 파일 세 개·vault-config·healthcheck 사본 하나를 읽고, `--plugin-scope-host`만 `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 교훈 단서 훅은 사용자가 병합할 때만 존재하며 힌트나 세션당 1회 `deny`만 내고 실패하면 호출이 그대로 지나간다.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.

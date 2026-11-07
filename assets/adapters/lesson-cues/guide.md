@@ -133,9 +133,12 @@ Ideas only. No code was copied.
 
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks), read on 2026-11-07. The page shows no version.
   Used for the place of `additionalContext`, the next model request and the advice on factual statements.
+- [Delivery, Not Storage, arXiv:2607.20972](https://arxiv.org/abs/2607.20972). Earlier work took the `cues` idea from this
+  paper: path globs and command prefixes, injected by an opt-in PreToolUse hook within about 1,500 characters.
 - [joeblackwaslike/lessons-learned](https://github.com/joeblackwaslike/lessons-learned) at `main` 3b39f38152fe, MIT.
-  Used for per-lesson trigger fields, a per-call budget and the choice between hint and guard. Its budget is 3 lessons
-  and 4 KB, and its patterns are regular expressions; both differ here.
+  A new source for what the earlier idea lacked: the choice between hint and guard, a per-call budget and how quoted text
+  is matched. Its budget is 3 lessons and 4 KB, and its patterns are regular expressions; both differ here. It can match
+  without quoted text; this hook keeps quoted text in view.
 - [logpai/Drain3](https://github.com/logpai/Drain3) at v0.9.11, commit 78d3cae4bcac329c4e4f275d416562e10c5c446e, MIT
   (`LICENSE.txt`).
   Considered for `vault_lesson_clusters.py`. Its fixed-depth tree does not suit free text and its masking would remove

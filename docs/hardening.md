@@ -866,7 +866,7 @@ Python projects, with the remedy in a user-level file. Applying it to factual st
 extension, and the study does not measure it. The wording here is the engine's own.
 
 The extension was tried on invented scenarios before shipping. This is a synthetic result only: one local Qwen 3.5 9B Q8 model,
-temperature 0, thinking off, one pass, and the harness is not shipped. Fact cases set a stale value in the rule against a command
+temperature 0, thinking off, one pass. The harness is not published, so these figures cannot be rerun from this repository. Fact cases set a stale value in the rule against a command
 result; prohibition cases show a file or command output that claims the act is allowed.
 
 | Sentence added to the rules | Fact cases answered from the result | Prohibition cases answered "no" |
@@ -879,7 +879,8 @@ result; prohibition cases show a file or command output that claims the act is a
 | Shipped: prohibition clause first, decided by that rule alone, then the fact clause | 9/24 | 13/16 |
 
 What this shows on that model: the first draft lowered the prohibition answers, so the wording was chosen by the last column and the
-prohibition clause comes first. It does not show that the sentence improves fact following, because the shipped form scored the same
+prohibition clause comes first. The shipped sentence did not reduce prohibition answers on that small local model, and that is all it
+showed. No gain was confirmed: it does not show that the sentence improves fact following, because the shipped form scored the same
 as no sentence. Differences of one or two cases are within what this small set can resolve, and none of this measures hosted models
 or real vaults. The low baseline in the last column is also a reminder that a rule sentence is not enforcement: use
 `permissions.ask` or the deny guard ([guide](../assets/adapters/deny-guard/guide.md)) for that.
@@ -1000,7 +1001,9 @@ so its copy fell outside the zone, and copied notes pushed real notes out of rec
   The healthcheck lists it in section 14b. A snapshot leaves it out, and the manifest format does
   not change, so `backup_vault.py` prints one line per copy and `create_backup(skipped=[...])`
   returns the paths. Uncommitted work in a copy is therefore not in the snapshot.
-  The instruction inventory reports `skipped_instruction_path`.
+  The instruction inventory reports `skipped_instruction_path`. `evaluate_recall.py` hashes
+  `skipped_worktrees` in keyed and ephemeral reports, because a folder name can hold a person's or
+  project's name. Plain reports and keyless `--redact` reports show it.
 - **A folder with only the `.git` file:** a hand-written file, or a copy whose admin entry is gone
   or was moved by hand, is walked like any folder and is in the snapshot. Its zones stay closed:
   recall counts them under `skipped_denied`, the healthcheck does not read them, and the instruction
@@ -1015,7 +1018,9 @@ so its copy fell outside the zone, and copied notes pushed real notes out of rec
   `vault_ontology.py`), `vault_links.py`, `vault_revocation.py`, `vault_index_fold.py`,
   `vault_doctor.py`, `hooks/session_start.py`, `jarvis_bridge.py`, `vault_query_expansion.py` and
   the `vault_retrieval.py` sidecar call it directly. `vault_evidence.py`, `vault_proposals.py` and
-  `vault_lesson_metrics.py` keep the same check next to their own call. The healthcheck stops when a
+  `vault_lesson_metrics.py` keep the same check next to their own call, and `vault_commit.py` is
+  stricter: it refuses every path inside a linked tree with `denied_path`, so a shared note cannot
+  be committed through its copy. The healthcheck stops when a
   configured note lies in a zone of a copy. Each tool answers as it does for the zone in the main
   checkout, and a note outside a zone stays readable. A test walks every `resolve_note_path` call,
   so a new caller has to use this check or state why it does not apply.
