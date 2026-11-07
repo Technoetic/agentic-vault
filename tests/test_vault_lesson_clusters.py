@@ -6,10 +6,13 @@ import hashlib
 import importlib
 import io
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/agentic-vault/scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -201,6 +204,48 @@ class CandidateTests(ClusterBase):
                 '## M-903 · 표\n- 관련: M-901, M-902, M-904\n\n'
                 '## M-904 · 글꼴\n- 관련: M-901, M-902, M-903\n')
         self.assertEqual(self.run_clusters(body, threshold=0.1)['classes'], [])
+
+    def test_a_pair_exactly_at_the_threshold_is_a_candidate(self):
+        tokens = {'M-1': {1, 2, 3, 4, 5}, 'M-2': {1, 2, 3, 4, 6}}
+        score = 4 / 6
+        with mock.patch.object(self.module, '_tokens', return_value=tokens):
+            self.assertEqual(self.module._candidates([], score), [(['M-1', 'M-2'], score)])
+            self.assertEqual(self.module._candidates([], math.nextafter(score, 1)), [])
+
+    def test_a_group_may_hold_a_pair_exactly_at_the_threshold(self):
+        tokens = {'M-1': {1, 2, 3, 4, 5, 6, 7}, 'M-2': {1, 2, 3, 4, 5, 6, 8}, 'M-3': {1, 2, 3, 4, 5, 9, 10}}
+        score = self.module._jaccard(tokens['M-1'], tokens['M-3'])
+        self.assertLess(score, self.module._jaccard(tokens['M-1'], tokens['M-2']))
+        self.assertEqual(self.module._jaccard(tokens['M-2'], tokens['M-3']), score)
+        with mock.patch.object(self.module, '_tokens', return_value=tokens):
+            self.assertEqual(self.module._candidates([], score), [(['M-1', 'M-2', 'M-3'], score)])
+            self.assertEqual(self.module._candidates([], math.nextafter(score, 1)),
+                             [(['M-1', 'M-2'], self.module._jaccard(tokens['M-1'], tokens['M-2']))])
+
+    def filler(self, count, common):
+        """Entries with their own words; the first ones in common also carry the common word."""
+        words = '가나다라마바사아자차카타파하거너더러머버서어저처커터퍼허고노도로모보소오조초코토포호구누두루무부수우주추쿠투푸후'
+        return [SimpleNamespace(id=f'M-{number}', text=[words[number * 5:number * 5 + 5]
+                                                        + (' 공통낱말표현' if number < common else '')])
+                for number in range(count)]
+
+    def test_a_word_in_more_than_half_of_eight_entries_is_dropped(self):
+        tokens = self.module._tokens(self.filler(8, 5))
+        self.assertFalse(tokens['M-0'] & tokens['M-1'])
+
+    def test_a_word_in_exactly_half_of_the_entries_stays(self):
+        tokens = self.module._tokens(self.filler(8, 4))
+        self.assertTrue(tokens['M-0'] & tokens['M-1'])
+
+    def test_fewer_entries_than_the_filter_needs_keep_every_word(self):
+        tokens = self.module._tokens(self.filler(self.module.DF_FILTER_MIN_ENTRIES - 1, 7))
+        self.assertTrue(tokens['M-0'] & tokens['M-1'])
+
+    def test_entries_alike_only_in_a_common_word_are_not_a_candidate(self):
+        entries = self.filler(8, 8)
+        self.assertEqual(self.module._candidates(entries, 0.1), [])
+        with mock.patch.object(self.module, 'DF_FILTER_MIN_ENTRIES', 100):
+            self.assertTrue(self.module._candidates(entries, 0.1))
 
     def test_bad_threshold_is_a_fixed_code(self):
         for value in (0, 1.5, 'x', True):

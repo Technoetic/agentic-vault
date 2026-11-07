@@ -11,7 +11,9 @@ vault_* module.
 Contract:
   - Input: one PreToolUse hook input (JSON) on stdin. The vault root is
     CLAUDE_PROJECT_DIR. Cues come from 00-meta/lesson-cues.json, which
-    vault_lesson_cues.py build --write compiles from the lesson ledger.
+    vault_lesson_cues.py build --write compiles from the lesson ledger. The
+    file has no review step of its own, so each cue is checked again here: one
+    that the compiler could not have written is dropped with a warning.
   - Output: nothing, or one JSON object whose hookSpecificOutput carries
     additionalContext (hint cues, as factual statements) and, for guard cues,
     permissionDecision "deny". It never answers "allow" or "ask". The exit code
@@ -43,12 +45,24 @@ import re
 import stat
 import sys
 import tempfile
+import unicodedata
 
 
 CUES_REL = "00-meta/lesson-cues.json"
 MAX_FILE_BYTES = 256 * 1024
 MAX_PER_CALL = 3
 MAX_CHARS = 1500
+# The compiler's rules (vault_lesson_delta.py and vault_state.ITEM_ID_RE). A test
+# holds these equal; this file stands alone, so it cannot import them.
+MAX_CUE_TEXT = 300
+MAX_CUE_VALUE = 200
+MAX_CUE_VALUES = 8
+MAX_COUNT = 1000000
+CUE_MATCHERS = ("command_prefix", "command_contains", "path_glob")
+CUE_KEYS = frozenset(("id", "count", "kind", "text", "tools", *CUE_MATCHERS))
+ITEM_ID_RE = re.compile(r'(?:[A-Za-z][A-Za-z0-9_]{0,23}-?\d{1,10}|av-[0-9a-f]{20})')
+TOOL_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')
+UNSAFE_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 COMMAND_TOOLS = ("Bash", "PowerShell", "Monitor")
 GUARD = "guard"
 HINT = "hint"
@@ -77,8 +91,40 @@ def _strings(cue: dict, name: str) -> list:
     return [item for item in value if isinstance(item, str) and item] if isinstance(value, list) else []
 
 
+def _clean(value: object, limit: int) -> bool:
+    return (isinstance(value, str) and bool(value.strip()) and len(value) <= limit
+            and "<!--" not in value and "-->" not in value
+            and not any(unicodedata.category(char) in UNSAFE_CATEGORIES for char in value))
+
+
+def _valid_values(cue: dict, name: str) -> bool:
+    values = cue[name]
+    if not isinstance(values, list) or not 1 <= len(values) <= MAX_CUE_VALUES:
+        return False
+    if name == "tools" and not all(isinstance(item, str) and TOOL_NAME.fullmatch(item) for item in values):
+        return False
+    if name == "path_glob" and not all(isinstance(item, str) and set(item) - set("*?/") for item in values):
+        return False
+    return all(_clean(item, MAX_CUE_VALUE) for item in values)
+
+
+def _valid_cue(cue: object) -> bool:
+    """True when the compiler could have written this cue."""
+    if not isinstance(cue, dict) or set(cue) - CUE_KEYS or cue.get("kind") not in (GUARD, HINT):
+        return False
+    count = cue.get("count")
+    identifier = cue.get("id")
+    if type(count) is not int or not 1 <= count <= MAX_COUNT:
+        return False
+    if not isinstance(identifier, str) or not ITEM_ID_RE.fullmatch(identifier):
+        return False
+    if not _clean(cue.get("text"), MAX_CUE_TEXT) or not set(cue) & set(CUE_MATCHERS):
+        return False
+    return all(_valid_values(cue, name) for name in (*CUE_MATCHERS, "tools") if name in cue)
+
+
 def load_cues(vault: str) -> list:
-    """Compiled cues, or an empty list when the file is absent or unusable."""
+    """Compiled cues that pass _valid_cue. Empty when the file is absent or unusable."""
     path = os.path.join(vault, *CUES_REL.split("/"))
     try:
         info = os.lstat(path)
@@ -96,8 +142,10 @@ def load_cues(vault: str) -> list:
     if not isinstance(cues, list):
         _warn("the compiled cue file has an unknown format")
         return []
-    return [cue for cue in cues if isinstance(cue, dict) and cue.get("kind") in (GUARD, HINT)
-            and isinstance(cue.get("text"), str) and isinstance(cue.get("id"), str)]
+    valid = [cue for cue in cues if _valid_cue(cue)]
+    if len(valid) != len(cues):
+        _warn(f"{len(cues) - len(valid)} compiled cues were dropped: compile the list again")
+    return valid
 
 
 def _command_matches(cue: dict, command: str) -> bool:

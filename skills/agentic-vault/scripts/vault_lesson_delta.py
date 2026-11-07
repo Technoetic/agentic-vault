@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import unicodedata
 
 import vault_evidence as evidence
 import vault_proposals as proposals
@@ -33,10 +34,13 @@ MAX_CUE_VALUES = 8
 MAX_CUE_VALUE = 200
 CUE_KINDS = ('hint', 'guard')
 CUE_MATCHERS = ('command_prefix', 'command_contains', 'path_glob')
+# Line breaks, format marks and controls: they can end a line or hide text from a reader.
+UNSAFE_CATEGORIES = ('Cc', 'Cf', 'Cs', 'Zl', 'Zp')
 META = 'agentic-vault:lesson'
 MARKER = re.compile(r'\s*<!-- agentic-vault:lesson (\{.*\}) -->\s*$')
 HEADING = re.compile(r'^(#{2,6}\s+)(' + state.ITEM_ID_RE.pattern + r')(\s+(?:—|–|-)\s+)(.+)$')
 EXPLICIT = re.compile(r'^\[(' + state.ITEM_ID_RE.pattern + r')\]\s+')
+COMMENT_OPEN = re.compile(r' {0,3}<!--')
 HASH = re.compile(r'[0-9a-f]{64}')
 REF_ID = re.compile(r'[0-9a-f]{32}')
 LEDGER_ROW = re.compile(r'- \d{4}-\d{2}-\d{2}')
@@ -88,7 +92,8 @@ def _references(value):
 
 def _cue_text(value, limit):
     if (not isinstance(value, str) or not value.strip() or len(value) > limit
-            or any(ord(c) < 32 for c in value) or '<!--' in value or '-->' in value):
+            or any(unicodedata.category(c) in UNSAFE_CATEGORIES for c in value)
+            or '<!--' in value or '-->' in value):
         raise LessonDeltaError('invalid_lesson_cues')
     return value
 
@@ -145,7 +150,13 @@ def _marker(record):
 
 
 def _lines(raw):
-    offset, fence = 0, ''
+    """Yield each line. visible is False in fenced code; comment is True in an HTML comment block.
+
+    A block opens with <!-- at the start of a line and ends on the line that holds -->
+    (the rule hooks/session_start.py uses). comment is a separate field: a row in a
+    block stays in the inventory, so counters, ids and proposals keep working on it.
+    """
+    offset, fence, in_comment = 0, '', False
     for number, line in enumerate(raw.splitlines(keepends=True)):
         start, offset = offset, offset + len(line)
         text = line.decode('utf-8').rstrip('\r\n')
@@ -158,8 +169,13 @@ def _lines(raw):
             visible = False
         elif match and (match[1][0] != '`' or '`' not in match[2]):
             fence, visible = match[1], False
+        comment = in_comment
+        if visible and in_comment:
+            in_comment = '-->' not in text
+        elif visible and (opening := COMMENT_OPEN.match(text)):
+            comment, in_comment = True, '-->' not in text[opening.end():]
         yield dict(number=number, start=start, end=offset - len(ending), text=text,
-                   ending=ending, visible=visible)
+                   ending=ending, visible=visible, comment=comment)
 
 
 def _inventory(raw, namespace):

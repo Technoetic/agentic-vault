@@ -131,7 +131,11 @@ In scope:
   hint or a once-per-session `deny`, and a way to make it answer `allow` or `ask` is
   in scope. Cues are literals and globs, not regular expressions. It keeps a session
   record in the system temporary folder. It sets no `onFailure`, so a failed hook lets
-  the call run: it is advisory, not a control. `vault_lesson_clusters.py` only reads.
+  the call run: it is advisory, not a control. The compiler takes only rows with a known
+  status, outside comment blocks and the rejected-drafts section. The hook checks each
+  compiled cue again and drops one the compiler could not have written, but it does not
+  prove that a well-formed cue came from the ledger. The compiled file is not a
+  deny-guard control. `vault_lesson_clusters.py` only reads.
 - **Linked worktree handling** (`vault_worktrees.py` and its callers, `deny-guard.py`):
   a zone in a copy is closed by reading the folder's `.git` file, so a wrong file only
   closes more. A walk or a backup leaves a folder out only when git's admin folder also
