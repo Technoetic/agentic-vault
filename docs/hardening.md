@@ -113,7 +113,7 @@ Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 
 | 출처 | `vault_provenance.py`: `derive_provenance`, `validate_provenance`, `analyze_notes` | 선택 원본·정제본 해시와 가장 낮은 신뢰를 유지. 별도 근거의 현재성을 조회하며 이름만으로 독립 검증을 인정하지 않음 |
 | 공유 상태 | `vault_state.py`: `advisory_lock`, `patch_note`, `project_handoff`, `detect_removed_blockers` | 원본 UTF-8 바이트 범위의 부분 편집, 기대 파일/config 해시, 소유자 토큰과 TTL. 협조하는 쓰기만 잠금 보호 |
 | 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함. 그 안의 선택형 [`--normalize-periods`](#기간-표현-정규화---normalize-periods)는 기간 표현을 날짜 구간으로 따로 대조(`vault_period.py`) |
-| 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존 |
+| 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE/CUES, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존. 형식을 벗어난 대장 줄은 `ignored_rows`로 보고 |
 | 선언 규칙 | `vault_declarative_rules.py`: `evaluate_rules` | literal existence/substitution/occurrence 기본값. regex는 명시적 선택, 별도 프로세스 제한시간·입력 상한 |
 | 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
 | 토큰 | `vault_token_calibration.py`: `calibrate`, `estimate`, `check_drift`, `measure_local`, `measure_counter` | 모델/세대별 측정치와 보정 해시. 명시적으로 선택할 때만 사용; 기존 hook/검색 계수 유지 |

@@ -19,7 +19,7 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-class LessonDeltaTests(unittest.TestCase):
+class LessonDeltaFixture(unittest.TestCase):
     def setUp(self):
         try:
             self.module = importlib.import_module('vault_lesson_delta')
@@ -55,6 +55,8 @@ class LessonDeltaTests(unittest.TestCase):
         return {'path': 'notes/observation.md', 'sha256': sha(self.source.read_bytes()),
                 'observation_id': '1' * 32, 'receipt_id': '2' * 32}
 
+
+class LessonDeltaTests(LessonDeltaFixture):
     def test_inc_preserves_historical_id_and_every_other_byte(self):
         p = self.prepare([{'op': 'INC', 'id': 'L-001', 'amount': 2, 'references': [self.ref()]}])
         self.assertEqual(self.target.read_bytes(), self.original)
@@ -266,6 +268,135 @@ class LessonDeltaTests(unittest.TestCase):
             run = subprocess.run(command, input=raw, text=True, capture_output=True)
             self.assertNotEqual(run.returncode, 0)
             self.assertNotIn(str(self.vault), run.stdout + run.stderr)
+
+
+CUE = {'kind': 'hint', 'text': 'A pipe hides the exit code', 'tools': ['Bash'],
+       'command_contains': ['; ', ' | ']}
+GUARD = {'kind': 'guard', 'text': 'Paid call after a semicolon', 'command_prefix': ['paid-tool'],
+         'path_glob': ['**/*.lock']}
+
+
+class LessonCueTests(LessonDeltaFixture):
+    def marker_line(self, record):
+        return ('<!-- agentic-vault:lesson '
+                + json.dumps(record, ensure_ascii=False, separators=(',', ':'), sort_keys=True) + ' -->')
+
+    def row(self, **extra):
+        record = {'id': 'L-009', 'count': 1, 'state': 'active', 'references': [], **extra}
+        return ('- 2026-10-03 | 횟수 1 | [L-009] Keep cues | 근거: note | 상태: 관찰중 '
+                + self.marker_line(record) + '\n').encode()
+
+    def ledger(self, row):
+        self.target.write_bytes(b'## ' + '대장'.encode() + b'\n' + row)
+
+    def test_cues_survive_inc_retire_and_edit_on_a_bullet(self):
+        self.ledger(self.row(cues=[CUE]))
+        self.apply(self.prepare([{'op': 'INC', 'id': 'L-009'}]))
+        self.apply(self.prepare([{'op': 'EDIT', 'id': 'L-009', 'text': 'Keep cues always'}]))
+        self.apply(self.prepare([{'op': 'RETIRE', 'id': 'L-009'}]))
+        _, record = self.module._metadata(self.target.read_text(encoding='utf-8').splitlines()[1])
+        self.assertEqual(record['cues'], [CUE])
+        self.assertEqual((record['count'], record['state']), (2, 'retired'))
+
+    def test_cues_survive_on_a_heading_marker_line(self):
+        self.target.write_bytes(('## L-010 — Heading lesson\n'
+                                 + self.marker_line({'id': 'L-010', 'count': 1, 'state': 'active',
+                                                     'references': [], 'cues': [GUARD]}) + '\n').encode('utf-8'))
+        self.apply(self.prepare([{'op': 'INC', 'id': 'L-010'}]))
+        _, record = self.module._metadata(self.target.read_text(encoding='utf-8').splitlines()[1])
+        self.assertEqual((record['count'], record['cues']), (2, [GUARD]))
+
+    def test_without_cues_the_rewritten_marker_has_the_same_bytes_as_before(self):
+        self.ledger(self.row())
+        self.apply(self.prepare([{'op': 'INC', 'id': 'L-009'}]))
+        self.assertTrue(self.target.read_bytes().endswith(
+            b'<!-- agentic-vault:lesson {"count":2,"id":"L-009","references":[],"state":"active"} -->\n'))
+
+    def test_add_and_cues_operation_set_and_clear_the_list(self):
+        p = self.prepare([{'op': 'ADD', 'text': 'New cue row', 'date': '2026-10-07', 'cues': [CUE]}])
+        identifier = p['changes'][0]['id']
+        self.apply(p)
+        self.assertIn(b'"cues":[', self.target.read_bytes())
+        self.apply(self.prepare([{'op': 'CUES', 'id': identifier, 'cues': [GUARD]}]))
+        self.assertIn(b'paid-tool', self.target.read_bytes())
+        self.apply(self.prepare([{'op': 'CUES', 'id': 'L-001', 'cues': [CUE]}]))
+        self.assertIn(b'"cues":[', self.target.read_bytes().splitlines()[6])
+        self.apply(self.prepare([{'op': 'CUES', 'id': identifier, 'cues': []}]))
+        self.assertNotIn(b'paid-tool', self.target.read_bytes())
+
+    def test_a_retired_lesson_takes_no_new_cues(self):
+        self.ledger(self.row(cues=[CUE]))
+        self.apply(self.prepare([{'op': 'RETIRE', 'id': 'L-009'}]))
+        with self.assertRaises(self.module.LessonDeltaError) as caught:
+            self.prepare([{'op': 'CUES', 'id': 'L-009', 'cues': [GUARD]}])
+        self.assertEqual(str(caught.exception), 'retired_lesson')
+
+    def test_invalid_cues_are_refused_with_a_fixed_code(self):
+        bad = [
+            [], 'x', [{}], [{**CUE, 'kind': 'block'}], [{**CUE, 'regex': '.*'}], [{**CUE, 'command_regex': ['a']}],
+            [{'kind': 'hint', 'text': 'no matcher'}], [{**CUE, 'text': ' '}], [{**CUE, 'text': 'x' * 301}],
+            [{**CUE, 'text': 'closes -->'}], [{**CUE, 'text': 'line\nbreak'}],
+            [{**CUE, 'command_contains': ['']}], [{**CUE, 'command_contains': ['  ']}],
+            [{**CUE, 'command_contains': []}], [{**CUE, 'command_contains': 'x'}],
+            [{**CUE, 'command_prefix': ['x' * 201]}], [{**CUE, 'path_glob': ['**']}], [{**CUE, 'path_glob': ['*/?']}],
+            [{**CUE, 'tools': ['bad tool']}], [{**CUE, 'tools': []}], [CUE] * 9,
+        ]
+        for value in bad[1:]:
+            with self.subTest(value=str(value)[:40]):
+                self.ledger(self.row(cues=value))
+                with self.assertRaises(self.module.LessonDeltaError) as caught:
+                    self.prepare([{'op': 'INC', 'id': 'L-009'}])
+                self.assertEqual(str(caught.exception), 'invalid_lesson_cues')
+                with self.assertRaises(self.module.LessonDeltaError) as caught:
+                    self.module._cues(value)
+                self.assertEqual(str(caught.exception), 'invalid_lesson_cues')
+        self.ledger(self.row(cues=[]))
+        with self.assertRaises(self.module.LessonDeltaError) as caught:
+            self.prepare([{'op': 'INC', 'id': 'L-009'}])
+        self.assertEqual(str(caught.exception), 'invalid_lesson_cues')
+
+    def test_other_extra_keys_stay_refused(self):
+        self.ledger(self.row(hint='x'))
+        with self.assertRaises(self.module.LessonDeltaError) as caught:
+            self.prepare([{'op': 'INC', 'id': 'L-009'}])
+        self.assertEqual(str(caught.exception), 'invalid_lesson_metadata')
+
+    def test_cues_field_is_refused_on_operations_that_do_not_take_it(self):
+        for op in ({'op': 'INC', 'id': 'L-001', 'cues': [CUE]}, {'op': 'CUES', 'id': 'L-001'}):
+            with self.subTest(op=op['op']), self.assertRaises(self.module.LessonDeltaError):
+                self.prepare([op])
+
+
+class IgnoredRowTests(LessonDeltaFixture):
+    SIX = '- 2026-10-03 | 횟수 2 | Six cells | 근거: x | 상태: 관찰중 | 단서: y\n'
+
+    def ledger(self, *rows):
+        self.target.write_bytes(('## 대장\n' + ''.join(rows)).encode('utf-8'))
+
+    def test_a_row_with_the_wrong_cell_count_is_reported_not_silent(self):
+        self.ledger('- 2026-10-01 | 횟수 1 | [L-001] Fine | 근거: x | 상태: 관찰중\n', self.SIX,
+                    '- 2026-10-04 | 횟수 1 | Four cells | 근거: x\n')
+        p = self.prepare([{'op': 'INC', 'id': 'L-001'}])
+        self.assertEqual(p['ignored_rows'], [{'line': 3, 'cells': 6}, {'line': 4, 'cells': 4}])
+        self.assertEqual(self.apply(p)['ignored_rows'], [{'line': 3, 'cells': 6}, {'line': 4, 'cells': 4}])
+        self.assertIn(self.SIX.encode(), self.target.read_bytes())
+
+    def test_add_with_the_text_of_an_ignored_row_is_a_duplicate(self):
+        self.ledger(self.SIX, '- 2026-10-05 | 횟수 1 | [L-007] Tagged  six | 근거: x | 상태: 관찰중 | 단서: y\n')
+        for text in ('Six cells', 'Tagged six'):
+            with self.subTest(text=text), self.assertRaises(self.module.LessonDeltaError) as caught:
+                self.prepare([{'op': 'ADD', 'text': text, 'date': '2026-10-07'}])
+            self.assertEqual(str(caught.exception), 'duplicate_lesson_text')
+
+    def test_clean_ledgers_keep_the_proposal_shape(self):
+        p = self.prepare([{'op': 'INC', 'id': 'L-001'}])
+        self.assertNotIn('ignored_rows', p)
+        self.assertNotIn('ignored_rows', self.apply(p))
+
+    def test_prose_with_pipes_is_not_a_ledger_row(self):
+        self.ledger('- 2026-10-01 | 횟수 1 | [L-001] Fine | 근거: x | 상태: 관찰중\n',
+                    '- 2026-10-03 | note | more\n', 'plain | 횟수 2 | text\n')
+        self.assertNotIn('ignored_rows', self.prepare([{'op': 'INC', 'id': 'L-001'}]))
 
 
 if __name__ == '__main__':

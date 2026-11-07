@@ -27,12 +27,21 @@ MAX_OPERATIONS = 64
 MAX_TEXT_BYTES = 4096
 MAX_REFERENCES = 8
 MAX_COUNT = 1000000
+MAX_CUES = 8
+MAX_CUE_TEXT = 300
+MAX_CUE_VALUES = 8
+MAX_CUE_VALUE = 200
+CUE_KINDS = ('hint', 'guard')
+CUE_MATCHERS = ('command_prefix', 'command_contains', 'path_glob')
 META = 'agentic-vault:lesson'
 MARKER = re.compile(r'\s*<!-- agentic-vault:lesson (\{.*\}) -->\s*$')
 HEADING = re.compile(r'^(#{2,6}\s+)(' + state.ITEM_ID_RE.pattern + r')(\s+(?:—|–|-)\s+)(.+)$')
 EXPLICIT = re.compile(r'^\[(' + state.ITEM_ID_RE.pattern + r')\]\s+')
 HASH = re.compile(r'[0-9a-f]{64}')
 REF_ID = re.compile(r'[0-9a-f]{32}')
+LEDGER_ROW = re.compile(r'- \d{4}-\d{2}-\d{2}')
+LEDGER_COUNT = re.compile(r'횟수 \d+')
+TOOL_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')
 AUTHORITY = 'observation_data_only'
 
 
@@ -77,6 +86,39 @@ def _references(value):
     return result
 
 
+def _cue_text(value, limit):
+    if (not isinstance(value, str) or not value.strip() or len(value) > limit
+            or any(ord(c) < 32 for c in value) or '<!--' in value or '-->' in value):
+        raise LessonDeltaError('invalid_lesson_cues')
+    return value
+
+
+def _cues(value):
+    """Validate tool-call triggers: literal text and globs only, never a regex."""
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_CUES:
+        raise LessonDeltaError('invalid_lesson_cues')
+    result = []
+    for cue in value:
+        if (not isinstance(cue, dict) or not {'kind', 'text'} <= set(cue)
+                or set(cue) - {'kind', 'text', 'tools', *CUE_MATCHERS}
+                or cue['kind'] not in CUE_KINDS or not set(cue) & set(CUE_MATCHERS)):
+            raise LessonDeltaError('invalid_lesson_cues')
+        _cue_text(cue['text'], MAX_CUE_TEXT)
+        for name in (*CUE_MATCHERS, 'tools'):
+            if name not in cue:
+                continue
+            if not isinstance(cue[name], list) or not 1 <= len(cue[name]) <= MAX_CUE_VALUES:
+                raise LessonDeltaError('invalid_lesson_cues')
+            for item in cue[name]:
+                _cue_text(item, MAX_CUE_VALUE)
+                if name == 'tools' and not TOOL_NAME.fullmatch(item):
+                    raise LessonDeltaError('invalid_lesson_cues')
+                if name == 'path_glob' and not set(item) - set('*?/'):
+                    raise LessonDeltaError('invalid_lesson_cues')
+        result.append(dict(cue))
+    return result
+
+
 def _metadata(text):
     match = MARKER.search(text)
     if not match:
@@ -84,17 +126,21 @@ def _metadata(text):
             raise LessonDeltaError('malformed_lesson_metadata')
         return text, None
     data = evidence.decode(match[1].encode())
-    if (not isinstance(data, dict) or set(data) != {'id', 'count', 'state', 'references'}
+    if (not isinstance(data, dict) or set(data) - {'cues'} != {'id', 'count', 'state', 'references'}
             or not isinstance(data['id'], str) or not state.ITEM_ID_RE.fullmatch(data['id'])
             or type(data['count']) is not int or not 1 <= data['count'] <= MAX_COUNT
             or data['state'] not in ('active', 'retired')):
         raise LessonDeltaError('invalid_lesson_metadata')
     data['references'] = _references(data['references'])
+    if 'cues' in data:
+        data['cues'] = _cues(data['cues'])
     return text[:match.start()], data
 
 
 def _marker(record):
     data = {k: record[k] for k in ('id', 'count', 'state', 'references')}
+    if record.get('cues'):
+        data['cues'] = record['cues']
     return '<!-- ' + META + ' ' + encode(data).decode('utf-8') + ' -->'
 
 
@@ -117,7 +163,7 @@ def _lines(raw):
 
 
 def _inventory(raw, namespace):
-    rows, registry, entries = list(_lines(raw)), {}, []
+    rows, registry, entries, ignored = list(_lines(raw)), {}, [], []
     for index, line in enumerate(rows):
         if not line['visible']:
             continue
@@ -128,6 +174,10 @@ def _inventory(raw, namespace):
                   and re.fullmatch(r'횟수 \d+', cells[1]) and cells[3].startswith('근거:')
                   and cells[4].startswith('상태:'))
         if not heading and not bullet:
+            # A row that opens like a ledger row but is not one must not vanish:
+            # its count and text would be invisible to every later operation.
+            if len(cells) > 1 and LEDGER_ROW.fullmatch(cells[0]) and LEDGER_COUNT.fullmatch(cells[1]):
+                ignored.append(dict(line, cells=cells))
             continue
         if heading:
             identifier, lesson = heading[2], heading[4]
@@ -162,7 +212,12 @@ def _inventory(raw, namespace):
         entries.append(record)
         if len(entries) > 256:
             raise LessonDeltaError('lesson_count_limit')
-    return entries, rows, registry
+    return entries, rows, registry, ignored
+
+
+def _cell_text(cell):
+    explicit = EXPLICIT.match(cell)
+    return ' '.join((cell[explicit.end():] if explicit else cell).split())
 
 
 def _operations(value):
@@ -172,12 +227,13 @@ def _operations(value):
         raise LessonDeltaError('operations_too_large')
     result = []
     for op in value:
-        if not isinstance(op, dict) or op.get('op') not in ('ADD', 'INC', 'EDIT', 'RETIRE'):
+        if not isinstance(op, dict) or op.get('op') not in ('ADD', 'INC', 'EDIT', 'RETIRE', 'CUES'):
             raise LessonDeltaError('invalid_operation')
-        allowed = {'ADD': {'op', 'text', 'date', 'references'},
+        allowed = {'ADD': {'op', 'text', 'date', 'references', 'cues'},
                    'INC': {'op', 'id', 'amount', 'references'},
                    'EDIT': {'op', 'id', 'text', 'references'},
-                   'RETIRE': {'op', 'id', 'references'}}[op['op']]
+                   'RETIRE': {'op', 'id', 'references'},
+                   'CUES': {'op', 'id', 'cues', 'references'}}[op['op']]
         if set(op) - allowed:
             raise LessonDeltaError('invalid_operation_fields')
         normalized = dict(op)
@@ -198,6 +254,10 @@ def _operations(value):
             if type(amount) is not int or not 1 <= amount <= 1000:
                 raise LessonDeltaError('invalid_increment')
             normalized['amount'] = amount
+        if op['op'] == 'CUES' and op.get('cues') != []:
+            normalized['cues'] = _cues(op.get('cues'))
+        elif op['op'] == 'ADD' and 'cues' in op:
+            normalized['cues'] = _cues(op['cues'])
         normalized['references'] = _references(op.get('references', []))
         result.append(normalized)
     return result
@@ -216,19 +276,23 @@ def _prepare(vault, path, operations):
     path = _safe_note(policy, path)
     info, _, original = policy.read_note(path)
     namespace = 'lesson:' + path.casefold()
-    inventory, lines, registry = _inventory(original, namespace)
+    inventory, lines, registry, ignored = _inventory(original, namespace)
+    ignored_text = {_cell_text(row['cells'][2]) for row in ignored if len(row['cells']) > 2}
     operations = _operations(operations)
     records = {r['id']: dict(r) for r in inventory}
     changed, added, changes, references = {}, [], [], []
     for op in operations:
         if op['op'] == 'ADD':
-            if any(' '.join(op['text'].split()) == ' '.join(r['text'].split()) for r in records.values()):
+            if (any(' '.join(op['text'].split()) == ' '.join(r['text'].split()) for r in records.values())
+                    or ' '.join(op['text'].split()) in ignored_text):
                 raise LessonDeltaError('duplicate_lesson_text')
             identifier = state.stable_item_id(namespace, op['text'], registry=registry)
             if identifier in records:
                 raise LessonDeltaError('id_collision')
             record = dict(id=identifier, text=op['text'], date=op['date'], count=1, state='active',
                           references=[], kind='new')
+            if 'cues' in op:
+                record['cues'] = op['cues']
             records[identifier], added = record, added + [record]
             if len(records) > 256:
                 raise LessonDeltaError('lesson_count_limit')
@@ -245,6 +309,10 @@ def _prepare(vault, path, operations):
                     raise LessonDeltaError('lesson_counter_limit')
             elif op['op'] == 'EDIT':
                 record['text'] = op['text']
+            elif op['op'] == 'CUES':
+                record.pop('cues', None)
+                if 'cues' in op:
+                    record['cues'] = op['cues']
             else:
                 record['state'] = 'retired'
         record['references'] = _references(record['references'] + op['references'])
@@ -341,6 +409,8 @@ def _prepare(vault, path, operations):
                   candidate_sha256=_sha(candidate), changes=changes, references=references,
                   inventory=[{k: r[k] for k in ('id', 'text', 'count', 'state')} for r in inventory],
                   authority=AUTHORITY,
+                  **({'ignored_rows': [dict(line=row['number'] + 1, cells=len(row['cells'])) for row in ignored]}
+                     if ignored else {}),
                   diff=''.join(difflib.unified_diff(original.decode().splitlines(keepends=True),
                                                    candidate.decode().splitlines(keepends=True),
                                                    fromfile=path + ' (base)', tofile=path + ' (candidate)')))
@@ -390,7 +460,8 @@ def apply_delta(vault, proposal, *, approve=False):
                                   expected_config_sha256=current['config_sha256'])
         return dict(result, proposal_id=current['id'], proposal_sha256=current['proposal_sha256'],
                     explicit_approval=True, changes=current['changes'], references=current['references'],
-                    authority=AUTHORITY)
+                    authority=AUTHORITY,
+                    **({'ignored_rows': current['ignored_rows']} if 'ignored_rows' in current else {}))
     return _safe(apply)
 
 
