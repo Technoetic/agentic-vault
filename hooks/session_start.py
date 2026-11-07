@@ -20,7 +20,7 @@ SCRIPTS_DIR = PLUGIN_ROOT / "skills" / "agentic-vault" / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
+from vault_healthcheck import HealthcheckError, estimate_tokens, split_frontmatter, validate_config
 from vault_paths import resolve_note_path
 from vault_revocation import RevocationError, RevocationPolicy
 
@@ -56,6 +56,7 @@ MAX_FIXED_LINE_CHARS = 120
 # headings. Both patterns run in linear time on any line.
 _FENCE_OPEN = re.compile(r" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 _FENCE_CLOSE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
+_COMMENT_OPEN = re.compile(r" {0,3}<!--")
 _NON_SPACE = re.compile(r"\S")
 
 
@@ -522,6 +523,41 @@ def _section_items(text: str, label: str) -> tuple[list[str], int]:
     return [_fixed_line(line) for line in result[:MAX_FIXED_ITEMS]], max(0, len(result) - MAX_FIXED_ITEMS)
 
 
+def _visible_lines(text: str):
+    """Yield body lines outside front matter, fenced code and HTML comment blocks."""
+    in_comment = False
+    for line in _outside_fence_lines(split_frontmatter(text)[1]):
+        if in_comment:
+            in_comment = '-->' not in line
+            continue
+        opening = _COMMENT_OPEN.match(line)
+        if opening is not None:
+            in_comment = '-->' not in line[opening.end():]
+            continue
+        yield line
+
+
+def _constraint_projections(text: str) -> list[list[str]]:
+    """Render a constraints note as fixed lines, fullest rendering first.
+
+    Notes usually open with front matter or a header comment, so a note-wide
+    excerpt of the first characters held no rule. Each top-level '- ' item is
+    a line of its own; a note without items keeps the single excerpt line.
+    """
+    visible = list(_visible_lines(text))
+    items = [item for item in (line[2:].strip() for line in visible if line.startswith('- ')) if item]
+    if not items:
+        excerpt = '\n'.join(visible).strip()
+        return [['Configured constraints excerpt: ' + _fixed_line(excerpt)] if excerpt else []]
+    projections = []
+    for shown in range(min(len(items), MAX_FIXED_ITEMS), -1, -1):
+        omitted = len(items) - shown
+        projections.append(['Constraint: ' + _fixed_line(item) for item in items[:shown]]
+                           + ([f'Constraint items omitted: {omitted}; inspect the source before any decision.']
+                              if omitted else []))
+    return projections
+
+
 def _explicit_anchor(text: str) -> str:
     """Select an explicit current anchor field; prose and fences are not fields."""
     field = r'(?:anchor|기준 커밋(?:\(anchor\))?)'
@@ -580,15 +616,26 @@ def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSo
             lines.extend('Blocked: ' + item for item in blocked)
             if omitted:
                 lines.append(f'Blocked items omitted: {omitted}.')
-    if rules is not None:
-        lines.append('Configured constraints excerpt: ' + _fixed_line(rules.text))
+    bound = []
     for source in inspected:
         digest = hashlib.sha256(source.text.encode('utf-8')).hexdigest()
-        lines.append(f'Source {_fixed_line(source.source_path)} normalized_excerpt_sha256={digest}'
+        bound.append(f'Source {_fixed_line(source.source_path)} normalized_excerpt_sha256={digest}'
                      + (' [source excerpt incomplete]' if source.source_truncated else ''))
     # The digest binds the inspected normalized excerpt, not raw bytes, factual
     # accuracy, approval, or content beyond the configured byte limit.
-    return SectionSource(FIXED_HEADER, '\n'.join(lines), total_budget, False, '')
+    # The block is atomic, so items go first and are counted: an over-budget
+    # block would drop the policy lines and source hashes with them.
+    text = ''
+    for projection in (_constraint_projections(rules.text) if rules is not None else [[]]):
+        text = '\n'.join([*lines, *projection, *bound])
+        if _fixed_block_fits(text, total_budget):
+            break
+    return SectionSource(FIXED_HEADER, text, total_budget, False, '')
+
+
+def _fixed_block_fits(text: str, budget: int) -> bool:
+    fixed_text = FIXED_HEADER + '\n' + text
+    return estimate_tokens(fixed_text) <= budget and utf16_len(fixed_text + '\n') <= HOST_MAX_OUTPUT_CHARS
 
 
 def compose_compact_context(vault: Path, config: dict, sources: Sequence[SectionSource | None], *, revocations=None) -> SessionContext:
@@ -599,7 +646,7 @@ def compose_compact_context(vault: Path, config: dict, sources: Sequence[Section
     # discard policy, blockers or source hashes and leave an unsafe projection.
     fixed_text = fixed.header + '\n' + fixed.text
     charge = estimate_tokens(fixed_text)
-    if charge > fixed.token_budget or utf16_len(fixed_text + '\n') > HOST_MAX_OUTPUT_CHARS:
+    if not _fixed_block_fits(fixed.text, fixed.token_budget):
         print(COMPACT_BUDGET_DIAGNOSTIC, file=sys.stderr)
         return SessionContext(tuple(None for _ in sources), '')
     rendered = RenderedSection(fixed_text, False, False)
