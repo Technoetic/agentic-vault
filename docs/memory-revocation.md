@@ -30,6 +30,11 @@ The following endpoints read the same optional registry:
 | SessionStart startup/resume/compact | Mask before normalization and budget truncation, including configured compact tasks/constraints |
 | New selected OKF exports | Mask the new projection and retain raw source fingerprints; do not alter earlier exports |
 | `vault_links.propose_links` | Mask target snippets; refuse diffs for an affected source so review neither discloses withdrawn context nor proposes physical deletion |
+| Jev selected vault excerpts and Jarvis direct context (v0.44.0) | Project full raw UTF-8 before normalization/prefix limits; retain a source/config/policy-bound envelope through pre-dispatch and post-response checks |
+
+See [configured egress and synthetic lifecycle checks](revocation-egress.md) for
+the two added context boundaries, generated-order tests and the simulated sink's
+limits. Already-sent information is not withdrawn.
 
 Other direct file readers, audit/history/diff tools, backups, external memory
 services and arbitrary host tool calls are not an engine-wide forgetting boundary.

@@ -86,6 +86,13 @@ python skills/agentic-vault/scripts/vault_proposals.py --vault PATH preserve-che
 - 바뀌어야 할 것(정정)과 그대로여야 할 것(유지)을 함께 선언하는 방식은 AgentOnto(arXiv 2610.23317)의 갱신
   관문에서 설계 원리만 가져왔다. 통과해도 자동 적용은 없고 사람 승인 절차는 그대로다.
 
+## 관계 레코드 보존 (선택)
+
+v0.44.0의 선택형 `--relation-probes 00-meta/probes.json`은 작성자가 고른 본문 행·문단 전체를
+원문에 바인딩해 비교한다. 수량 맞바꾸기, 같은 범위의 부정문 추가·예외 삭제, 다른 곳에 원문을
+복제해 가린 변경은 검토 대상으로 표시한다. 기본 출력과 적용 승인 절차는 그대로다.
+JSON 형식·입력 상한·범위 한계는 [관계 레코드 보존](relation-preservation.md)을 따른다.
+
 ## 승인과 적용
 
 현재 사용자가 정확한 수정안을 승인한 경우에만 적용한다. 이미 같은 수정안을

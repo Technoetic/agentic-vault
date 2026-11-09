@@ -105,6 +105,13 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_lesson_delta.py",
             "skills/agentic-vault/scripts/vault_declarative_rules.py",
             "skills/agentic-vault/scripts/vault_compile_quality.py",
+            "skills/agentic-vault/scripts/vault_relation_probes.py",
+            "skills/agentic-vault/scripts/vault_context_guard.py",
+            "docs/relation-preservation.md", "docs/revocation-egress.md",
+            "scripts/evaluate_relation_preservation.py",
+            "tests/fixtures/relation_preservation/pack.json",
+            "scripts/evaluate_revocation_egress.py",
+            "tests/fixtures/revocation_egress/pack.json",
             "skills/agentic-vault/scripts/vault_token_calibration.py",
             "skills/agentic-vault/scripts/resources/lint-benign-v1.json",
             "docs/hardening.md",
@@ -356,6 +363,29 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Corrupted knowledge resource\n", encoding="utf-8")
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_relation_and_egress_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/scripts/vault_relation_probes.py",
+                         "skills/agentic-vault/scripts/vault_context_guard.py",
+                         "docs/relation-preservation.md", "docs/revocation-egress.md",
+                         "scripts/evaluate_relation_preservation.py",
+                         "tests/fixtures/relation_preservation/pack.json",
+                         "scripts/evaluate_revocation_egress.py",
+                         "tests/fixtures/revocation_egress/pack.json"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed relation/egress resource\n", encoding="utf-8")
+
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 

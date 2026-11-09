@@ -848,7 +848,34 @@ def _read_context_prefix(path: Path) -> tuple[str, bool]:
         os.close(descriptor)
 
 
-def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
+class _GenerationEnvelope:
+    """Prompt plus the exact configured policy and raw bindings used to build it."""
+    def __init__(self, payload, guard=None):
+        self.payload, self.guard = payload, guard
+
+    def recheck(self):
+        if self.guard is not None:
+            from vault_evidence import EvidenceError
+            from vault_healthcheck import HealthcheckError
+            try:
+                self.guard.recheck()
+            except (EvidenceError, HealthcheckError) as exc:
+                raise ValueError("context unavailable") from exc
+
+
+def _generation_envelope(vault: Path, cfg: dict, prompt: str):
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from vault_evidence import EvidenceError
+    from vault_healthcheck import HealthcheckError
+    try:
+        return _build_generation_envelope(vault, cfg, prompt)
+    except (EvidenceError, HealthcheckError) as exc:
+        raise ValueError("context unavailable") from exc
+
+
+def _build_generation_envelope(vault: Path, cfg: dict, prompt: str):
     """Only the host reads bounded, permitted Markdown; the model receives data."""
     scripts_dir = str(Path(__file__).resolve().parent)
     if scripts_dir not in sys.path:
@@ -863,10 +890,45 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
         raise ValueError("input limit")
     if contains_sensitive(prompt):
         raise ValueError("sensitive input")
+    from vault_context_guard import ContextGuard
+    from vault_evidence import Store
+    initial_config = _read_config(vault, _diagnostics())
+    guard = None
+    if initial_config is not None and initial_config.get("memory_revocation_file"):
+        guard = ContextGuard(Store(vault))
+        if guard.store.config != initial_config:
+            raise ValueError("context unavailable")
     result = recall(vault, prompt, limit=5, max_tokens=1500)
     status = result["diagnostics"]["status"]
     if status not in ("ok", "not_vault"):
         raise ValueError("context unavailable")
+    config = None
+    if status == "ok":
+        config = _read_config(vault, _diagnostics())
+        if config is None:
+            raise ValueError("context unavailable")
+        if guard is not None or config.get("memory_revocation_file"):
+            from vault_recall import (_rank_document, _render_context, _normalize,
+                                      _terms, MAX_QUERY_CHARS, MAX_QUERY_TERMS)
+            if guard is None:
+                guard = ContextGuard(Store(vault))
+            if guard.store.config != config:
+                raise ValueError("context unavailable")
+            # Recall selected paths. Rebuild their snippets from this envelope's
+            # current full raw sources so an earlier retrieval cannot authorize
+            # old bytes under a newly constructed policy.
+            phrase = _normalize(prompt[:MAX_QUERY_CHARS])
+            terms = _terms(prompt[:MAX_QUERY_CHARS])[:MAX_QUERY_TERMS]
+            matches = []
+            for match in result["matches"]:
+                _info, text = guard.read(match["path"])
+                current = _rank_document(match["path"], text.removeprefix("\ufeff"), phrase, terms)
+                if current is not None:
+                    matches.append(current)
+            diagnostics = dict(result["diagnostics"])
+            diagnostics.update(context_matches=0, context_omitted=0, context_truncated=0)
+            result = {**result, "context": _render_context(matches, 1500, diagnostics),
+                      "diagnostics": diagnostics}
     evidence = []
     omitted = []
     if result["context"]:
@@ -875,9 +937,6 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
         else:
             evidence.append(result["context"])
     if status == "ok":
-        config = _read_config(vault, _diagnostics())
-        if config is None:
-            raise ValueError("context unavailable")
         source_keys = [("hot_note", "hot_max_tokens"),
                        ("handoff_note", "handoff_max_tokens")]
         if cfg.get("_include_activity"):
@@ -892,7 +951,17 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
                        for rule in config.get("exclude_dirs", [])):
                     raise ValueError("excluded source")
                 source = checked_note_path(vault, rel, config["deny_zones"])
-                text, source_truncated = _read_context_prefix(source)
+                if guard is None:
+                    text, source_truncated = _read_context_prefix(source)
+                else:
+                    # Filter the full raw UTF-8 source, including BOM/CRLF,
+                    # before the legacy prefix and token output budgets.
+                    _info, text = guard.read(rel)
+                    raw_projection = text.encode("utf-8")
+                    source_truncated = len(raw_projection) > MAX_CONTEXT_NOTE_BYTES
+                    import codecs
+                    text = codecs.getincrementaldecoder("utf-8-sig")().decode(
+                        raw_projection[:MAX_CONTEXT_NOTE_BYTES], final=not source_truncated)
                 if path_key == "log_note":
                     text = "\n".join(text.splitlines()[:10])
                 if contains_sensitive(text):
@@ -909,6 +978,8 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
                     if low < len(text) or source_truncated:
                         omitted.append("context_truncated")
             except (OSError, UnicodeError, ValueError, OverflowError):
+                if guard is not None:
+                    raise ValueError("context unavailable") from None
                 omitted.append("context_source_unavailable")
     if cfg.get("_include_activity"):
         activity = cfg.get("_git_activity", "")
@@ -925,7 +996,14 @@ def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
         raise ValueError("input limit")
     if contains_sensitive(payload):
         raise ValueError("sensitive envelope")
-    return payload
+    envelope = _GenerationEnvelope(payload, guard)
+    envelope.recheck()
+    return envelope
+
+
+def _generation_prompt(vault: Path, cfg: dict, prompt: str) -> str:
+    """Compatibility string API; generation retains the internal envelope."""
+    return _generation_envelope(vault, cfg, prompt).payload
 
 
 def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
@@ -937,7 +1015,8 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
     if not prompt.strip():
         return GenerationResult(False, "(빈 질문 — 질문 내용을 보내 주세요)")
     try:
-        bounded_prompt = _generation_prompt(vault, cfg, prompt)
+        envelope = _generation_envelope(vault, cfg, prompt)
+        bounded_prompt = envelope.payload
     except (ValueError, UnicodeError, OSError):
         return GenerationResult(False, "⚠️ 질문 크기·민감정보 또는 근거 구성을 확인해 주세요.")
     try:
@@ -952,14 +1031,19 @@ def generate_claude(vault: Path, cfg: dict, prompt: str) -> GenerationResult:
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
     try:
+        child_env = child_process_env()
+        envelope.recheck()
         # qa_timeout_sec는 프롬프트 쓰기까지 포함한 전체 실행에 걸린다(run_with_stdin 참조).
         r = run_with_stdin(cmd, input=bounded_prompt, cwd=str(vault),
-                           timeout=cfg["qa_timeout_sec"], env=child_process_env(),
+                           timeout=cfg["qa_timeout_sec"], env=child_env,
                            startupinfo=startupinfo,
                            creationflags=(subprocess.CREATE_NO_WINDOW
                                           if sys.platform == "win32" else 0))
+        envelope.recheck()
     except ChildOutputLimitError:
         return GenerationResult(False, "⚠️ 응답 크기 한도를 초과했습니다. 질문을 좁혀 주세요.")
+    except (ValueError, UnicodeError):
+        return GenerationResult(False, "Context changed or is unavailable; prepare a fresh request.")
     except subprocess.TimeoutExpired:
         return GenerationResult(
             False, "⏱️ 응답 생성이 시간 초과됐습니다. 질문을 좁혀 다시 시도해 주세요.")

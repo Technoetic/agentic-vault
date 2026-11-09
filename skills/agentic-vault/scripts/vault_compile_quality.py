@@ -19,6 +19,7 @@ import re
 import sys
 import unicodedata
 
+import vault_relation_probes as relation_records
 from vault_proposals import Store, ProposalError, decode_json, read_bounded
 from vault_recall import _read_regular_bytes
 
@@ -150,17 +151,24 @@ def _present(kind, literal, numbers, dates, texts):
     return any(literal in body for body in texts)
 
 
-def check_compile(vault, sources, targets, required_claims, *, report_unsupported=False):
+def check_compile(vault, sources, targets, required_claims, *, report_unsupported=False, relation_probes=None):
     """Compare bounded literals; hashes bind current originals and compiled notes.
 
     report_unsupported=True adds the precision direction: number/date/name
     literals extracted from targets with the same scope and limits that appear
     in no selected source. Default output is unchanged when it is False.
+    relation_probes adds authored record comparisons bound only to selected
+    source/target roles. None preserves the legacy result shape and status.
     """
     if not isinstance(required_claims, list) or len(required_claims) > MAX_CLAIMS:
         raise QualityError('invalid_required_claims')
     if any(not isinstance(item, str) or not item.strip() or len(item) > 1024 for item in required_claims):
         raise QualityError('invalid_required_claim')
+    if relation_probes is not None:
+        try:
+            relation_records.validate_relation_probes(relation_probes, with_paths=True)
+        except relation_records.RelationProbeError as exc:
+            raise QualityError(str(exc)) from None
     try:
         store = Store(Path(vault))
         config_path = store.path('00-meta/vault-config.json')
@@ -200,6 +208,25 @@ def check_compile(vault, sources, targets, required_claims, *, report_unsupporte
         unsupported = [{'kind': kind, 'literal': literal, 'target_paths': sorted(paths)}
                        for (kind, literal), paths in sorted(target_facts.items())
                        if not _present(kind, literal, source_numbers, source_dates, source_bodies)]
+    relation_rows = None
+    if relation_probes is not None:
+        source_roles = {row['path']: row['text'] for row in originals}
+        target_roles = {row['path']: row['text'] for row in compiled}
+        groups = {}
+        for probe in relation_probes:
+            pair = (probe['source_path'], probe['target_path'])
+            if pair[0] not in source_roles or pair[1] not in target_roles:
+                raise QualityError('relation_path_not_selected_role')
+            groups.setdefault(pair, []).append({key: probe[key] for key in ('id', 'anchor', 'scope')})
+        observed = {}
+        try:
+            for (source_path, target_path), probes in groups.items():
+                checked = relation_records.check_relation_records(source_roles[source_path], target_roles[target_path], probes)
+                for row in checked['relation_rows']:
+                    observed[row['id']] = {**row, 'source_path': source_path, 'target_path': target_path}
+        except relation_records.RelationProbeError as exc:
+            raise QualityError(str(exc)) from None
+        relation_rows = [observed[probe['id']] for probe in relation_probes]
     # Recheck policy and every original after analysis. This is a point-in-time
     # guard, not an atomic multi-file snapshot or authority to quarantine.
     try:
@@ -243,6 +270,18 @@ def check_compile(vault, sources, targets, required_claims, *, report_unsupporte
                                   'status, review_reason or exit code; paraphrase, unit and format variants cause '
                                   'misses and false alarms; a literal is not truth'),
         })
+    if relation_rows is not None:
+        reasons = _relation_reasons(relation_rows)
+        result.update(relation_rows=relation_rows, relation_scope=relation_records.RELATION_SCOPE,
+                      relation_review_reasons=reasons)
+        if relation_rows and result['review_reason'] == 'no_selected_literal_facts':
+            # Valid authored records supply selected evidence even when the
+            # legacy number/date/name/claim extraction found none.
+            result['review_reason'] = None
+            result['status'] = 'complete'
+        if reasons:
+            result['status'] = 'needs_review'
+            result['review_reason'] = result['review_reason'] or reasons[0]
     return result
 
 
@@ -285,7 +324,12 @@ def _declared(values, name):
     return [_normalize(item) for item in values]
 
 
-def check_preservation(original, candidate, *, required_claims=(), expected_removals=(), expected_additions=()):
+def _relation_reasons(rows):
+    return list(dict.fromkeys('relation_' + row['reason'] for row in rows if not row['preserved']))
+
+
+def check_preservation(original, candidate, *, required_claims=(), expected_removals=(), expected_additions=(),
+                       relation_probes=None):
     """Occurrence-counted literal preservation from one note's original to its candidate, both given as text.
 
     Only the two texts are read and nothing is written. Bodies are compared
@@ -298,6 +342,8 @@ def check_preservation(original, candidate, *, required_claims=(), expected_remo
     declaration that contains date or number tokens is judged by those tokens
     (for example 90일 names the number 90). The result is advisory review
     material: it never permits or blocks an edit, and a literal is not truth.
+    Optional relation_probes additionally compare whole authored body records;
+    None preserves the legacy result shape and status.
     """
     claims = _declared(required_claims, 'required_claims')
     removals = _declared(expected_removals, 'expected_removals')
@@ -373,7 +419,7 @@ def check_preservation(original, candidate, *, required_claims=(), expected_remo
     # nothing about the rest of the text, so 0 of 0 never reads as complete.
     if not rows:
         reasons.append('no_selected_literal_facts')
-    return {'status': 'needs_review' if reasons else 'complete', 'review_reasons': reasons,
+    result = {'status': 'needs_review' if reasons else 'complete', 'review_reasons': reasons,
             'original_sha256': hashlib.sha256(original.encode('utf-8')).hexdigest(),
             'candidate_sha256': hashlib.sha256(candidate.encode('utf-8')).hexdigest(),
             'facts_checked': len(rows), 'facts_preserved': sum(row['preserved'] for row in rows),
@@ -388,6 +434,17 @@ def check_preservation(original, candidate, *, required_claims=(), expected_remo
                       'declarations with date/number tokens are judged by those tokens; paraphrases and attached '
                       'particles show as missing, and a sentence rewritten with the same numbers and links is '
                       'caught only when it is declared as a claim')}
+    if relation_probes is not None:
+        try:
+            checked = relation_records.check_relation_records(original, candidate, relation_probes)
+        except relation_records.RelationProbeError as exc:
+            raise QualityError(str(exc)) from None
+        result.update(relation_rows=checked['relation_rows'], relation_scope=checked['relation_scope'])
+        if checked['relation_rows'] and 'no_selected_literal_facts' in reasons:
+            reasons.remove('no_selected_literal_facts')
+        reasons.extend(_relation_reasons(checked['relation_rows']))
+        result['status'] = 'needs_review' if reasons else 'complete'
+    return result
 
 
 def main(argv=None):
@@ -401,10 +458,12 @@ def main(argv=None):
         if len(data) > MAX_INPUT_BYTES:
             raise QualityError('input_byte_limit')
         request = decode_json(data)
-        if not isinstance(request, dict) or set(request) != {'sources', 'targets', 'required_claims'}:
+        required = {'sources', 'targets', 'required_claims'}
+        if (not isinstance(request, dict) or not required <= set(request)
+                or set(request) - required - {'relation_probes'}):
             raise QualityError('invalid_request')
         result = check_compile(args.vault, request['sources'], request['targets'], request['required_claims'],
-                               report_unsupported=args.report_unsupported)
+                               report_unsupported=args.report_unsupported, relation_probes=request.get('relation_probes'))
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
         return 0 if result['status'] == 'complete' else 1
     except (QualityError, ProposalError, ValueError, OSError, RuntimeError, UnicodeError) as exc:

@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "unchanged",
+      "category": "preserved",
+      "original": "[[Sample A]] quantity is 10.\n[[Sample B]] quantity is 20.",
+      "candidate": "[[Sample A]] quantity is 10.\n[[Sample B]] quantity is 20.",
+      "probes": [
+        {
+          "id": "a",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        },
+        {
+          "id": "b",
+          "anchor": "[[Sample B]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "quantity_swap",
+      "category": "binding",
+      "original": "[[Sample A]] quantity is 10.\n[[Sample B]] quantity is 20.",
+      "candidate": "[[Sample A]] quantity is 20.\n[[Sample B]] quantity is 10.",
+      "probes": [
+        {
+          "id": "a",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        },
+        {
+          "id": "b",
+          "anchor": "[[Sample B]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "record_reorder",
+      "category": "preserved",
+      "original": "[[Sample A]] quantity is 10.\n[[Sample B]] quantity is 20.",
+      "candidate": "[[Sample B]] quantity is 20.\n[[Sample A]] quantity is 10.",
+      "probes": [
+        {
+          "id": "a",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        },
+        {
+          "id": "b",
+          "anchor": "[[Sample B]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "negation_appended",
+      "category": "polarity",
+      "original": "[[Access rule]] approval is required.",
+      "candidate": "[[Access rule]] approval is required. Approval is not required.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Access rule]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "exception_removed",
+      "category": "condition",
+      "original": "[[Access rule]] entry is forbidden.\nExcept during an emergency.",
+      "candidate": "[[Access rule]] entry is forbidden.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Access rule]]",
+          "scope": "paragraph"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "duplicate_old_record",
+      "category": "ambiguity",
+      "original": "[[Sample A]] quantity is 10.",
+      "candidate": "[[Sample A]] quantity is 20.\n\n[[Sample A]] quantity is 10.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "canonical_unicode",
+      "category": "preserved",
+      "original": "[[Café]] quantity is 10.",
+      "candidate": "[[Café]] quantity is 10.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Café]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "case_sensitive_unit",
+      "category": "binding",
+      "original": "[[Limit]] value is 10Pa.",
+      "candidate": "[[Limit]] value is 10pA.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Limit]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "missing_anchor",
+      "category": "missing",
+      "original": "[[Sample A]] quantity is 10.",
+      "candidate": "[[Sample C]] quantity is 10.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "changed_number_control",
+      "category": "binding",
+      "original": "[[Sample A]] quantity is 10.",
+      "candidate": "[[Sample A]] quantity is 11.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "condition_added",
+      "category": "condition",
+      "original": "[[Access rule]] approval is required.",
+      "candidate": "[[Access rule]] approval is required.\nOnly when audited.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Access rule]]",
+          "scope": "paragraph"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "line_endings",
+      "category": "preserved",
+      "original": "[[Access rule]] approval is required.\r\nOnly when audited.\r\n",
+      "candidate": "[[Access rule]] approval is required.\nOnly when audited.\n",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Access rule]]",
+          "scope": "paragraph"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "frontmatter_only_change",
+      "category": "preserved",
+      "original": "---\nname: Draft\nupdated: 2000-01-01\n---\n[[Sample A]] quantity is 10.",
+      "candidate": "---\nname: Revised\nupdated: 2001-01-01\n---\n[[Sample A]] quantity is 10.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Sample A]]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "literal_metacharacters",
+      "category": "preserved",
+      "original": "[.*] approval is required.",
+      "candidate": "[.*] approval is required.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[.*]",
+          "scope": "line"
+        }
+      ],
+      "expected_preserved": true
+    },
+    {
+      "id": "exception_detached",
+      "category": "condition",
+      "original": "[[Access rule]] entry is forbidden.\nExcept during an emergency.",
+      "candidate": "[[Access rule]] entry is forbidden.\n\nExcept during an emergency.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Access rule]]",
+          "scope": "paragraph"
+        }
+      ],
+      "expected_preserved": false
+    },
+    {
+      "id": "same_record_repeated_anchor",
+      "category": "preserved",
+      "original": "[[Sample A]] confirms [[Sample A]] quantity is 10.",
+      "candidate": "[[Sample A]] confirms [[Sample A]] quantity is 10.",
+      "probes": [
+        {
+          "id": "selected",
+          "anchor": "[[Sample A]]",
+          "scope": "paragraph"
+        }
+      ],
+      "expected_preserved": true
+    }
+  ]
+}

@@ -120,6 +120,9 @@ deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다. Codex의 `i
 현재 사용자에게 이미 승인받은 정확한 수정안에만 사용한다. `stale`이면 최신 diff를 다시 검토하며,
 설정·경로 오류를 다른 읽기 도구로 우회하지 않는다. 이 두 명시적 작업은 해당 절차로 종료하며
 아래의 일반 세션 복원을 덧붙이지 않는다.
+선택한 줄·문단 전체의 보존은 [기록 보존 안내](../../../docs/relation-preservation.md)의 명시적
+`relation_probes`를 사용한다. 기존 해시·경로 정책 안에서만 검사하며, 누락·중복·차이를 검토로
+보고한다. 의미·진실·적용 권한을 보증하지 않으며 옵션을 생략하면 기존 검사를 유지한다.
 
 `evidence`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_evidence.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
 v0.11.0부터 제공하는 선택 기능이다. 설치본에 스크립트가 없으면 해당 설치본에서

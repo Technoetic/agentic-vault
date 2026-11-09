@@ -13,6 +13,7 @@ import re
 import sys
 
 from vault_evidence import EvidenceError, Store, decode, encode, stable_read
+from vault_context_guard import ContextGuard
 from vault_healthcheck import HealthcheckError
 from vault_recall import _classified_skip
 from jev_client import JevError, MODEL, SENSITIVE, build_payload, contains_sensitive, request_judgments
@@ -101,7 +102,7 @@ def _lines(text):
     return text.replace('\r\n', '\n').replace('\r', '\n')
 
 
-def _read_source(store, relative):
+def _read_source(store, relative, guard=None):
     if not relative.lower().endswith('.md'):
         raise JudgeError('unsafe_source')
     parts = tuple(relative.replace('\\', '/').split('/'))
@@ -115,7 +116,8 @@ def _read_source(store, relative):
         return path
     info, _stamp, raw = stable_read(resolver, MAX_SOURCE_BYTES, contents=True)
     try:
-        content = _lines(raw.decode('utf-8-sig'))
+        text = guard.project(relative, raw, info) if guard is not None else raw.decode('utf-8')
+        content = _lines(text.removeprefix('\ufeff'))
     except UnicodeError:
         raise JudgeError('invalid_source_encoding') from None
     return info, content
@@ -129,9 +131,10 @@ def _prepare(vault, value):
     if not data['sources']:
         return {**base, 'status': 'needs_review', 'reason': 'no_evidence'}, None
     store = Store(Path(vault))
+    guard = ContextGuard(store)
     references, evidence = [], []
     for source in data['sources']:
-        info, content = _read_source(store, source['path'])
+        info, content = _read_source(store, source['path'], guard)
         excerpt = _lines(source['excerpt'])
         start = content.find(excerpt)
         if start < 0:
@@ -153,12 +156,13 @@ def _prepare(vault, value):
         current, _ = _read_source(store, reference['path'])
         if current['sha256'] != reference['sha256']:
             raise JudgeError('source_changed')
+    guard.recheck()
     result = {**base, 'status': 'prepared', 'config_sha256': store.config_sha,
               'input_sha256': hashlib.sha256(encode(data)).hexdigest(),
               'request_sha256': hashlib.sha256(outbound).hexdigest(),
               'sources': references, 'question_count': len(questions),
               'min_confidence': data['min_confidence'], 'network_required': True}
-    return result, (store, data, state, questions)
+    return result, (store, data, state, questions, guard)
 
 
 def _error_code(exc):
@@ -168,7 +172,8 @@ def _error_code(exc):
         return str(exc)
     if isinstance(exc, EvidenceError):
         return str(exc) if str(exc) in {'configuration_changed', 'input_too_large',
-                                       'file_changed_during_read', 'unsafe_file', 'unsafe_path'} else 'invalid_input'
+                                       'file_changed_during_read', 'source_changed',
+                                       'unsafe_file', 'unsafe_path'} else 'invalid_input'
     return 'invalid_input'
 
 
@@ -196,8 +201,10 @@ def run(vault, request, *, allow_network=False, api_key=None, transport=None):
         key = os.environ.get('TYPESAFE_API_KEY', '') if api_key is None else api_key
         if not key:
             return _failure('missing_api_key')
-        store, data, state, questions = context
+        store, data, state, questions, guard = context
+        guard.recheck()
         reply = request_judgments(state, questions, api_key=key, transport=transport)
+        guard.recheck()
         store.fresh_policy()
         for source in prepared['sources']:
             current, _ = _read_source(store, source['path'])

@@ -178,6 +178,18 @@ class PublicDocsTests(unittest.TestCase):
 
 
 class ContinuousIntegrationTests(unittest.TestCase):
+    def test_required_stateful_job_runs_all_generated_modules_with_dependencies(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        stateful = workflow.split("\n  stateful:\n", 1)[1].split("\n  supply-chain-audit:\n", 1)[0]
+        dependency_install = "run: python -m pip install -r requirements-dev.txt"
+        command = (
+            "run: python -m unittest tests.test_stateful_memory_lifecycle "
+            "tests.test_stateful_relation_probes tests.test_stateful_revocation_egress -v"
+        )
+        self.assertIn(command, stateful)
+        self.assertLess(stateful.index(dependency_install), stateful.index(command))
+        self.assertNotIn("continue-on-error", stateful)
+
     def test_whitespace_check_covers_whole_committed_tree(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         runs = [line.strip() for line in workflow.splitlines()

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "original-synthetic-egress-20261109",
+  "sources": [
+    {"id": "root", "path": "20-knowledge/source.md", "lines": ["# Synthetic source", "POISON_ROOT fixture instruction", "BENIGN_ROOT checkpoint"], "start_line": 2, "end_line": 2, "markers": ["POISON_ROOT"], "benign": "BENIGN_ROOT"},
+    {"id": "hot", "path": "00-meta/hot.md", "lines": ["# Synthetic hot", "DERIVED_HOT transformed fixture", "BENIGN_HOT checkpoint"], "start_line": 2, "end_line": 2, "markers": ["DERIVED_HOT"], "benign": "BENIGN_HOT"},
+    {"id": "handoff", "path": "00-meta/handoff.md", "lines": ["# Synthetic handoff", "FRAGMENT_ONE split fixture", "FRAGMENT_TWO split fixture", "BENIGN_HANDOFF checkpoint"], "start_line": 2, "end_line": 3, "markers": ["FRAGMENT_ONE", "FRAGMENT_TWO"], "benign": "BENIGN_HANDOFF"},
+    {"id": "log", "path": "00-meta/log.md", "lines": ["# Synthetic activity", "DERIVED_LOG summarized fixture", "BENIGN_LOG checkpoint"], "start_line": 2, "end_line": 2, "markers": ["DERIVED_LOG"], "benign": "BENIGN_LOG"}
+  ],
+  "derivations": [{"parent": "root", "child": "hot"}, {"parent": "hot", "child": "handoff"}, {"parent": "root", "child": "log"}],
+  "undeclared": {"path": "20-knowledge/undeclared.md", "text": "# Outside declared scope\nUNDECLARED_COPY transformed fixture\n"}
+}

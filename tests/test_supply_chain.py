@@ -108,7 +108,8 @@ BLOCKING_RUNS_V0240 = {
     ),
     "stateful": (
         "python -m pip install -r requirements-dev.txt",
-        "python tests/test_stateful_memory_lifecycle.py",
+        "python -m unittest tests.test_stateful_memory_lifecycle "
+        "tests.test_stateful_relation_probes tests.test_stateful_revocation_egress -v",
     ),
 }
 EXACT_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([0-9][0-9A-Za-z.+!-]*)")

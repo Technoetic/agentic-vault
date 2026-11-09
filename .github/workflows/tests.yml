@@ -115,8 +115,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install test dependencies only
         run: python -m pip install -r requirements-dev.txt
-      - name: Generated proposal and operation lifecycle regressions
-        run: python tests/test_stateful_memory_lifecycle.py
+      - name: Generated lifecycle, relation and configured egress regressions
+        run: python -m unittest tests.test_stateful_memory_lifecycle tests.test_stateful_relation_probes tests.test_stateful_revocation_egress -v
 
   # Advisory supply-chain checks. Findings surface as warnings; this job never
   # fails the workflow and gets no write, OIDC or code-scanning permission.

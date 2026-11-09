@@ -341,16 +341,41 @@ def propose(store: Store, args) -> dict:
     return {'id': receipt['id'], 'status': 'proposed'}
 
 
-def preserve_check(receipt: dict, claims, removals, additions) -> dict:
+def preserve_check(receipt: dict, claims, removals, additions, *, relation_probes=None) -> dict:
     """Read-only literal preservation between the receipt's stored original and candidate (advisory)."""
     # vault_compile_quality imports this module, so it is loaded only for this read-only command.
     from vault_compile_quality import QualityError, check_preservation
     try:
         observed = check_preservation(receipt['original'], receipt['candidate'], required_claims=list(claims),
-                                      expected_removals=list(removals), expected_additions=list(additions))
+                                      expected_removals=list(removals), expected_additions=list(additions),
+                                      relation_probes=relation_probes)
     except QualityError as exc:
         raise ProposalError(str(exc)) from None
     return {'id': receipt['id'], 'target': receipt['target'], 'proposal_status': receipt['status'], **observed}
+
+
+def read_relation_manifest(store: Store, relative: str):
+    """Read a bounded JSON sidecar through current portable/deny/reserved policy.
+
+    Return probes and a raw-byte digest for the caller's post-analysis recheck.
+    Exclusions retain the existing explicitly-selected ingest input semantics.
+    """
+    from vault_relation_probes import MAX_MANIFEST_BYTES, RelationProbeError, parse_relation_manifest
+
+    def resolve():
+        path = store.path(relative)
+        canonical = path.relative_to(store.root).as_posix().casefold()
+        if path.suffix.casefold() != '.json' or any(
+                canonical == reserved or canonical.startswith(reserved + '/') for reserved in RESERVED_NOTE_DIRS):
+            raise ProposalError('invalid_relation_manifest_path')
+        return path
+
+    raw = read_stable(resolve, MAX_MANIFEST_BYTES)
+    try:
+        probes = parse_relation_manifest(decode_json(raw))
+    except RelationProbeError as exc:
+        raise ProposalError(str(exc)) from None
+    return probes, sha(raw)
 
 
 def apply(store: Store, receipt: dict) -> dict:
@@ -583,6 +608,7 @@ def main(argv=None) -> int:
             command.add_argument('--reason', required=True)
     preserve = commands.add_parser('preserve-check')
     preserve.add_argument('id')
+    preserve.add_argument('--relation-probes', help='vault-relative schema1 JSON authored record probes')
     for flag in ('claim', 'expect-removed', 'expect-added'):
         preserve.add_argument('--' + flag, action='append', default=[])
     args = parser.parse_args(argv)
@@ -602,7 +628,19 @@ def main(argv=None) -> int:
                 result = rollback_preview(store, receipt)
             elif args.command == 'preserve-check':
                 validate_change(store, receipt['target'], receipt['original'], receipt['candidate'])
-                result = preserve_check(receipt, args.claim, args.expect_removed, args.expect_added)
+                probes, manifest_sha = (read_relation_manifest(store, args.relation_probes)
+                                        if args.relation_probes is not None else (None, None))
+                result = preserve_check(receipt, args.claim, args.expect_removed, args.expect_added,
+                                        relation_probes=probes)
+                if args.relation_probes is not None:
+                    fresh = store.fresh()
+                    current_receipt = fresh.load(args.id)
+                    if current_receipt['receipt_sha256'] != receipt['receipt_sha256']:
+                        raise ProposalError('proposal_changed')
+                    if read_relation_manifest(fresh, args.relation_probes)[1] != manifest_sha:
+                        raise ProposalError('relation_manifest_changed')
+                    validate_change(fresh, receipt['target'], receipt['original'], receipt['candidate'])
+                    fresh.fresh()
             else:
                 result = check(store, receipt)
         else:

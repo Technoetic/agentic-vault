@@ -1,5 +1,24 @@
 # Claude Code · Codex 겸용 사용
 
+## v0.44.0 - authored record probes and configured revocation at egress
+
+[Relation preservation](relation-preservation.md) optionally compares a uniquely anchored
+source line or paragraph with its candidate record. This is literal record preservation,
+not semantic truth or permission to edit. Omitted probes keep the existing checks.
+[Configured revocation](revocation-egress.md) now filters full raw source text for Jev
+file-grounded judgments and Jarvis generation before normalization or truncation. The
+same policy/source envelope is rechecked around dispatch. This covers the two named
+consumers and declared derivatives; already-sent data and unregistered semantic copies
+remain outside that guarantee. No configuration keeps the existing behavior.
+
+Generated tests extend the existing development-only Hypothesis dependency. Their sink
+is simulated and their inputs are synthetic; no persistent outbox or actual-model
+defense result is claimed. Conversation-budget research remains exploratory. Current
+install refs target v0.44.0; publication does not update active installations or company
+vaults. See [scope](releases/v0.44.0.md) and [verification](verification/v0.44.0.md).
+
+Earlier version sections below are historical; use the current installation commands.
+
 ## v0.43.0 - large-vault operations, shared worktrees and verifier fidelity
 
 [Recall scope](recall-scope.md) adds optional read settings and three result
@@ -159,7 +178,7 @@ files and committed LF harmless corpus remain unchanged from v0.37.0 and the v0.
 candidate when installed bound bytes match. Older changed-byte transitions retain warning
 reset, engine alignment, certificate regeneration with harmless replay and re-promotion.
 See [release scope](releases/v0.38.1.md) and [verification gates](verification/v0.38.1.md).
-The following version sections are historical; current install refs target v0.43.0.
+The following version sections are historical; current install refs target v0.44.0.
 
 ## v0.38.0 - optional source binding and local-model evaluation
 
@@ -353,7 +372,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.43.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.44.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -367,7 +386,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대�
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.43.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.44.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
