@@ -365,8 +365,9 @@ def read_relation_manifest(store: Store, relative: str):
     def resolve():
         path = store.path(relative)
         canonical = path.relative_to(store.root).as_posix().casefold()
-        if path.suffix.casefold() != '.json' or any(
-                canonical == reserved or canonical.startswith(reserved + '/') for reserved in RESERVED_NOTE_DIRS):
+        if (path.suffix.casefold() != '.json' or any(
+                canonical == reserved or canonical.startswith(reserved + '/') for reserved in RESERVED_NOTE_DIRS)
+                or store.worktrees.denied(path.relative_to(store.root).parts, RESERVED_NOTE_DIRS)):
             raise ProposalError('invalid_relation_manifest_path')
         return path
 

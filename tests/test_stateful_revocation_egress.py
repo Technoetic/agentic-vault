@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 try:
     from hypothesis import seed, settings, strategies as st
@@ -50,7 +51,63 @@ if HAVE_HYPOTHESIS:
             self.derived_count = 0
 
         def teardown(self):
-            self.temp.cleanup()
+            try:
+                self.terminal_checkpoint()
+            finally:
+                self.temp.cleanup()
+
+        def terminal_checkpoint(self):
+            """Every generated trace ends with measured current consumer outcomes.
+
+            A refusal is evidence of unavailability, not useful masking. Rebuild
+            current context here; pending stale envelopes remain tested by rules.
+            """
+            rows = []
+            def record(consumer, text, outcome='observed'):
+                if outcome == 'observed':
+                    self.assert_observed_context(text)
+                rows.append(evaluation.observe(self.fixture, consumer, text, outcome=outcome,
+                    phase='after_revoke' if self.revoked else 'before_revoke'))
+
+            retrieved = evaluation.recall(self.fixture.root, 'BENIGN')
+            record('vault_recall.recall', retrieved['context'],
+                   'observed' if retrieved['diagnostics']['status'] == 'ok' else 'unavailable')
+            compiled = evaluation.compile_units(self.fixture.root,
+                [self.fixture.unit(poison=True), self.fixture.unit()])
+            record('vault_memory.compile_units', compiled['context'],
+                   'observed' if compiled['context'] else 'unavailable')
+            try:
+                envelope = evaluation.bridge._generation_envelope(self.fixture.root,
+                    {'_include_activity': True}, 'BENIGN')
+            except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
+                envelope = None
+                assert not self.registry_valid or (self.revoked and not self.hot_binding_valid)
+                record('jarvis_bridge._generation_envelope', '', 'unavailable')
+            else:
+                record('jarvis_bridge._generation_envelope', envelope.payload)
+
+            try:
+                prepared, context = evaluation.judge._prepare(self.fixture.root, self.fixture.request())
+            except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
+                assert not self.registry_valid
+                record('vault_judge._prepare', '', 'unavailable')
+            else:
+                assert prepared['status'] == 'prepared' and context is not None
+                record('vault_judge._prepare', '\n'.join(context[2]['evidence']))
+
+            if envelope is None:
+                record('simulated_memory_sink', '', 'refused')
+            else:
+                envelope.recheck()  # The actual current envelope's freshness guard.
+                self.simulated_sink.append(envelope.payload)
+                record('simulated_memory_sink', self.simulated_sink[-1])
+            self.terminal_observations = rows
+            self.terminal_assessment = evaluation.assess_observations(rows)
+            assert len(rows) == 5 and self.terminal_assessment['unavailable_count'] <= 5
+            available = self.registry_valid and (not self.revoked or self.hot_binding_valid)
+            # Before withdrawal, declared fixture markers are intentionally
+            # visible. That exposure is a baseline, not a masking success.
+            assert self.terminal_assessment['safe_useful'] == (self.revoked and available)
 
         def assert_observed_context(self, text):
             assert text and 'BENIGN_' in text, 'missing benign observation is not safe useful success'
@@ -163,6 +220,46 @@ if HAVE_HYPOTHESIS:
 
     TestEgressLifecycle = EgressLifecycleMachine.TestCase
     TestEgressLifecycle.settings = GENERATION
+
+    class MandatoryTerminalObservationTests(unittest.TestCase):
+        def run_terminal(self, invalid=False):
+            machine = EgressLifecycleMachine()
+            machine.revoke_root()
+            if invalid:
+                machine.change_between_prepare_and_send(change='registry')
+            with mock.patch.object(evaluation, 'recall', wraps=evaluation.recall) as retrieved, \
+                    mock.patch.object(evaluation, 'compile_units', wraps=evaluation.compile_units) as compiled, \
+                    mock.patch.object(evaluation.bridge, '_generation_envelope',
+                                      wraps=evaluation.bridge._generation_envelope) as prepared, \
+                    mock.patch.object(evaluation.judge, '_prepare', wraps=evaluation.judge._prepare) as judged:
+                machine.teardown()
+            self.assertGreater(retrieved.call_count, 0, 'terminal trace had no actual retrieval observation')
+            self.assertGreater(compiled.call_count, 0, 'terminal trace had no actual compile observation')
+            self.assertGreater(prepared.call_count, 0, 'terminal trace had no actual guarded preparation')
+            self.assertGreater(judged.call_count, 0, 'terminal trace had no actual Jev preparation')
+            self.assertEqual(len(machine.terminal_observations), 5)
+            return machine
+
+        def test_short_revoke_trace_must_observe_consumers_and_guarded_simulated_send(self):
+            machine = self.run_terminal()
+            self.assertTrue(machine.terminal_assessment['safe_useful'])
+            self.assertEqual(machine.terminal_assessment['benign_retained_count'], 5)
+            self.assertTrue(machine.simulated_sink)
+
+        def test_invalid_terminal_state_is_observed_refusal_not_useful_safe_success(self):
+            machine = self.run_terminal(invalid=True)
+            self.assertEqual(machine.terminal_assessment['observed_count'], 0)
+            self.assertEqual(machine.terminal_assessment['unavailable_count'], 5)
+            self.assertFalse(machine.terminal_assessment['safe_useful'])
+            self.assertEqual(machine.simulated_sink, [])
+
+        def test_cli_seed_reaches_actual_hypothesis_state_machine_factory(self):
+            actual_runner = run_state_machine_as_test
+            def run(factory, **kwargs):
+                self.assertEqual(getattr(factory, '_hypothesis_internal_use_seed', None), 20261109)
+                return actual_runner(factory, **kwargs)
+            with mock.patch(__name__ + '.run_state_machine_as_test', side_effect=run):
+                self.assertEqual(main(['--seed', '20261109', '--max-examples', '1', '--steps', '1']), 0)
 else:
     @unittest.skip('Hypothesis is an optional development dependency; direct execution requires it')
     class TestEgressLifecycle(unittest.TestCase):
@@ -181,10 +278,9 @@ def main(argv=None):
         parser.error('install requirements-dev.txt; generated tests must not skip')
     class SelectedMachine(EgressLifecycleMachine):
         unfiltered_reader = options.negative_control
-    run = lambda: run_state_machine_as_test(SelectedMachine, settings=settings(
+    run_state_machine_as_test(seed(options.seed)(SelectedMachine), settings=settings(
         max_examples=options.max_examples, stateful_step_count=options.steps,
         deadline=None, database=None))
-    seed(options.seed)(run)()
     print('Generated egress lifecycle passed: actual readers, simulated sink; seed=' + str(options.seed))
     return 0
 

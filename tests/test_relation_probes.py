@@ -279,6 +279,46 @@ class RelationIntegrationTests(unittest.TestCase):
         with self.assertRaises(proposals.ProposalError):
             proposals.read_relation_manifest(store, '00-meta/linked.json')
 
+    def test_sidecar_reserved_dirs_in_linked_and_nested_worktrees_are_rejected(self):
+        payload = json.dumps({'schema_version': 1, 'probes': PROBES})
+        self.write('00-meta/vault-config.json', json.dumps({'required_keys': [], 'enums': {},
+                   'deny_zones': ['private'], 'exclude_dirs': ['10-inbox']}))
+        for prefix, name in [('copy', 'outer'), ('copy/nested', 'inner')]:
+            admin = self.vault / '.git' / 'worktrees' / name
+            admin.mkdir(parents=True)
+            self.write(prefix + '/.git', 'gitdir: ' + admin.as_posix() + '\n')
+        store = proposals.Store(self.vault)
+        for prefix in ('copy', 'copy/nested'):
+            for reserved in ('00-meta/proposals', '00-meta/evidence', '00-meta/.agentic-vault/runtime'):
+                relative = prefix + '/' + reserved + '/probes.json'
+                self.write(relative, payload)
+                with self.subTest(relative=relative), self.assertRaises(proposals.ProposalError):
+                    proposals.read_relation_manifest(store, relative)
+        # Explicitly selected JSON inputs keep existing retrieval-exclusion
+        # semantics; only reserved views and configured deny zones are closed.
+        for prefix in ('', 'copy/', 'copy/nested/'):
+            relative = prefix + '10-inbox/probes.json'
+            self.write(relative, payload)
+            probes, digest = proposals.read_relation_manifest(store, relative)
+            self.assertEqual(probes, PROBES)
+            self.assertEqual(digest, hashlib.sha256(payload.encode()).hexdigest())
+
+    def test_sidecar_rechecks_new_worktree_view_after_read(self):
+        admin = self.vault / '.git' / 'worktrees' / 'new'
+        admin.mkdir(parents=True)
+        relative = 'new-copy/00-meta/proposals/probes.json'
+        self.write(relative, json.dumps({'schema_version': 1, 'probes': PROBES}))
+        target = self.vault / relative
+        store = proposals.Store(self.vault)
+        real_open = os.open
+        def introduce_worktree(path, *args, **kwargs):
+            descriptor = real_open(path, *args, **kwargs)
+            if Path(path) == target:
+                self.write('new-copy/.git', 'gitdir: ' + admin.as_posix() + '\n')
+            return descriptor
+        with patch.object(os, 'open', side_effect=introduce_worktree), self.assertRaises(proposals.ProposalError):
+            proposals.read_relation_manifest(store, relative)
+
     def test_proposal_opt_in_rechecks_manifest_receipt_and_policy_after_analysis(self):
         real = proposals.preserve_check
         for change, expected in [('manifest', 'relation_manifest_changed'), ('receipt', 'proposal_changed'),

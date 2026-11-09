@@ -192,6 +192,46 @@ class RevocationEgressTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(send.call_count, 0)
 
+    def test_jarvis_disabled_to_enabled_before_dispatch_refuses_child(self):
+        for disabled in ('absent', 'empty'):
+            with self.subTest(disabled=disabled):
+                self.fixture = EgressFixture(self.vault, bom=True)
+                if disabled == 'absent':
+                    self.fixture.config.pop('memory_revocation_file')
+                else:
+                    self.fixture.config['memory_revocation_file'] = ''
+                self.fixture.save()
+                def enable():
+                    self.fixture.config['memory_revocation_file'] = '00-meta/revocations.json'
+                    self.fixture.save()
+                result, send = self.jarvis_run(before=enable)
+                self.assertFalse(result.ok)
+                self.assertEqual(send.call_count, 0)
+
+    def test_jarvis_disabled_to_enabled_during_dispatch_withholds_response(self):
+        self.fixture.config.pop('memory_revocation_file')
+        self.fixture.save()
+        def enable():
+            self.fixture.config['memory_revocation_file'] = '00-meta/revocations.json'
+            self.fixture.save()
+        result, send = self.jarvis_run(during=enable)
+        self.assertEqual(send.call_count, 1)
+        self.assertFalse(result.ok)
+        self.assertNotIn('synthetic answer', result.text)
+
+    def test_jarvis_not_vault_to_vault_before_dispatch_refuses_child(self):
+        (self.vault / '00-meta/vault-config.json').unlink()
+        result, send = self.jarvis_run(before=self.fixture.save)
+        self.assertFalse(result.ok)
+        self.assertEqual(send.call_count, 0)
+
+    def test_jarvis_not_vault_to_vault_during_dispatch_withholds_response(self):
+        (self.vault / '00-meta/vault-config.json').unlink()
+        result, send = self.jarvis_run(during=self.fixture.save)
+        self.assertEqual(send.call_count, 1)
+        self.assertFalse(result.ok)
+        self.assertNotIn('synthetic answer', result.text)
+
     def test_configured_malformed_or_stale_sources_never_use_unfiltered_fallback(self):
         for kind in ('registry', 'direct'):
             with self.subTest(kind=kind):

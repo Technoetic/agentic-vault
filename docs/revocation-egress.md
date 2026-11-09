@@ -25,7 +25,10 @@ answer; they cannot retract bytes already sent.
 The compatibility `_generation_prompt` API still returns a string. Actual Jarvis
 generation retains the envelope and checks its original guard, rather than
 constructing a new policy after generation. With revocation absent or disabled,
-the existing prompt format and direct-prefix behavior remain unchanged.
+the existing prompt format and direct-prefix behavior remain unchanged. Every
+envelope still binds the original raw configuration identity or its absence;
+enabling revocation or creating a vault configuration before dispatch rejects the
+old prompt rather than authorizing it under the newly enabled policy.
 
 Configured whole-source reads retain the existing 4 MiB file bound and 32 MiB
 cumulative revocation-reader budget. The guard's additional selected-source reads
@@ -63,6 +66,10 @@ fresh retrieval, compile rebuild, prepare, simulated send, source/configuration/
 registry changes and authored synthetic rebind orders. Direct execution requires
 Hypothesis and errors if it is missing; ordinary unittest discovery can skip the
 optional generated module when the development dependency is absent.
+Each generated trace finishes with mandatory actual fresh retrieval, compile,
+Jev/Jarvis preparation and a guarded simulated-send checkpoint. Missing context
+and invalid/stale evidence are recorded as unavailable/refused observations and
+do not earn useful safe success.
 
 These two negative controls intentionally exit nonzero:
 

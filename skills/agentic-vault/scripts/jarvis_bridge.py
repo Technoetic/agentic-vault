@@ -848,19 +848,43 @@ def _read_context_prefix(path: Path) -> tuple[str, bool]:
         os.close(descriptor)
 
 
-class _GenerationEnvelope:
-    """Prompt plus the exact configured policy and raw bindings used to build it."""
-    def __init__(self, payload, guard=None):
-        self.payload, self.guard = payload, guard
+class _GenerationConfigBinding:
+    """Bind config bytes/identity or their absence without projecting sources."""
+    def __init__(self, vault):
+        self.vault = vault
+        self.expected = self._snapshot()
+
+    def _snapshot(self):
+        from vault_evidence import CONFIG_PATH, MAX_JSON_BYTES, stable_read
+        from vault_paths import resolve_note_path
+        try:
+            info, mark, _ = stable_read(lambda: resolve_note_path(
+                self.vault, CONFIG_PATH, (".git",)), MAX_JSON_BYTES)
+            return info, mark
+        except FileNotFoundError:
+            return None
 
     def recheck(self):
-        if self.guard is not None:
-            from vault_evidence import EvidenceError
-            from vault_healthcheck import HealthcheckError
-            try:
+        if self._snapshot() != self.expected:
+            raise ValueError("configuration changed")
+
+
+class _GenerationEnvelope:
+    """Prompt plus the exact configured policy and raw bindings used to build it."""
+    def __init__(self, payload, guard, config_binding):
+        self.payload, self.guard = payload, guard
+        self.config_binding = config_binding
+
+    def recheck(self):
+        from vault_evidence import EvidenceError
+        from vault_healthcheck import HealthcheckError
+        try:
+            self.config_binding.recheck()
+            if self.guard is not None:
                 self.guard.recheck()
-            except (EvidenceError, HealthcheckError) as exc:
-                raise ValueError("context unavailable") from exc
+            self.config_binding.recheck()
+        except (EvidenceError, HealthcheckError) as exc:
+            raise ValueError("context unavailable") from exc
 
 
 def _generation_envelope(vault: Path, cfg: dict, prompt: str):
@@ -892,6 +916,7 @@ def _build_generation_envelope(vault: Path, cfg: dict, prompt: str):
         raise ValueError("sensitive input")
     from vault_context_guard import ContextGuard
     from vault_evidence import Store
+    config_binding = _GenerationConfigBinding(vault)
     initial_config = _read_config(vault, _diagnostics())
     guard = None
     if initial_config is not None and initial_config.get("memory_revocation_file"):
@@ -996,7 +1021,7 @@ def _build_generation_envelope(vault: Path, cfg: dict, prompt: str):
         raise ValueError("input limit")
     if contains_sensitive(payload):
         raise ValueError("sensitive envelope")
-    envelope = _GenerationEnvelope(payload, guard)
+    envelope = _GenerationEnvelope(payload, guard, config_binding)
     envelope.recheck()
     return envelope
 
