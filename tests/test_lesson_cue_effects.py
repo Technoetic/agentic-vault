@@ -12,6 +12,11 @@ import sys
 import tempfile
 import unittest
 
+try:
+    from _winfs import make_junction
+except ImportError:
+    from tests._winfs import make_junction
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/evaluate_lesson_cue_effects.py"
 
@@ -45,6 +50,14 @@ def fixture():
                        "usage": {"input_tokens": 100, "output_tokens": 30},
                        "teacher_label": "good"})
     return {"schema_version": 1, "scenarios": [scenario], "trials": trials}
+
+
+def directory_alias(target, alias):
+    """Create an owned linked parent, including Windows without symlink rights."""
+    if os.name == "nt":
+        make_junction(alias, target)
+    else:
+        os.symlink(target, alias, target_is_directory=True)
 
 
 class LessonCueEffectsTests(unittest.TestCase):
@@ -211,7 +224,7 @@ class LessonCueEffectsTests(unittest.TestCase):
 
     def test_json_loader_rejects_duplicates_nonfinite_deep_and_oversized_files(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "input.json"
+            path = Path(directory).resolve() / "input.json"
             for raw in ('{"schema_version":1,"schema_version":1}', '{"x":NaN}',
                         '[' * 40 + '0' + ']' * 40, ' ' * (1024 * 1024 + 1), '{bad'):
                 path.write_text(raw, encoding="utf-8")
@@ -219,6 +232,38 @@ class LessonCueEffectsTests(unittest.TestCase):
                     self.ev.load_trials(path)
             path.write_text(json.dumps(fixture()), encoding="utf-8")
             self.assertEqual(self.ev.load_trials(path), fixture())
+
+    def test_positive_file_fixtures_work_with_an_aliased_system_temp_directory(self):
+        # macOS /var is an alias of /private/var. Reproduce that host layout
+        # using only an owned directory; exercise the actual API and CLI tests.
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            real = base / "real-temp"
+            real.mkdir()
+            alias = base / "temp-alias"
+            directory_alias(real, alias)
+            environment = os.environ.copy()
+            environment.update({key: str(alias) for key in ("TMPDIR", "TEMP", "TMP")})
+            selected = ["test_lesson_cue_effects.LessonCueEffectsTests." + name for name in (
+                "test_json_loader_rejects_duplicates_nonfinite_deep_and_oversized_files",
+                "test_demo_and_cli_are_deterministic_and_explicitly_scripted")]
+            run = subprocess.run([sys.executable, "-m", "unittest", *selected],
+                                 cwd=ROOT / "tests", env=environment,
+                                 text=True, capture_output=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_linked_parent_is_refused_but_canonical_owned_file_is_readable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            real = base / "real"
+            real.mkdir()
+            target = real / "trials.json"
+            target.write_text(json.dumps(fixture()), encoding="utf-8")
+            alias = base / "parent-alias"
+            directory_alias(real, alias)
+            with self.assertRaisesRegex(ValueError, "^unsafe_input_path$"):
+                self.ev.load_trials(alias / "trials.json")
+            self.assertEqual(self.ev.load_trials(target), fixture())
 
     def test_unsafe_paths_rejected_before_access_and_errors_are_content_free(self):
         for path in ("//host/share/private.json", r"\\?\C:\private.json", "NUL", "CON.json",
@@ -234,10 +279,10 @@ class LessonCueEffectsTests(unittest.TestCase):
     def test_non_regular_and_symlink_inputs_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
-                self.ev.load_trials(directory)
-            target = Path(directory) / "data.json"
+                self.ev.load_trials(Path(directory).resolve())
+            target = Path(directory).resolve() / "data.json"
             target.write_text(json.dumps(fixture()), encoding="utf-8")
-            link = Path(directory) / "link.json"
+            link = Path(directory).resolve() / "link.json"
             try:
                 os.symlink(target, link)
             except (OSError, NotImplementedError):
@@ -247,9 +292,9 @@ class LessonCueEffectsTests(unittest.TestCase):
 
     def test_hardlinked_input_and_unicode_control_keys_are_rejected_with_fixed_errors(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "data.json"
+            target = Path(directory).resolve() / "data.json"
             target.write_text(json.dumps(fixture()), encoding="utf-8")
-            linked = Path(directory) / "linked.json"
+            linked = Path(directory).resolve() / "linked.json"
             os.link(target, linked)
             with self.assertRaisesRegex(ValueError, "^unsafe_input_path$"):
                 self.ev.load_trials(linked)
@@ -292,7 +337,7 @@ class LessonCueEffectsTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(json.loads(run.stdout), report)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "trial.json"
+            path = Path(directory).resolve() / "trial.json"
             path.write_text(json.dumps(fixture()), encoding="utf-8")
             run = subprocess.run([sys.executable, str(SCRIPT), "--input", str(path), "--json"],
                                  capture_output=True, text=True, timeout=15)

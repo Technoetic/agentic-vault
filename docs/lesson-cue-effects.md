@@ -231,6 +231,9 @@ multiple hard links, and changes detected across file-open/read checks. This is
 defensive local-file handling, not a sandbox or guarantee against a hostile
 filesystem racing every check. It does not authorize access to a restricted
 file. Paths inside a pack are unsupported schema data and are never followed.
+An operating-system alias such as macOS `/var` is also a linked parent; supply
+the explicit physical path instead. Tests resolve only their owned temporary
+directories before supplying fixture paths and separately verify alias refusal.
 
 `caller_reported_actual_host` means the caller claims the receipts came from a
 host run. This tool does **not** authenticate that claim, infer a hidden model
