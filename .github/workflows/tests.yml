@@ -84,6 +84,10 @@ jobs:
         run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 3 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
       - name: Hard bilingual recall at top5 (same token budget)
         run: python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare --expand-query --query-mapping 00-meta/query-map.txt --top-k 5 --max-tokens 1500 --max-no-answer-false-positive-rate 0.25 --max-stale-top-1-rate 0
+      - name: Authored evidence on actual recall (original synthetic vaults)
+        run: python scripts/evaluate_recall_support.py
+      - name: Lesson observation scorer (scripted demo; no host or model calls)
+        run: python scripts/evaluate_lesson_cue_effects.py
       - name: Compile Python sources
         run: python -m compileall -q hooks skills/agentic-vault/scripts scripts
       # Compare the committed tree with git's built-in empty tree so every

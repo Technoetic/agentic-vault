@@ -1,0 +1,888 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "description": "Original authored recall visibility controls; no external code or datasets. Expected labels are frozen separately from retrieval.",
+  "cases": [
+    {
+      "id": "complete",
+      "category": "complete",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora release token is violet."
+        },
+        {
+          "path": "facts/condition.md",
+          "text": "aurora approval condition is signed."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          },
+          {
+            "id": "condition",
+            "alternatives": [
+              {
+                "path": "facts/condition.md",
+                "line": 1,
+                "quote": "aurora approval condition is signed."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "lexical_distractor",
+      "category": "lexical_distractor",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "Release token is violet."
+        },
+        {
+          "path": "facts/distractor.md",
+          "text": "aurora aurora aurora Release token is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "Release token is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "missing_condition",
+      "category": "missing_condition",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora release token is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          },
+          {
+            "id": "condition",
+            "alternatives": [
+              {
+                "path": "facts/condition.md",
+                "line": 1,
+                "quote": "aurora approval condition is signed."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "blocker",
+      "category": "blocker",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora release token is violet."
+        },
+        {
+          "path": "facts/condition.md",
+          "text": "aurora approval condition is signed."
+        },
+        {
+          "path": "facts/hold.md",
+          "text": "aurora active hold forbids release."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          },
+          {
+            "id": "condition",
+            "alternatives": [
+              {
+                "path": "facts/condition.md",
+                "line": 1,
+                "quote": "aurora approval condition is signed."
+              }
+            ]
+          }
+        ],
+        "blockers": [
+          {
+            "id": "hold",
+            "alternatives": [
+              {
+                "path": "facts/hold.md",
+                "line": 1,
+                "quote": "aurora active hold forbids release."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "distributed_chain",
+      "category": "distributed_chain",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/a.md",
+          "text": "aurora identifies the violet shipment."
+        },
+        {
+          "path": "facts/b.md",
+          "text": "aurora violet shipment has signed approval."
+        },
+        {
+          "path": "facts/c.md",
+          "text": "aurora signed approval permits release."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "identity",
+            "alternatives": [
+              {
+                "path": "facts/a.md",
+                "line": 1,
+                "quote": "aurora identifies the violet shipment."
+              }
+            ]
+          },
+          {
+            "id": "condition",
+            "alternatives": [
+              {
+                "path": "facts/b.md",
+                "line": 1,
+                "quote": "aurora violet shipment has signed approval."
+              }
+            ]
+          },
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/c.md",
+                "line": 1,
+                "quote": "aurora signed approval permits release."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "shuffled_chain",
+      "category": "shuffled_chain",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/z.md",
+          "text": "aurora identifies the violet shipment."
+        },
+        {
+          "path": "facts/a.md",
+          "text": "aurora signed approval permits release."
+        },
+        {
+          "path": "facts/m.md",
+          "text": "aurora violet shipment has signed approval."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "identity",
+            "alternatives": [
+              {
+                "path": "facts/z.md",
+                "line": 1,
+                "quote": "aurora identifies the violet shipment."
+              }
+            ]
+          },
+          {
+            "id": "condition",
+            "alternatives": [
+              {
+                "path": "facts/m.md",
+                "line": 1,
+                "quote": "aurora violet shipment has signed approval."
+              }
+            ]
+          },
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/a.md",
+                "line": 1,
+                "quote": "aurora signed approval permits release."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "outside_snippet",
+      "category": "outside_snippet",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora aurora aurora routing catalogue.\naurora release token is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 2,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "tiny_context",
+      "category": "tiny_context",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora release token is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "no_match",
+      "category": "no_match",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "Unrelated violet shipment record."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "aurora release token is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524287_start",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524287,
+            "position": "start",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 1,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524287_middle",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524287,
+            "position": "middle",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524287_end",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524287,
+            "position": "end",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524288_start",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524288,
+            "position": "start",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 1,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524288_middle",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524288,
+            "position": "middle",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524288_end",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524288,
+            "position": "end",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524289_start",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524289,
+            "position": "start",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 1,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524289_middle",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524289,
+            "position": "middle",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "utf8_524289_end",
+      "category": "utf8_byte_boundary",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/boundary.md",
+          "boundary": {
+            "bytes": 524289,
+            "position": "end",
+            "quote": "aurora boundary permit is violet."
+          }
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/boundary.md",
+                "line": 2,
+                "quote": "aurora boundary permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "outside_snippet_tail",
+      "category": "outside_snippet_tail",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 1500,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing permit is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    },
+    {
+      "id": "truncated_context",
+      "category": "truncated_context",
+      "query": "aurora",
+      "limit": 10,
+      "max_tokens": 25,
+      "files": [
+        {
+          "path": "facts/release.md",
+          "text": "aurora routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing routing permit is violet."
+        }
+      ],
+      "contract": {
+        "schema_version": 1,
+        "requirements": [
+          {
+            "id": "release",
+            "alternatives": [
+              {
+                "path": "facts/release.md",
+                "line": 1,
+                "quote": "permit is violet."
+              }
+            ]
+          }
+        ],
+        "blockers": []
+      }
+    }
+  ],
+  "labels": {
+    "complete": {
+      "observed_requirement_ids": [
+        "release",
+        "condition"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "lexical_distractor": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "missing_condition": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "blocker": {
+      "observed_requirement_ids": [
+        "release",
+        "condition"
+      ],
+      "observed_blocker_ids": [
+        "hold"
+      ],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "distributed_chain": {
+      "observed_requirement_ids": [
+        "identity",
+        "condition",
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "shuffled_chain": {
+      "observed_requirement_ids": [
+        "identity",
+        "condition",
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "outside_snippet": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "tiny_context": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": false
+    },
+    "no_match": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524287_start": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524287_middle": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524287_end": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524288_start": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524288_middle": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524288_end": {
+      "observed_requirement_ids": [
+        "release"
+      ],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "utf8_524289_start": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": false,
+      "output_complete": true
+    },
+    "utf8_524289_middle": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": false,
+      "output_complete": true
+    },
+    "utf8_524289_end": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": false,
+      "output_complete": true
+    },
+    "outside_snippet_tail": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": true
+    },
+    "truncated_context": {
+      "observed_requirement_ids": [],
+      "observed_blocker_ids": [],
+      "scope_complete": true,
+      "output_complete": false
+    }
+  }
+}
