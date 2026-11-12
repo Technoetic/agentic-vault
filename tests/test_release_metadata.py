@@ -1818,7 +1818,7 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         "없을 때 CLI는 로그인하지 않았다는 줄을 표준 출력에 내고 종료 코드 1로 끝났다(1회). 브리지는 0이 아닌 종료 "
         "코드를 생성 실패로 처리하고 그 출력을 전달하지 않는다.",
         "주입 명령이 훅을 거치지 않는다는 관찰은 Claude Code 2.1.252 출력 모드에서 경우마다 1회 본 것이며, 훅 기록은 "
-        "두 번의 실행에서 확인했다. repl 전달 방식은 Windows 11, Aside CLI 1.26.916.1741에서 2026-11-12~13에 "
+        "두 번의 실행에서 확인했다(시험한 명령은 `allowed-tools`로 주입 명령을 미리 허용했다). repl 전달 방식은 Windows 11, Aside CLI 1.26.916.1741에서 2026-11-12~13에 "
         "실측했다: Git Bash에서 인자로 넘기기와 Python에서 셸 없이 넘기기는 스크립트가 그대로 전달됐고, Windows "
         "PowerShell 5.1에서 인자로 넘기면 큰따옴표가 사라져 실패했다(1회). 같은 PowerShell 5.1에서 Python 한 줄 "
         "경로로 넘기면 그대로 전달됐다(1회). PowerShell 7, macOS, Linux와 Codex 세션의 실행은 시험하지 않았다. /aside-repl은 최종 파일로 Claude Code 2.1.252 출력 모드에서 공개 페이지 하나로 한 번 "
@@ -2117,6 +2117,9 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(statement, limits)
         self.assertIn("Codex was not run", limits)
         self.assertIn("were not run", limits)
+        # The hook observation names its condition wherever it is stated (finding LA-4).
+        self.assertIn("with the hook log checked in two runs (the probe command pre-approved its injected command "
+                      "with `allowed-tools`).", limits)
 
 
 # v0.47.0 shared surfaces: README, SECURITY.md, docs/codex.md, docs/hardening.md, docs/README.md and
@@ -2377,14 +2380,17 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         limits = _folded(_section(security, "## Known limitations"))
         for literal in ("**Commands that a command or skill body injects bypass PreToolUse hooks (observed).**",
                         "2.1.252", "2026-11-12", "disableSkillShellExecution", "allowed-tools",
-                        "two runs whose hook log was checked", "deny and ask rules still override"):
+                        "two runs whose hook log was checked", "deny and ask rules still override",
+                        "in the two runs whose hook log was checked (the probe command pre-approved its injected "
+                        "command with `allowed-tools`), the three commands"):
             with self.subTest(limits=literal):
                 self.assertIn(literal, limits)
         for stale in ("four injected commands", "states neither behaviour"):
             with self.subTest(stale=stale):
                 self.assertNotIn(stale, limits)
         summary = _folded(_section(security, "## 한국어 요약"))
-        for literal in ("disableSkillShellExecution", "2.1.252", "훅 기록을 확인한 두 번의 실행"):
+        for literal in ("disableSkillShellExecution", "2.1.252", "훅 기록을 확인한 두 번의 실행",
+                        "훅 기록을 확인한 두 번의 실행(시험한 명령은 `allowed-tools`로 주입 명령을 미리 허용했다) 동안"):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
         self.assertNotIn("문서상 권한 규칙만 거친다", summary)
