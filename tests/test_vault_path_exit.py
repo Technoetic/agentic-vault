@@ -314,6 +314,13 @@ class ArgparseAbbreviationTests(_PathCase):
                 self.assertEqual(out.getvalue()[:1], "{", "usage error instead of a report")
                 self.assertEqual(json.loads(out.getvalue())["status"], "not_vault")
 
+        # `--j` was a usage error too; it now selects `--json-summary` (F7).
+        with self.subTest(tool="healthcheck", prefix="--j"):
+            code, stdout, stderr = run_healthcheck("--vault", str(self.plain), "--j")
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stderr, not_vault_message(self.plain))
+            self.assertEqual(json.loads(stdout.splitlines()[-1])["status"], "not_vault")
+
 
 if __name__ == "__main__":
     unittest.main()

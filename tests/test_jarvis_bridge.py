@@ -503,7 +503,7 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
 
         command = runner.call_args.args[0]
         self.assertEqual(command, [
-            sys.executable, str(healthcheck), "--vault", str(self.vault),
+            sys.executable, str(healthcheck), "--vault", str(self.vault), "--json-summary",
         ])
         self.assertNotIn("--output", command)
         self.assertNotIn(cached_report, command)
@@ -515,6 +515,183 @@ class JarvisSubprocessBoundaryTests(unittest.TestCase):
             self.assertEqual(_BRIDGE._git(self.vault, "status"), "ok")
 
         self._assert_scrubbed_copy(runner.call_args.kwargs["env"])
+
+
+def _health_summary(**changes) -> dict:
+    """A clean, complete summary line of the health check (`--json-summary`)."""
+    summary = {
+        "complete": True, "critical": 0, "evidence_skipped": 0, "exit_code": 0,
+        "extension_input_complete": True, "issues": 3, "linked_worktree_copies": 0,
+        "notes_checked": 12, "schema": "agentic-vault/healthcheck-summary/v1",
+        "skipped_links": 0, "status": "checked", "unreadable": 0,
+        "warning_promotion_active": False,
+    }
+    summary.update(changes)
+    return summary
+
+
+def _summary_stdout(summary) -> str:
+    return ("[vault-healthcheck] console line\n"
+            + json.dumps(summary, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            + "\n")
+
+
+class JarvisButlerSummaryTests(unittest.TestCase):
+    """The butler reads the health check's JSON summary, not only its exit code."""
+
+    CLEAN = "· healthcheck: 치명 없음 ✅ (노트 12개)"
+    CANNOT_TELL = "· healthcheck: 결과 확인 불가 ⚠️ (종료 코드 {code}) — 브리지 옆 검사기 버전 확인"
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.vault = Path(temporary.name).resolve()
+
+    def butler_line(self, returncode: int, stdout: str) -> tuple[str, list[str]]:
+        completed = Mock(returncode=returncode, stdout=stdout, stderr="STDERR-SENTINEL")
+        with patch.object(_BRIDGE.subprocess, "run", return_value=completed), \
+                patch.object(_BRIDGE, "_git", return_value=""), \
+                patch.object(_BRIDGE, "log") as logger:
+            report = _BRIDGE.do_butler(self.vault, {})
+        lines = [line for line in report.splitlines() if line.startswith("· healthcheck:")]
+        self.assertEqual(len(lines), 1, report)
+        return lines[0], [call.args[0] for call in logger.call_args_list]
+
+    def test_each_result_row_has_its_message(self):
+        not_complete = " · 일부 미검사(읽기 실패 1건·링크/정션 제외 2건)"
+        rows = (
+            ("checked, clean, complete", 0, _health_summary(), self.CLEAN),
+            ("checked, clean, not complete", 0,
+             _health_summary(complete=False, unreadable=1, skipped_links=2,
+                             extension_input_complete=False),
+             "· healthcheck: 치명 0건, 일부 미검사 ⚠️ — 읽기 실패 1건·링크/정션 제외 2건"
+             "(리포트 §14·§14b)"),
+            ("checked, fatal, complete", 1, _health_summary(critical=4, exit_code=1),
+             "· healthcheck: 치명 위반 4건 🚨 — 세션에서 /vault-lint 필요"),
+            ("checked, fatal, not complete", 1,
+             _health_summary(critical=4, exit_code=1, complete=False, unreadable=1,
+                             skipped_links=2, extension_input_complete=False),
+             "· healthcheck: 치명 위반 4건 🚨 — 세션에서 /vault-lint 필요" + not_complete),
+            ("error", 1, _health_summary(status="error", exit_code=1, notes_checked=0,
+                                         issues=0, complete=False),
+             "· healthcheck: 검사 오류 ⚠️ — 설정·경로 확인 필요(세션에서 /vault-lint)"),
+            ("not_vault", 0, _health_summary(status="not_vault", notes_checked=0, issues=0,
+                                             complete=False),
+             "· healthcheck: 볼트 설정 없음 ⚠️ — 00-meta/vault-config.json 확인"),
+            ("not_vault with --require-vault", 2,
+             _health_summary(status="not_vault", exit_code=2, notes_checked=0, issues=0,
+                             complete=False),
+             "· healthcheck: 볼트 설정 없음 ⚠️ — 00-meta/vault-config.json 확인"),
+            ("vault_not_found", 2,
+             _health_summary(status="vault_not_found", exit_code=2, notes_checked=0, issues=0,
+                             complete=False),
+             "· healthcheck: 볼트 폴더 없음 ⚠️"),
+            ("linked worktree copies do not make it incomplete", 0,
+             _health_summary(linked_worktree_copies=2), self.CLEAN),
+            ("extension analysis cut short, no promotion", 0,
+             _health_summary(evidence_skipped=3, extension_input_complete=False),
+             self.CLEAN + " · 확장 경고 분석 일부 생략(근거 용량 한도 3건)"),
+            ("extension analysis cut short, promotion active", 0,
+             _health_summary(evidence_skipped=3, extension_input_complete=False,
+                             warning_promotion_active=True),
+             "· healthcheck: 치명 없음 ⚠️ (노트 12개) · 확장 경고 분석 일부 생략(근거 용량 한도 3건)"),
+            ("promotion active, analysis complete", 0,
+             _health_summary(warning_promotion_active=True), self.CLEAN),
+        )
+        for label, returncode, summary, expected in rows:
+            with self.subTest(label):
+                line, logged = self.butler_line(returncode, _summary_stdout(summary))
+                self.assertEqual(line, expected)
+                self.assertEqual(logged, [])
+
+    def test_evidence_budget_skips_are_not_read_failures(self):
+        # Contract as the spec words it (v0.45.1 also showed the check mark here);
+        # the exact line is pinned in test_each_result_row_has_its_message.
+        line, _logged = self.butler_line(0, _summary_stdout(
+            _health_summary(evidence_skipped=3, extension_input_complete=False)))
+        self.assertIn("치명 없음 ✅", line)
+        self.assertNotIn("읽기 실패", line)
+
+    def test_unknown_fields_are_ignored_and_never_shown(self):
+        line, _logged = self.butler_line(0, _summary_stdout(
+            _health_summary(path="secret/x.md", note="secret note")))
+        self.assertEqual(line, self.CLEAN)
+        self.assertNotIn("secret", line)
+
+    def test_summary_that_cannot_be_trusted_shows_no_check_mark(self):
+        clean = _health_summary()
+        older = {key: value for key, value in clean.items()
+                 if key not in ("extension_input_complete", "warning_promotion_active")}
+        rows = (
+            ("no line", 0, ""),
+            ("console line only", 0, "[vault-healthcheck] console line\n"),
+            ("not JSON", 0, "{not json\n"),
+            ("JSON list", 0, "[1, 2]\n"),
+            ("summary not on the last line", 0, _summary_stdout(clean) + "later line\n"),
+            ("wrong schema", 0, _summary_stdout(_health_summary(schema="other/v1"))),
+            ("unknown status", 0, _summary_stdout(_health_summary(status="skipped"))),
+            ("string count", 0, _summary_stdout(_health_summary(critical="0"))),
+            ("bool count", 0, _summary_stdout(_health_summary(unreadable=False))),
+            ("negative count", 0, _summary_stdout(_health_summary(skipped_links=-1))),
+            ("float count", 0, _summary_stdout(_health_summary(notes_checked=12.0))),
+            ("complete not a bool", 0, _summary_stdout(_health_summary(complete=1))),
+            ("exit code differs", 1, _summary_stdout(clean)),
+            ("bool exit code", 1, _summary_stdout(_health_summary(exit_code=True))),
+            ("fatal without exit 1", 0, _summary_stdout(_health_summary(critical=2))),
+            ("clean with exit 1", 1, _summary_stdout(_health_summary(exit_code=1))),
+            ("missing count", 0, _summary_stdout(
+                {key: value for key, value in clean.items() if key != "unreadable"})),
+            ("older summary without the extension fields", 0, _summary_stdout(older)),
+            ("extension field not a bool", 0,
+             _summary_stdout(_health_summary(warning_promotion_active="no"))),
+        )
+        for label, returncode, stdout in rows:
+            with self.subTest(label):
+                line, logged = self.butler_line(returncode, stdout)
+                self.assertEqual(line, self.CANNOT_TELL.format(code=returncode))
+                self.assertNotIn("✅", line)
+                self.assertEqual(len(logged), 1, logged)
+                self.assertIn(str(returncode), logged[0])
+                for leaked in ("console", "secret", "STDERR-SENTINEL", "{", "later"):
+                    self.assertNotIn(leaked, logged[0])
+
+    def test_trailing_blank_lines_after_the_summary_are_ignored(self):
+        line, _logged = self.butler_line(0, _summary_stdout(_health_summary()) + "\n  \n")
+        self.assertEqual(line, self.CLEAN)
+
+    def test_launch_failure_and_missing_script_keep_their_messages(self):
+        # Contract: these two rows are unchanged.
+        with patch.object(_BRIDGE.subprocess, "run", side_effect=OSError("gone")), \
+                patch.object(_BRIDGE, "_git", return_value=""), \
+                patch.object(_BRIDGE, "log"):
+            report = _BRIDGE.do_butler(self.vault, {})
+        self.assertIn("· healthcheck: 실행 실패 ⚠️ — 브리지 로그 확인", report.splitlines())
+
+        with patch.object(_BRIDGE, "__file__", str(self.vault / "jarvis_bridge.py")), \
+                patch.object(_BRIDGE.subprocess, "run") as runner, \
+                patch.object(_BRIDGE, "_git", return_value=""):
+            report = _BRIDGE.do_butler(self.vault, {})
+        self.assertIn("· healthcheck: 스크립트 없음(생략)", report.splitlines())
+        runner.assert_not_called()
+
+    def test_real_checker_summary_reaches_the_butler(self):
+        (self.vault / "00-meta").mkdir()
+        (self.vault / "00-meta" / "vault-config.json").write_text(json.dumps({
+            "required_keys": ["title"], "deny_zones": [], "exclude_dirs": [".git"],
+            "frontmatter_roots": ["20-knowledge"], "index_note": "", "log_note": "",
+            "log_tags": [], "hot_note": "", "handoff_note": "", "ssot_note": "",
+            "rules_dir": "",
+        }), encoding="utf-8")
+        (self.vault / "20-knowledge").mkdir()
+        for name, other in (("A", "B"), ("B", "A")):
+            (self.vault / "20-knowledge" / f"{name}.md").write_text(
+                f'---\ntitle: "{name}"\n---\n[[{other}]]\n', encoding="utf-8")
+        with patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(self.vault.parent)}), \
+                patch.object(_BRIDGE, "_git", return_value=""), \
+                patch.object(_BRIDGE, "log") as logger:
+            report = _BRIDGE.do_butler(self.vault, {})
+        self.assertIn("· healthcheck: 치명 없음 ✅ (노트 2개)", report.splitlines(), report)
+        logger.assert_not_called()
 
 
 class JarvisMainTests(unittest.TestCase):
