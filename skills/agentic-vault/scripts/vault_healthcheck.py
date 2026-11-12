@@ -828,7 +828,291 @@ def estimate_tokens(text: str) -> int:
 
 
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
+# The v0.45.1 line rule, still applied where a block node starts (and where the front matter
+# is a root scalar or ends inside an open quote or flow); unquoted_frontmatter_link_lines() below.
 UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
+_FM_BLOCK_HEADER_RE = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?$")
+_FM_HEADER_DIGIT_RE = re.compile(r"[|>][+-]?([1-9])")
+_FM_DOC_END_RE = re.compile(r"\.\.\.(?:[ \t]|$)")
+
+
+def _fm_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _fm_blank(line: str) -> bool:
+    return not line.strip(" \t")
+
+
+def _fm_indicator(line: str, i: int, char: str) -> bool:
+    return line.startswith(char, i) and (i + 1 == len(line) or line[i + 1] in " \t")
+
+
+def _fm_comment_start(line: str, i: int) -> bool:
+    return line[i] == "#" and (i == 0 or line[i - 1] in " \t")
+
+
+def _fm_has_comment(line: str) -> bool:
+    return any(_fm_comment_start(line, k) for k in range(len(line)))
+
+
+def _fm_has_mapping_indicator(line: str) -> bool:
+    for k in range(len(line)):
+        if _fm_comment_start(line, k):
+            return False
+        if _fm_indicator(line, k, ":"):
+            return True
+    return False
+
+
+def _fm_close_quote(line: str, i: int, quote: str) -> int | None:
+    """Index after the closing quote at or after i; '"' skips escapes, "'" reads '' as text."""
+    n = len(line)
+    while i < n:
+        char = line[i]
+        if quote == '"' and char == "\\":
+            i += 2
+            continue
+        if char == quote:
+            if quote == "'" and i + 1 < n and line[i + 1] == "'":
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return None
+
+
+class _FrontmatterLinkScan:
+    """Line-by-line YAML context for unquoted_frontmatter_link_lines (iterative, linear).
+
+    mode is one of block, block_scalar, plain, quoted, flow. owner is the column a block or
+    plain scalar continuation must exceed, content the block scalar's content column, pending
+    the column of a key or dash whose value is empty on its line.
+    """
+
+    def __init__(self) -> None:
+        self.mode = "block"
+        self.owner = -1
+        self.content: int | None = None
+        self.pending = -1
+        self.collection = False
+        self.collection_before = False
+        self.quote = ""
+        self.depth = 0
+        self.prev = ""
+        self.node_col = -1
+        self.node_owner = -1
+        self.open_line: int | None = None
+        self.flag = False
+
+    def line(self, line: str, number: int) -> bool:
+        self.flag = False
+        self.collection_before = self.collection
+        if _FM_DOC_END_RE.match(line):  # '...' ends every node
+            self.mode = "block"
+            self.quote = ""
+            self.depth = 0
+            self.pending = -1
+            self.content = None
+            self.open_line = None
+            return False
+        if UNQUOTED_FM_LINK_RE.match(line) and (
+                (self.mode in ("block_scalar", "plain") and self.owner == -1)
+                or (self.mode == "quoted" and self.node_owner == -1)):
+            self.flag = True  # rule (c): a scalar at the root of the front matter
+        if self.mode == "block_scalar":
+            if _fm_blank(line):
+                return self.flag
+            indent = _fm_indent(line)
+            if self.content is None and indent > self.owner:
+                self.content = indent
+                return self.flag
+            if self.content is not None and indent >= self.content:
+                return self.flag
+            self.mode = "block"
+            self.content = None
+        elif self.mode == "plain":
+            if _fm_blank(line):
+                return self.flag
+            if (_fm_indent(line) > self.owner and not line.lstrip(" \t").startswith("#")
+                    and not _fm_has_mapping_indicator(line)):
+                if _fm_has_comment(line):  # a comment ends the plain scalar
+                    self.mode = "block"
+                return self.flag
+            self.mode = "block"
+        if self.mode == "quoted":
+            j = _fm_close_quote(line, 0, self.quote)
+            if j is not None:
+                self.quote = ""
+                self._run(line, number, ("after", j, self.node_col, self.node_owner))
+        elif self.mode == "flow":
+            j = self._flow(line, 0)
+            if j is not None:
+                self._run(line, number, ("after", j, self.node_col, self.node_owner))
+        else:
+            stripped = line.lstrip(" \t")
+            if not stripped or stripped.startswith("#"):
+                return self.flag
+            if UNQUOTED_FM_LINK_RE.match(line):
+                self.flag = True  # rule (b): a block node starts on this line
+            col = _fm_indent(line)
+            owner = self.pending if col > self.pending else -1
+            self.pending = -1
+            self._run(line, number, ("node", col, owner))
+        return self.flag
+
+    def _run(self, line: str, number: int, item: tuple | None) -> None:
+        """NODE and AFTER_NODE steps as work items of one loop instead of mutual recursion."""
+        n = len(line)
+        while item is not None:
+            if item[0] == "after":
+                _kind, j, node_col, owner = item
+                item = None
+                self.mode = "block"
+                while j < n and line[j] in " \t":
+                    j += 1
+                if j >= n or line[j] == "#":  # '#' right after a node starts a comment
+                    break
+                if _fm_indicator(line, j, ":"):  # the node was a key
+                    item = ("node", j + 1, node_col)
+                    continue
+                rest = line[j:]
+                cut = [k for k in (rest.find(" #"), rest.find("\t#")) if k >= 0]
+                if "[[" in (rest[:min(cut)] if cut else rest):
+                    self.flag = True
+                break
+            _kind, i, owner = item
+            item = None
+            while True:
+                while i < n and line[i] in " \t":
+                    i += 1
+                if i >= n or _fm_comment_start(line, i):
+                    self.pending = owner
+                    return
+                if line.startswith("![[", i):  # Obsidian embed at a node start
+                    self.flag = True
+                    return
+                if line[i] in "&!":  # anchor or tag
+                    while i < n and line[i] not in " \t":
+                        i += 1
+                    continue
+                if (_fm_indicator(line, i, "-") or _fm_indicator(line, i, "?")
+                        or _fm_indicator(line, i, ":")):
+                    if i == 0:
+                        self.collection = True
+                    owner = i
+                    i += 1
+                    continue
+                break
+            char = line[i]
+            if char in "[{":
+                self.depth = 0
+                self.quote = ""
+                self.prev = ""
+                j = self._flow(line, i)
+                if j is None:
+                    self.mode = "flow"
+                    self.node_col, self.node_owner, self.open_line = i, owner, number
+                    return
+                item = ("after", j, i, owner)
+            elif char in "\"'":
+                j = _fm_close_quote(line, i + 1, char)
+                if j is None:
+                    self.mode = "quoted"
+                    self.quote = char
+                    self.node_col, self.node_owner, self.open_line = i, owner, number
+                    return
+                item = ("after", j, i, owner)
+            elif char in "|>" and _FM_BLOCK_HEADER_RE.match(line, i):
+                self.mode = "block_scalar"
+                self.owner = owner
+                digit = _FM_HEADER_DIGIT_RE.match(line, i)
+                self.content = owner + int(digit.group(1)) if digit else None
+                return
+            elif char == "*":  # alias
+                j = i
+                while j < n and line[j] not in " \t,[]{}":
+                    j += 1
+                item = ("after", j, i, owner)
+            else:  # plain scalar or implicit key
+                k = i
+                while k < n and not _fm_comment_start(line, k) and not _fm_indicator(line, k, ":"):
+                    k += 1
+                if k < n and line[k] != "#":
+                    if i == 0:
+                        self.collection = True
+                    item = ("node", k + 1, i)
+                elif k < n:  # a comment ends the plain scalar
+                    self.mode = "block"
+                elif owner == -1 and self.collection_before:  # a second root node (YAML error)
+                    self.mode = "block"
+                else:
+                    self.mode = "plain"
+                    self.owner = owner
+
+    def _flow(self, line: str, i: int) -> int | None:
+        """Scan a flow collection from i; the index after it closes, or None if it stays open."""
+        n = len(line)
+        if i == 0:
+            self.prev = ","
+        while i < n:
+            if self.quote:
+                j = _fm_close_quote(line, i, self.quote)
+                if j is None:
+                    return None
+                self.quote = ""
+                self.prev = "x"
+                i = j
+                if i < n and line[i] == "#":
+                    return None
+                continue
+            char = line[i]
+            if char in " \t":
+                i += 1
+                continue
+            if char == "#" and (i == 0 or line[i - 1] in " \t[{,"):
+                return None
+            if char in "&!" and self.prev in "[{,:?":  # anchor or tag before an item
+                while i < n and line[i] not in " \t,[]{}":
+                    i += 1
+                continue
+            if char in "\"'" and self.prev in "[{,:?":
+                self.quote = char
+                i += 1
+                continue
+            if char == "[" and line.startswith("[[", i):
+                self.flag = True
+            if char in "[{":
+                self.depth += 1
+            elif char in "]}":
+                self.depth -= 1
+                if self.depth == 0:
+                    self.prev = ""
+                    return i + 1
+            self.prev = char
+            i += 1
+        return None
+
+
+def unquoted_frontmatter_link_lines(fm: str) -> list[int]:
+    """0-based indices into fm.splitlines() of the lines to report.
+
+    A line is reported when YAML reads an unquoted `[[` on it as the start of a nested list
+    (or `![[` at a node start), or when the v0.45.1 line rule matches it outside the contexts
+    YAML itself makes a scalar: a block scalar's content, a quoted scalar, or a plain
+    continuation of a key's or list item's value.
+    """
+    lines = fm.splitlines()
+    scan = _FrontmatterLinkScan()
+    reported = [number for number, line in enumerate(lines) if scan.line(line, number)]
+    if scan.mode in ("quoted", "flow") and scan.open_line is not None:
+        # rule (d): the front matter ends inside a quote or flow (a YAML error)
+        later = (number for number in range(scan.open_line + 1, len(lines))
+                 if UNQUOTED_FM_LINK_RE.match(lines[number]))
+        reported = sorted(set(reported).union(later))
+    return reported
+
+
 # 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
 CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
@@ -1593,12 +1877,12 @@ def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
         value = keys.get(field)
         if value is not None and value not in allowed:
             errors.append(f"스테이징 차단: {path} — Enum 위반: {field}={value}")
-    for line in fm.splitlines():
-        if UNQUOTED_FM_LINK_RE.match(line):
-            errors.append(
-                f"스테이징 차단: {path} — 프런트매터 내 따옴표 없는 위키링크: "
-                f"{line.strip()}"
-            )
+    lines = fm.splitlines()
+    for index in unquoted_frontmatter_link_lines(fm):
+        errors.append(
+            f"스테이징 차단: {path} — 프런트매터 내 따옴표 없는 위키링크: "
+            f"{lines[index].strip()}"
+        )
     return errors
 
 
@@ -2240,9 +2524,9 @@ def main() -> int:
                 v = keys.get(field)
                 if v is not None and v not in allowed:
                     enum_violations.append((rel, field, v))
-            for line in fm.splitlines():
-                if UNQUOTED_FM_LINK_RE.match(line):
-                    unquoted_links.append(f"{rel} → `{line.strip()}`")
+            fm_text_lines = fm.splitlines()
+            for index in unquoted_frontmatter_link_lines(fm):
+                unquoted_links.append(f"{rel} → `{fm_text_lines[index].strip()}`")
             if stale_days > 0:
                 try:
                     upd_d = datetime.strptime(keys.get("updated", ""), "%Y-%m-%d").date()
