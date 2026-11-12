@@ -425,7 +425,12 @@ class PathRuleSourceTests(unittest.TestCase):
         cafe_nfd = "cafe" + chr(0x301)
         greek = chr(0x390)
         greek_upper_nfd = chr(0x399) + chr(0x308) + chr(0x301)
-        zones = ["20-knowledge/" + nfc(bogwan), nfc(bigonggae), nfd(jaryo), cafe_nfc, greek]
+        # Canonical caseless matches that NFC-casefold-NFC folds differently: the
+        # ypogegrammeni (U+0345) is reordered after another mark once case changes.
+        omega_ypo_zone = chr(0x1FAA) + chr(0x352)
+        omega_ypo_zone_path = chr(0x3A9) + chr(0x313) + chr(0x300) + chr(0x352) + chr(0x399)
+        zones = ["20-knowledge/" + nfc(bogwan), nfc(bigonggae), nfd(jaryo), cafe_nfc, greek,
+                 omega_ypo_zone]
         cases = {
             "20-knowledge/" + nfd(bogwan) + "/a.md": True,
             "20-knowledge/" + nfc(bogwan) + "/a.md": True,
@@ -437,21 +442,26 @@ class PathRuleSourceTests(unittest.TestCase):
             "notes/" + cafe_nfd.upper() + "/a.md": True,
             "notes/cafe/a.md": False,  # a different name
             "notes/" + greek_upper_nfd + "/a.md": True,  # fails with NFC-then-casefold only
+            "notes/" + omega_ypo_zone_path + "/a.md": True,  # fails with NFC-casefold-NFC
         }
         self.assert_deciders_agree(zones, cases)
 
     def assert_deciders_agree(self, zones: list, cases: dict) -> None:
         prefixes, names = vault_healthcheck.build_deny_rules(zones)
         guard = _deny_guard()
+        deciders = (
+            ("healthcheck.is_denied", lambda rel, parts: vault_healthcheck.is_denied(rel, prefixes, names)),
+            ("vault_paths._is_denied", lambda rel, parts: vault_paths._is_denied(parts, zones)),
+            ("recall deny", lambda rel, parts: vault_recall._classified_skip(parts, zones, ()) == "denied"),
+            ("recall exclude", lambda rel, parts: vault_recall._classified_skip(parts, (), zones) == "excluded"),
+            ("lint_extensions._denied", lambda rel, parts: vault_lint_extensions._denied(rel, {"deny_zones": zones})),
+            ("guard.zone_matches", lambda rel, parts: any(guard.zone_matches(parts, zone) for zone in zones)),
+        )
         for rel, expected in cases.items():
             parts = tuple(rel.split("/"))
-            with self.subTest(rel=ascii(rel)):
-                self.assertIs(vault_healthcheck.is_denied(rel, prefixes, names), expected)
-                self.assertIs(vault_paths._is_denied(parts, zones), expected)
-                self.assertIs(vault_recall._classified_skip(parts, zones, ()) == "denied", expected)
-                self.assertIs(vault_recall._classified_skip(parts, (), zones) == "excluded", expected)
-                self.assertIs(vault_lint_extensions._denied(rel, {"deny_zones": zones}), expected)
-                self.assertIs(any(guard.zone_matches(parts, zone) for zone in zones), expected)
+            for name, decide in deciders:
+                with self.subTest(rel=ascii(rel), decider=name):
+                    self.assertIs(decide(rel, parts), expected)
 
 
 class AtxHeadingSourceTests(unittest.TestCase):

@@ -6,7 +6,9 @@ form must cover the folder written in the other, in every deny-zone decider:
 the shared fold, configuration validation, the health check's full mode,
 recall and the lint warning extensions. The commit gate keeps its byte-exact
 Git pathspecs, so a staged note in another spelling of a zone stays
-schema-checked (a contract, as for case variants).
+schema-checked (a contract, as for case variants). Two segments are the same
+name exactly when they are Unicode canonical caseless matches (NFD, casefold,
+NFD), which the seeded property test checks against this Python's own data.
 
 Every non-ASCII string is built from code points, so the source shows which
 normalization form it means. Tests that need a folder on disk read the name
@@ -17,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import random
 import subprocess
 import sys
 import tempfile
@@ -63,6 +66,8 @@ CAFE_NFC = "caf" + chr(0xE9)
 CAFE_NFD = "cafe" + chr(0x301)
 GREEK = chr(0x390)                                   # iota with dialytika and tonos
 GREEK_UPPER_NFD = chr(0x399) + chr(0x308) + chr(0x301)
+OMEGA_YPO_ZONE = chr(0x1FAA) + chr(0x352)            # omega with ypogegrammeni, then a mark
+OMEGA_YPO_ZONE_PATH = chr(0x3A9) + chr(0x313) + chr(0x300) + chr(0x352) + chr(0x399)
 
 # Report and gate wording of the health check, built from code points.
 CHECKED_NOTES = _text(0xAC80, 0xC0AC, 0x20, 0xB178, 0xD2B8, 0x20, 0xC218)
@@ -87,6 +92,8 @@ class FoldTests(unittest.TestCase):
         (CAFE_NFC, CAFE_NFD),
         (CAFE_NFC, CAFE_NFD.upper()),
         (GREEK, GREEK_UPPER_NFD),
+        # Canonical caseless matches that NFC-casefold-NFC folds differently.
+        (OMEGA_YPO_ZONE, OMEGA_YPO_ZONE_PATH),
         ("Node_Modules", "node_modules"),
     )
     UNEQUAL = (
@@ -109,6 +116,50 @@ class FoldTests(unittest.TestCase):
                 self.assertEqual(fold(folded), folded)  # idempotent
                 for copy in copies:
                     self.assertEqual(copy(value), folded)
+
+
+class FoldPropertyTests(unittest.TestCase):
+    """Seeded property test: fold equality is Unicode canonical caseless matching.
+
+    The expected relation (NFD, casefold, NFD; Unicode D145) is computed with
+    this interpreter's own unicodedata, never a stored table, so the test holds
+    for the Unicode version of every Python it runs on. Greek letters with
+    stacked marks, U+0345 among them, are where case changes reorder marks.
+    """
+
+    SEED = 7
+    STRINGS = 2000
+    MARKS = tuple(map(chr, (0x300, 0x301, 0x308, 0x313, 0x314, 0x342, 0x345, 0x352, 0x316, 0x323)))
+
+    @staticmethod
+    def caseless_key(text: str) -> str:
+        return NFD(NFD(text).casefold())
+
+    def test_fold_equality_is_canonical_caseless_matching(self) -> None:
+        rng = random.Random(self.SEED)
+        greek = [chr(c) for c in range(0x1F00, 0x2000) if unicodedata.category(chr(c)) != "Cn"]
+        groups = []
+        for _ in range(self.STRINGS):
+            text = rng.choice(greek) + "".join(rng.choice(self.MARKS) for _ in range(rng.randint(1, 3)))
+            variants = []
+            for form in (text, NFC(text), NFD(text)):
+                variants.extend((form, form.upper()))
+            groups.append(variants)
+        # Every pair of variants of one string, and one pair across neighbouring strings.
+        pairs = [(group[i], group[j]) for group in groups
+                 for i in range(len(group)) for j in range(i + 1, len(group))]
+        pairs += [(left[0], right[0]) for left, right in zip(groups, groups[1:])]
+        folds = (("vault_paths", vault_paths.fold_path_part),
+                 ("vault_healthcheck", vault_healthcheck.fold_path_part),
+                 ("vault_lint_extensions", vault_lint_extensions.fold_path_part))
+        for name, fold in folds:
+            with self.subTest(fold=name):
+                wrong = [(ascii(a), ascii(b)) for a, b in pairs
+                         if (fold(a) == fold(b)) != (self.caseless_key(a) == self.caseless_key(b))]
+                self.assertEqual(wrong[:5], [], f"{len(wrong)} of {len(pairs)} pairs disagree")
+                not_idempotent = [ascii(text) for group in groups for text in group
+                                  if fold(fold(text)) != fold(text)]
+                self.assertEqual(not_idempotent[:5], [], f"{len(not_idempotent)} strings")
 
 
 class ConfigTests(unittest.TestCase):
