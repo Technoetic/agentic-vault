@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import unicodedata
 import unittest
 
 try:
@@ -39,6 +40,7 @@ try:
     import jev_client
     import vault_healthcheck
     import vault_judge
+    import vault_lint_extensions
     import vault_paths
     import vault_recall
     import vault_ssot
@@ -301,15 +303,18 @@ class PathRuleSourceTests(unittest.TestCase):
         )
         self.assertEqual(owners, ["vault_healthcheck.py", "vault_paths.py"])
 
-    def test_deny_guard_carries_a_verbatim_copy_of_zone_matches(self) -> None:
+    def test_deny_guard_carries_verbatim_copies_of_fold_path_part_and_zone_matches(self) -> None:
         # The guard is copied into vaults and run alone by a PreToolUse hook, so
         # it cannot import vault_paths; its copy between the SHARED ZONE RULE
-        # markers must stay the exact source of vault_paths.zone_matches.
+        # markers must stay the exact source of vault_paths.fold_path_part and
+        # vault_paths.zone_matches.
         text = DENY_GUARD.read_text(encoding="utf-8")
         self.assertEqual(text.count(ZONE_BEGIN), 1)
         self.assertEqual(text.count(ZONE_END), 1)
         start = text.index("\n", text.index(ZONE_BEGIN)) + 1
-        self.assertEqual(text[start:text.index(ZONE_END)], inspect.getsource(vault_paths.zone_matches))
+        self.assertEqual(text[start:text.index(ZONE_END)],
+                         inspect.getsource(vault_paths.fold_path_part) + "\n\n"
+                         + inspect.getsource(vault_paths.zone_matches))
         owners = sorted(
             path.relative_to(ROOT).as_posix()
             for path in (*SCRIPTS.glob("*.py"), *ADAPTER_SCRIPTS.glob("*/*.py"), *(ROOT / "hooks").glob("*.py"))
@@ -317,6 +322,24 @@ class PathRuleSourceTests(unittest.TestCase):
         )
         self.assertEqual(owners, ["assets/adapters/deny-guard/deny-guard.py",
                                   "skills/agentic-vault/scripts/vault_paths.py"])
+
+    def test_fold_path_part_has_one_source_and_verbatim_copies(self) -> None:
+        # One fold decides how every deny-zone decider compares a path segment.
+        # The health check and the lint extensions cannot import vault_paths at
+        # module level, so they keep verbatim copies; the guard's copy is above.
+        owners = sorted(
+            path.relative_to(ROOT).as_posix()
+            for path in (*SCRIPTS.glob("*.py"), *ADAPTER_SCRIPTS.glob("*/*.py"), *(ROOT / "hooks").glob("*.py"))
+            if "def fold_path_part" in path.read_text(encoding="utf-8")
+        )
+        self.assertEqual(owners, ["assets/adapters/deny-guard/deny-guard.py",
+                                  "skills/agentic-vault/scripts/vault_healthcheck.py",
+                                  "skills/agentic-vault/scripts/vault_lint_extensions.py",
+                                  "skills/agentic-vault/scripts/vault_paths.py"])
+        source = inspect.getsource(vault_paths.fold_path_part)
+        self.assertTrue(source.isascii())
+        self.assertEqual(inspect.getsource(vault_healthcheck.fold_path_part), source)
+        self.assertEqual(inspect.getsource(vault_lint_extensions.fold_path_part), source)
 
     def test_deny_guard_fallback_zones_match_the_healthcheck_default(self) -> None:
         self.assertEqual(list(_deny_guard().DEFAULT_DENY_ZONES), vault_healthcheck.DEFAULT_CONFIG["deny_zones"])
@@ -390,15 +413,44 @@ class PathRuleSourceTests(unittest.TestCase):
             "90-Assets/x.png": True, "90-assets-old/x.md": False,
             ".obsidian/workspace.md": True, "20-knowledge/a.md": False,
         }
+        self.assert_deciders_agree(zones, cases)
+        # The same deciders ignore Unicode normalization as well as case. Zones and
+        # paths are built from code points, so the source shows each form.
+        nfc = lambda text: unicodedata.normalize("NFC", text)
+        nfd = lambda text: unicodedata.normalize("NFD", text)
+        bogwan = chr(0xBCF4) + chr(0xAD00)
+        bigonggae = chr(0xBE44) + chr(0xACF5) + chr(0xAC1C)
+        jaryo = chr(0xC790) + chr(0xB8CC)
+        cafe_nfc = "caf" + chr(0xE9)
+        cafe_nfd = "cafe" + chr(0x301)
+        greek = chr(0x390)
+        greek_upper_nfd = chr(0x399) + chr(0x308) + chr(0x301)
+        zones = ["20-knowledge/" + nfc(bogwan), nfc(bigonggae), nfd(jaryo), cafe_nfc, greek]
+        cases = {
+            "20-knowledge/" + nfd(bogwan) + "/a.md": True,
+            "20-knowledge/" + nfc(bogwan) + "/a.md": True,
+            "notes/20-knowledge/" + nfd(bogwan) + "/a.md": False,  # longer zones match from the root only
+            "40-people/" + nfd(bigonggae) + "/a.md": True,
+            "40-people/" + nfc(bigonggae) + "-old/a.md": False,
+            nfc(jaryo) + "/x.md": True,  # zone written NFD
+            "notes/" + cafe_nfd + "/a.md": True,
+            "notes/" + cafe_nfd.upper() + "/a.md": True,
+            "notes/cafe/a.md": False,  # a different name
+            "notes/" + greek_upper_nfd + "/a.md": True,  # fails with NFC-then-casefold only
+        }
+        self.assert_deciders_agree(zones, cases)
+
+    def assert_deciders_agree(self, zones: list, cases: dict) -> None:
         prefixes, names = vault_healthcheck.build_deny_rules(zones)
         guard = _deny_guard()
         for rel, expected in cases.items():
             parts = tuple(rel.split("/"))
-            with self.subTest(rel=rel):
+            with self.subTest(rel=ascii(rel)):
                 self.assertIs(vault_healthcheck.is_denied(rel, prefixes, names), expected)
                 self.assertIs(vault_paths._is_denied(parts, zones), expected)
                 self.assertIs(vault_recall._classified_skip(parts, zones, ()) == "denied", expected)
                 self.assertIs(vault_recall._classified_skip(parts, (), zones) == "excluded", expected)
+                self.assertIs(vault_lint_extensions._denied(rel, {"deny_zones": zones}), expected)
                 self.assertIs(any(guard.zone_matches(parts, zone) for zone in zones), expected)
 
 

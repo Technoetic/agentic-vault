@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from unittest import mock
 
@@ -1112,6 +1113,64 @@ class ConfigTests(GuardCase):
 
 
 @unittest.skipUnless(os.name == "nt", "Windows path forms")
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
+def _nfd(text: str) -> str:
+    return unicodedata.normalize("NFD", text)
+
+
+BOGWAN = chr(0xBCF4) + chr(0xAD00)                   # Hangul word, 2 syllables
+BIGONGGAE = chr(0xBE44) + chr(0xACF5) + chr(0xAC1C)  # Hangul word, 3 syllables
+
+
+class UnicodeZoneTests(GuardCase):
+    """Zones ignore Unicode normalization: an NFD spelling of a zone written NFC is the zone.
+
+    Strings are built from code points, so the source shows each form. None of
+    the paths needs to exist, so the table runs on every file system.
+    """
+
+    zones = TEMPLATE_ZONES + ("20-knowledge/" + _nfc(BOGWAN), _nfc(BIGONGGAE))
+
+    def test_file_tools_deny_another_spelling_of_a_zone(self) -> None:
+        self.assert_table("Read", [
+            ({"file_path": self.path("20-knowledge", _nfd(BOGWAN), "a.md")}, "deny"),
+            ({"file_path": self.path("40-people", _nfd(BIGONGGAE), "a.md")}, "deny"),
+        ])
+
+    def test_zone_written_nfd_covers_the_nfc_folder(self) -> None:
+        self.write_config({"deny_zones": [_nfd(BIGONGGAE)]})
+        self.assertEqual(self.decide("Read", {"file_path": self.path("40-people", _nfc(BIGONGGAE), "a.md")}),
+                         "deny")
+
+    def test_bash_names_another_spelling_of_a_zone(self) -> None:
+        self.assert_table("Bash", [
+            ({"command": "cat 20-knowledge/" + _nfd(BOGWAN) + "/a.md"}, "deny"),
+            ({"command": "cat notes/a.md"}, None),
+        ], cwd=str(self.vault))
+
+    def test_glob_patterns_with_another_spelling_of_a_zone(self) -> None:
+        self.assert_table("Glob", [
+            ({"pattern": "20-knowledge/" + _nfd(BOGWAN) + "/*.md", "path": str(self.vault)}, "deny"),
+            ({"pattern": "**/" + _nfd(BIGONGGAE) + "/**", "path": str(self.vault)}, "deny"),
+        ])
+
+    def test_powershell_pre_filter_sees_another_spelling_of_a_zone(self) -> None:
+        calls: list[str] = []
+
+        def parse(command: str):
+            calls.append(command)
+            return None, "unavailable"
+
+        command = "Get-Content 20-knowledge/" + _nfd(BOGWAN) + "/a.md"
+        with mock.patch.object(self.guard, "parse_powershell", parse):
+            decision = self.decide("PowerShell", {"command": command})
+        self.assertEqual(calls, [command])
+        self.assertEqual(decision, "ask")
+
+
 class WindowsPathTests(GuardCase):
     def test_msys_paths_are_mapped_to_drive_paths(self) -> None:
         target = msys_form(self.vault / "90-assets" / "a.png")
