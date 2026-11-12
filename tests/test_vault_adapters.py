@@ -244,7 +244,9 @@ class AdapterAssetTests(unittest.TestCase):
         # The opt-in /aside-repl procedure is copied into vaults as .claude/commands/aside-repl.md.
         raw = COMMAND.read_bytes()
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM")
-        text = raw.decode("utf-8")  # raises if the file is not UTF-8
+        # A checkout may carry CRLF line ends when core.autocrlf is on: fold CRLF to LF first,
+        # then no lone carriage return may be left. The rest of the test works on the folded text.
+        text = raw.decode("utf-8").replace("\r\n", "\n")  # raises if the file is not UTF-8
         self.assertNotIn("\r", text)
         self.assertTrue(text.startswith("---\n"))
         front, rest = _command_parts(text)
