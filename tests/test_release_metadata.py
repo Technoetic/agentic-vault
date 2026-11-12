@@ -1982,6 +1982,35 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
             "이상이 함께 `pending`에 있으면 뒤 회차는 앞 회차의 실패로 늘어난 간격에서 이어 시도하고 건너뛰기 안내도 "
             "그만큼 늦게 온다.", changes)
 
+    # The Aside start hook acts only on Bash and PowerShell commands that begin with `aside`
+    # (assets/adapters/aside/settings-hooks.json); the Python route begins with `python` (finding LA-2).
+    PYTHON_ROUTE_HOOK_SENTENCE = (
+        "다만 Python 경로의 호출은 `python`으로 시작하므로, `aside`로 시작하는 Bash·PowerShell 명령에만 건 Aside 자동 "
+        "기동 훅은 동작하지 않는다. 그래서 절차는 그 경로에서 훅이 있어도 기동 도우미를 직접 실행하게 한다(훅의 조건은 "
+        "설정 파일을 읽어 확인했고 훅을 켠 채 실행해 보지는 않았다)."
+    )
+    ENTRY_17_START_LINE = (
+        "`**기동(Windows):**` 줄은 Python 경로로 `aside repl`을 부를 때 자동 기동 훅이 있어도 기동 도우미를 먼저 "
+        "실행하게 한다."
+    )
+
+    def test_v0470_note_states_that_the_start_hook_misses_the_python_route(self) -> None:
+        changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        self.assertIn("권한 확인과 훅을 거친다. " + self.PYTHON_ROUTE_HOOK_SENTENCE, changes)
+        self.assertIn(self.ENTRY_17_START_LINE + " 기존 조항은 바뀌지 않는다. 대상: 새로 Aside를 들이는 볼트.",
+                      self._default_change_entry(17))
+
+    def test_v0470_python_route_statements_match_the_shipped_texts(self) -> None:
+        # The note describes the clause and the command file; they must say what the note says.
+        hooks = (REPO_ROOT / "assets/adapters/aside/settings-hooks.json").read_text(encoding="utf-8")
+        self.assertIn('"if": "Bash(aside *)"', hooks)
+        self.assertIn('"if": "PowerShell(aside *)"', hooks)
+        clause = (REPO_ROOT / "assets/adapters/aside/browser-clause.md").read_text(encoding="utf-8")
+        start = next(line for line in clause.splitlines() if line.startswith("- **기동(Windows):**"))
+        self.assertIn("Python으로 `aside repl`을 부를 때는 훅이 있어도 먼저 아래 도우미를 실행한다.", start)
+        command = (REPO_ROOT / "assets/adapters/aside/aside-repl-command.md").read_text(encoding="utf-8")
+        self.assertIn("Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", _folded(command))
+
     def test_v0470_no_placeholder_left(self) -> None:
         import re
 
