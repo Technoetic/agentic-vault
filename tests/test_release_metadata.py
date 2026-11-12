@@ -2030,6 +2030,19 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("`hot_note`를 핵심 결정·다음 행동이 앞에 오게 다시 쓰고", skill)
         self.assertNotIn("500단어 이내로 재작성", skill)
 
+    def test_v0470_entry_14_names_the_output_that_gains_the_lines(self) -> None:
+        # /vault-doctor runs vault_adapters.py with `--format json`; the two new lines are in that script's
+        # own text output, its default format (final check of the documents, F4).
+        entry = self._default_change_entry(14)
+        self.assertIn(
+            "`vault_adapters.py`의 텍스트 출력(기본 `--format text`)에 두 줄이 더 붙으며 `/vault-doctor`가 읽는 "
+            "JSON에는 `adapters.aside_command`가 더해진다. 다른 항목은 그대로다.", entry)
+        self.assertNotIn("doctor 텍스트에 두 줄", entry)
+        doctor = (REPO_ROOT / "commands/vault-doctor.md").read_text(encoding="utf-8")
+        self.assertIn('vault_adapters.py" --vault "<현재 볼트 절대 경로>" --format json', doctor)
+        adapters = (REPO_ROOT / "skills/agentic-vault/scripts/vault_adapters.py").read_text(encoding="utf-8")
+        self.assertIn('parser.add_argument("--format", choices=("text", "json"), default="text")', adapters)
+
     def test_v0470_note_states_the_shared_briefing_backoff(self) -> None:
         # The retry backoff is shared by all pending slots and returns to its base only when `pending` is
         # empty (finding BR-1; the behaviour is pinned in tests/test_jarvis_bridge.py).
