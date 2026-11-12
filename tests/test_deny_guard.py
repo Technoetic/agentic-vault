@@ -15,6 +15,7 @@ hooks/hooks.json and the permission and config templates as in v0.31.0.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -1112,7 +1113,6 @@ class ConfigTests(GuardCase):
         self.assertEqual(self.guard.DEFAULT_DENY_ZONES, TEMPLATE_ZONES)
 
 
-@unittest.skipUnless(os.name == "nt", "Windows path forms")
 def _nfc(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
@@ -1171,6 +1171,7 @@ class UnicodeZoneTests(GuardCase):
         self.assertEqual(decision, "ask")
 
 
+@unittest.skipUnless(os.name == "nt", "Windows path forms")
 class WindowsPathTests(GuardCase):
     def test_msys_paths_are_mapped_to_drive_paths(self) -> None:
         target = msys_form(self.vault / "90-assets" / "a.png")
@@ -1472,6 +1473,26 @@ class DefaultInstallUnchangedTests(unittest.TestCase):
             with self.subTest(path=rel_path):
                 data = (ROOT / rel_path).read_bytes().replace(b"\r\n", b"\n")
                 self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+
+
+class ModuleLayoutTests(unittest.TestCase):
+    """Platform skips in this module decorate test classes, never helpers.
+
+    A skip decorator above a module-level helper turns the helper into a skip
+    on other systems: a class body that calls it at import time then skips the
+    whole module there, and the class the decorator was meant for runs on
+    every system. On Windows the decorator returns the helper unchanged, so
+    only the source shows the mistake.
+    """
+
+    def test_platform_skips_decorate_classes_only(self) -> None:
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        decorated = [node.name for node in tree.body if isinstance(node, ast.FunctionDef) and node.decorator_list]
+        self.assertEqual(decorated, [])
+        windows = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "WindowsPathTests"]
+        self.assertEqual(len(windows), 1)
+        self.assertEqual([ast.unparse(item) for item in windows[0].decorator_list],
+                         ["unittest.skipUnless(os.name == 'nt', 'Windows path forms')"])
 
 
 if __name__ == "__main__":
