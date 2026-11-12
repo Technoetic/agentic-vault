@@ -54,7 +54,8 @@ class CommandBodyTests(unittest.TestCase):
         def injected(text: str) -> bool:
             return bool(INLINE.search(text) or FENCE.search(text))
 
-        for text in ("!`ls`", "see !`git status` now", "\t!`x`", "```!\nls\n```", "  ```!"):
+        for text in ("!`ls`", "see !`git status` now", "\t!`x`", "```!\nls\n```", "  ```!",
+                     "a\N{NO-BREAK SPACE}!`x`", "가\N{IDEOGRAPHIC SPACE}!`x`"):
             with self.subTest(positive=text):
                 self.assertTrue(injected(text))
         for text in ("`!`로", "KEY=!`cmd`", "a!`b`", "```bash"):
