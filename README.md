@@ -1468,6 +1468,8 @@ claude
 | `staged_growth_max_tokens` | 위 검사의 한 커밋 증가 상한(0 이상 정수). 없거나 0이면 증가 상한 없음 |
 | `handoff_fold` | `vault_handoff_fold.py` 선택 설정 객체. `unresolved_prefixes`(기본 `unresolved:`)와 `protect_titles`(기본 없음) — [handoff-fold.md](docs/handoff-fold.md) |
 
+위 두 표의 키와 `fm_exempt_zones`·`warning_policy`·`memory_revocation_file`·`privileged_notes`·`lint_max_warnings`·`promotion_review_sessions` 밖의 최상위 키는 적용되지 않는다. full 헬스체크는 그런 키 이름을 리포트 §0(설정 경고)과 콘솔 요약 줄에, Doctor는 `config_warnings`에 가장 가까운 알려진 키와 함께 적는다(값은 적지 않는다). 종료 코드는 바뀌지 않는다. `deny_zone`을 `deny_zones`로 고칠 때는 `deny_zones`가 기본 금지 구역 5개를 대체하므로 그 5개도 함께 적는다.
+
 </details>
 
 ---

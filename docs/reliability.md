@@ -83,6 +83,11 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --format 
 `--session-evidence`(세션 기록으로 SessionStart 실행 확인)로 따로 본다. 정상적인 기존 세션 훅의
 출력과 fail-soft 종료 정책은 유지한다.
 
+`config_warnings`는 설정 파일에 엔진이 읽지 않는 최상위 키가 있을 때만 생긴다. 키마다
+`{"code": "unknown_key", "key", "suggestion"}`(키 이름과 가장 가까운 알려진 키, 없으면 `null`)을
+최대 20개 담고, 더 있으면 `{"code": "more_unknown_keys", "count"}` 하나를 덧붙인다. 값은 담지
+않으며, 이 필드는 종료 코드를 바꾸지 않는다.
+
 기존 사용자 소유 문서의 교훈 적용 기록은 [교훈 제안 절차](lesson-proposals.md)를 따른다.
 
 ## 호스트 버전과 SessionStart 실측
