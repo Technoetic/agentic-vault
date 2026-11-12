@@ -2011,7 +2011,14 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         command = (REPO_ROOT / "assets/adapters/aside/aside-repl-command.md").read_text(encoding="utf-8")
         self.assertIn("Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", _folded(command))
 
-    PLACEHOLDER_SENTENCE = "내용 없는 자리표시 파일(`.gitkeep` 등)은 대기열 파일로 세지 않는다."
+    def test_v0470_entry_3_names_the_retire_condition_of_session_end(self) -> None:
+        # /vault-session-end now proposes RETIRE only on evidence seen in the session (finding RD-7).
+        condition = "은퇴는 그 교훈이 기대던 원인이 사라졌다는 근거를 이번 세션에서 확인했을 때만 제안"
+        session_end = _folded((REPO_ROOT / "commands/vault-session-end.md").read_text(encoding="utf-8"))
+        self.assertIn(condition, session_end)
+        self.assertIn(condition + "한다. 대상: 모든 사용자의 새 승격과 은퇴 제안.", self._default_change_entry(3))
+
+    PLACEHOLDER_SENTENCE ="내용 없는 자리표시 파일(`.gitkeep` 등)은 대기열 파일로 세지 않는다."
 
     def test_v0470_placeholder_files_are_not_counted_as_queue_files(self) -> None:
         # Every /vault-init vault has empty `.gitkeep` files in the inbox folders (finding TS-2).
