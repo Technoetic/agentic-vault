@@ -2161,6 +2161,15 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertIn("소유자에게 날짜·시각·회차 이름과 시도 횟수를 적고 원인은 짐작하지 않는 안내를 한 번 보낸다.", changes)
         self.assertNotIn("시도 횟수만 담은 안내", changes)
 
+    def test_codex_long_description_conditions_the_checker_sentence(self) -> None:
+        # The checker does not change between v0.46.0 and v0.47.0, so the migration sentence applies only
+        # to transitions from v0.45.1 or earlier (finding RD-3).
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        long_description = codex["interface"]["longDescription"]
+        self.assertIn("For transitions from v0.45.1 or earlier, where " + V0310_CODEX_UPGRADE_SENTENCE,
+                      long_description)
+        self.assertEqual(long_description.count(V0310_CODEX_UPGRADE_SENTENCE), 1)
+
     def test_contributor_guide_layout_is_stated_as_shipped(self) -> None:
         # The guide ships as root AGENTS.md plus .claude/CLAUDE.md; no text may name a root CLAUDE.md.
         release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
