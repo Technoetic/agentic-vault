@@ -1326,7 +1326,10 @@ class AsideCommandWiringTests(unittest.TestCase):
 
     def test_guard_guide_and_codex_reference_state_the_injection_observation(self) -> None:
         limits = _section(self.read("assets/adapters/deny-guard/guide.md"), "## 한계")
-        for literal in ("disableSkillShellExecution", "2.1.252", "훅 기록을 확인한 두 번의 실행"):
+        # The probe command had pre-approved its injected command with allowed-tools; a settings allow
+        # rule instead was not run, so the guide names that condition of the observation.
+        for literal in ("disableSkillShellExecution", "2.1.252", "훅 기록을 확인한 두 번의 실행",
+                        "시험한 명령은 `allowed-tools`로 주입 명령을 미리 허용했다."):
             with self.subTest(literal=literal):
                 self.assertIn(literal, limits)
         self.assertNotIn("문서상 주입 명령은 권한 규칙만 거친다", limits)
