@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.46.0"
-EXPECTED_PUBLIC_REF = "0.46.0"
+EXPECTED = "0.47.0"
+EXPECTED_PUBLIC_REF = "0.47.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.46.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.46.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.47.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.47.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.46.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.47.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -658,6 +658,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(commit, verification_section)
                 self.assertIn(commit, record)
 
+    # v0.47.0 changes none of the seven bound files, so it keeps the v0.46.0 value below.
     def test_stated_source_checker_hash_matches_actual_certificate(self) -> None:
         # The expected value is declared, never derived from the implementation under test.
         # A child process reads the actual checkout beside the certificate CLI.
@@ -1595,15 +1596,26 @@ class V0460ReleaseMetadataTests(unittest.TestCase):
     RECORD_OPENING = "This document specifies gates, not measured results."
     RECORD_SECTIONS = ("## Release content and scope", "## Required feature evidence",
                        "## Evidence boundaries", "## Final release gates", "## Limits")
+    # Dated errata appended in v0.47.0 (item 11); V0460ErrataTests pins the published text above them.
+    ERRATA = "## 정오표"
+    RECORD_ERRATA = "## Errata"
+    PUBLISHED_RELEASE_SHA256 = "ffc83b91bd48d96192720ef8c1b77b999a3d6cbcb29dd10eabccfe8289344d55"
+    PUBLISHED_RECORD_SHA256 = "f2716b5a99f76d20bbce5e613966fc0bcf03a90f3c41987d690c8f1b508c238a"
+
+    @staticmethod
+    def published(text: str, heading: str) -> str:
+        """The published text of a v0.46.0 document: everything before its errata heading."""
+        return text[:text.index("\n" + heading + "\n")]
 
     def test_v0460_release_note_sections_and_install_ref(self) -> None:
         release = self.RELEASE.read_text(encoding="utf-8")
         lines = release.splitlines()
         self.assertEqual(lines[0], self.TITLE)
         headings = [line for line in lines if line.startswith("## ")]
-        self.assertEqual(tuple(headings), self.SECTIONS)
-        # The closing paragraph after the last section states the install ref and the stamps.
-        closing = _folded(release[release.index("\n" + self.SECTIONS[-1] + "\n"):])
+        self.assertEqual(tuple(headings), self.SECTIONS + (self.ERRATA,))
+        # The closing paragraph after the last published section states the install ref and the stamps.
+        published = self.published(release, self.ERRATA)
+        closing = _folded(published[published.index("\n" + self.SECTIONS[-1] + "\n"):])
         self.assertIn(self.INSTALL_REF, closing)
         self.assertIn("engine=0.46.0", closing)
 
@@ -1640,7 +1652,7 @@ class V0460ReleaseMetadataTests(unittest.TestCase):
         self.assertTrue(_folded(record).startswith(
             "# v0.46.0 verification contract " + self.RECORD_OPENING))
         headings = [line for line in lines if line.startswith("## ")]
-        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS + (self.RECORD_ERRATA,))
         folded = _folded(record)
         for literal in ("verification.json", "129", "claude plugin validate --strict",
                         "Reference Atlas", "both directions", "flags-off"):
@@ -1674,3 +1686,485 @@ class V0460ReleaseMetadataTests(unittest.TestCase):
         for path in unchanged:
             with self.subTest(unchanged=path.name):
                 self.assertNotIn("engine=0.46.0", path.read_text(encoding="utf-8-sig"))
+
+
+def _section(text: str, heading: str) -> str:
+    """The text from a heading line to the next heading of the same or a higher level, or to the end."""
+    start = text.index("\n" + heading + "\n") + 1
+    level = heading.split(" ", 1)[0]
+    ends = [text.find("\n" + "#" * size + " ", start + len(heading)) for size in range(1, len(level) + 1)]
+    ends = [end for end in ends if end != -1]
+    return text[start:min(ends) if ends else len(text)]
+
+
+# v0.47.0 item 11: dated errata at the end of the two v0.46.0 documents. The published text above
+# each errata heading keeps its bytes, and each erratum says what was wrong and what holds instead.
+class V0460ErrataTests(unittest.TestCase):
+    def test_published_text_is_kept_above_the_errata(self) -> None:
+        cls = V0460ReleaseMetadataTests
+        for document, heading, digest in (
+                (cls.RELEASE, cls.ERRATA, cls.PUBLISHED_RELEASE_SHA256),
+                (cls.VERIFICATION, cls.RECORD_ERRATA, cls.PUBLISHED_RECORD_SHA256)):
+            with self.subTest(document=document.name):
+                # read_text folds CRLF, so a Windows checkout hashes like the Git blob.
+                text = document.read_text(encoding="utf-8")
+                self.assertEqual(text.count("\n" + heading + "\n"), 1)
+                headings = [line for line in text.splitlines() if line.startswith("## ")]
+                self.assertEqual(headings[-1], heading)
+                published = cls.published(text, heading)
+                self.assertEqual(hashlib.sha256(published.encode("utf-8")).hexdigest(), digest)
+
+    def test_errata_state_what_was_wrong_and_what_is_right(self) -> None:
+        import re
+
+        cls = V0460ReleaseMetadataTests
+        release = cls.RELEASE.read_text(encoding="utf-8")
+        release_errata = release[release.index("\n" + cls.ERRATA + "\n"):]
+        for literal in ("2026-11-13", "\"영문자·숫자·`_` 밖의 글자가 든 키 뒤\"", "`\\w`", "단어 문자", "see-also"):
+            with self.subTest(release_literal=literal):
+                self.assertIn(literal, _folded(release_errata))
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. ", release_errata), ["1"])
+        record = cls.VERIFICATION.read_text(encoding="utf-8")
+        record_errata = record[record.index("\n" + cls.RECORD_ERRATA + "\n"):]
+        for literal in ("2026-11-13", "\"on the annotated v0.46.0 tag before master is pushed\"",
+                        "pushed together", "candidate-branch run",
+                        "\"The vault folder name itself is not normalized\"", "deny guard on macOS",
+                        "\"built from the local tag before anything is pushed\"",
+                        "Candidate branches had been pushed", "before the tag and master were pushed"):
+            with self.subTest(record_literal=literal):
+                self.assertIn(literal, _folded(record_errata))
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. ", record_errata), ["1", "2", "3"])
+        # The errata correct sentences only; neither restates a checker digest.
+        for errata in (release_errata, record_errata):
+            for digest in (CHECKER_SHA256_V0460, CHECKER_SHA256_V0340):
+                with self.subTest(digest=digest[:8]):
+                    self.assertNotIn(digest[:8], errata)
+
+
+# v0.47.0: eleven items from an outside review that compared the plugin with a vendor prompting
+# guide. Item 2 was tried and not shipped, no certificate-bound file changed (the v0.46.0
+# fingerprint stays), and only the health check, the Aside clause and the new command asset move to
+# engine=0.47.0. The note fixes the publication order; the record specifies gates, not results.
+class V0470ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.47.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.47.0.md"
+    TITLE = "# v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령"
+    SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 참고와 기존 활용의 차이",
+                "## v0.46.0 문서 정정", "## 검증", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.47.0`이다."
+    CERTIFICATE_SENTENCE = (
+        f"일곱 bound 파일은 v0.46.0과 같으므로 checker_sha256는 `{CHECKER_SHA256_V0460}` 그대로다. "
+        "v0.46.0에서 만든 인증서는 실제 설치 바이트가 같으면 그대로 맞는다. v0.45.1 이하에서 올 때는 "
+        "[v0.46.0의 순서](v0.46.0.md#하위호환업그레이드)를 따른다."
+    )
+    CORPUS_SHA256 = "38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a"
+    RESULT_SHA256 = "2efeda6adfcbfd1b677159fa9ce59cb61fa011179168740f99bf9d20655dac59"
+    DEFAULT_CHANGES_LEAD = (
+        "플러그인을 갱신하면 명령·스킬·브리지 코드는 바로 바뀐다. 볼트에 설치된 사본(규칙·healthcheck·어댑터)은 "
+        "/vault-upgrade(Codex는 upgrade)를 실행하기 전까지 예전대로 동작하고, 이전 플러그인 폴더에서 시작한 "
+        "Telegram 브리지는 다시 시작하기 전까지 예전대로 동작한다."
+    )
+    DEFAULT_CHANGES = 20
+    ORDER_SENTENCE = (
+        "후보 브랜치 CI(최종 커밋) → 로컬 태그·ZIP·재빌드 확인·Codex 설치 확인·인증서 → 태그 push → "
+        "태그 CI 11/11 → 참고 대장 갱신과 독립 확인 → 독립 릴리스 검토 → master push → master CI 11/11 → "
+        "검증 기록(verification.json) → 업로드 → 초안 점검 → 게시 → 게시 후 확인"
+    )
+    RECORD_TITLE = "# v0.47.0 verification contract"
+    RECORD_OPENING = "This document specifies gates, not measured results."
+    RECORD_SECTIONS = ("## Release content and scope", "## Required feature evidence",
+                       "## Evidence boundaries", "## Final release gates", "## Limits")
+    GATE_LABELS = (
+        "Local gates on the integrated tree and on the final commit.",
+        "Candidate-branch CI on the final commit.",
+        "Local tag, release ZIP, rebuild check, native Codex check and certificate.",
+        "Tag push.",
+        "Tag CI.",
+        "Reference catalog update and its independent check.",
+        "Independent release review.",
+        "Master push.",
+        "Master CI.",
+        "Receipt.",
+        "Upload.",
+        "Draft inspection.",
+        "Publication.",
+        "Post-publication checks.",
+    )
+    # The local steps that the release steps repeat before every changed candidate and on the
+    # final commit: full suite, compile, whitespace, smokes, manifest validation, flags-off
+    # comparison with probes, independent source review and the real /aside-repl run.
+    GATE_ONE_STEPS = ("unittest", "compile", "whitespace", "smoke", "claude plugin validate --strict",
+                      "flags-off", "independent source review", "/aside-repl")
+    # Fixed boundary texts (what ran, on what, and what did not run).
+    BOUNDARY_TEXTS = (
+        "루트 안내(AGENTS.md·CLAUDE.md)가 다른 폴더의 세션에 읽히지 않는 것은 Claude Code 2.1.252 출력 모드에서 "
+        "--plugin-dir로 플러그인을 불러 한 번 확인했다. 마켓플레이스 설치본, IDE 확장, 플러그인 파일을 읽는 턴은 "
+        "시험하지 않았고 Codex는 실행하지 않았다(호스트 문서의 탐색 규칙을 따른다). 플러그인 체크아웃을 볼트 안에 "
+        "두면 Claude Code가 그 CLAUDE.md를 읽을 수 있다.",
+        "엔진 사본 소유를 밝히는 계약 한 줄은 계획해 규칙 문구 시험을 했으나 통과하지 못해 넣지 않았다: 시험한 세 "
+        "문구가 모두, 사용자가 명시적으로 요청한 볼트 사본 수정을 거절하게 만들었다(줄 없이 4건 중 3건 수행, 줄이 "
+        "있으면 0건; 로컬 모델 하나, 문구마다 1회, 지어낸 사례 — "
+        "[hardening.md](../hardening.md#engine-copy-ownership-line-tried-not-shipped)). 그래서 vault-architecture.md와 "
+        "그 스탬프는 v0.46.0과 같다.",
+        "브리지는 모델 이름이 CLI에서 쓸 수 있는지 검사하지 않는다. --effort가 없는 이전 claude CLI는 값을 지정하면 "
+        "실행이 실패할 수 있다. 설치된 claude CLI 2.1.252에서 브리지 인자 배열에 두 옵션을 넣어 확인했다(2026-11-13, "
+        "경우마다 1회): --bare에서는 옵션 해석까지만 확인했고(이 기기에는 API 키가 없어 응답 생성은 못 했다), --bare "
+        "없이 로그인한 상태에서는 haiku·low로 응답했다. CLI가 받지 않는 모델 이름 하나는 --bare 없이 0이 아닌 종료 "
+        "코드로 끝났다. --bare에서 인증된 응답 생성과 노력 수준 적용은 확인하지 않았다. 모델·노력 수준을 바꿔 응답 "
+        "시간이나 품질이 어떻게 달라지는지는 재지 않았다.",
+        "브리지는 claude CLI의 텍스트 출력과 종료 코드만 읽어 모델 제공자의 요청 거절과 장애·빈 응답을 구별하지 "
+        "못한다. --output-format json은 쓰지 않는다. 실제 거절의 출력 형태는 확인하지 않았다. --bare에서 API 키가 "
+        "없을 때 CLI는 로그인하지 않았다는 줄을 표준 출력에 내고 종료 코드 1로 끝났다(1회). 브리지는 0이 아닌 종료 "
+        "코드를 생성 실패로 처리하고 그 출력을 전달하지 않는다.",
+        "주입 명령이 훅을 거치지 않는다는 관찰은 Claude Code 2.1.252 출력 모드에서 경우마다 1회 본 것이며, 훅 기록은 "
+        "두 번의 실행에서 확인했다. repl 전달 방식은 Windows 11, Aside CLI 1.26.916.1741에서 2026-11-12~13에 "
+        "실측했다: Git Bash에서 인자로 넘기기와 Python에서 셸 없이 넘기기는 스크립트가 그대로 전달됐고, Windows "
+        "PowerShell 5.1에서 인자로 넘기면 큰따옴표가 사라져 실패했다(1회). PowerShell 7, macOS, Linux와 Codex 세션의 "
+        "실행은 시험하지 않았다. /aside-repl은 최종 파일로 Claude Code 2.1.252 출력 모드에서 공개 페이지 하나로 한 번 "
+        "실행했다(기동 도우미와 aside repl 줄은 에이전트 자신의 도구 호출로 실행됐다). IDE 확장, 슬래시 명령 없이 "
+        "말로 한 요청, Codex에서는 실행하지 않았다. 절차 글은 동작을 강제하지 못한다.",
+    )
+    RECORD_LIMITS = (
+        "The root guide was checked on Claude Code 2.1.252 in print mode with `--plugin-dir`, one run each: a "
+        "session in another folder did not see it and a session inside the checkout did. A marketplace "
+        "installation, the IDE extension and a turn that reads a plugin file were not tested, and Codex was "
+        "not run.",
+        "The two bridge options were checked on Claude Code 2.1.252, one run per case: with `--bare` only up "
+        "to option parsing (the release machine has no API key), and without `--bare`, logged in, with an "
+        "answer. Generation with authentication in bare mode and whether bare mode applies the effort level "
+        "were not run.",
+    )
+    # Files under assets/, hooks/ and skills/ that carry engine=0.47.0 in their first five lines.
+    DECLARED_STAMPS = {
+        "skills/agentic-vault/scripts/vault_healthcheck.py",
+        "assets/adapters/aside/aside-repl-command.md",
+        "assets/adapters/aside/browser-clause.md",
+    }
+
+    def test_v0470_release_note_sections_and_install_ref(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        lines = release.splitlines()
+        self.assertEqual(lines[0], self.TITLE)
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+        # The closing paragraph after the last section states the install ref and the stamp.
+        closing = _folded(release[release.index("\n" + self.SECTIONS[-1] + "\n"):])
+        self.assertIn(self.INSTALL_REF, closing)
+        self.assertIn("engine=0.47.0", closing)
+        self.assertIn("--ref v0.47.0", closing)
+
+    def test_v0470_states_the_unchanged_checker_once(self) -> None:
+        for document in (self.RELEASE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.name):
+                self.assertEqual(text.count(CHECKER_SHA256_V0460), 1)
+                self.assertEqual(text.count(CHECKER_SHA256_V0460[:8]), 1)
+            for digest in (CHECKER_SHA256_V0340, CHECKER_SHA256_V0330, CHECKER_SHA256_V0320):
+                with self.subTest(document=document.name, absent=digest[:8]):
+                    self.assertNotIn(digest[:8], text)
+        release = self.RELEASE.read_text(encoding="utf-8")
+        self.assertIn(self.CERTIFICATE_SENTENCE, _folded(_section(release, "## 하위호환·업그레이드")))
+        record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
+        self.assertIn(f"checker fingerprint `{CHECKER_SHA256_V0460}`", record)
+        self.assertIn(f"`{self.CORPUS_SHA256}`", record)
+        self.assertIn(f"`{self.RESULT_SHA256}`", record)
+
+    def test_v0470_publication_order(self) -> None:
+        import re
+
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        gates = _section(record, "## Final release gates")
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. \*\*", gates), [str(n) for n in range(1, 15)])
+        folded = _folded(gates)
+        position = -1
+        for number, label in enumerate(self.GATE_LABELS, 1):
+            with self.subTest(gate=number):
+                found = folded.find(f"{number}. **{label}**")
+                self.assertGreater(found, position)
+                position = found
+        release = self.RELEASE.read_text(encoding="utf-8")
+        self.assertIn(self.ORDER_SENTENCE, _section(release, "## 검증").splitlines())
+        self.assertEqual(_folded(release).count(self.ORDER_SENTENCE), 1)
+
+    def test_v0470_record_specifies_gates_not_results(self) -> None:
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        lines = record.splitlines()
+        self.assertEqual(lines[0], self.RECORD_TITLE)
+        self.assertTrue(_folded(record).startswith(self.RECORD_TITLE + " " + self.RECORD_OPENING))
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        folded = _folded(record)
+        for literal in ("verification.json", "130", "claude plugin validate --strict", "Reference Atlas",
+                        "flags-off", "this document does not assert they passed"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_v0470_errata_section_links_both_errata(self) -> None:
+        import re
+
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## v0.46.0 문서 정정")
+        self.assertIn("틀린 문장 넷", section)
+        self.assertNotIn("틀린 문장 셋", section)
+        bullets = [line for line in section.splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 4)
+        self.assertEqual(section.count("](v0.46.0.md#정오표)"), 1)
+        self.assertTrue(bullets[0].startswith("- [릴리스 노트의 정오표](v0.46.0.md#정오표): "))
+        self.assertEqual(re.findall(r"\]\(\.\./verification/v0\.46\.0\.md#errata\) (\d):", section),
+                         ["1", "2", "3"])
+        self.assertEqual(section.count("](../verification/v0.46.0.md#errata)"), 3)
+
+    def test_v0470_document_links_resolve(self) -> None:
+        import re
+        from urllib.parse import unquote
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
+                if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                with self.subTest(document=document.name, target=target):
+                    self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
+
+    def test_v0470_moves_only_the_declared_stamps(self) -> None:
+        stamped = set()
+        for top in ("assets", "hooks", "skills"):
+            for path in (REPO_ROOT / top).rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    head = path.read_text(encoding="utf-8-sig").splitlines()[:5]
+                except UnicodeDecodeError:
+                    continue
+                if any("engine=0.47.0" in line for line in head):
+                    stamped.add(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(stamped, self.DECLARED_STAMPS)
+
+    def test_v0470_default_changes_are_numbered(self) -> None:
+        import re
+
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")
+        self.assertIn(self.DEFAULT_CHANGES_LEAD, section.splitlines())
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. ", section),
+                         [str(n) for n in range(1, self.DEFAULT_CHANGES + 1)])
+        # Item 2 was not shipped, so no entry concerns a change of the architecture rule.
+        self.assertIn("상시 로드 규칙 `vault-architecture.md`는 그대로다", _folded(section))
+
+    def test_v0470_no_placeholder_left(self) -> None:
+        import re
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.name):
+                self.assertIsNone(re.search(r"<[^<>\n]*>", text))
+                self.assertNotIn("TBD", text)
+                self.assertNotIn("TODO", text)
+
+    def test_v0470_record_never_claims_nothing_was_pushed(self) -> None:
+        record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
+        self.assertNotIn("Nothing is pushed", record)
+        self.assertNotIn("before anything is pushed", record)
+        self.assertIn("only candidate branches have been pushed", record)
+
+    def test_v0470_gate_one_names_every_repeated_local_step(self) -> None:
+        gates = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Final release gates"))
+        gate_one = gates[gates.index("1. **" + self.GATE_LABELS[0]):gates.index("2. **" + self.GATE_LABELS[1])]
+        for step in self.GATE_ONE_STEPS:
+            with self.subTest(step=step):
+                self.assertIn(step, gate_one)
+        self.assertIn("Before the first candidate-branch push", gate_one)
+        self.assertIn("again on the final commit", gate_one)
+
+    def test_v0470_note_counts_the_deliberate_copies(self) -> None:
+        import re
+
+        # The rule's source file for each marker; SHARED ZONE RULE has no marked source.
+        sources = {"SHARED PATH RULE": "vault_paths.py", "SHARED WORKTREE RULE": "vault_worktrees.py",
+                   "ATX HEADING": "vault_ssot.py"}
+        unmarked = "SHARED ZONE RULE"
+        files = [*(REPO_ROOT / "skills/agentic-vault/scripts").glob("*.py"),
+                 *(REPO_ROOT / "assets/adapters").glob("*/*.py"),
+                 *(REPO_ROOT / "hooks").glob("*.py")]
+        names, copies = set(), []
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            for name in re.findall(r"(?m)^# --- BEGIN (.+?)(?: \(| ---)", text):
+                names.add(name)
+                if sources.get(name) != path.name:
+                    copies.append((name, path.name))
+            outside = re.sub(r"(?ms)^# --- BEGIN " + unmarked + r".*?^# --- END " + unmarked + " ---$", "", text)
+            if path.name != "vault_paths.py" and "def fold_path_part" in outside:
+                copies.append(("fold_path_part", path.name))
+        self.assertEqual(names - set(sources) - {unmarked}, set())
+        rules = len(names | {"fold_path_part"})
+        korean = {4: "네", 5: "다섯", 6: "여섯", 7: "일곱", 8: "여덟", 9: "아홉"}
+        self.assertEqual((rules, len(copies)), (5, 7), copies)
+        changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        self.assertIn(f"{korean[rules]} 규칙의 사본({korean[len(copies)]} 곳)", changes)
+        self.assertNotIn("다섯 쌍", changes)
+
+    def test_v0470_boundaries_state_what_ran_and_what_did_not(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        boundaries = _section(release, "## 알려진 경계")
+        for text in self.BOUNDARY_TEXTS:
+            with self.subTest(boundary=text[:30]):
+                self.assertIn(text, boundaries)
+        # The PowerShell 5.1 statement appears once, as the measured failure with its run count.
+        self.assertEqual(boundaries.count("PowerShell 5.1"), 1)
+        start = boundaries.index("PowerShell 5.1")
+        sentence = boundaries[start:boundaries.index("실패했다(1회).", start)]
+        self.assertNotIn("다. ", sentence)
+        self.assertNotIn("\n", sentence)
+        self.assertNotIn("영수증", release)
+        self.assertNotIn("호스트 문서와 영수증에", release)
+        limits = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Limits"))
+        for statement in self.RECORD_LIMITS:
+            with self.subTest(limit=statement[:30]):
+                self.assertIn(statement, limits)
+        self.assertIn("Codex was not run", limits)
+        self.assertIn("were not run", limits)
+
+
+# v0.47.0 shared surfaces: README, SECURITY.md, docs/codex.md, docs/hardening.md, docs/README.md and
+# commands/vault-upgrade.md carry the parts of items 1-5 and 9 that other phases leave to the release.
+class V0470SharedSurfaceTests(unittest.TestCase):
+    JARVIS_BRIDGE = REPO_ROOT / "skills/agentic-vault/scripts/jarvis_bridge.py"
+    JARVIS_SETUP = REPO_ROOT / "commands/vault-jarvis-setup.md"
+    LESSON_DELTA = REPO_ROOT / "skills/agentic-vault/scripts/vault_lesson_delta.py"
+    HARDENING = REPO_ROOT / "docs/hardening.md"
+    SECURITY = REPO_ROOT / "SECURITY.md"
+    UPGRADE = REPO_ROOT / "commands/vault-upgrade.md"
+    OWNERSHIP_HEADING = "### Engine copy ownership line (tried, not shipped)"
+    OWNERSHIP_ROWS = (
+        ("None (v0.46.0)", "15/16", "8/8", "3/4", "0/4"),
+        ("Line 6 wording only", "15/16", "8/8", "3/4", "0/4"),
+        ("W1, last line", "14/16", "8/8", "0/4", "0/4"),
+        ("W1, after the `00-meta/` entry", "16/16", "8/8", "0/4", "0/4"),
+        ("W2, last line", "15/16", "8/8", "0/4", "0/4"),
+        ("W3, last line", "15/16", "8/8", "0/4", "0/4"),
+    )
+
+    def test_readme_tree_lists_the_contributor_guide(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        tree = readme[readme.index("agentic-vault/\n├── .claude-plugin/"):]
+        tree = tree[:tree.index("```")]
+        self.assertIn("AGENTS.md · CLAUDE.md", tree)
+        docs_index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        self.assertIn("](../AGENTS.md)", docs_index)
+
+    def test_hardening_ownership_subsection_states_the_dropped_result(self) -> None:
+        text = self.HARDENING.read_text(encoding="utf-8")
+        self.assertEqual(text.count(self.OWNERSHIP_HEADING + "\n"), 1)
+        start = text.index(self.OWNERSHIP_HEADING + "\n")
+        end = text.index("\n## ", start)
+        # It closes the rule-facts section, directly before the sync-conflict section.
+        self.assertLess(text.index("\n## Rule facts and tool results\n"), start)
+        self.assertEqual(end, text.index("\n## 동기화 충돌 사본과 checkpoint 이후 변경 경고 (선택)\n"))
+        section = text[start:end]
+        rows = [tuple(cell.strip() for cell in line.strip().strip("|").split("|"))
+                for line in section.splitlines()
+                if line.startswith("| ") and not line.startswith("| Wording") and not line.startswith("| ---")]
+        self.assertEqual(tuple(rows), self.OWNERSHIP_ROWS)
+        folded = _folded(section)
+        for literal in ("The line was not shipped because", "0/4", "Qwen3.5-9B-Q8_0.gguf", "b10729-458681e1d",
+                        "harness is not published"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+        self.assertNotIn("<", section)
+        self.assertNotIn("x/", section)
+
+    def test_readme_describes_optional_model_and_effort(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        for literal in ("`jarvis.model`·`jarvis.effort`", "`low`·`medium`·`high`·`xhigh`·`max`",
+                        "비어 있으면 브리지는 `--model`·`--effort`를 넘기지 않아",
+                        "`--bare`에서 인증된 응답 생성과 노력 수준 적용은 확인하지 않았다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, readme)
+        self.assertIn("(선택 키 `model`·`effort` 포함, 기본 빈 값)", readme)
+        limits = _section(self.SECURITY.read_text(encoding="utf-8"), "## Known limitations")
+        bullets = [_folded(bullet) for bullet in ("\n" + limits).split("\n- ")[1:]]
+        named = [bullet for bullet in bullets if "`jarvis.model`" in bullet]
+        self.assertEqual(len(named), 1)
+        self.assertIn("were not run", named[0])
+
+    def test_readme_states_the_briefing_attempt_limit_and_refusal_limit(self) -> None:
+        attempts = _module_constant(self.JARVIS_BRIDGE, "BRIEFING_MAX_ATTEMPTS")
+        readme = README.read_text(encoding="utf-8")
+        for literal in (f"같은 회차가 {attempts}번 연속 실패하면",
+                        "이 안내가 전달되지 않아도 다시 보내지 않고 로그에만 남긴다.",
+                        "날이 바뀔 때 전날의 `pending` 회차는 한 번만 더 시도하고",
+                        "시도 횟수는 브리지 메모리에만 두므로 브리지를 다시 시작하면 0부터 센다.",
+                        "모델 제공자의 요청 거절과 장애·빈 응답을 구별하지 못하며"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, readme)
+
+        def block(text: str) -> str:
+            start = text.index("이 보장에도 조건이 붙는다. 같은 회차가")
+            end = text.index("0부터 센다.", start) + len("0부터 센다.")
+            return text[start:end]
+
+        self.assertEqual(block(readme), block(self.JARVIS_SETUP.read_text(encoding="utf-8")))
+        self.assertIn(f"since v0.47.0 a scheduled briefing slot that fails {attempts} times in a row is skipped",
+                      readme)
+
+    def test_constraints_guidance_asks_for_scope_reason_and_removal(self) -> None:
+        section = _folded(_section(self.HARDENING.read_text(encoding="utf-8"),
+                                   "## Compact constraints note (`constraints_note`)"))
+        for literal in ("scope and its reason", "Remove an item when its reason no longer holds",
+                        "only the first 120 characters"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, section)
+        row = next(line for line in README.read_text(encoding="utf-8").splitlines()
+                   if line.startswith("| `constraints_note` |"))
+        self.assertIn("적용 범위와 이유", row)
+        self.assertIn("이유가 사라진 항목은 지운다", row)
+
+    def test_retire_reason_section_names_the_real_error_codes(self) -> None:
+        text = self.HARDENING.read_text(encoding="utf-8")
+        self.assertEqual(text.count("\n## 교훈 은퇴 사유\n"), 1)
+        section = _section(text, "## 교훈 은퇴 사유")
+        literals = {node.value for node in ast.walk(ast.parse(self.LESSON_DELTA.read_text(encoding="utf-8")))
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+        for code in ("invalid_retire_reason", "retire_reason_exists", "retire_reason_unsupported"):
+            with self.subTest(code=code):
+                self.assertIn(code, section)
+                self.assertIn(code, literals)
+
+    def test_upgrade_passes_the_offer_flag_once(self) -> None:
+        # Among the command lines that run the adapter report, exactly one passes the flag: step 6.
+        lines = [line for line in self.UPGRADE.read_text(encoding="utf-8").splitlines()
+                 if "vault_adapters.py" in line and "--vault" in line]
+        flagged = [line for line in lines if "--offer-aside-command" in line]
+        self.assertEqual(len(flagged), 1)
+        self.assertEqual(flagged[0].count("--offer-aside-command"), 1)
+        self.assertTrue(flagged[0].startswith("6. **도구 어댑터(선택)**"))
+
+    def test_upgrade_owns_the_stamped_copy_and_offers_one_clause_line(self) -> None:
+        text = self.UPGRADE.read_text(encoding="utf-8")
+        for literal in ("`offer_command`", "`offer_command_update`", "`review_command`",
+                        "`agentic-vault:adapter aside-repl engine=`", "**repl 스크립트 전달:**",
+                        "사용자가 승인한 Aside 조항 한 줄 추가"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+
+    def test_security_and_codex_doc_state_the_injection_observation(self) -> None:
+        security = self.SECURITY.read_text(encoding="utf-8")
+        limits = _folded(_section(security, "## Known limitations"))
+        for literal in ("**Commands that a command or skill body injects bypass PreToolUse hooks (observed).**",
+                        "2.1.252", "2026-11-12", "disableSkillShellExecution", "allowed-tools",
+                        "two runs whose hook log was checked", "deny and ask rules still override"):
+            with self.subTest(limits=literal):
+                self.assertIn(literal, limits)
+        for stale in ("four injected commands", "states neither behaviour"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, limits)
+        summary = _folded(_section(security, "## 한국어 요약"))
+        for literal in ("disableSkillShellExecution", "2.1.252", "훅 기록을 확인한 두 번의 실행"):
+            with self.subTest(summary=literal):
+                self.assertIn(literal, summary)
+        self.assertNotIn("문서상 권한 규칙만 거친다", summary)
+        scope = _section(security, "## Scope")
+        aside = scope[scope.index("- **Optional Aside adapter**"):]
+        aside = aside[:aside.index("\n- ")]
+        self.assertIn("/aside-repl", aside)
+        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        self.assertIn("aside-repl-command.md", codex)
+        self.assertIn("subprocess", codex)

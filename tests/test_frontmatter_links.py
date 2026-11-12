@@ -196,6 +196,31 @@ class CaseTableTests(unittest.TestCase):
             with self.subTest(case=case_id, text=text):
                 self.assertEqual(scan(text), lines)
 
+    def test_v0451_rule_already_reported_unicode_letter_keys(self) -> None:
+        # Fact pin behind the v0.46.0 erratum: the v0.45.1 rule matched keys with `[\w_]+`, and
+        # Python's `\w` takes every Unicode letter and digit, so a Hangul or Arabic-Indic key was
+        # already reported. Only keys holding a non-word character are new in v0.46.0.
+        already = (
+            chr(0xAD00) + chr(0xB828) + ": [[B]]",  # Hangul key
+            chr(0x0661) + chr(0x0662) + ": [[B]]",  # Arabic-Indic digits
+        )
+        new_in_v0460 = (
+            "see-also: [[B]]",
+            "a.b: [[B]]",
+            "a b: [[B]]",
+            '"a": [[B]]',
+            "cafe" + chr(0x0301) + ": [[B]]",  # a combining mark is not a word character
+        )
+        for text in already:
+            with self.subTest(v0451="matched", text=text):
+                self.assertIsNotNone(vault_healthcheck.UNQUOTED_FM_LINK_RE.match(text))
+        for text in new_in_v0460:
+            with self.subTest(v0451="not matched", text=text):
+                self.assertIsNone(vault_healthcheck.UNQUOTED_FM_LINK_RE.match(text))
+        for text in already + new_in_v0460:
+            with self.subTest(scanner=text):
+                self.assertEqual(scan(text), [0])
+
 
 class GateTests(unittest.TestCase):
     """The staged commit gate, one note per case, front matter `title` first."""
