@@ -636,6 +636,17 @@ class JarvisButlerSummaryTests(unittest.TestCase):
             ("float count", 0, _summary_stdout(_health_summary(notes_checked=12.0))),
             ("complete not a bool", 0, _summary_stdout(_health_summary(complete=1))),
             ("exit code differs", 1, _summary_stdout(clean)),
+            # Only the exit_code check rejects these: each status is valid on its own.
+            ("fatal, summary says exit 0", 1, _summary_stdout(_health_summary(critical=2))),
+            ("not_vault, summary says exit 0", 2, _summary_stdout(_health_summary(
+                status="not_vault", notes_checked=0, issues=0, complete=False,
+                extension_input_complete=False))),
+            ("error, summary says exit 1", 0, _summary_stdout(_health_summary(
+                status="error", exit_code=1, notes_checked=0, issues=0, complete=False,
+                extension_input_complete=False))),
+            ("vault_not_found, summary says exit 2", 1, _summary_stdout(_health_summary(
+                status="vault_not_found", exit_code=2, notes_checked=0, issues=0,
+                complete=False, extension_input_complete=False))),
             ("bool exit code", 1, _summary_stdout(_health_summary(exit_code=True))),
             ("fatal without exit 1", 0, _summary_stdout(_health_summary(critical=2))),
             ("clean with exit 1", 1, _summary_stdout(_health_summary(exit_code=1))),
