@@ -2081,6 +2081,18 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(absent=old):
                 self.assertNotIn(old, folded)
 
+    def test_v0470_record_conditions_probe_e10_on_the_installed_git(self) -> None:
+        # Probe E10 requires no automatic maintenance child under the v0.47.0 settings; under the v0.46.0
+        # settings it records whether git started one, which not every git does (final check of the
+        # documents, F2).
+        evidence = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Required feature evidence"))
+        self.assertIn(
+            "Probe E10: in a fresh repository with the seed's settings, the Trace2 record of a commit shows no "
+            "automatic maintenance child under the v0.47.0 settings; under the v0.46.0 settings it shows one where "
+            "the installed git starts one at all, and the receipt records which of the two was observed.", evidence)
+        self.assertIn("where the installed git starts one at all", evidence)
+        self.assertNotIn("must show one automatic maintenance child", evidence)
+
     def test_v0470_record_never_claims_nothing_was_pushed(self) -> None:
         record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
         self.assertNotIn("Nothing is pushed", record)
