@@ -15,9 +15,11 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# The two documented injection forms: `!` + backquote at a line start or after a blank,
-# and a backquote or tilde fence whose info string starts with `!`.
-INLINE = re.compile(r"(?m)(?:^|(?<=[ \t]))!`")
+# The two documented injection forms: `!` + backquote at a line start or after whitespace,
+# and a backquote or tilde fence whose info string starts with `!`. Whitespace is read widely
+# (any Unicode whitespace, such as a no-break or an ideographic space): Claude Code's own
+# definition of whitespace was not measured.
+INLINE = re.compile(r"(?m)(?:^|(?<=\s))!`")
 FENCE = re.compile(r"(?m)^[ \t]*(?:`{3,}|~{3,})!")
 COMMAND_ASSET = "assets/adapters/aside/aside-repl-command.md"
 
