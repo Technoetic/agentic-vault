@@ -77,7 +77,9 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault "C:/vault" --format 
 전체 출력을 중단한다면 그 사실도 함께 표시한다. 진단은 보고서나 캐시를 쓰지 않는다.
 
 종료 코드 0은 사용 가능하거나 의도적으로 꺼진 상태, 1은 일부 기억이 빠지는 경고,
-2는 잘못되거나 사용할 수 없는 설정이다. 비볼트 여부도 JSON 상태로 확인한다.
+2는 잘못되거나 사용할 수 없는 설정, 또는 없거나 폴더가 아닌 볼트 경로(`invalid_vault`,
+`vault_path_not_found`)다. 비볼트 여부(`not_vault`, 종료 코드 0)도 JSON 상태로 확인하며,
+`--require-vault`를 주면 `not_vault`도 종료 코드 2로 끝난다(보고 내용은 같다).
 이 결과는 **파일과 설정의 진단**이다. 호스트가 훅을 신뢰했는지·실제로 실행했는지,
 모델이 기억을 제대로 사용했는지까지 검증하지 않는다. 실행 기록은 아래의 선택형
 `--session-evidence`(세션 기록으로 SessionStart 실행 확인)로 따로 본다. 정상적인 기존 세션 훅의
