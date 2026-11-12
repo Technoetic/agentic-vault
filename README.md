@@ -1083,7 +1083,7 @@ SessionStart 훅이 위 두 계층(handoff+hot)을 자동 주입하므로 대부
 세션 컨텍스트에는 크기 제한이 필요하다. 그래서 v0.8.0부터 healthcheck 섹션 11이 **토큰 예산**(`hot_max_tokens` / `handoff_max_tokens`)으로 비대화를 감시한다. **이 로컬 개선판은 주입 시에도 각 섹션을 추정 예산 안으로 줄인다.** 헤더·생략 표시를 포함하고 0이면 해당 섹션을 주입하지 않는다. 바이트 읽기 상한과 볼트 내부 경로 검증도 적용한다.
 계산은 기존 검사기의 **문자 종류별 추정치**를 사용한다. 실제 모델 토크나이저·청구 토큰과 같지는 않다. 500단어는 작성 권고다. **추정 토큰 예산은 비용 예산이고, 호스트 전송 상한(Claude Code 훅 출력 10,000자 — 엔진은 9,500자로 묶는다)은 별도다.** 합친 출력이 넘치면 헤더 몫을 먼저 떼고 토큰 예산 비율로 섹션별 글자 상한을 나눠 줄·단어 경계(없으면 글자 위치)에서 자르며 두 헤더는 남긴다. 잘린 섹션 끝의 생략 표시에는 들어가는 한 원문 경로, 생략된 제목(최대 5개), 주제 검색용 `/vault-recall` 안내가 붙고, 아니면 짧은 표시만 남는다.
 
-⚠️ **이 계층이 낡는 것도 감시 대상이다.** handoff의 기준 커밋(anchor)은 session-end만 갱신하므로, git HEAD가 anchor보다 임계(기본 3커밋, `anchor_drift_threshold`) 이상 앞서면 **세션이 session-end 없이 닫혔다**는 신호다 — v0.8.1부터 healthcheck 섹션 12가 이 거리를 재서 콘솔 요약에 띄운다(실사례: remember 미실행 3주 공백을 어떤 계기판도 못 잡았다).
+⚠️ **이 계층이 낡는 것도 감시 대상이다.** handoff의 기준 커밋(anchor)은 session-end만 갱신하므로, git HEAD가 anchor보다 임계(기본 3커밋, `anchor_drift_threshold`) 이상 앞서면 **세션이 session-end 없이 닫혔다**는 신호다 — v0.8.1부터 healthcheck 섹션 12가 이 거리를 재서 콘솔 요약에 띄운다(실사례: remember 미실행 3주 공백을 어떤 계기판도 못 잡았다). anchor가 아직 템플릿 값 `(없음)`인 handoff는 계약 위반이 아니다 — git을 쓰지 않는 볼트는 이 검사를 생략하고, git 볼트는 이 볼트 폴더를 바꾼 커밋이 `anchor_drift_threshold`개 이상 쌓였을 때만 "session-end 기록 없음"으로 알린다.
 
 상주 계약(L0)은 v0.6.0부터 **소유권으로 3층 분리**된다:
 
@@ -1457,7 +1457,7 @@ claude
 |:---|:---|
 | `stale_days` | 노화 문서 검사 임계 일수 — 미설정/0이면 생략 |
 | `index_scopes` | 인덱스 미등록 검사 대상 최상위 폴더 — 미설정 시 기본 스코프 |
-| `anchor_drift_threshold` | handoff 기준 커밋과 HEAD 간 세션 종료 누락 의심 임계 — 미설정 시 기본 3커밋 |
+| `anchor_drift_threshold` | handoff 기준 커밋과 HEAD 간 세션 종료 누락 의심 임계 — 미설정 시 기본 3커밋. anchor가 아직 템플릿 값 `(없음)`이면 계약 위반이 아니다: git 미사용 볼트는 검사를 생략하고, git 볼트는 이 볼트 폴더를 바꾼 커밋이 이 값 이상일 때만 안내한다 |
 | `sync_conflict_check` | `true`면 Syncthing 충돌 사본·임시 파일과 Obsidian Sync 충돌 파일 이름을 §15 경고로 보고 — 미설정 시 꺼짐. 근거와 범위는 [hardening.md](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택) |
 | `sync_conflict_patterns` | 위 검사에 더할 파일 이름 glob 목록(최대 32개) — 공식 이름 규칙을 확인하지 못한 Dropbox·OneDrive 등은 여기에 직접 적음 |
 | `checkpoint_drift_check` | `true`면 마지막 PreCompact·SessionEnd checkpoint 이후 바뀌거나 없어진 hot·handoff·log·tasks 노트를 §15 경고로 보고 — 미설정 시 꺼짐 |
