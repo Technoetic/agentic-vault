@@ -45,6 +45,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 from dataclasses import dataclass
+import difflib
 import fnmatch
 import hashlib
 import json
@@ -193,6 +194,65 @@ DEFAULT_CONFIG: dict = {
     # 생략하고, git 볼트는 이 볼트 폴더를 바꾼 커밋이 이 값 이상일 때만 안내한다.
     "anchor_drift_threshold": 3,
 }
+
+# Every top-level key the engine reads: DEFAULT_CONFIG plus the optional keys
+# read by the scripts, hooks, adapters and commands. Another top-level key is
+# not applied; the full check (section 0 and the console line) and Doctor name
+# it, never its value. validate_config, staged mode and SessionStart stay silent.
+KNOWN_CONFIG_KEYS = frozenset({
+    *DEFAULT_CONFIG,
+    "frontmatter_roots", "frontmatter_exempt_paths", "fm_exempt_zones", "warning_policy",
+    "sync_conflict_check", "checkpoint_drift_check", "sync_conflict_patterns",
+    "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
+    "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
+    "constraints_note", "lint_max_warnings", "promotion_review_sessions",
+})
+_CONFIG_KEY_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def unknown_config_keys(raw: object) -> list[tuple[str, str | None]]:
+    """Sorted top-level keys of `raw` outside KNOWN_CONFIG_KEYS, each with a suggestion.
+
+    The suggestion is the known key equal to the name after stripping, case
+    folding and `-` -> `_`, else the closest known key (difflib, cutoff 0.75),
+    else None. `raw` is never changed; anything but a dict has no unknown keys.
+    """
+    if not isinstance(raw, dict):
+        return []
+    known = sorted(KNOWN_CONFIG_KEYS)
+    found: list[tuple[str, str | None]] = []
+    for name in sorted(key for key in raw if key not in KNOWN_CONFIG_KEYS):
+        folded = name.strip().casefold().replace("-", "_")
+        if folded in KNOWN_CONFIG_KEYS:
+            found.append((name, folded))
+            continue
+        matches = difflib.get_close_matches(folded, known, n=1, cutoff=0.75)
+        found.append((name, matches[0] if matches else None))
+    return found
+
+
+def config_key_display(name: str) -> str:
+    """A configuration key name as one quoted line that always encodes as UTF-8.
+
+    Cut to 80 characters (then `…`); a double quote and a backslash get a
+    backslash in front, and every control, format, surrogate, private-use,
+    unassigned or line/paragraph separator character (categories Cc, Cf, Cs,
+    Co, Cn, Zl, Zp) is written as backslash-u and four lowercase hex digits
+    (backslash-U and eight above U+FFFF). Other characters, Hangul included,
+    stay readable, and the result holds no line break or bidirectional control.
+    """
+    text = name[:80] + "…" if len(name) > 80 else name
+    out: list[str] = []
+    for char in text:
+        if char in '"\\':
+            out.append("\\" + char)
+        elif unicodedata.category(char) in _CONFIG_KEY_ESCAPED_CATEGORIES:
+            code = ord(char)
+            out.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
+
 
 _PATH_KEYS = {
     "index_note", "log_note", "hot_note", "handoff_note", "ssot_note",
@@ -2340,6 +2400,14 @@ def main() -> int:
         print(f"[vault-healthcheck] 오류: {CONFIG_RELPATH} 파싱 실패 — {e}", file=sys.stderr)
         return 1
     warnings: list[str] = []
+    # Unknown top-level keys: named in section 0 and on the console line only;
+    # they never change the exit code and their values are never shown.
+    unknown_keys = unknown_config_keys(user_cfg)
+    for name, suggestion in unknown_keys[:20]:
+        hint = f"({config_key_display(suggestion)}의 오타일 수 있음)" if suggestion else ""
+        warnings.append(f"알 수 없는 설정 키 {config_key_display(name)} — 적용되지 않는다{hint}.")
+    if len(unknown_keys) > 20:
+        warnings.append(f"알 수 없는 설정 키 {len(unknown_keys) - 20}건 더 — 생략.")
 
     # Config-derived readers are fail-closed. Missing paths remain optional, but
     # an existing symlink/junction component must never redirect a full scan.
@@ -2956,9 +3024,11 @@ def main() -> int:
                  if sync_name_count else "")
     checkpoint_note = (f" ⚠️checkpoint 이후 바뀐 엔진 노트 {checkpoint_change_count}건(§15)"
                        if checkpoint_change_count else "")
+    unknown_key_note = (f" ⚠️알 수 없는 설정 키 {len(unknown_keys)}건(§0)"
+                        if unknown_keys else "")
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
           f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}"
-          f"{sync_note}{checkpoint_note}")
+          f"{sync_note}{checkpoint_note}{unknown_key_note}")
     return 1 if critical > 0 else 0
 
 

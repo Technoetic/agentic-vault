@@ -52,7 +52,9 @@ def _load_hook() -> ModuleType:
 
 session_hook = _load_hook()
 
-from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
+from vault_healthcheck import (
+    HealthcheckError, config_key_display, estimate_tokens, unknown_config_keys, validate_config,
+)
 from vault_paths import resolve_note_path
 from vault_worktrees import checked_note_path
 
@@ -302,6 +304,9 @@ def diagnose(vault: Path, *, instructions: bool = False) -> tuple[dict, int]:
         return _terminal_report(
             "invalid_config", "config_json_invalid", "repair_vault_config_json",
         ), 2
+    # Top-level keys the engine does not read: names only, never values, and
+    # never a change of the exit code.
+    unknown_keys = unknown_config_keys(raw)
 
     full_config: dict | None
     try:
@@ -409,6 +414,15 @@ def diagnose(vault: Path, *, instructions: bool = False) -> tuple[dict, int]:
         ),
         "sections": sections,
     }
+    if unknown_keys:
+        config_warnings: list[dict] = [
+            {"code": "unknown_key", "key": config_key_display(name)[1:-1],
+             "suggestion": suggestion}
+            for name, suggestion in unknown_keys[:20]
+        ]
+        if len(unknown_keys) > 20:
+            config_warnings.append({"code": "more_unknown_keys", "count": len(unknown_keys) - 20})
+        report["config_warnings"] = config_warnings
     if instructions:
         from vault_instruction_budget import diagnose_instructions
         from vault_evidence import EvidenceError, stable_read
@@ -607,6 +621,14 @@ def _format_text(report: dict) -> str:
                 f"configured_budget={section['configured_token_budget']}; "
                 f"effective_budget={section['effective_token_budget']}"
             )
+    for warning in report.get("config_warnings", ()):
+        if warning["code"] == "unknown_key":
+            line = f"config_warning: unknown_key \"{warning['key']}\""
+            if warning["suggestion"] is not None:
+                line += f" suggestion=\"{warning['suggestion']}\""
+            lines.append(line)
+        else:
+            lines.append(f"config_warning: more_unknown_keys {warning['count']}")
     if "instructions" in report:
         inventory = report["instructions"]
         lines.extend([
