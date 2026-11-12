@@ -32,6 +32,7 @@ MAX_CUES = 8
 MAX_CUE_TEXT = 300
 MAX_CUE_VALUES = 8
 MAX_CUE_VALUE = 200
+MAX_RETIRE_REASON = 200
 CUE_KINDS = ('hint', 'guard')
 CUE_MATCHERS = ('command_prefix', 'command_contains', 'path_glob')
 # Line breaks, format marks and controls: they can end a line or hide text from a reader.
@@ -46,6 +47,9 @@ REF_ID = re.compile(r'[0-9a-f]{32}')
 LEDGER_ROW = re.compile(r'- \d{4}-\d{2}-\d{2}')
 LEDGER_COUNT = re.compile(r'횟수 \d+')
 TOOL_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')
+# The status cell RETIRE writes. The word `retired` stays first so every reader
+# that knows the v0.46.0 cell (vault_lesson_cues.WITHDRAWN) still sees it.
+RETIRED_CELL = re.compile(r'상태: retired(\(.+, \d{4}-\d{2}-\d{2}\))?')
 AUTHORITY = 'observation_data_only'
 
 
@@ -68,6 +72,35 @@ def _text(value):
             or ' | ' in value):
         raise LessonDeltaError('invalid_lesson_text')
     return value
+
+
+def _date(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        raise LessonDeltaError('explicit_date_required')
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise LessonDeltaError('invalid_date') from exc
+    return value
+
+
+def _reason(value):
+    """A retirement reason: one short visible line inside the status cell."""
+    if (not isinstance(value, str) or not value.strip() or value != value.strip()
+            or len(value) > MAX_RETIRE_REASON
+            or any(unicodedata.category(c) in UNSAFE_CATEGORIES for c in value)
+            or '<!--' in value or '-->' in value or ' | ' in value or META in value):
+        raise LessonDeltaError('invalid_retire_reason')
+    return value
+
+
+def _retired_cell(record, current=None):
+    """Status cell of a retired row; a reason already written is never dropped."""
+    if 'retire_reason' in record:
+        return '상태: retired(' + record['retire_reason'] + ', ' + record['retire_date'] + ')'
+    if current is not None and RETIRED_CELL.fullmatch(current):
+        return current
+    return '상태: retired'
 
 
 def _references(value):
@@ -248,21 +281,19 @@ def _operations(value):
         allowed = {'ADD': {'op', 'text', 'date', 'references', 'cues'},
                    'INC': {'op', 'id', 'amount', 'references'},
                    'EDIT': {'op', 'id', 'text', 'references'},
-                   'RETIRE': {'op', 'id', 'references'},
+                   'RETIRE': {'op', 'id', 'references', 'reason', 'date'},
                    'CUES': {'op', 'id', 'cues', 'references'}}[op['op']]
-        if set(op) - allowed:
+        if set(op) - allowed or (op['op'] == 'RETIRE' and 'date' in op and 'reason' not in op):
             raise LessonDeltaError('invalid_operation_fields')
         normalized = dict(op)
         if op['op'] == 'ADD':
-            if not isinstance(op.get('date'), str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', op['date']):
-                raise LessonDeltaError('explicit_date_required')
-            try:
-                date.fromisoformat(op['date'])
-            except ValueError as exc:
-                raise LessonDeltaError('invalid_date') from exc
+            _date(op.get('date'))
         else:
             if not isinstance(op.get('id'), str) or not state.ITEM_ID_RE.fullmatch(op['id']):
                 raise LessonDeltaError('invalid_lesson_id')
+        if op['op'] == 'RETIRE' and 'reason' in op:
+            _reason(op['reason'])
+            _date(op.get('date'))
         if op['op'] in ('ADD', 'EDIT'):
             normalized['text'] = _text(op.get('text'))
         if op['op'] == 'INC':
@@ -330,6 +361,13 @@ def _prepare(vault, path, operations):
                 if 'cues' in op:
                     record['cues'] = op['cues']
             else:
+                if 'reason' in op:
+                    if record['kind'] == 'heading':
+                        raise LessonDeltaError('retire_reason_unsupported')
+                    cell = RETIRED_CELL.fullmatch(record['cells'][4]) if record['kind'] == 'bullet' else None
+                    if 'retire_reason' in record or (cell and cell[1]):
+                        raise LessonDeltaError('retire_reason_exists')
+                    record['retire_reason'], record['retire_date'] = op['reason'], op['date']
                 record['state'] = 'retired'
         record['references'] = _references(record['references'] + op['references'])
         changed[identifier] = record
@@ -355,7 +393,7 @@ def _prepare(vault, path, operations):
             cells[1] = '횟수 ' + str(record['count'])
             cells[2] = record['explicit'] + record['text']
             if record['state'] == 'retired':
-                cells[4] = '상태: retired'
+                cells[4] = _retired_cell(record, cells[4])
             replacement = ' | '.join(cells) + ' ' + _marker(record)
             edits.append(dict(start=line['start'], end=line['end'], replacement=replacement))
         else:
@@ -377,7 +415,8 @@ def _prepare(vault, path, operations):
         offset = header['end'] + len(header['ending'])
         prefix = '' if header['ending'] else newline
         text = ''.join('- ' + r['date'] + ' | 횟수 ' + str(r['count']) + ' | ' + r['text']
-                       + ' | 근거: host-provided references | 상태: ' + r['state'] + ' '
+                       + ' | 근거: host-provided references | '
+                       + (_retired_cell(r) if r['state'] == 'retired' else '상태: ' + r['state']) + ' '
                        + _marker(r) + newline for r in added)
         edits.append(dict(start=offset, end=offset, replacement=prefix + text))
     edits.sort(key=lambda edit: (edit['start'], edit['end']))

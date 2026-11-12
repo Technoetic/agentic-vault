@@ -58,6 +58,10 @@ whole cell, so `관찰중단`, `승격제안 기각`, `승격제안철회`, `승
 fits a form but holds `철회`, `기각`, `중단`, `취소`, `롤백`, `retired`, `withdrawn`, `rejected` or `rolled` also stays out, so
 `승격완료(→롤백)` is out, and so is a real target whose name has one of those words. Keep notes in the evidence cell.
 
+`RETIRE` can also write a reason into the status cell, as `retired(reason, YYYY-MM-DD)`. The row stays out either way:
+a row retired through `RETIRE` is counted under `retired` in `skipped`, because its marker state is `retired`, and a
+cell written by hand in either form without that marker state is counted under `status`.
+
 Two places are left out whatever the status says:
 
 - **An HTML comment block:** from `<!--` at the start of a line to the line that holds `-->`, or to the end of the file
