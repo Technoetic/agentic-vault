@@ -109,6 +109,15 @@ class ProcessInboxCompletionTests(_TextCase):
     def test_unrelated_files_continue(self) -> None:
         self.assert_has("그 답과 상관없는 나머지 파일은 계속 처리한다", self.section())
 
+    def test_placeholder_files_are_not_queue_items(self) -> None:
+        # /vault-init leaves empty `.gitkeep` files in the inbox subfolders. They fit neither ending of
+        # section 3-1, so section 1 says, right after the underscore-folder line, that they are no queue items.
+        start = self.text.index("## 1. 대기열 확인")
+        lines = self.text[start:self.text.index("## 2. 파일별 정제", start)].split("\n")
+        underscore = next(index for index, line in enumerate(lines) if line.startswith("- 언더스코어(`_`)로 시작하는 폴더"))
+        self.assertEqual(lines[underscore + 1],
+                         "- 내용 없는 자리표시 파일(`.gitkeep` 등)은 대기열 파일이 아니다 — 처리·이동·보고하지 않는다.")
+
     def test_report_lists_every_hold_reason(self) -> None:
         report = self.text[self.text.index(REPORT_HEADING):]
         self.assert_has("판독 불가·이름 충돌·보완 뒤에도 재검사 미통과·풀리지 않은 장애", report)
