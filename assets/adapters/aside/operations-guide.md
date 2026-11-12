@@ -44,6 +44,7 @@ updated: {{DATE}}
 | 표준 입력으로 전달(`aside repl < 파일.js`) | 한 줄 스크립트는 실행됐고(1회) 여러 줄 스크립트는 구문 오류가 났다(1회). 이 방식은 계정과 세션 폴더 경로가 든 머리 줄을 출력했다 | 쓰지 않는다. 이 방식의 출력은 어디에도 붙여 넣지 않는다 |
 | `openTab('file:///…')` | `Cannot navigate to a file URL without local file access.`로 거부됐다(1회) | 로컬 파일을 이 방식으로 열지 않는다. 다른 방식은 이 볼트에서 실측해 아래 표에 적는다 |
 | 한 호출에서 연 탭 | 다음 repl 호출의 `listBrowserTabs()` 목록에 없었다(1회) | 탭이 필요한 일은 한 호출 안에서 끝내고, 호출 사이에 탭이 남는다고 가정하지 않는다 |
+| `closeTab` 호출 형태 | `closeTab`은 repl의 전역 함수였고 `openTab`이 돌려준 탭 객체에는 `closeTab` 메서드가 없었다(`typeof`로 확인). `await closeTab(탭)`은 오류 없이 끝났고 그 페이지의 탭이 `listBrowserTabs()`에 남지 않았다(1회, 2026-11-13) | 스크립트가 연 탭은 `closeTab(탭)`으로 닫는다 |
 | `getTabs()` | 도움말 예시에 있지만 repl에서 정의되지 않았다. `listBrowserTabs()`는 동작했다(2회) | `listBrowserTabs()`를 쓴다 |
 | 스크립트 글에 `import(`가 있을 때(문자열 안 포함) | 실행 전에 `External modules are not available in the REPL.`로 거부됐다(1회) | 외부 모듈을 쓰지 않고, 문자열에도 이 글자를 넣지 않는다 |
 | 40초를 기다리는 `evaluate` 한 번 | 30.0초에 `CDP command timeout: Runtime.callFunctionOn`으로 실패했다(1회) | 페이지 안의 `evaluate` 한 번은 30초 안에 끝나게 나눈다 |
