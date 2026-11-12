@@ -58,7 +58,7 @@ rate through preserve-check, or on the false alarm rate for the two rewrite rows
 | `fact_free_paragraph_deletion` | out_of_scope | 18 | 0 | 0 | 0 | 100% | 18 |
 | `tail_truncation_with_facts` | in_scope | 18 | 18 | 18 | 0 | 15.3% | |
 | `tail_truncation_fact_free` | out_of_scope | 18 | 0 | 0 | 0 | 100% | |
-| `frontmatter_destruction` | out_of_scope | 66 | 0 | 0 | 42 | 47.2% | |
+| `frontmatter_destruction` | out_of_scope | 66 | 0 | 0 | 48 | 37.7% | |
 | `frontmatter_destruction_exempt_target` | out_of_scope | 66 | 0 | 0 | 0 | 100% | |
 | `rewrite_literals_kept` | false_alarm | 30 | 0 | 0 | 0 | 9.5% | |
 | `rewrite_literals_reformatted` | false_alarm | 18 | 16 | 16 | 0 | 98.0% | |
@@ -86,7 +86,7 @@ one has a stated reason in `scope_reason`:
   this covers a paragraph in the middle as well as the end of a note. A tail
   holding a literal fact is in scope and is caught.
 - Bodies are compared without frontmatter. Destroying it is not seen by the
-  literal check. The schema check in `propose` stops 7 of the 11 bundled kinds
+  literal check. The schema check in `propose` stops 8 of the 11 bundled kinds
   on an ordinary note and none on a target it exempts, such as `CLAUDE.md`.
 
 The `Declared flagged` column repeats the mutation with `--claim` set to the
@@ -148,6 +148,12 @@ Against the v0.42.0 extraction the same table gave 0 of 12 for
 false alarms for `rewrite_literals_reformatted`, and every declared removal on a
 note without facts completed. So the fixes gained 15 catches here. They added 4
 false alarms, all a unit written with a space, and removed 1, `5kg` to `5KG`.
+
+Since v0.46.0 the schema check in `propose` also stops the unclosed-quote kind. The
+quote left open on the `title:` line closes at the first quote of the `related:` line,
+which puts the wiki link outside quotes, and the front-matter link scanner reports that
+line. This moved `frontmatter_destruction` from 42 to 48 of 66 blocked. A `----` closing
+line, an unclosed bracket and changed values still pass `propose`.
 
 Frontmatter of more than 64 lines is still read as body. That bound is unchanged.
 

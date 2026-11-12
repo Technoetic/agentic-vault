@@ -41,7 +41,7 @@ EXPECTED = {
     'fact_free_paragraph_deletion': (18, 0, 0, 0, 18),
     'tail_truncation_with_facts': (18, 18, 18, 0, None),
     'tail_truncation_fact_free': (18, 0, 0, 0, None),
-    'frontmatter_destruction': (66, 0, 0, 42, None),
+    'frontmatter_destruction': (66, 0, 0, 48, None),
     'frontmatter_destruction_exempt_target': (66, 0, 0, 0, None),
     'rewrite_literals_kept': (30, 0, 0, 0, None),
     # The two clear cases: 5kg to 5KG, and a label rewritten around the same name.
