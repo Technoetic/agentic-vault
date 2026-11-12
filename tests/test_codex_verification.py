@@ -32,6 +32,9 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
             "skills/agentic-vault/references/codex.md",
             "skills/agentic-vault/scripts/vault_recall.py",
+            "skills/agentic-vault/scripts/vault_paths.py",
+            "skills/agentic-vault/scripts/vault_healthcheck.py",
+            "skills/agentic-vault/scripts/jarvis_bridge.py",
             "skills/agentic-vault/scripts/vault_links.py",
             "skills/agentic-vault/scripts/vault_evidence.py",
             "skills/agentic-vault/scripts/vault_retrieval.py",
@@ -595,6 +598,27 @@ class CodexVerificationTests(unittest.TestCase):
                             resource.unlink()
                         else:
                             resource.write_text("Changed adapter resource\n", encoding="utf-8")
+
+                    with self.assertRaises((RuntimeError, FileNotFoundError)):
+                        self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_zone_healthcheck_and_bridge_resources_must_exist_and_match(self) -> None:
+        # The shared deny-zone matcher, the health check and the Telegram bridge carry the
+        # v0.46.0 fixes; an installed copy that differs from the source must be rejected.
+        for relative in ("skills/agentic-vault/scripts/vault_paths.py",
+                         "skills/agentic-vault/scripts/vault_healthcheck.py",
+                         "skills/agentic-vault/scripts/jarvis_bridge.py"):
+            for mutation in ("changed", "missing"):
+                with self.subTest(resource=relative, mutation=mutation), \
+                     tempfile.TemporaryDirectory() as temporary:
+                    source = self.make_plugin_fixture(Path(temporary))
+
+                    def mutate_cache(cached):
+                        resource = cached / relative
+                        if mutation == "missing":
+                            resource.unlink()
+                        else:
+                            resource.write_text("Changed zone, check or bridge resource\n", encoding="utf-8")
 
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
