@@ -1168,6 +1168,46 @@ class UnicodeZoneTests(GuardCase):
                 self.write_config({"deny_zones": [zone]})
                 self.assertEqual(self.decide("Bash", {"command": command}, cwd=str(self.vault)), "deny")
 
+    def test_macos_path_folding_keeps_canonical_caseless_zones(self) -> None:
+        # macOS folds every path before it takes the vault-relative parts (_CASELESS_PATHS).
+        # That fold must decompose before it casefolds: casefold turns U+0345 into a starter,
+        # after which the marks of a path can no longer reorder to the zone's folded spelling.
+        # The switch is set here, so the macOS branch runs on every platform.
+        omega_ypo = chr(0x1FAA) + chr(0x352)
+        with mock.patch.object(self.guard, "_CASELESS_PATHS", True):
+            self.write_config({"deny_zones": [omega_ypo]})
+            self.assert_table("Read", [
+                ({"file_path": self.path("notes", omega_ypo, "a.md")}, "deny"),  # the zone as configured
+                ({"file_path": self.path("notes", chr(0x3A9) + chr(0x313) + chr(0x300) + chr(0x352) + chr(0x399),
+                                         "a.md")}, "deny"),
+                ({"file_path": self.path("notes", "a.md")}, None),
+            ])
+            self.assert_table("Bash", [
+                ({"command": "cat notes/" + omega_ypo + "/a.md"}, "deny"),
+                ({"command": "cat notes/" + chr(0x1FAA) + "\\" + chr(0x352) + "/a.md"}, "deny"),
+            ], cwd=str(self.vault))
+            self.write_config({"deny_zones": ["Caf" + chr(0xE9), _nfc(BIGONGGAE)]})
+            self.assert_table("Read", [
+                ({"file_path": self.path("notes", "CAFE" + chr(0x301), "a.md")}, "deny"),
+                ({"file_path": self.path("40-people", _nfd(BIGONGGAE), "a.md")}, "deny"),
+                ({"file_path": self.path("notes", "a.md")}, None),
+            ])
+
+    def test_macos_path_folding_sees_the_vault_in_another_spelling(self) -> None:
+        # The vault folder and a path under it can arrive in different normalization forms
+        # on macOS, where both name the same folder.
+        name = _nfc(BOGWAN)
+        vault = self.base / name
+        (vault / "00-meta").mkdir(parents=True)
+        (vault / "00-meta" / "vault-config.json").write_text(json.dumps({"deny_zones": ["90-assets"]}),
+                                                               encoding="utf-8")
+        other = str(self.base / _nfd(BOGWAN) / "90-assets" / "a.png")
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {"file_path": other}}
+        with mock.patch.object(self.guard, "_CASELESS_PATHS", True):
+            result = self.guard.evaluate(payload, str(vault), self.warnings.append)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[0], "deny")
+
     def test_glob_patterns_with_another_spelling_of_a_zone(self) -> None:
         self.assert_table("Glob", [
             ({"pattern": "20-knowledge/" + _nfd(BOGWAN) + "/*.md", "path": str(self.vault)}, "deny"),
