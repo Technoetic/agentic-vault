@@ -3,7 +3,7 @@
 This guide is for people and coding agents who change this plugin repository. It does not apply to an
 Obsidian vault or to a session that only uses the installed plugin: a vault has its own contract
 (`CLAUDE.md`, `AGENTS.md` and `.claude/rules/` written by `/vault-init`). If you reached this file from a
-vault session, ignore it. `CLAUDE.md` in this folder imports this file for Claude Code; Codex reads it
+vault session, ignore it. `.claude/CLAUDE.md` imports this file for Claude Code; Codex reads it
 directly.
 
 ## Who decides what

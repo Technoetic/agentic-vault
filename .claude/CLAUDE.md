@@ -1,3 +1,3 @@
 # agentic-vault repository
 
-@AGENTS.md
+@../AGENTS.md

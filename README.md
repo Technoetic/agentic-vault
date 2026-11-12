@@ -34,9 +34,10 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 외부 검토가 이 플러그인을 공급사의 프롬프트 작성 안내서와 견줘 찾은 열한 항목을 다룬다.
 
-- 저장소 루트의 [AGENTS.md](AGENTS.md)와 이를 가져오는 CLAUDE.md는 이 저장소를 고치는 기여자·에이전트
-  안내다. 일부러 둔 규칙 사본과 그것을 지키는 시험, 엔진 파일과 볼트 자료의 구분, 릴리스 규칙, 시험
-  실행법을 적었고 볼트에는 설치하지 않는다.
+- 저장소 루트의 [AGENTS.md](AGENTS.md)는 이 저장소를 고치는 기여자·에이전트 안내이고, Claude Code는
+  .claude/CLAUDE.md(한 줄: @../AGENTS.md)로 이를 불러온다. 플러그인 루트에는 CLAUDE.md를 두지 않는다.
+  일부러 둔 규칙 사본과 그것을 지키는 시험, 엔진 파일과 볼트 자료의 구분, 릴리스 규칙, 시험 실행법을
+  적었고 볼트에는 설치하지 않는다.
 - 엔진 사본 소유를 밝히는 계약 한 줄은 규칙 문구 시험을 통과하지 못해 넣지 않았다
   ([시험 결과](docs/hardening.md#engine-copy-ownership-line-tried-not-shipped)). `vault-architecture.md`는
   v0.46.0과 같다.
@@ -372,8 +373,8 @@ python scripts/evaluate_knowledge_evolution.py
 ## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
 
 This release takes up eleven items from an outside review that compared the plugin with a vendor
-prompting guide. A root `AGENTS.md` (imported by `CLAUDE.md`) guides people and coding agents that
-change this repository and is not installed into vaults. The Telegram bridge passes `--model` and
+prompting guide. A root `AGENTS.md` (imported by `.claude/CLAUDE.md`) guides people and coding agents
+that change this repository and is not installed into vaults. The Telegram bridge passes `--model` and
 `--effort` only when the optional `jarvis.model` and `jarvis.effort` settings are not empty, and gives
 up a scheduled briefing slot after 8 failed attempts in a row and tells the owner once. A lesson can
 be retired with a dated reason, `/vault-process-inbox` re-lists the inbox before its report,
@@ -1303,7 +1304,8 @@ agentic-vault/
 ├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.47.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
-├── AGENTS.md · CLAUDE.md              ← 이 저장소를 고치는 기여자·에이전트 안내 (볼트에 설치하지 않음)
+├── AGENTS.md                          ← 이 저장소를 고치는 기여자·에이전트 안내 (볼트에 설치하지 않음)
+├── .claude/CLAUDE.md                  ← Claude Code가 위 안내를 불러오는 한 줄 (@../AGENTS.md)
 │
 ├── commands/                          ← 15개 슬래시 커맨드
 │   ├── vault-harden.md                ← 출처·공유 상태·시간 대장·교훈·품질·보정
