@@ -2011,6 +2011,22 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         command = (REPO_ROOT / "assets/adapters/aside/aside-repl-command.md").read_text(encoding="utf-8")
         self.assertIn("Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", _folded(command))
 
+    PLACEHOLDER_SENTENCE = "내용 없는 자리표시 파일(`.gitkeep` 등)은 대기열 파일로 세지 않는다."
+
+    def test_v0470_placeholder_files_are_not_counted_as_queue_files(self) -> None:
+        # Every /vault-init vault has empty `.gitkeep` files in the inbox folders (finding TS-2).
+        changes = _section(self.RELEASE.read_text(encoding="utf-8"), "## 변경")
+        start = changes.index("- [`/vault-process-inbox`]")
+        bullet = _folded(changes[start:changes.index("\n- ", start)])
+        self.assertIn("보류돼야 끝난다. " + self.PLACEHOLDER_SENTENCE, bullet)
+        self.assertIn(self.PLACEHOLDER_SENTENCE + " 대상: 플러그인을 갱신한 모든 사용자(Claude Code와 Codex).",
+                      self._default_change_entry(1))
+
+    def test_v0470_placeholder_statement_matches_the_inbox_command(self) -> None:
+        command = (REPO_ROOT / "commands/vault-process-inbox.md").read_text(encoding="utf-8")
+        self.assertIn("- 내용 없는 자리표시 파일(`.gitkeep` 등)은 대기열 파일이 아니다 — 처리·이동·보고하지 않는다.",
+                      command.splitlines())
+
     def test_v0470_no_placeholder_left(self) -> None:
         import re
 
