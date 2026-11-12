@@ -43,7 +43,7 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py"
 
 - **프런트매터 누락 / 필수 키 누락 (1, 2)** → config의 `required_keys`를 기준으로 보완하라. `title`은 파일명에서, `type`은 폴더·내용에서 추론하고, 확신이 없으면 `status: draft`로 둔다. 볼트에 프런트매터 스키마 노트가 있으면(예: `00-meta/schemas/` 아래) 그 스키마를 우선 따르라.
 - **Enum 위반 (3)** → config `enums`의 유효값 중 의미가 가장 가까운 값으로 교정하라 (예: `done` → `archive`, `wip` → `draft`). 애매하면 해당 노트의 맥락을 읽고 판단하라.
-- **따옴표 없는 위키링크 (4)** → 해당 프런트매터 값을 이중 따옴표로 감싸라: `related: [[X]]` → `related: ["[[X]]"]`. 링크 대상을 바꾸지 마라.
+- **따옴표 없는 위키링크 (4)** → 리포트된 줄에서 따옴표 없는 링크 항목을 모두 이중 따옴표로 감싸라: `related: [[X]]` → `related: ["[[X]]"]`, `related: ["[[A]]", [[B]]]` → `related: ["[[A]]", "[[B]]"]`. 다음 줄에 둔 값이나 목록 항목의 링크도 같은 방식으로 감싼다(`- [[B]]` → `- "[[B]]"`). `|`·`>` 블록 안과 따옴표 안의 링크는 건드리지 마라. 링크 대상을 바꾸지 마라.
 - **로그 연산 태그 누락/미승인/형식오류 (9)** → config `log_note`의 해당 항목을 Edit로 고쳐라.
   - 태그 없음: 요약 맨 앞에 config `log_tags` 중 내용에 맞는 태그를 달아라 (판별 기준: 소스 소화=ingest · 리서치/질의=query · 무결성 점검=lint · 산출물 제작=build · 구조/규칙 변경=ops · 결정 확정=decision).
   - 미승인 태그: `log_tags`의 유효 태그로 치환하라.
