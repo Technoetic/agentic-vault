@@ -146,6 +146,32 @@ ROOT_INDICATOR_CASES = [
 ]
 
 CASE = {case_id: (text, lines) for case_id, text, lines in CASES + ROOT_INDICATOR_CASES}
+
+# Front matter YAML cannot load, where YAML places the v0.45.1 line in no scalar: a `...` line
+# cuts an unterminated quote or flow (the quote stays open to the end, as in C88), or a value
+# starts with a character that cannot start a plain scalar (YAML stops there).
+INVALID_YAML_CASES = [
+    ('Y1', 'title: "My note\nrelated: [[B]]\n...', [1]),  # C88 with a document end marker
+    ('Y2', 'title: "My note\n- [[B]]\n...', [1]),  # the same with a list item
+    ('Y3', 'related: ["a\n- [[B]]\n...', [1]),  # an open quote inside a flow, then '...'
+    ('Y4', "title: 'x\n- [[B]]\n...\nnext: [[C]]", [1, 3]),  # single quote; a node after '...'
+    ('Y5', 'related:\n  ]\n  - [[B]]', [2]),  # ']' cannot start a plain scalar
+    ('Y6', 'aliases: @old\n  - [[B]]', [1]),  # '@' is reserved
+    ('Y7', 'aliases: `old`\n  - [[B]]', [1]),  # '`' is reserved
+    ('Y8', 'aliases: }x\n  - [[B]]', [1]),  # '}' outside a flow
+    ('Y9', 'aliases: ,x\n  - [[B]]', [1]),  # ',' outside a flow
+    ('Y10', 'aliases: %x\n  - [[B]]', [1]),  # '%' is a directive indicator
+    ('Y11', 'note: |x\n  - [[B]]', [1]),  # '|' without a valid block scalar header
+    ('Y12', 'list:\n  - @x\n    - [[B]]', [2]),  # reserved indicator in a list item
+]
+
+# The same characters after a dash, '?' or ':' that is not followed by a space start a plain
+# scalar, so YAML loads these and the continuation lines stay unreported.
+PLAIN_INDICATOR_CASES = [
+    ('P1', 'title: -x\n  - [[B]]', []),
+    ('P2', 'title: ?x\n  - [[B]]', []),
+    ('P3', 'title: :x\n  - [[B]]', []),
+]
 NOTE_PATH = "20-knowledge/note.md"
 LINK_MESSAGE = "스테이징 차단: " + NOTE_PATH + " — 프런트매터 내 따옴표 없는 위키링크: "
 
@@ -155,6 +181,18 @@ class CaseTableTests(unittest.TestCase):
         self.assertEqual(len(CASES), 94)
         self.assertEqual(len(CASE), len(CASES) + len(ROOT_INDICATOR_CASES))
         for case_id, text, lines in CASES + ROOT_INDICATOR_CASES:
+            with self.subTest(case=case_id, text=text):
+                self.assertEqual(scan(text), lines)
+
+    def test_invalid_yaml_keeps_v0451_reports_outside_scalars(self) -> None:
+        # Contract: no v0.45.1 report is lost outside a YAML scalar, broken YAML included.
+        for case_id, text, lines in INVALID_YAML_CASES:
+            with self.subTest(case=case_id, text=text):
+                v0451 = [number for number, line in enumerate(text.splitlines())
+                         if vault_healthcheck.UNQUOTED_FM_LINK_RE.match(line)]
+                self.assertEqual(lines, v0451)
+                self.assertEqual(scan(text), lines)
+        for case_id, text, lines in PLAIN_INDICATOR_CASES:
             with self.subTest(case=case_id, text=text):
                 self.assertEqual(scan(text), lines)
 
@@ -197,6 +235,14 @@ class GateTests(unittest.TestCase):
         # Contract: no v0.45.1 report is lost outside a YAML scalar, broken YAML included.
         self.assert_reported(("C79", "C80", "C81", "C82", "C84", "C85", "C86", "C87", "C88",
                               "C91", "C92", "C93"))
+
+    def test_invalid_yaml_after_a_document_end_or_a_reserved_indicator_blocks_a_staged_note(self) -> None:
+        for case_id, text, lines in INVALID_YAML_CASES:
+            with self.subTest(case=case_id):
+                note = '---\ntitle: "T"\n' + text + "\n---\nbody\n"
+                errors = vault_healthcheck._staged_schema_errors(NOTE_PATH, note, self.config)
+                expected = [LINK_MESSAGE + text.splitlines()[line].strip() for line in lines]
+                self.assertEqual([error for error in errors if "따옴표 없는 위키링크" in error], expected)
 
     def test_properties_before_quoted_flow_items_are_not_reported(self) -> None:
         # Contract: an anchor or tag before a quoted flow item leaves the quote a quote.
