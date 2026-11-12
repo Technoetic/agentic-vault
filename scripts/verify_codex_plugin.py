@@ -213,6 +213,11 @@ def verify(codex: str) -> dict:
                          "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
                          "skills/agentic-vault/references/codex.md",
                          "skills/agentic-vault/scripts/vault_recall.py",
+                         # the shared deny-zone matcher, the health check and the Telegram
+                         # bridge carry the v0.46.0 fixes
+                         "skills/agentic-vault/scripts/vault_paths.py",
+                         "skills/agentic-vault/scripts/vault_healthcheck.py",
+                         "skills/agentic-vault/scripts/jarvis_bridge.py",
                          "skills/agentic-vault/scripts/vault_links.py",
                          "skills/agentic-vault/scripts/vault_evidence.py",
                          "skills/agentic-vault/scripts/vault_retrieval.py",
