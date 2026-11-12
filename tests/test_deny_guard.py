@@ -1151,6 +1151,23 @@ class UnicodeZoneTests(GuardCase):
             ({"command": "cat notes/a.md"}, None),
         ], cwd=str(self.vault))
 
+    def test_bash_escapes_between_the_marks_of_a_zone_name(self) -> None:
+        # casefold turns U+0345 into a starter, so the shell's quotes and backslashes must
+        # leave the command before it is folded, or the marks cannot reorder to the zone.
+        omega_ypo = chr(0x1FAA) + chr(0x352)
+        alpha = chr(0x1FB4)  # NFD 03B1 0301 0345
+        rows = (
+            (omega_ypo, "cat notes/" + chr(0x1FAA) + "\\" + chr(0x352) + "/a.md"),
+            (omega_ypo, "cat notes/" + chr(0x1FAA) + '""' + chr(0x352) + "/a.md"),
+            (alpha, "cat notes/" + chr(0x1FB3) + "\\" + chr(0x301) + "/a.md"),
+            (alpha, "cat notes/" + chr(0x3B1) + chr(0x345) + "''" + chr(0x301) + "/a.md"),
+            ("Kalypso" + alpha, "cat notes/KALYPSO" + chr(0x1FB3) + "\\" + chr(0x301) + "/a.md"),
+        )
+        for zone, command in rows:
+            with self.subTest(zone=ascii(zone), command=ascii(command)):
+                self.write_config({"deny_zones": [zone]})
+                self.assertEqual(self.decide("Bash", {"command": command}, cwd=str(self.vault)), "deny")
+
     def test_glob_patterns_with_another_spelling_of_a_zone(self) -> None:
         self.assert_table("Glob", [
             ({"pattern": "20-knowledge/" + _nfd(BOGWAN) + "/*.md", "path": str(self.vault)}, "deny"),
