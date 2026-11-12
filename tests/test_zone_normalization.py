@@ -242,6 +242,16 @@ class LintExtensionTests(unittest.TestCase):
             findings = vault_lint_extensions.analyze_notes(notes, config)
         self.assertEqual(findings, [])
 
+    def test_exclude_dirs_entry_in_another_spelling_is_folded(self) -> None:
+        # The entry is stored decomposed; the path names the same folder composed, and the reverse.
+        for entry, folder in ((NFD(BOGWAN), NFC(BOGWAN)), (NFC(BOGWAN), NFD(BOGWAN)),
+                              (CAFE_NFD.upper(), CAFE_NFC)):
+            with self.subTest(entry=ascii(entry), folder=ascii(folder)):
+                config = {"deny_zones": [], "exclude_dirs": [entry]}
+                self.assertTrue(vault_lint_extensions._denied("20-knowledge/" + folder + "/t.md", config))
+        config = {"deny_zones": [], "exclude_dirs": [NFD(BOGWAN)]}
+        self.assertFalse(vault_lint_extensions._denied("20-knowledge/" + NFC(JARYO) + "/t.md", config))
+
 
 class StagedContractTests(unittest.TestCase):
     """Contract: the commit gate's pathspecs stay byte-exact, so another spelling is still checked."""
