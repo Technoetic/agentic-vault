@@ -2051,6 +2051,11 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(step, gate_one)
         self.assertIn("Before the first candidate-branch push", gate_one)
         self.assertIn("again on the final commit", gate_one)
+        # The release note names the same repetitions as gate 1 (finding RD-5).
+        check = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 검증"))
+        self.assertIn("전체 로컬 시험은 통합한 트리에서 첫 후보 브랜치 push 전에, 그 뒤 트리가 바뀐 후보 push 전마다, "
+                      "그리고 최종 커밋에서 다시 실행한다.", check)
+        self.assertNotIn("최종 커밋에서 다시 한 번 실행한다", check)
 
     def test_v0470_note_counts_the_deliberate_copies(self) -> None:
         import re
