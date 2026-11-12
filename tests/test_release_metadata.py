@@ -2059,6 +2059,28 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                 self.assertNotIn("TBD", text)
                 self.assertNotIn("TODO", text)
 
+    def test_v0470_record_describes_probe_e1_and_the_baseline_as_they_run(self) -> None:
+        # The feature-evidence probes take a clean checkout of tag v0.46.0 as their baseline, and probe E1
+        # compares the files of the two trees; it does not run native Codex discovery, which gate 3 runs on
+        # the v0.47.0 tag and ZIP (final check of the documents, F1).
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        evidence = _folded(_section(record, "## Required feature evidence"))
+        self.assertTrue(evidence.startswith(
+            "## Required feature evidence Each probe runs on the v0.47.0 source and, as its baseline, on a clean "
+            "checkout of tag v0.46.0 in a separate folder. "), evidence[:200])
+        self.assertIn(
+            "Probe E1: the v0.46.0 tree has neither file; the v0.47.0 tree (the tagged commit and the extracted "
+            "ZIP) has root `AGENTS.md` and `.claude/CLAUDE.md` and no root `CLAUDE.md`, no manifest names them, "
+            "and the skill files, the hook files and the hook handlers per event equal those of v0.46.0 (no new "
+            "skill or hook). Native Codex discovery of the v0.47.0 tag and ZIP is part of gate 3.", evidence)
+        folded = _folded(record)
+        self.assertIn("a clean checkout of tag v0.46.0", folded)
+        self.assertIn("the skill files, the hook files and the hook handlers per event", folded)
+        for old in ("the v0.46.0 ZIP has neither file", "native Codex discovery is identical",
+                    "git show v0.46.0:PATH"):
+            with self.subTest(absent=old):
+                self.assertNotIn(old, folded)
+
     def test_v0470_record_never_claims_nothing_was_pushed(self) -> None:
         record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
         self.assertNotIn("Nothing is pushed", record)
