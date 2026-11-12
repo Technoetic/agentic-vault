@@ -32,7 +32,9 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 ## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령
 
-이 플러그인을 공급사의 프롬프트 작성 안내서와 견준 대조 검토가 찾은 열한 항목을 다룬다.
+열한 항목을 다룬다. 여덟은 이 플러그인을 공급사의 프롬프트 작성 안내서와 견준 대조 검토가 찾은 것이고,
+`/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 시험 fixture의 경합과 v0.46.0 문서 정정은
+v0.46.0 릴리스에서 넘어온 것이다.
 
 - 저장소 루트의 [AGENTS.md](AGENTS.md)는 이 저장소를 고치는 기여자·에이전트 안내이고, Claude Code는
   .claude/CLAUDE.md(한 줄: @../AGENTS.md)로 이를 불러온다. 플러그인 루트에는 CLAUDE.md를 두지 않는다.
@@ -374,8 +376,10 @@ python scripts/evaluate_knowledge_evolution.py
 
 ## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
 
-This release takes up eleven items from a review that compared the plugin with a vendor
-prompting guide. A root `AGENTS.md` (imported by `.claude/CLAUDE.md`) guides people and coding agents
+This release takes up eleven items: eight from a review that compared the plugin with a vendor
+prompting guide, one request handled in the same review (the `/aside-repl` procedure command) and
+two carried over from the v0.46.0 release (a test fixture race and errata for its documents). A root
+`AGENTS.md` (imported by `.claude/CLAUDE.md`) guides people and coding agents
 that change this repository and is not installed into vaults. The Telegram bridge passes `--model` and
 `--effort` only when the optional `jarvis.model` and `jarvis.effort` settings are not empty, and gives
 up a scheduled briefing slot after 8 failed attempts in a row and tells the owner once. A lesson can
@@ -1408,7 +1412,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.47.0**이며 **Claude Code, Codex 겸용**이다. 안내서 대조 검토 반영과 aside-repl 절차 명령: 대조 검토에서 나온 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘고, 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.47.0.md)에 있다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.47.0**이며 **Claude Code, Codex 겸용**이다. 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.47.0.md)에 있다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
 
 v0.34.0은 다음 기능을 더했고 v0.35.1에서도 유지한다. 명시적으로 켜는 기능 다섯 가지를 더하며, 모두 훅·CI·기본 실행에 연결하지 않는다. `check-support --bind-subject`는 첫 글자가 ASCII가 아닌 글자인 주어 앞에 [왼쪽 경계](docs/support-row-diagnostics.md#subject-left-edge)가 있어야 일치로 보므로, 주어 앞에 한글 한 음절이 더 붙은 긴 이름은 더 이상 주어 일치로 세지 않는다(값·기본 출력·종료 코드는 그대로다). `evaluate_recall.py --abstention-calibration conformal`은 평가기 안에서만 [답 없음 보정 문턱](docs/memory-evaluation.md#답-없음-보정-문턱)을 커밋한 분할의 dev 쪽에서 맞추고 heldout 쪽에서 잰다. recall_hard(팔마다 보정 문항 28개 이하, α = 0.05)에서는 문턱이 있어도 보정 신호의 최솟값 한 점에 걸리고 조건부판(Learn then Test)은 문턱을 내지 못하므로, 보정 집합을 늘린 뒤에 쓸모가 있다. `scripts/real_vault_audit.py plan`은 라벨하기 전에 [표본 크기와 합격 확률](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)을 정확한 정수 산술로 계산한다. `vault_improvements.py inspect`·`compare --receipt-order`는 계획과 완료 영수증의 [기록 순서](docs/improvement-experiments.md#영수증-기록-순서-선택)를 표시하며, 이는 관찰 시점이나 서명이 아니다. `evaluate_tool_matrix.py --string-patterns`는 같은 trial을 현재 스키마와 형식 패턴을 더한 스키마로 짝지어 실행하고 호스트 판정을 기록만 한다([문자열 인자 패턴 짝 비교](docs/evaluation-stability.md#문자열-인자-패턴-짝-비교)). 새 옵션을 주지 않으면 출력·종료 코드는 v0.33.1과 같고, 이미 있던 `--bind-subject`를 켠 결과(첫 글자가 ASCII가 아닌 글자인 주어), 바뀐 CLI의 도움말·usage 줄, argparse 약어(`evaluate_recall.py --f`가 모호해진다), 일부 평가기가 싣는 소스 해시만 다르다. 주어 경계가 `vault_ssot.py`를 바꾸므로 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.34.0.md)를 따른다.
 
