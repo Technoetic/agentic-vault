@@ -2225,6 +2225,95 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("with the hook log checked in two runs (the probe command pre-approved its injected command "
                       "with `allowed-tools`).", limits)
 
+    # Fix round 3: a timing-dependent test that the local gates found. The test moves the rewritten
+    # file's modification time on explicitly (runtime code unchanged), and both documents name the
+    # limit of the final source sweep that lies behind it.
+    TIMING_FIX_OPENING = "그 밖에 릴리스 게이트가 찾은 기존 시험의 시간 의존 결함 하나를 고쳤다(런타임 코드는 그대로다)."
+    TIMING_FIX_BULLET = (
+        "- 시험: [tests/test_vault_retrieval.py](../../tests/test_vault_retrieval.py)의 "
+        "`test_later_source_verification_cannot_leave_earlier_source_stale`은 같은 크기로 다시 쓴 출처를 마지막 "
+        "재확인이 알아채는지 보는데, 두 번의 쓰기가 같은 파일 시각 눈금에 들어가면 떨어졌다. 이 릴리스의 첫 후보 "
+        "커밋에서 전체 로컬 시험을 두 번 돌린 가운데 한 번 떨어졌고, 그 시험만 한 프로세스에서 300번 반복하면 그 "
+        "커밋에서 97번, v0.46.0에서 86번 떨어졌다(Windows 11, Python 3.12). 시험이 다시 쓴 파일의 수정 시각을 "
+        "명시적으로 뒤로 옮기게 고쳤다. 런타임 코드는 바뀌지 않는다."
+    )
+    SWEEP_LIMIT_BULLET = (
+        "- 검색의 마지막 출처 재확인(`vault_retrieval.py`)은 파일의 장치·inode·크기와 파일 시각"
+        "(`st_mtime_ns`·`st_ctime_ns`)을 견준다. 출처의 내용 해시를 확인한 뒤 그 파일이 같은 크기로, 파일 시각이 "
+        "구별되지 않을 만큼 빨리 제자리에서 다시 쓰이면 이 재확인은 알아채지 못한다. v0.46.0에도 있던 한계이며 이번 "
+        "릴리스에서 고치지 않았다(위 시험 수정은 시험만 바꾼다)."
+    )
+    RECORD_TIMING_SCOPE = (
+        "It also fixes one timing-dependent test that the local gates of this release found "
+        "(`tests/test_vault_retrieval.py`); runtime code is unchanged by that fix."
+    )
+    RECORD_TIMING_EVIDENCE = (
+        "- Test fix found by the local gates: `tests/test_vault_retrieval.py` "
+        "`AdvancedRetrievalTests.test_later_source_verification_cannot_leave_earlier_source_stale` moves the "
+        "rewritten file's modification time on explicitly. The receipt names the record of that test repeated 300 "
+        "times in one process on the v0.46.0 tree and on the final commit."
+    )
+    RECORD_SWEEP_LIMIT = (
+        "The final source sweep of retrieval compares file identity, size and file times; a same-size in-place "
+        "rewrite that leaves those equal after the source's content hash was verified is not noticed. This limit is "
+        "in v0.46.0 as well and is not fixed in this release."
+    )
+    TIMING_TEST = "test_later_source_verification_cannot_leave_earlier_source_stale"
+
+    def test_v0470_note_states_the_timing_test_fix_and_the_sweep_limit(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        opening = _folded(release[:release.index("\n## 변경\n")])
+        self.assertIn("통과하지 못해 넣지 않았다. " + self.TIMING_FIX_OPENING + " 새 옵션 없이도", opening)
+        # The new bullet of `## 변경` follows the test-fixture bullet; it holds the sentence about the
+        # modification time and says that runtime code does not change.
+        changes = [line for line in _section(release, "## 변경").splitlines() if line.startswith("- ")]
+        fixture = next(index for index, line in enumerate(changes) if line.startswith("- 시험 fixture:"))
+        self.assertEqual(changes[fixture + 1], self.TIMING_FIX_BULLET)
+        self.assertIn("수정 시각을 명시적으로 뒤로 옮기게 고쳤다", changes[fixture + 1])
+        self.assertIn("런타임 코드는 바뀌지 않는다", changes[fixture + 1])
+        # The limit stands directly before the last boundary (injected commands and the repl).
+        boundaries = [line for line in _section(release, "## 알려진 경계").splitlines() if line.startswith("- ")]
+        self.assertTrue(boundaries[-1].startswith("- 주입 명령이 훅을 거치지 않는다는 관찰은"), boundaries[-1][:40])
+        self.assertEqual(boundaries[-2], self.SWEEP_LIMIT_BULLET)
+        self.assertIn("이 재확인은 알아채지 못한다", boundaries[-2])
+        self.assertIn("v0.46.0에도 있던 한계", boundaries[-2])
+
+    def test_v0470_record_states_the_timing_test_fix_and_the_sweep_limit(self) -> None:
+        import re
+
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertIn(self.RECORD_TIMING_SCOPE, _folded(_section(record, "## Release content and scope")))
+        # The evidence bullet of the test fix follows the bullet of item 11.
+        evidence = _section(record, "## Required feature evidence")
+        bullets = [_folded(part) for part in re.split(r"\n(?=- )", evidence) if part.startswith("- ")]
+        item_11 = next(index for index, bullet in enumerate(bullets) if bullet.startswith("- Item 11:"))
+        self.assertEqual(bullets[item_11 + 1], self.RECORD_TIMING_EVIDENCE)
+        self.assertIn(self.RECORD_SWEEP_LIMIT, _folded(_section(record, "## Limits")))
+
+    def test_v0470_timing_test_moves_the_modification_time_after_the_rewrite(self) -> None:
+        source = (REPO_ROOT / "tests/test_vault_retrieval.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        self.assertIn("os", {alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names})
+        function = next(node for node in ast.walk(tree)
+                        if isinstance(node, ast.FunctionDef) and node.name == self.TIMING_TEST)
+        segment = ast.get_source_segment(source, function)
+        rewrite = segment.index('first.write_text("rollback FIRST_NEW')
+        self.assertIn("os.utime(", segment[rewrite:])
+
+    def test_v0470_sweep_limit_matches_the_stamp_fields(self) -> None:
+        # The boundary sentence names the fields of `_stamp`; it stays true only while `_stamp` returns
+        # exactly these five and the final sweep compares that stamp.
+        source = (REPO_ROOT / "skills/agentic-vault/scripts/vault_retrieval.py").read_text(encoding="utf-8")
+        stamp = next(node for node in ast.parse(source).body
+                     if isinstance(node, ast.FunctionDef) and node.name == "_stamp")
+        returns = [node for node in ast.walk(stamp) if isinstance(node, ast.Return)]
+        self.assertEqual(len(returns), 1)
+        self.assertIsInstance(returns[0].value, ast.Tuple)
+        fields = [element.attr if isinstance(element, ast.Attribute) else None for element in returns[0].value.elts]
+        self.assertEqual(fields, ["st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"])
+        sweep = next(line for line in source.splitlines() if '"final source sweep"' in line)
+        self.assertIn('_stamp(path) != documents[rel]["stamp"]', sweep)
+
 
 # v0.47.0 shared surfaces: README, SECURITY.md, docs/codex.md, docs/hardening.md, docs/README.md and
 # commands/vault-upgrade.md carry the parts of items 1-5 and 9 that other phases leave to the release.
