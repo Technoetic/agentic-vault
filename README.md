@@ -55,11 +55,13 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 - 시험 fixture의 경합을 고치고, v0.46.0 문서에서 찾은 틀린 문장 넷(릴리스 노트 하나, 검증 계약 셋)을 두
   파일 끝의 정오표로 바로잡는다.
 
-새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.47.0.md)의
-`기본 결과 변경` 절에 모두 적었다. 인증서가 묶는 일곱 파일은 바뀌지 않아 경고 승격 인증서를 다시 만들
-필요가 없다(실제 설치 바이트가 같을 때). healthcheck 스탬프, Aside 조항 시작 마커와
-`aside-repl-command.md`는 `engine=0.47.0`이고 규칙 6종은 기존 스탬프를 유지한다. 볼트에 설치된 사본은
-`/vault-upgrade`(Codex `upgrade`) 전까지 옛 동작이다. [검증 계약](docs/verification/v0.47.0.md)을 함께 본다.
+새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.47.0.md)의 `기본 결과 변경` 절에
+모두 적었다. v0.46.0에서 올 때는 인증서가 묶는 일곱 파일이 같아 경고 승격 인증서를 다시 만들 필요가
+없다(실제 설치 바이트가 같을 때). v0.45.1 이하에서 올 때는
+[v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)를 따른다. healthcheck 스탬프, Aside
+조항 시작 마커와 `aside-repl-command.md`는 `engine=0.47.0`이고 규칙 6종은 기존 스탬프를 유지한다. 볼트에
+설치된 사본은 `/vault-upgrade`(Codex `upgrade`) 전까지 옛 동작이다.
+[검증 계약](docs/verification/v0.47.0.md)을 함께 본다.
 
 ## v0.46.0 — 금지 구역 정규화와 검사 빈틈 보강
 
