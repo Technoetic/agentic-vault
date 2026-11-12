@@ -1,5 +1,28 @@
 # 출처와 공유 상태 보강
 
+## v0.46.0 source and certificate migration
+
+v0.46.0 changes two of the seven certificate-bound checker files, `vault_paths.py` and
+`vault_lint_extensions.py`, because deny zones now compare folder names by Unicode
+canonical caseless matching. The measured `checker_sha256` changes from
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f` (v0.34.0 to v0.45.1) to
+`09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d`. The harmless corpus
+`38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a` is unchanged.
+A vault that promotes warnings to `fatal` stops under the new engine until it follows the
+coordination below: the health check exits 1, SessionStart injects nothing, the staged gate
+refuses commits, and doctor and recall report `invalid_config`. Vaults without promotion
+are unaffected. While engine versions are mixed no single certificate fits every copy, so
+keep promotion off until every copy runs the same bytes.
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination.
+See the [release note](releases/v0.46.0.md#하위호환업그레이드) and the
+[verification contract](verification/v0.46.0.md). No installed plugin or vault
+engine copy is updated by release preparation.
+
 ## v0.35.1 source and certificate migration
 
 v0.35.1 adds the shared [webapp-principles skill](../skills/webapp-principles/SKILL.md),
@@ -46,7 +69,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, 현재 v0.35.1의 인증서 호환 범위는 위 절을 따른다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, 현재 v0.46.0의 인증서 전환은 맨 위 v0.46.0 절을 따른다.
 
 ## v0.33.1 source and certificate migration
 
