@@ -42,9 +42,13 @@ exit 2로 끝난다.
 
 사용법:
   python vault_healthcheck.py [--vault <볼트 루트>] [--output <리포트 경로>] [--require-vault]
+                              [--json-summary]
   --vault  기본값: 환경변수 CLAUDE_PROJECT_DIR, 없으면 현재 디렉토리
   --output 기본값: vault-config.json 의 health_report (비어 있으면 00-meta/health-report.md)
   --require-vault  볼트 설정이 없으면 0 대신 2로 끝낸다
+  --json-summary   full 모드에서 stdout 마지막 줄에 JSON 요약 한 줄을 더한다(건수만, 경로·노트
+                   이름 없음; schema agentic-vault/healthcheck-summary/v1, status checked·
+                   not_vault·vault_not_found·error). --staged와 함께 쓰면 인자 오류(exit 2).
 """
 from __future__ import annotations
 
@@ -93,6 +97,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 ENGINE_VERSION = "0.45.1"
+HEALTHCHECK_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
 DEFAULT_FRONTMATTER_ROOTS = (
@@ -1255,17 +1260,23 @@ def rel_posix(p: Path, vault: Path) -> str:
     return p.relative_to(vault).as_posix()
 
 
+# Reasons for evidence reads skipped only because the byte budget was spent;
+# the --json-summary counts them apart from read failures.
+EVIDENCE_BUDGET_REASONS = ("extension evidence total byte limit",
+                           "extension evidence note/total byte limit")
+
+
 def _read_extension_evidence(vault: Path, path: Path, deny_zones, remaining_bytes: int) -> tuple[str | None, str | None]:
     """Read one allowed legacy-exempt target once within note/total byte caps."""
     _ensure_vault_path(vault, path, "extension target evidence", deny_zones)
     limit = min(1_000_000, max(remaining_bytes, 0))
     if not limit:
-        return None, "extension evidence total byte limit"
+        return None, EVIDENCE_BUDGET_REASONS[0]
     try:
         with path.open("rb") as stream:
             original = stream.read(limit + 1)
         if len(original) > limit:
-            return None, "extension evidence note/total byte limit"
+            return None, EVIDENCE_BUDGET_REASONS[1]
         return original.decode("utf-8-sig"), None
     except (OSError, UnicodeError) as exc:
         return None, f"{type(exc).__name__}: extension target unavailable"
@@ -2368,8 +2379,29 @@ def main() -> int:
                       help="full 모드 리포트 출력 경로 (기본: config의 health_report)")
     ap.add_argument("--require-vault", action="store_true",
                     help="볼트 설정이 없으면 0 대신 2로 끝낸다")
+    ap.add_argument("--json-summary", action="store_true",
+                    help="full 모드 stdout 마지막 줄에 건수만 담은 JSON 요약 한 줄을 더한다")
     args = ap.parse_args()
+    if args.json_summary and args.staged:
+        ap.error("--json-summary는 --staged와 함께 쓸 수 없다(full 모드 전용)")
 
+    # The summary of a run that checks no notes; _main fills it as it returns.
+    summary: dict[str, object] = {
+        "schema": HEALTHCHECK_SUMMARY_SCHEMA, "status": "error", "exit_code": 1,
+        "notes_checked": 0, "issues": 0, "critical": 0, "evidence_skipped": 0,
+        "unreadable": 0, "skipped_links": 0, "linked_worktree_copies": 0,
+        "complete": False, "extension_input_complete": False,
+        "warning_promotion_active": False,
+    }
+    rc = _main(args, summary)
+    if args.json_summary:
+        summary["exit_code"] = rc
+        print(json.dumps(summary, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+    return rc
+
+
+def _main(args: argparse.Namespace, summary: dict) -> int:
+    """Run the check; every controlled return leaves its status in summary."""
     explicit_vault = args.vault is not None
     vault = Path(args.vault if explicit_vault
                  else (os.environ.get("CLAUDE_PROJECT_DIR") or ".")).resolve()
@@ -2378,6 +2410,7 @@ def main() -> int:
         # (hook, cwd) keeps the quiet "not a vault" pass below.
         print(f"[vault-healthcheck] 오류: --vault 경로가 없거나 폴더가 아님 — {vault}",
               file=sys.stderr)
+        summary["status"] = "vault_not_found"
         return 2
 
     if args.staged:
@@ -2403,6 +2436,7 @@ def main() -> int:
         print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
         return 1
     if not cfg_path.is_file():
+        summary["status"] = "not_vault"
         if args.require_vault:
             print(f"[vault-healthcheck] 오류: 볼트 아님 — {vault} 에 {CONFIG_RELPATH} 이 없음 "
                   "(--require-vault)", file=sys.stderr)
@@ -2840,9 +2874,11 @@ def main() -> int:
     linked_trees = sorted(rel for rel in linked_trees
                           if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names))
 
+    extension_input_complete = (
+        not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
+        and not any(_warning_inventory_allowed(rel, cfg) for rel in link_skipped))
     extension_diagnostics = extension_warnings(approved_note_texts, cfg,
-        input_complete=not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
-                       and not any(_warning_inventory_allowed(rel, cfg) for rel in link_skipped),
+        input_complete=extension_input_complete,
         consumer_paths=consumer_paths)
     # 선택형 동기화 경고: 경고 전용이라 승격·치명 집계에 들어가지 않는다. 확장 모듈이
     # 없으면 위 extension_warnings가 이미 lint-extension-unavailable을 보고한다.
@@ -3049,6 +3085,24 @@ def main() -> int:
     print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
           f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}"
           f"{sync_note}{checkpoint_note}{unknown_key_note}")
+    # Counts only. Evidence reads skipped by the byte budget are not read
+    # failures; linked worktree copies are skipped on purpose.
+    evidence_skipped = sum(reason in EVIDENCE_BUDGET_REASONS for _rel, reason in unreadable)
+    # validate_config accepted the policy, so every "fatal" level is promoted.
+    policy_levels = (cfg.get("warning_policy") or {}).get("levels") or {}
+    summary.update({
+        "status": "checked",
+        "notes_checked": len(targets),
+        "issues": total_issues,
+        "critical": critical,
+        "evidence_skipped": evidence_skipped,
+        "unreadable": len(unreadable) - evidence_skipped,
+        "skipped_links": len(link_skipped),
+        "linked_worktree_copies": len(linked_trees),
+        "complete": len(unreadable) == evidence_skipped and not link_skipped,
+        "extension_input_complete": extension_input_complete,
+        "warning_promotion_active": any(level == "fatal" for level in policy_levels.values()),
+    })
     return 1 if critical > 0 else 0
 
 
