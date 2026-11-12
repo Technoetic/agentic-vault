@@ -5,7 +5,9 @@
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
 모든 볼트 고유 규칙(필수 키·Enum·제외 구역·로그 태그·SSOT 사실 패턴)은
 볼트 루트의 00-meta/vault-config.json 에서 읽는다. 이 파일이 없으면
-"볼트 아님" 한 줄을 출력하고 조용히 종료한다(exit 0 — 에러 스팸 금지).
+"볼트 아님" 한 줄을 출력하고 조용히 종료한다(exit 0 — 에러 스팸 금지;
+--require-vault 를 주면 exit 2). 명령줄에 준 --vault 경로가 없거나 폴더가 아니면
+exit 2로 끝난다.
 
 검사 섹션:
   1   프런트매터 누락                          (치명)
@@ -32,13 +34,17 @@
       더한다(full 모드만, 기본 꺼짐 — 키가 없으면 출력이 그대로다).
 
 종료 코드(fail-closed):
-  0 = 볼트 아님(조용히 통과) 또는 치명 이슈 0건 (관리성 이슈는 리포트만)
+  0 = 볼트 아님(설정 파일이 없는 폴더, 또는 --vault 없이 정한 경로 — 조용히 통과)
+      또는 치명 이슈 0건 (관리성 이슈는 리포트만)
   1 = 치명 이슈 존재, 또는 설정/경로 오류(잘못된 config·검사 대상 소실)
+  2 = 명령줄에 준 --vault 경로가 없거나 폴더가 아님, --require-vault 인데 볼트 설정이 없음,
+      또는 인자 오류
 
 사용법:
-  python vault_healthcheck.py [--vault <볼트 루트>] [--output <리포트 경로>]
+  python vault_healthcheck.py [--vault <볼트 루트>] [--output <리포트 경로>] [--require-vault]
   --vault  기본값: 환경변수 CLAUDE_PROJECT_DIR, 없으면 현재 디렉토리
   --output 기본값: vault-config.json 의 health_report (비어 있으면 00-meta/health-report.md)
+  --require-vault  볼트 설정이 없으면 0 대신 2로 끝낸다
 """
 from __future__ import annotations
 
@@ -2353,16 +2359,26 @@ def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_line
 def main() -> int:
     ap = argparse.ArgumentParser(description="볼트 무결성 검증 엔진 (agentic-vault)")
     ap.add_argument("--vault",
-                    default=os.environ.get("CLAUDE_PROJECT_DIR") or ".",
+                    default=None,
                     help="볼트 루트 경로 (기본: $CLAUDE_PROJECT_DIR, 없으면 cwd)")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--staged", action="store_true",
                       help="Git index의 커밋 대상만 검사하고 리포트는 쓰지 않음")
     mode.add_argument("--output", default=None,
                       help="full 모드 리포트 출력 경로 (기본: config의 health_report)")
+    ap.add_argument("--require-vault", action="store_true",
+                    help="볼트 설정이 없으면 0 대신 2로 끝낸다")
     args = ap.parse_args()
 
-    vault = Path(args.vault).resolve()
+    explicit_vault = args.vault is not None
+    vault = Path(args.vault if explicit_vault
+                 else (os.environ.get("CLAUDE_PROJECT_DIR") or ".")).resolve()
+    if explicit_vault and not vault.is_dir():
+        # A path given on the command line must be a folder; the implicit path
+        # (hook, cwd) keeps the quiet "not a vault" pass below.
+        print(f"[vault-healthcheck] 오류: --vault 경로가 없거나 폴더가 아님 — {vault}",
+              file=sys.stderr)
+        return 2
 
     if args.staged:
         try:
@@ -2387,6 +2403,10 @@ def main() -> int:
         print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
         return 1
     if not cfg_path.is_file():
+        if args.require_vault:
+            print(f"[vault-healthcheck] 오류: 볼트 아님 — {vault} 에 {CONFIG_RELPATH} 이 없음 "
+                  "(--require-vault)", file=sys.stderr)
+            return 2
         # stderr로 출력 — SessionStart 훅이 exit 0의 stdout을 컨텍스트에 주입하므로
         # 비볼트 프로젝트의 세션에 잡음이 들어가지 않게 한다(CLI 직접 실행 시에도 안내는 보임).
         print(f"[vault-healthcheck] 볼트 아님 — {vault} 에 {CONFIG_RELPATH} 이 없어 검사를 건너뜁니다.",

@@ -263,6 +263,10 @@ def _isolated_configs(raw: dict) -> tuple[dict, dict] | None:
 
 
 def diagnose(vault: Path, *, instructions: bool = False) -> tuple[dict, int]:
+    if not vault.is_dir():
+        return _terminal_report(
+            "invalid_vault", "vault_path_not_found", "pass_an_existing_vault_directory",
+        ), 2
     config_candidate = vault / session_hook.CONFIG_REL
     try:
         if not config_candidate.is_file():
@@ -721,6 +725,13 @@ def main(argv: list[str] | None = None) -> int:
             "arguments, no shell, bounded time) to compare the host's merged value."
         ),
     )
+    parser.add_argument(
+        "--require-vault", action="store_true",
+        help=(
+            "Exit 2 instead of 0 when the folder has no 00-meta/vault-config.json "
+            "(not_vault); the report is unchanged."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.session_instruction_paths and args.session_evidence is None:
         parser.error("--session-instruction-paths requires --session-evidence")
@@ -728,6 +739,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--plugin-scope-host requires --plugin-scope")
 
     report, exit_code = diagnose(args.vault, instructions=args.instructions)
+    if args.require_vault and report["status"] == "not_vault":
+        exit_code = 2
     if args.host_version:
         # Reported beside the vault diagnosis; the exit code stays the vault's.
         report["host_version"] = diagnose_host_version()
