@@ -243,6 +243,18 @@ def unsafe_path_segment(part: str) -> bool:
         or stem.casefold() in RESERVED_DEVICE_NAMES
         or _RESERVED_DEVICE_PATTERN.fullmatch(stem) is not None
     )
+
+
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: NFC, then casefold, then NFC
+    again, because casefold can return a string that is not NFC. ASCII text
+    needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold())
 # --- END SHARED PATH RULE ---
 
 
@@ -904,11 +916,11 @@ def build_deny_rules(deny_zones) -> tuple[list[str], set[str]]:
     """deny_zones 항목을 (경로 접두 목록, 이름 집합)으로 분해한다.
     '10-inbox/_processed' 처럼 /가 있으면 루트 기준 접두 매칭,
     '.obsidian' 처럼 단일 세그먼트면 어느 깊이든 경로 구성 요소 매칭.
-    모든 비교는 casefold로 대소문자를 무시한다."""
+    모든 비교는 세그먼트마다 fold_path_part로 대소문자와 NFC/NFD 표기 차이를 무시한다."""
     prefixes: list[str] = []
     names: set[str] = set()
     for z in deny_zones or []:
-        z = norm_cfg_path(z).casefold()
+        z = "/".join(fold_path_part(p) for p in norm_cfg_path(z).split("/"))
         if not z:
             continue
         if "/" in z:
@@ -919,7 +931,7 @@ def build_deny_rules(deny_zones) -> tuple[list[str], set[str]]:
 
 
 def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
-    rel = rel.replace("\\", "/").casefold()
+    rel = "/".join(fold_path_part(p) for p in rel.replace("\\", "/").split("/"))
     if any(rel == pre or rel.startswith(pre + "/") for pre in prefixes):
         return True
     return any(part in names for part in rel.split("/"))

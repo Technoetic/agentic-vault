@@ -1,4 +1,4 @@
-# agentic-vault:adapter deny-guard engine=0.43.0
+# agentic-vault:adapter deny-guard engine=0.46.0
 """deny-guard.py - opt-in deny-zone guard for Claude Code PreToolUse hooks.
 
 ASCII only, Python 3.10+ standard library only. The plugin ships this file in
@@ -81,6 +81,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import unicodedata
 from typing import Sequence
 
 
@@ -198,21 +199,34 @@ _PS_TEXT_KEYS = ("strings", "expandable_strings", "flags")
 
 
 # This file is copied into vaults and run alone by the hook, so it cannot
-# import the plugin's vault_paths.py. The block below is a verbatim copy of
-# vault_paths.zone_matches; tests/test_rule_sources.py fails if they drift.
-# --- BEGIN SHARED ZONE RULE (verbatim copy of vault_paths.zone_matches) ---
+# import the plugin's vault_paths.py. The block below holds verbatim copies of
+# vault_paths.fold_path_part and vault_paths.zone_matches;
+# tests/test_rule_sources.py fails if they drift.
+# --- BEGIN SHARED ZONE RULE (verbatim copies of vault_paths.fold_path_part and zone_matches) ---
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: NFC, then casefold, then NFC
+    again, because casefold can return a string that is not NFC. ASCII text
+    needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold())
+
+
 def zone_matches(parts: Sequence[str], zone: str) -> bool:
-    """Return True when a deny/exclude zone covers a path, ignoring case.
+    """Return True when a deny/exclude zone covers a path, ignoring case and Unicode normalization.
 
     A one-segment zone ("90-assets") matches that component at any depth; a
     longer zone ("10-inbox/_processed") matches only as a prefix from the root.
     """
     zone_parts = tuple(
-        part.casefold() for part in zone.replace("\\", "/").split("/") if part
+        fold_path_part(part) for part in zone.replace("\\", "/").split("/") if part
     )
     if not zone_parts:
         return False
-    folded = tuple(part.casefold() for part in parts)
+    folded = tuple(fold_path_part(part) for part in parts)
     if len(zone_parts) == 1:
         return zone_parts[0] in folded
     return folded[: len(zone_parts)] == zone_parts
@@ -1266,10 +1280,10 @@ class Guard:
         return zones, any(_short_alias(base, stem) for base in bases for stem in _CONTROL_STEMS)
 
     def zones_in(self, text: str) -> list[str]:
-        """Zones whose last segment, or a short name that can stand for it, appears in text, ignoring case."""
-        folded = text.casefold()
+        """Zones whose last segment, or a short name that can stand for it, appears in text, ignoring case and Unicode normalization."""
+        folded = fold_path_part(text)
         short = self.short_names(text)[0]
-        return [zone for zone in self.zones if zone.split("/")[-1].casefold() in folded or zone in short]
+        return [zone for zone in self.zones if fold_path_part(zone.split("/")[-1]) in folded or zone in short]
 
     def control_named(self, text: str) -> bool:
         """True when text names a guard control, or holds a short name that can stand for one."""
@@ -1286,7 +1300,8 @@ class Guard:
         A second look drops quotes, backslashes, braces and commas, so 90-ass"ets"
         and 90-ass\\ets still show the zone name.
         """
-        variants = (text.casefold(), re.sub(r"[\"'\\{},]", "", text.casefold()))
+        base = fold_path_part(text)
+        variants = (base, re.sub(r"[\"'\\{},]", "", base))
         named = [set(self.zones_in(variant)) for variant in variants]
         zones = [zone for zone in self.zones if any(zone in found for found in named)]
         return zones, any(self.control_named(variant) for variant in variants)
@@ -1355,10 +1370,10 @@ class Guard:
             return (ASK, named) if named else None
         asked = None
         for segment in segments:
-            folded = _fold_part(segment).casefold()
+            folded = fold_path_part(_fold_part(segment))
             wild = _WILDCARD_RE.search(segment) is not None
             for zone in self.zones:
-                last = zone.split("/")[-1].casefold()
+                last = fold_path_part(zone.split("/")[-1])
                 if wild and last in folded:
                     asked = asked or zone  # a wildcard next to the zone name
                 elif not wild and "/" not in zone and folded == last:

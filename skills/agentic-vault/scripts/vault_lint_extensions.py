@@ -65,18 +65,33 @@ def _limit(config, key, default):
     return min(value, default) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
 
 
+# Verbatim copy of vault_paths.fold_path_part: this module must not import
+# vault_paths (a vault copy set without it would stop the health check at
+# import); tests/test_rule_sources.py fails if the copies drift.
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: NFC, then casefold, then NFC
+    again, because casefold can return a string that is not NFC. ASCII text
+    needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold())
+
+
 def _denied(path, config):
-    folded = path.casefold()
+    folded = "/".join(fold_path_part(p) for p in path.split("/"))
     runtime = '00-meta/.agentic-vault/runtime'
     if folded == runtime or folded.startswith(runtime + '/'):
         return True
     parts = folded.split('/')
     for zone in config.get('deny_zones', []) or []:
-        zone = str(zone).replace('\\', '/').strip('/').casefold()
+        zone = "/".join(fold_path_part(p) for p in str(zone).replace("\\", "/").strip("/").split("/"))
         if zone and ((('/' in zone) and (folded == zone or folded.startswith(zone + '/')))
                      or ('/' not in zone and zone in parts)):
             return True
-    return any(str(x).casefold() in parts for x in config.get('exclude_dirs', []) or [])
+    return any(fold_path_part(str(x)) in parts for x in config.get('exclude_dirs', []) or [])
 
 
 def _valid_path(path):

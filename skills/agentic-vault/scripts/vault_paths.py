@@ -1,8 +1,10 @@
 """Safe path handling shared by agentic-vault note readers.
 
 This module is the single source of three rules: which relative path segments
-are allowed, how a deny/exclude zone matches a path, and that no symlink or
-Windows reparse point (junction) is traversed. Plugin scripts import it.
+are allowed, how a deny/exclude zone matches a path (path segments compared
+after fold_path_part, which ignores case and Unicode normalization), and that
+no symlink or Windows reparse point (junction) is traversed. Plugin scripts
+import it.
 
 vault_healthcheck.py is the one exception among the plugin scripts. It is
 installed into each vault as a standalone file
@@ -13,14 +15,17 @@ tests/test_rule_sources.py fails when the two copies differ.
 
 The opt-in deny-zone guard (assets/adapters/deny-guard/deny-guard.py) is copied
 into a vault the same way and run alone by a Claude Code PreToolUse hook. It
-keeps a verbatim copy of zone_matches between its SHARED ZONE RULE markers, and
-tests/test_rule_sources.py fails when that copy differs from the source here.
+keeps verbatim copies of fold_path_part and zone_matches between its SHARED
+ZONE RULE markers, and tests/test_rule_sources.py fails when that copy differs
+from the source here. vault_lint_extensions.py keeps a verbatim copy of
+fold_path_part (it must not import this module), held by the same test file.
 """
 from __future__ import annotations
 
 import os
 import re
 import stat
+import unicodedata
 from pathlib import Path
 from typing import Sequence
 
@@ -60,6 +65,18 @@ def unsafe_path_segment(part: str) -> bool:
         or stem.casefold() in RESERVED_DEVICE_NAMES
         or _RESERVED_DEVICE_PATTERN.fullmatch(stem) is not None
     )
+
+
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: NFC, then casefold, then NFC
+    again, because casefold can return a string that is not NFC. ASCII text
+    needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold())
 # --- END SHARED PATH RULE ---
 
 
@@ -87,17 +104,17 @@ _relative_parts = relative_parts
 
 
 def zone_matches(parts: Sequence[str], zone: str) -> bool:
-    """Return True when a deny/exclude zone covers a path, ignoring case.
+    """Return True when a deny/exclude zone covers a path, ignoring case and Unicode normalization.
 
     A one-segment zone ("90-assets") matches that component at any depth; a
     longer zone ("10-inbox/_processed") matches only as a prefix from the root.
     """
     zone_parts = tuple(
-        part.casefold() for part in zone.replace("\\", "/").split("/") if part
+        fold_path_part(part) for part in zone.replace("\\", "/").split("/") if part
     )
     if not zone_parts:
         return False
-    folded = tuple(part.casefold() for part in parts)
+    folded = tuple(fold_path_part(part) for part in parts)
     if len(zone_parts) == 1:
         return zone_parts[0] in folded
     return folded[: len(zone_parts)] == zone_parts
