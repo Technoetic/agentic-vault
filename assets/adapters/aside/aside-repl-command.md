@@ -25,7 +25,7 @@ argument-hint: "[주소나 할 일 | 실행할 .js 파일 경로]"
 
 ## 2. 준비
 
-1. CLAUDE.md의 Aside 조항이 정한 기동 절차를 따른다(Windows에서 자동 기동 훅이 없으면 볼트 루트에서 `powershell -NoProfile -ExecutionPolicy Bypass -File 00-meta/scripts/aside-up.ps1`).
+1. CLAUDE.md의 Aside 조항이 정한 기동 절차를 따른다(Windows에서 자동 기동 훅이 없으면 볼트 루트에서 `powershell -NoProfile -ExecutionPolicy Bypass -File 00-meta/scripts/aside-up.ps1`). 4단계의 Python 경로로 넘길 때는 자동 기동 훅이 `aside`로 시작하는 명령에만 동작하므로, Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.
 2. 사용자에게 "작업 중 Aside 탭을 만지지 말아 달라"고 한 줄로 알린다. 스크립트는 사용자의 로그인 세션 안에서 돈다.
 3. 로그인·제출·설정 변경은 사용자가 이번 요청에서 허용한 범위 안에서만 한다. 저장된 비밀번호 자동입력은 사용자가 그 계정을 말했을 때만 한다. 로그인 실패 안내가 나오면 다시 시도하지 말고 멈춘다.
 
@@ -54,7 +54,7 @@ python -X utf8 -c "import subprocess, sys; code = open(sys.argv[1], encoding='ut
 
 - `<…>` 자리에는 3단계에서 정한 실제 경로를 쓴다(공백이 있으면 그 셸의 방식으로 따옴표를 씌운다). 요청 글을 이 줄에 넣지 않는다.
 - 표준 입력(`aside repl < 파일`)은 쓰지 않는다. 여러 줄 스크립트는 구문 오류가 났고, 머리 줄에 계정과 세션 폴더 경로가 찍혔다. Windows PowerShell 5.1에서 스크립트 내용을 `aside repl`의 인자로 직접 넘기지 않는다(큰따옴표가 사라졌다). 위 두 방식 밖의 전달 방식은 그 기기에서 실측해 운영 가이드에 적기 전에는 쓰지 않는다. bash 셸도 Python도 없으면 실행하지 말고 사용자에게 알린다.
-- 실행 뒤 종료 코드와 출력 파일의 바이트 수·SHA-256을 확인한다. 실패했으면 출력·오류 파일에 "Aside isn't running"이 있는지 건수만 센다(bash 셸이면 `grep -c`, 없으면 Python으로 센다). 있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.
+- 실행 뒤 종료 코드와 출력 파일의 바이트 수·SHA-256을 확인한다. 실패했으면 출력·오류 파일에 "Aside isn't running"이 있는지 건수만 센다(bash 셸이면 `grep -c`, 없으면 Python으로 센다). 있으면 2단계 1번을 다시 하되 Windows에서는 훅이 있어도 도우미를 직접 실행하고, 한 번만 다시 실행한다.
 
 ## 5. 결과
 
