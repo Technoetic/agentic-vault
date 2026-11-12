@@ -189,6 +189,8 @@ DEFAULT_CONFIG: dict = {
     # 실사례(NS): remember 미실행 3주 공백을 어떤 계기판도 잡지 못했다.
     # 1~2커밋은 활성 세션의 정상 누적이라 임계 기본 3. 0이면 검사를 끈다.
     # handoff_note가 비어 있으면 자동 생략.
+    # anchor가 아직 템플릿 값 `(없음)`이면 계약 위반이 아니다 — git 미사용 볼트는 검사를
+    # 생략하고, git 볼트는 이 볼트 폴더를 바꾼 커밋이 이 값 이상일 때만 안내한다.
     "anchor_drift_threshold": 3,
 }
 
@@ -760,8 +762,9 @@ def read_index_text(vault: Path, path: str) -> str:
 
 HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 
-# session-end 계약이 handoff 상단에 쓰는 앵커 줄 형식 (스킬 §anchor 참조)
-ANCHOR_RE = re.compile(r"\*\*기준 커밋\(anchor\):\*\*\s*`([0-9a-fA-F]{7,40})`")
+# session-end 계약이 handoff 상단에 쓰는 앵커 줄 형식 (스킬 §anchor 참조).
+# 템플릿 자리값 `(없음)`도 받는다 — 그때 group(1)은 None이다.
+ANCHOR_RE = re.compile(r"\*\*기준 커밋\(anchor\):\*\*\s*`(?:([0-9a-fA-F]{7,40})|\(없음\))`")
 
 
 def _git(vault: Path, *args: str) -> str | None:
@@ -791,6 +794,20 @@ def scan_anchor_drift(vault: Path, handoff_rel: str,
         return ("handoff에 기준 커밋(anchor) 줄이 없음 — session-end 계약 위반",
                 ["- ⚠️ handoff에 `**기준 커밋(anchor):**` 줄이 없다. "
                  "session-end가 갱신하는 줄이다."])
+    if m.group(1) is None:
+        # 템플릿 자리값 `(없음)` — 계약 위반이 아니다. git 볼트에서 이 볼트 폴더를 바꾼
+        # 커밋(cwd=볼트, `-- .`)이 임계 이상 쌓였을 때만 안내 1건으로 센다.
+        if _git(vault, "rev-parse", "--is-inside-work-tree") is None:
+            return None, ["- 검사 생략: git 미사용 볼트 — anchor `(없음)`"]
+        count_s = _git(vault, "rev-list", "--count", "HEAD", "--", ".")
+        commits = int(count_s) if count_s and count_s.isdigit() else 0
+        if commits >= threshold:
+            return (f"session-end 기록 없음 — anchor `(없음)`, 커밋 {commits}개",
+                    [f"- ⚠️ anchor가 아직 `(없음)`인데 HEAD까지 이 볼트 폴더를 바꾼 커밋이 "
+                     f"{commits}개다(임계 {threshold}). session-end가 한 번도 기록되지 않았을 수 있다.",
+                     "- 조치: /vault-session-end 실행(anchor를 커밋 해시로 갱신)."])
+        return None, [f"- 안내: 아직 session-end 기록이 없다(anchor `(없음)`, 커밋 {commits}개). "
+                      "첫 /vault-session-end가 이 줄을 커밋 해시로 바꾼다."]
     anchor = m.group(1)
     if _git(vault, "rev-parse", "--is-inside-work-tree") is None:
         return None, ["- 판정 불가: git 리포가 아니거나 git 실행 실패"]
