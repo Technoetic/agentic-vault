@@ -114,6 +114,7 @@ Jev-first 선호가 적용되는 현재 요청은 볼트 존재 검사나 일반
 Aside 자동 기동 훅은 Claude Code 설정에만 병합한다. Codex는 CLAUDE.md의 Aside 조항에 적힌 기동 절차를 직접 따른다.
 deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다. Codex의 `init`·`upgrade`는 그 단계를 건너뛰고 `doctor`는 상태만 보고한다.
 교훈 단서 훅(`adapters.lesson_cues`)도 Claude Code 전용이며 같은 방식으로 다룬다.
+`/aside-repl` 절차 명령(`adapters.aside_command`)은 볼트의 `.claude/commands/aside-repl.md` 파일이다. Codex는 CLAUDE.md의 Aside 조항이 이 파일을 가리키면 `aside repl` 작업 전에 읽고 같은 순서로 따르며, `요청:` 줄의 자리표시자를 사용자의 요청으로 읽는다. 요청 글은 셸 코드가 아니다. bash 셸이 없으면 절차 4단계의 Python 실행 줄을 쓴다. `init`·`upgrade`는 Codex에서도 이 파일 설치를 제안한다(`--offer-aside-command`).
 노트 용량과 플러그인 범위는 같은 Doctor에 `--capacity`·`--plugin-scope`를 붙여 요청할 때만 본다(읽기 전용). `--plugin-scope-host`는 `claude`를 실행하므로 Claude Code가 있는 환경에서 요청할 때만 쓴다.
 `proposals`는 `<플러그인 루트>/skills/agentic-vault/scripts/vault_proposals.py --vault <볼트 루트> <하위 명령과 인자>`로 연결한다.
 인자는 각각 별도 argv로 전달한다. `inspect`·`check`·`preserve-check`·`rollback-preview`는 읽기 전용이고, `apply --approve`는

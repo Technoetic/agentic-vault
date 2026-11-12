@@ -322,7 +322,7 @@ def verify(codex: str) -> dict:
                          "docs/evidence.md",
                          "docs/link-proposals.md",
                          "assets/templates/AGENTS-vault-stub.md",
-                         # doctor's adapter report reads the bundled Aside helper, deny-zone
+                         # doctor's adapter report reads the bundled Aside helper and procedure command, deny-zone
                          # guard and lesson cue hook for their stamps
                          "skills/agentic-vault/scripts/vault_adapters.py",
                          "assets/adapters/deny-guard/deny-guard.py",
@@ -330,7 +330,8 @@ def verify(codex: str) -> dict:
                          "assets/adapters/lesson-cues/lesson-cues.py",
                          "assets/adapters/lesson-cues/settings-hooks.json",
                          "assets/adapters/lesson-cues/guide.md",
-                         "assets/adapters/aside/aside-up.ps1"):
+                         "assets/adapters/aside/aside-up.ps1",
+                         "assets/adapters/aside/aside-repl-command.md"):
             if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")
         return {"version": installed["version"], "installed_resources": "verified",
