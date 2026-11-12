@@ -38,7 +38,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
    - 효과 1줄 안내: "pre-commit은 설치된 staged 검사기의 결과를 그대로 반영하고 Python·검사기 부재 시 fail-closed, pre-push는 네트워크 push 차단(로컬 미러 허용)". 두 훅은 로컬 강제 장치이며 `--no-verify`로 명시 우회할 수 있다.
 4. **handoff anchor**: `handoff_note`가 설정돼 있고 그 파일 제목 아래에 "기준 커밋(anchor)" 줄이 없으면 삽입하라 — git 볼트면 `git rev-parse --short HEAD` 값으로, 아니면 `(없음)`으로.
 5. **Jarvis 안내** (설치는 하지 않음): `jarvis.enabled`가 false면 "Telegram 자비스를 켜려면 /vault-jarvis-setup" 한 줄만 안내하라 — 토큰 발급은 사용자 행위라 자동화 불가.
-6. **도구 어댑터(선택)**: `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행하고 `adapters.aside.actions`(Claude Code에서는 `adapters.deny_guard.actions`도)에 따라 처리하라. 진단은 읽기 전용이다. 교체·설치는 아래 각 항목의 조건을 따르며, 사용자 승인 없이 새로 설치하는 것은 없다.
+6. **도구 어댑터(선택)**: `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json --offer-aside-command`를 실행하고 `adapters.aside.actions`와 `adapters.aside_command.actions`(Claude Code에서는 `adapters.deny_guard.actions`도)에 따라 처리하라. 진단은 읽기 전용이다. 교체·설치는 아래 각 항목의 조건을 따르며, 사용자 승인 없이 새로 설치하는 것은 없다.
    - `offer_helper_update`: 설치된 `00-meta/scripts/aside-up.ps1`의 `agentic-vault:adapter aside-up engine=` 스탬프가 번들 원본보다 낮다. 엔진 소유 구버전이므로 원본과의 diff를 보여 주고, 릴리스 노트로 설명되지 않는 로컬 수정이 없을 때만 원본으로 교체한다. 판단이 불명확하면 기존 파일을 유지하고 `승인 대기(기존 유지)`로 기록한다.
    - `review_helper`: 스탬프가 없거나 숫자 버전이 아니거나(사용자 제작), 같은 스탬프인데 내용이 다르거나(로컬 수정), 더 높거나(다른 배포본), 읽을 수 없거나, 링크·정션을 거치는 경로다. 자동 덮어쓰기 금지 — diff만 보여 주고 기존 파일을 유지한다.
    - `offer_install`: Aside CLI가 있는데 어댑터가 없다. `/vault-init` 4-1과 같은 질문·순서로 제안만 하고, 승인할 때만 설치한다.
@@ -46,7 +46,12 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
    - `hook_optional`: Claude Code에서 자동 기동 훅을 켤 수 있다고 한 줄만 안내한다. 병합은 `/vault-init` 4-1의 4단계와 같은 확인을 거친다(기본 대상 `.claude/settings.local.json`).
    - `review_clause`: 조항 마커가 짝이 맞지 않거나, CLAUDE.md를 읽을 수 없거나, 링크·정션을 거친다. 수정하지 말고 보고한다.
    - `review_settings`: 설정 파일을 읽을 수 없거나 훅에 문제가 있다(`hook.problems`). `"$CLAUDE_PROJECT_DIR/..."` 형태의 명령은 PowerShell 훅 셸에서 경로가 비어 드라이브 루트의 같은 이름 파일을 실행할 수 있으므로, 현재 `settings-hooks.json`의 명령으로 바꾸는 변경안을 보여 주고 승인받아 교체한다. `if` 필터가 없는 aside-up 훅도 같은 방식으로 제안한다.
-   - CLAUDE.md의 Aside 조항은 볼트 소유다. 업그레이드가 내용을 바꾸지 않는다.
+   - CLAUDE.md의 Aside 조항은 볼트 소유다. 업그레이드가 내용을 바꾸지 않는다(아래 `/aside-repl` 항목에서 사용자가 승인한 한 줄 추가만 예외다). 조항 시작 마커의 `engine=` 값은 그 조항을 넣은 엔진 판일 뿐 교체 기준이 아니다.
+   - **`/aside-repl` 절차 명령(`adapters.aside_command.actions`):** `--offer-aside-command`를 붙였으므로 JSON에는 이 항목이 항상 있다. Aside 조항이 없고 `state`가 `missing`이면 사용자에게 말하지 않고 넘어간다.
+     - `offer_command`: Aside 조항이 있는데 `.claude/commands/aside-repl.md`가 없다. `/vault-init` 4-1의 5단계와 같은 질문·조건으로 제안만 하고, 승인할 때만 넣는다.
+     - `offer_command_update`: 설치된 명령의 `agentic-vault:adapter aside-repl engine=` 스탬프가 번들 원본보다 낮다. `offer_helper_update`와 같이 diff를 보여 주고 로컬 수정이 없을 때만 교체한다.
+     - `review_command`: 스탬프가 없거나(볼트가 직접 만든 같은 이름 명령일 수 있다) 숫자 버전이 아니거나, 같은 스탬프인데 내용이 다르거나, 더 높거나, 읽을 수 없거나, 링크·정션을 거치는 경로다. 자동 덮어쓰기 금지 — diff만 보여 주고 기존 파일을 유지한다.
+     - `state`가 `current`인데 Aside 조항에 `**repl 스크립트 전달:**` 줄이 없으면, 번들 `browser-clause.md`의 그 줄을 보여 주고 조항 끝 마커 바로 앞에 넣을지 따로 묻는다. 답이 없으면 넣지 않고, 조항의 다른 내용은 바꾸지 않는다.
    - **deny zone 가드(`adapters.deny_guard.actions`, Claude Code 전용 — Codex는 건너뛴다):** 업그레이드는 가드를 새로 설치하거나 제안하지 않는다(`--offer-deny-guard`를 붙이지 않는다. 새 설치는 `/vault-init` 4-2나 `assets/adapters/deny-guard/guide.md`의 수동 병합).
      - `offer_guard_update`: 설치된 `00-meta/scripts/deny-guard.py`·`ps-parse.ps1`의 스탬프(`agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=`)가 번들 원본보다 낮다. `offer_helper_update`와 같이 diff를 보여 주고 로컬 수정이 없을 때만 교체하며, 두 파일은 같은 버전으로 함께 바꾼다.
      - `review_guard`: 스크립트가 로컬 수정·스탬프 없음·더 높음·읽기 실패·링크/정션이거나, 일부만 있다(`state=incomplete`: 스크립트만 있고 훅이 없거나, 훅만 있고 스크립트가 없거나, `ps-parse.ps1`이 없음). 자동 덮어쓰기·삭제 금지 — 상태와 diff만 보여 주고, 빠진 파일 복사나 남은 훅 그룹 제거는 사용자가 승인할 때만 한다. 훅이 있는데 `deny-guard.py`가 없으면 python이 종료 코드 2로 끝나 대상 도구 호출이 막힌다는 점을 함께 알린다.
@@ -93,5 +98,5 @@ dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한�
 ## 안전 규칙
 
 - 기존 파일·키·값을 덮어쓰지 마라. 충돌이 의심되면 멈추고 물어라.
-- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 6번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 6번에서 사용자가 승인한 aside-up 훅 명령 교체도 같은 예외에 든다. 6번의 `agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=` 스탬프가 있는 `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`(Claude Code)도 엔진 소유 파일이며, 사용자가 승인한 가드 훅 그룹 교체도 같은 예외에 든다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
-- 이 명령은 볼트 내용(지식 노트)에 손대지 않는다 — 엔진 표면(설정·훅·시스템 파일)만 다룬다. 단, 6번에서 사용자가 승인한 어댑터 설치(운영 가이드 노트 생성과 index·log 기록, CLAUDE.md 관리 블록 밖 조항 추가)는 예외다.
+- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 6번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 6번에서 사용자가 승인한 aside-up 훅 명령 교체도 같은 예외에 든다. 6번의 `agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=` 스탬프가 있는 `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`(Claude Code)도 엔진 소유 파일이며, 사용자가 승인한 가드 훅 그룹 교체도 같은 예외에 든다. 6번의 `agentic-vault:adapter aside-repl engine=` 스탬프가 있는 `.claude/commands/aside-repl.md`도 엔진 소유 파일이다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
+- 이 명령은 볼트 내용(지식 노트)에 손대지 않는다 — 엔진 표면(설정·훅·시스템 파일)만 다룬다. 단, 6번에서 사용자가 승인한 어댑터 설치(운영 가이드 노트 생성과 index·log 기록, CLAUDE.md 관리 블록 밖 조항 추가, 사용자가 승인한 Aside 조항 한 줄 추가와 `/aside-repl` 명령 설치)는 예외다.

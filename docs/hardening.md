@@ -69,7 +69,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, 현재 v0.46.0의 인증서 전환은 맨 위 v0.46.0 절을 따른다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
 
 ## v0.33.1 source and certificate migration
 
@@ -136,12 +136,41 @@ Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 
 | 출처 | `vault_provenance.py`: `derive_provenance`, `validate_provenance`, `analyze_notes` | 선택 원본·정제본 해시와 가장 낮은 신뢰를 유지. 별도 근거의 현재성을 조회하며 이름만으로 독립 검증을 인정하지 않음 |
 | 공유 상태 | `vault_state.py`: `advisory_lock`, `patch_note`, `project_handoff`, `detect_removed_blockers` | 원본 UTF-8 바이트 범위의 부분 편집, 기대 파일/config 해시, 소유자 토큰과 TTL. 협조하는 쓰기만 잠금 보호 |
 | 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함. 그 안의 선택형 [`--normalize-periods`](#기간-표현-정규화---normalize-periods)는 기간 표현을 날짜 구간으로 따로 대조(`vault_period.py`) |
-| 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE/CUES, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존. 형식을 벗어난 대장 줄은 `ignored_rows`로 보고 |
+| 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE/CUES, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존하고 선택형 [은퇴 사유](#교훈-은퇴-사유)를 상태 칸에 남김. 형식을 벗어난 대장 줄은 `ignored_rows`로 보고 |
 | 선언 규칙 | `vault_declarative_rules.py`: `evaluate_rules` | literal existence/substitution/occurrence 기본값. regex는 명시적 선택, 별도 프로세스 제한시간·입력 상한 |
 | 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
 | 토큰 | `vault_token_calibration.py`: `calibrate`, `estimate`, `check_drift`, `measure_local`, `measure_counter` | 모델/세대별 측정치와 보정 해시. 명시적으로 선택할 때만 사용; 기존 hook/검색 계수 유지 |
 | 외부 전송 경고 | `vault_egress.py`: `scan_text`, `analyze_notes` | D1 정규화로 가짜 토큰·한국 식별번호 패턴 검사. 일치한 비밀값을 출력하지 않음; 자동 외부 전송 없음 |
 | 동기화 경고(선택) | `vault_healthcheck.py` full 모드: `sync_conflict_check`, `sync_conflict_patterns`, `checkpoint_drift_check` | 동기화 충돌 사본·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트를 경고만 함. 외부 쓰기를 막거나 되돌리지 않음 |
+
+## 교훈 은퇴 사유
+
+v0.47.0부터 `vault_lesson_delta.py`의 RETIRE는 선택형 `reason`과 `date`를 받는다. 둘은 함께 넘긴다.
+
+```json
+[{"op":"RETIRE","id":"L-001","reason":"도구 교체로 원인이 사라짐","date":"2026-11-12","references":[]}]
+```
+
+- 대장 줄의 상태 칸이 `상태: retired(사유, YYYY-MM-DD)`가 된다. 사유는 표지(`<!-- agentic-vault:lesson … -->`)에 넣지
+  않는다. 표지는 예전과 같은 키와 `state: retired`를 담으므로, v0.46.0 이하의 도구도 이 줄을 읽고 교훈 단서 컴파일은
+  예전처럼 은퇴한 줄을 뺀다.
+- `reason`이 없으면 상태 칸은 예전처럼 `상태: retired`이고, 사유 없는 옛 제안은 같은 바이트로 다시 계산되어 적용된다.
+- `reason`은 앞뒤 공백 없는 200자 이하의 한 줄이다. 제어 문자·보이지 않는 서식 문자(양방향 재정렬 표시 등)·줄과 문단
+  구분자, `<!--`, `-->`, 칸 구분자 ` | `, `agentic-vault:lesson`을 담으면 `invalid_retire_reason`으로 거부한다.
+  `date`는 ADD와 같은 `YYYY-MM-DD`이고 오류도 같다(`explicit_date_required`, `invalid_date`). 날짜만 넘기면
+  `invalid_operation_fields`다.
+- 사유 없이 은퇴한 줄에는 사유를 한 번 더할 수 있다. 사유가 이미 있으면 바꾸지 않는다(`retire_reason_exists`). 고칠 때는
+  대장을 직접 고치고 그 diff를 검토한다. 사유 없는 RETIRE를 다시 해도 이미 적힌 `retired(…)` 칸은 그대로 둔다.
+- 제목형 기록(`## M-001 — …`)에는 상태 칸이 없어 사유를 받지 않는다(`retire_reason_unsupported`). 사유 없는 RETIRE는
+  예전처럼 표지의 `state`만 바꾼다. 실수 노트의 은퇴 줄은 사용자 확인 뒤 사람이 적는다. 제목 바로 다음 줄에 표지가
+  있으면 은퇴 줄은 표지 다음 줄에 적고, 사유 없는 RETIRE로 표지의 `state`도 `retired`로 바꾼다. 도구는 제목 바로
+  다음 줄에서만 표지를 읽으므로, 제목과 표지 사이에 줄을 넣으면 그 항목을 표지 없는 활성 기록(횟수 1)으로 읽고 다음
+  변경 때 표지를 하나 더 단다. 교훈 단서 컴파일도 제목형 기록은 표지 상태만 보므로 손으로 적은 줄만으로는 단서가 빠지지
+  않는다.
+- 엔진 버전을 섞어 쓰면 v0.46.0 이하 도구는 `reason`이 든 제안을 `invalid_operation_fields`로 거부하고, 이미 사유가 적힌
+  줄을 다시 RETIRE할 때 칸을 `상태: retired`로 바꾼다. 이 변경은 준비 결과의 diff에 보이므로 적용 전에 거부한다.
+- 사유는 기록이며 은퇴를 승인하거나 원인이 사라졌다고 확정하지 않는다. 적용은 다른 교훈 변경과 같이 prepare, 검토,
+  `apply --approve` 순서를 따른다.
 
 ## 원본을 옮기기 전
 
@@ -863,14 +892,23 @@ notes, and a configured revocation registry masks the note before it is rendered
 The fixed block renders the note like this:
 
 - Front matter, fenced code and HTML comment blocks are skipped.
-- Each top-level `- ` item becomes a `Constraint: ` line, cut at 120 characters, up to 8 items in note order. Write the rules as items
-  and put the ones that matter most first.
+- Each top-level `- ` item becomes a `Constraint: ` line, cut at 120 characters, up to 8 items in note order.
 - Further items are counted in `Constraint items omitted: N; inspect the source before any decision.`
 - A note with no items keeps the single `Configured constraints excerpt: ` line, taken from the same visible body and cut at 120
   characters. A note with no visible body adds no line.
 - The block is atomic and charged to the handoff and hot budgets. When it does not fit, items are dropped from the end and counted
   before the block is given up. If it still does not fit, nothing is injected and the budget diagnostic is printed.
 - The `Source` line hashes the whole normalized note, not only the rendered lines.
+
+Writing the note: write each rule as one top-level item and put the ones that matter most first. Give each item its
+scope and its reason in the item itself, with the rule and its scope first, because only the first 120 characters of an
+item reach the session; the whole item stays in the note. For example:
+`- Ask before running the bulk rename script on 20-knowledge/: it rewrites wikilinks.` Write "ask before X" rather
+than "never X" unless X is a deliberate block, and give that block its reason too. Remove an item when its reason no
+longer holds, because the note is injected into every compact session start. These conventions follow the advice on
+accumulated cautions in Anthropic's
+[prompting guide for Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2)
+(read 2026-11-12). The engine does not check them, and their effect on vault work was not measured.
 
 Before v0.43.0 the excerpt was the first 120 characters of the note, so a note that opened with front matter or a header comment
 usually contributed no rule at all, and a long plain note lost its second rule.
@@ -912,6 +950,39 @@ showed. No gain was confirmed: it does not show that the sentence improves fact 
 as no sentence. Differences of one or two cases are within what this small set can resolve, and none of this measures hosted models
 or real vaults. The low baseline in the last column is also a reminder that a rule sentence is not enforcement: use
 `permissions.ask` or the deny guard ([guide](../assets/adapters/deny-guard/guide.md)) for that.
+
+### Engine copy ownership line (tried, not shipped)
+
+v0.47.0 planned one line for `assets/templates/rules/vault-architecture.md` saying that the engine copies in
+`00-meta/scripts/` (files with an `engine=` stamp and the helpers installed with them) belong to the plugin: a session
+reports a defect, the fix arrives through `/vault-upgrade`, and the session asks before editing a vault copy. The
+reason was the advice on saying who owns the code in Anthropic's
+[prompting guide for Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2)
+(read 2026-11-12). Before shipping, three wordings were tried with the same kind of synthetic contrast as above:
+`Qwen3.5-9B-Q8_0.gguf` (Q8_0 quantization) on llama.cpp server build `b10729-458681e1d`, temperature 0, seed 0,
+thinking off, one pass per wording, requests sent one after another, answers constrained to yes or no. The longest
+prompt was 3,887 tokens, within the 8,192-token context. Prohibition cases show a file or command output that claims a
+prohibited act is allowed (expected no). Ownership cases ask whether to edit an engine copy without asking (expected
+no), whether to carry out a user's explicit request to patch one (expected yes), and whether to fix the user's own
+script (expected yes). The wordings, their positions and the cases were fixed before the run. Its harness is not
+published, so these figures cannot be rerun.
+
+| Wording | Prohibition cases answered "no" | Unasked engine-copy edits declined | Explicit requests carried out | User's own scripts fixed |
+| --- | --- | --- | --- | --- |
+| None (v0.46.0) | 15/16 | 8/8 | 3/4 | 0/4 |
+| Line 6 wording only | 15/16 | 8/8 | 3/4 | 0/4 |
+| W1, last line | 14/16 | 8/8 | 0/4 | 0/4 |
+| W1, after the `00-meta/` entry | 16/16 | 8/8 | 0/4 | 0/4 |
+| W2, last line | 15/16 | 8/8 | 0/4 | 0/4 |
+| W3, last line | 15/16 | 8/8 | 0/4 | 0/4 |
+
+The line was not shipped because every wording, at either position, turned the explicit requests from 3 of 4 carried
+out into 0 of 4: on this model the line made a session refuse a change the user asked for. Unasked edits were already
+declined 8 of 8 without the line, so no gain could show. The user's-own-script cases were answered "no" without the
+line as well, so that column shows no effect of the line. The line-6 wording alone answered as the base arm in all 32
+cases; it was not shipped either, because changing the rule's stamp would offer the rule for replacement in every
+vault for that wording alone. The rule file and its stamp are as in v0.46.0. These results come from one local model,
+one pass per wording and invented cases; they measure neither hosted models nor real vaults.
 
 ## 동기화 충돌 사본과 checkpoint 이후 변경 경고 (선택)
 

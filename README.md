@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.46.0-10B981?style=for-the-badge)](docs/releases/v0.46.0.md)
+[![Version](https://img.shields.io/badge/v0.47.0-10B981?style=for-the-badge)](docs/releases/v0.47.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -29,6 +29,36 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 <img src="docs/screenshots/hero-cast.svg" width="90%" alt="agentic-vault 세션 사이클 데모 — /vault-init로 볼트를 만들고, SessionStart 훅이 직전 세션 인계를 자동 주입하고, /vault-session-end가 다음 세션의 나에게 편지를 남기는 터미널 시뮬레이션"/>
 
 </div>
+
+## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령
+
+외부 검토가 이 플러그인을 공급사의 프롬프트 작성 안내서와 견줘 찾은 열한 항목을 다룬다.
+
+- 저장소 루트의 [AGENTS.md](AGENTS.md)와 이를 가져오는 CLAUDE.md는 이 저장소를 고치는 기여자·에이전트
+  안내다. 일부러 둔 규칙 사본과 그것을 지키는 시험, 엔진 파일과 볼트 자료의 구분, 릴리스 규칙, 시험
+  실행법을 적었고 볼트에는 설치하지 않는다.
+- 엔진 사본 소유를 밝히는 계약 한 줄은 규칙 문구 시험을 통과하지 못해 넣지 않았다
+  ([시험 결과](docs/hardening.md#engine-copy-ownership-line-tried-not-shipped)). `vault-architecture.md`는
+  v0.46.0과 같다.
+- Telegram 브리지([설정](commands/vault-jarvis-setup.md))는 선택 키 `jarvis.model`·`jarvis.effort`가 비어
+  있지 않을 때만 `--model`·`--effort`를 넘긴다. 같은 정기 브리핑 회차가 8번 연속 실패하면 그 회차를
+  건너뛰고 소유자에게 한 번 알린다.
+- 교훈 대장의 RETIRE는 선택형 사유와 날짜를 상태 칸에 남긴다([교훈 은퇴 사유](docs/hardening.md#교훈-은퇴-사유)).
+  새 볼트의 실수 노트 템플릿은 사용자 확인 뒤 은퇴 줄을 다는 방법을 적는다. `/vault-session-end`의 승격
+  초안은 적용 범위·이유·출처를 담고, 종료 기록은 이 세션에 없던 사람이 읽는다는 기준으로 쓴다.
+- [`/vault-process-inbox`](commands/vault-process-inbox.md)는 보고 직전에 인박스를 다시 나열해 남은 파일을
+  처리하고, 보류 사유를 넷으로 정한다.
+- 선택형 Aside 어댑터에 `/aside-repl` 절차 명령([원본](assets/adapters/aside/aside-repl-command.md))을
+  더한다. 스크립트를 파일로 써서 넘기고 요청 글을 셸에 넣지 않는다. 명령·스킬 본문이 주입하는 셸
+  명령이 PreToolUse 훅을 거치지 않은 관찰은 [SECURITY.md](SECURITY.md)에 적었다.
+- 시험 fixture의 경합을 고치고, v0.46.0 문서에서 찾은 틀린 문장 넷(릴리스 노트 하나, 검증 계약 셋)을 두
+  파일 끝의 정오표로 바로잡는다.
+
+새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.47.0.md)의
+`기본 결과 변경` 절에 모두 적었다. 인증서가 묶는 일곱 파일은 바뀌지 않아 경고 승격 인증서를 다시 만들
+필요가 없다(실제 설치 바이트가 같을 때). healthcheck 스탬프, Aside 조항 시작 마커와
+`aside-repl-command.md`는 `engine=0.47.0`이고 규칙 6종은 기존 스탬프를 유지한다. 볼트에 설치된 사본은
+`/vault-upgrade`(Codex `upgrade`) 전까지 옛 동작이다. [검증 계약](docs/verification/v0.47.0.md)을 함께 본다.
 
 ## v0.46.0 — 금지 구역 정규화와 검사 빈틈 보강
 
@@ -263,7 +293,7 @@ v0.38.0 후보의 선택형 출처 바인딩, 한영 합성 대조군과 로컬 
 그대로 유지한다. `9d55755` 구현 체크포인트의 로컬 모델 관측은 새 측정이 아니며,
 교정 전 오염 조건을 충족하지 않아 엄격한 복구 점수는 0이고 효능은 미확인이다.
 [릴리스 범위](docs/releases/v0.38.1.md)와 [검증 기록](docs/verification/v0.38.1.md)을 참고한다.
-아래 v0.38.0 절은 공개하지 않은 후보의 준비 이력이다. 현재 설치 ref는 v0.46.0이다.
+아래 v0.38.0 절은 공개하지 않은 후보의 준비 이력이다. 현재 설치 ref는 v0.47.0이다.
 
 ## v0.38.0 — 출처 보존과 모델 행동 평가
 
@@ -338,6 +368,25 @@ python scripts/evaluate_knowledge_evolution.py
 [OpenWiki](https://github.com/langchain-ai/openwiki/tree/7bb583d664f2d1c2484fa44b9d591f6103ca8166)의
 버전 근거·페이지 관리·LEDGER 평가에서 설계 아이디어를 참고한 범위 제한 구현이다.
 자세한 내용은 [이번 변경·검증 범위](docs/releases/v0.36.1.md)를 참고한다.
+
+## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
+
+This release takes up eleven items from an outside review that compared the plugin with a vendor
+prompting guide. A root `AGENTS.md` (imported by `CLAUDE.md`) guides people and coding agents that
+change this repository and is not installed into vaults. The Telegram bridge passes `--model` and
+`--effort` only when the optional `jarvis.model` and `jarvis.effort` settings are not empty, and gives
+up a scheduled briefing slot after 8 failed attempts in a row and tells the owner once. A lesson can
+be retired with a dated reason, `/vault-process-inbox` re-lists the inbox before its report,
+`/vault-session-end` writes for a reader who did not see the session, and the optional Aside adapter
+gains an `/aside-repl` procedure command. A planned contract line about engine-copy ownership failed
+its wording test and was not shipped; the rule file is unchanged.
+
+Some results change without a new option; the release note lists each one under
+`기본 결과 변경`. The seven certificate-bound checker files are unchanged from v0.46.0, so
+certificates made with v0.46.0 stay valid when the installed bytes match. The health check stamp,
+the Aside clause begin marker and `aside-repl-command.md` move to `engine=0.47.0`; copies installed
+in a vault keep the old behaviour until `/vault-upgrade`.
+See [scope](docs/releases/v0.47.0.md) and [verification](docs/verification/v0.47.0.md).
 
 ## v0.46.0 — deny-zone normalization and check gap fixes
 
@@ -824,8 +873,8 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs below target v0.46.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.46.0.md);
+budgets; new findings warn first. The installation refs below target v0.47.0.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.47.0.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
@@ -978,7 +1027,7 @@ Windows contention can fail closed and receipts do not certify external effects.
 
 - Summaries, lessons and upgrade decisions still depend on the model. The checker enforces schema and links, not judgement.
 - The git hooks are local gates that `--no-verify` bypasses, not a security boundary.
-- Since v0.18.0 the Jarvis bridge passes host-selected bounded evidence on stdin and runs with no model tools, ambient settings, skills, automatic memory or session persistence. Its `--bare` mode requires API authentication rather than subscription OAuth. This is not an OS sandbox; v0.17.1 and earlier bridges have broader Read/Grep/Glob access (see [SECURITY.md](SECURITY.md)).
+- Since v0.18.0 the Jarvis bridge passes host-selected bounded evidence on stdin and runs with no model tools, ambient settings, skills, automatic memory or session persistence. Its `--bare` mode requires API authentication rather than subscription OAuth. This is not an OS sandbox; v0.17.1 and earlier bridges have broader Read/Grep/Glob access (see [SECURITY.md](SECURITY.md)). It reads only the CLI's text output and exit code, so it cannot tell a provider refusal from an outage or an empty answer; since v0.47.0 a scheduled briefing slot that fails 8 times in a row is skipped and the owner is told once.
 - Built-in search is lexical/BM25; an optional qmd path/rank sidecar is reread from originals. No embeddings or models are installed by core. Token budgets use a character-based estimate.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
@@ -1251,9 +1300,10 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.46.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.47.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
+├── AGENTS.md · CLAUDE.md              ← 이 저장소를 고치는 기여자·에이전트 안내 (볼트에 설치하지 않음)
 │
 ├── commands/                          ← 15개 슬래시 커맨드
 │   ├── vault-harden.md                ← 출처·공유 상태·시간 대장·교훈·품질·보정
@@ -1327,6 +1377,7 @@ agentic-vault/
 │   ├── aside-up.ps1                   ← Windows 기동 도우미(새 창 최소화·포커스 복귀)
 │   ├── browser-clause.md              ← CLAUDE.md 브라우저 도구 조항
 │   ├── operations-guide.md            ← 운영 가이드 노트 뼈대
+│   ├── aside-repl-command.md          ← /aside-repl 절차 명령 (.claude/commands/로 설치, 주입 셸 없음)
 │   └── settings-hooks.json            ← aside 명령에만 걸리는 PreToolUse 훅
 │
 ├── assets/adapters/deny-guard/        ← 선택형 deny zone 가드, Claude Code 전용 (/vault-init이 따로 묻고 승인 후 설치)
@@ -1353,7 +1404,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.46.0**이며 **Claude Code, Codex 겸용**이다. 금지 구역 정규화와 검사 빈틈 보강: v0.45.1 외부 검토가 찾은 결함 일곱 가지를 고쳤다. 새 옵션 없이 바뀌는 결과와 경고 승격 인증서의 전환 순서는 [이번 변경·검증 범위](docs/releases/v0.46.0.md)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.47.0**이며 **Claude Code, Codex 겸용**이다. 안내서 대조 검토 반영과 aside-repl 절차 명령: 외부 검토에서 나온 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘고, 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.47.0.md)에 있다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
 
 v0.34.0은 다음 기능을 더했고 v0.35.1에서도 유지한다. 명시적으로 켜는 기능 다섯 가지를 더하며, 모두 훅·CI·기본 실행에 연결하지 않는다. `check-support --bind-subject`는 첫 글자가 ASCII가 아닌 글자인 주어 앞에 [왼쪽 경계](docs/support-row-diagnostics.md#subject-left-edge)가 있어야 일치로 보므로, 주어 앞에 한글 한 음절이 더 붙은 긴 이름은 더 이상 주어 일치로 세지 않는다(값·기본 출력·종료 코드는 그대로다). `evaluate_recall.py --abstention-calibration conformal`은 평가기 안에서만 [답 없음 보정 문턱](docs/memory-evaluation.md#답-없음-보정-문턱)을 커밋한 분할의 dev 쪽에서 맞추고 heldout 쪽에서 잰다. recall_hard(팔마다 보정 문항 28개 이하, α = 0.05)에서는 문턱이 있어도 보정 신호의 최솟값 한 점에 걸리고 조건부판(Learn then Test)은 문턱을 내지 못하므로, 보정 집합을 늘린 뒤에 쓸모가 있다. `scripts/real_vault_audit.py plan`은 라벨하기 전에 [표본 크기와 합격 확률](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)을 정확한 정수 산술로 계산한다. `vault_improvements.py inspect`·`compare --receipt-order`는 계획과 완료 영수증의 [기록 순서](docs/improvement-experiments.md#영수증-기록-순서-선택)를 표시하며, 이는 관찰 시점이나 서명이 아니다. `evaluate_tool_matrix.py --string-patterns`는 같은 trial을 현재 스키마와 형식 패턴을 더한 스키마로 짝지어 실행하고 호스트 판정을 기록만 한다([문자열 인자 패턴 짝 비교](docs/evaluation-stability.md#문자열-인자-패턴-짝-비교)). 새 옵션을 주지 않으면 출력·종료 코드는 v0.33.1과 같고, 이미 있던 `--bind-subject`를 켠 결과(첫 글자가 ASCII가 아닌 글자인 주어), 바뀐 CLI의 도움말·usage 줄, argparse 약어(`evaluate_recall.py --f`가 모호해진다), 일부 평가기가 싣는 소스 해시만 다르다. 주어 경계가 `vault_ssot.py`를 바꾸므로 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.34.0.md)를 따른다.
 
@@ -1371,9 +1422,9 @@ v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#�
 
 v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md), v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.46.0`이다. deny zone 가드와 PowerShell 구문 분석기도 `engine=0.46.0`이다. 규칙 6종은 기존 스탬프를 유지하며 `vault-workflow.md`는 `engine=0.43.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.47.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.46.0) 경로는 v0.46.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.46.0 검증 기록](docs/verification/v0.46.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.47.0) 경로는 v0.47.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.47.0 검증 기록](docs/verification/v0.47.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -1416,7 +1467,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.46.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.47.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -1508,7 +1559,7 @@ claude
 | `rules_max_lines` | rules 파일별 권장 최대 줄 수 |
 | `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
 | `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
-| `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체 |
+| `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체(선택 키 `model`·`effort` 포함, 기본 빈 값) |
 | `gates` | **행동별 정책 선언** — 확인·기록·반복·수습·금지 요건의 설정 형식 검증. 기본 `{}`이며 실행 시 행동 차단은 미연동 |
 
 `gates`는 현재 설정 스키마와 템플릿 예시를 제공한다. `confirm`·`log`·`repeat`·`probation_days`·`deny` 값으로 사용자 확인, 기록, 반복 횟수, 관찰 기간, 행동 금지를 자동 집행하지 않는다. 기존 pre-push 훅의 네트워크 원격 차단은 이 설정과 독립적으로 동작한다. 행동 이름은 사용자 정의 문자열이며 앞뒤 공백을 제거한 뒤 이름이 겹치면 설정 오류로 거부한다.
@@ -1529,7 +1580,7 @@ claude
 | `sync_conflict_check` | `true`면 Syncthing 충돌 사본·임시 파일과 Obsidian Sync 충돌 파일 이름을 §15 경고로 보고 — 미설정 시 꺼짐. 근거와 범위는 [hardening.md](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택) |
 | `sync_conflict_patterns` | 위 검사에 더할 파일 이름 glob 목록(최대 32개) — 공식 이름 규칙을 확인하지 못한 Dropbox·OneDrive 등은 여기에 직접 적음 |
 | `checkpoint_drift_check` | `true`면 마지막 PreCompact·SessionEnd checkpoint 이후 바뀌거나 없어진 hot·handoff·log·tasks 노트를 §15 경고로 보고 — 미설정 시 꺼짐 |
-| `constraints_note` | 압축 세션 시작의 고정 블록에 넣을 제약 노트 경로. 맨 위 `- ` 항목을 최대 8개 `Constraint:` 줄로 낸다. **handoff 절이 선택될 때만 읽으며** `handoff_note`가 비었거나 노트가 없거나 `handoff_max_tokens`가 0이면 진단 없이 무시한다 — [hardening.md](docs/hardening.md#compact-constraints-note-constraints_note) |
+| `constraints_note` | 압축 세션 시작의 고정 블록에 넣을 제약 노트 경로. 맨 위 `- ` 항목을 최대 8개 `Constraint:` 줄로 낸다. **handoff 절이 선택될 때만 읽으며** `handoff_note`가 비었거나 노트가 없거나 `handoff_max_tokens`가 0이면 진단 없이 무시한다. 항목마다 적용 범위와 이유를 함께 적고(주입은 항목당 앞 120자), 이유가 사라진 항목은 지운다 — [hardening.md](docs/hardening.md#compact-constraints-note-constraints_note) |
 | `tasks_note` | 작업 노트 경로. 압축 세션 시작의 고정 블록(`Blocked:`·`Now:` 줄), checkpoint, `--capacity`가 읽는다. 없으면 고정 블록은 handoff 옆의 `… tasks.md`를 쓰고, handoff가 없으면 진단 없이 무시한다 |
 | `recall` | 검색 읽기 설정 객체. `max_total_read_bytes`(512 KiB~1 GiB, 없으면 16 MiB)와 `priority_paths`(볼트 상대 파일·폴더 최대 32개, 읽는 순서와 최종 점수 동점에만 작동). 알 수 없는 키나 잘못된 값은 `invalid_config`로 검색을 멈춘다 — [recall-scope.md](docs/recall-scope.md) |
 | `staged_growth_check` | `off`·`warn`·`block` — `vault_healthcheck.py --staged`가 예산 있는 hot·handoff의 증가를 `HEAD`와 비교. 미설정 시 꺼짐 — [capacity.md](docs/capacity.md) |
@@ -1565,7 +1616,11 @@ claude
 
 브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
 
-볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다.
+응답에 쓸 모델과 노력 수준은 선택 키 `jarvis.model`·`jarvis.effort`로 정한다. 두 키의 기본값은 빈 문자열이며, 비어 있으면 브리지는 `--model`·`--effort`를 넘기지 않아 claude CLI의 기본값을 쓴다. 값이 있으면 `--model <값>`·`--effort <값>`을 더한다. `effort`는 `low`·`medium`·`high`·`xhigh`·`max` 중 하나이고, `model`은 ASCII 영문자·숫자로 시작해 영문자·숫자와 `. _ : @ / + [ ] -`만 쓴 256자 이하의 이름이다. 다른 값은 설정 오류로 브리지를 시작하지 않는다. 브리지는 모델 이름이 CLI에서 쓸 수 있는지는 검사하지 않으므로, 지정했으면 `/brief`로 응답을 확인한다. claude CLI 2.1.252에서 브리지의 `--bare` 실행으로는 두 옵션이 인자 검사를 통과하는 것까지만 확인했고(API 키가 없어 응답은 만들지 못했다), `--bare` 없이 로그인한 상태에서는 응답했다. `--bare`에서 인증된 응답 생성과 노력 수준 적용은 확인하지 않았다.
+
+볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다. 이 보장에도 조건이 붙는다. 같은 회차가 8번 연속 실패하면(응답 생성 실패, 생성 중 예외, Telegram 전송 실패를 모두 센다) 그 회차를 `pending`에서 빼고 그날은 다시 시도하지 않으며, 소유자에게 회차의 날짜·시각과 시도 횟수만 담은 안내를 한 번 보낸다. 이 안내가 전달되지 않아도 다시 보내지 않고 로그에만 남긴다. 날이 바뀔 때 전날의 `pending` 회차는 한 번만 더 시도하고, 실패하면 같은 방식으로 건너뛴 뒤 그날 회차를 이어서 처리한다. 시도 횟수는 브리지 메모리에만 두므로 브리지를 다시 시작하면 0부터 센다.
+
+브리지는 claude CLI의 텍스트 출력과 종료 코드만 읽는다. 그래서 모델 제공자의 요청 거절과 장애·빈 응답을 구별하지 못하며, 실패 안내에도 원인을 적지 않는다. CLI가 거절을 0이 아닌 종료 코드나 빈 출력으로 끝내면 다른 실패와 같이 처리하고, 종료 코드 0의 텍스트로 끝내면 그 텍스트를 답으로 전달한다. 실제 거절이 어느 쪽으로 출력되는지는 확인하지 않았다.
 
 절충의 이유: 채널 20종·음성 같은 몸통 인프라는 OpenClaw의 영역이라 재발명하지 않는다 — 이 계층은 "볼트를 두뇌로 쓰는 최소 자비스"다.
 

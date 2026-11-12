@@ -9,8 +9,8 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
 2026-10-20 API 조회에서 `"enabled": true`, `"enforced_by_owner": false`였다. v0.23.0과 v0.24.0은
 불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0도 2026-10-19
-게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.46.0의 최종 소스·CI·ZIP/blob 대조와
-재빌드 명세는 [릴리스 검증](verification/v0.46.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.47.0의 최종 소스·CI·ZIP/blob 대조와
+재빌드 명세는 [릴리스 검증](verification/v0.47.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
 `post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산

@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.46.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.45.1 and earlier | No. Upgrade to 0.46.0, which closes a deny-zone bypass through a folder name stored in another Unicode normalization form (NFC or NFD) than the zone and the front-matter link forms the commit gate missed, after reviewing the configured revocation egress, Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. This transition changes certificate-bound bytes (`vault_paths.py`, `vault_lint_extensions.py`), so vaults that promote warnings to `fatal` must demote them, align every engine copy, regenerate the certificate and promote again. |
+| 0.47.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.46.0 and earlier | No. Upgrade to 0.47.0. Between 0.46.0 and 0.47.0 the seven certificate-bound checker files are unchanged, so a certificate made with 0.46.0 stays valid when the installed bytes match. From 0.45.1 and earlier, 0.46.0 and later close a deny-zone bypass through a folder name stored in another Unicode normalization form (NFC or NFD) than the zone and the front-matter link forms the commit gate missed; review the configured revocation egress, Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes first. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The transition from 0.45.1 and earlier changes certificate-bound bytes (`vault_paths.py`, `vault_lint_extensions.py`), so vaults that promote warnings to `fatal` must still demote them, align every engine copy, regenerate the certificate and promote again. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -57,7 +57,9 @@ In scope:
   PreToolUse hook that a user may merge into a vault's Claude settings (by default
   `.claude/settings.local.json`; with Claude Code's `if` filter it runs Windows
   PowerShell before `aside` commands), the helper script it runs from
-  `00-meta/scripts/`, how the hook command resolves the vault path, and the
+  `00-meta/scripts/`, how the hook command resolves the vault path, the optional
+  `/aside-repl` procedure command it may copy to `.claude/commands/` (it injects no
+  shell command and keeps the typed request out of shell lines), and the
   read-only adapter report.
 - **Optional deny-zone guard** (`assets/adapters/deny-guard/`, `vault_adapters.py`):
   the PreToolUse hook template that a user may merge into a vault's
@@ -175,7 +177,15 @@ them being bypassed in a way the documentation does not describe is still welcom
 - **Unattended generation uses a bounded, tool-free context.** Since v0.18.0
   Jarvis calls Claude with `--bare`, `--tools ""`, `--setting-sources ""`,
   `--disable-slash-commands`, `--no-session-persistence`, `--strict-mcp-config`
-  and `--settings '{"disableAllHooks":true}'`. The host reads permitted Markdown
+  and `--settings '{"disableAllHooks":true}'`. Since 0.47.0 the optional
+  `jarvis.model` and `jarvis.effort` settings add `--model` and `--effort` only
+  when they are not empty; they choose the model and the effort level and do not
+  change the tool, settings or hook restrictions. On Claude Code 2.1.252
+  (2026-11-13, one run per case) the parser accepted both options with `--bare`,
+  where no answer was generated because the release machine has no API key;
+  without `--bare`, logged in, the options produced an answer. Generation with
+  authentication in bare mode, and whether bare mode applies the effort level,
+  were not run. The host reads permitted Markdown
   through the existing path/stable-file policy, rejects hardlinks and passes
   bounded evidence on stdin. This replaces the 0.17.1 bridge's broad
   Read/Grep/Glob grants. Prompt injection can still corrupt an answer; none of
@@ -259,6 +269,26 @@ them being bypassed in a way the documentation does not describe is still welcom
   parent folder or a script) and changes made outside Claude Code are not seen.
   Keep the hook in `.claude/settings.local.json` and turn it on only where those
   paths are trusted.
+- **Commands that a command or skill body injects bypass PreToolUse hooks (observed).** Claude Code runs
+  `` !`…` `` and ` ```! ` blocks in a slash command or skill body before the model's turn. On Claude Code
+  2.1.252 in print mode (2026-11-12, one run per case), in the two runs whose hook log was checked, the
+  three commands that the injected command line ran never reached a PreToolUse hook on Bash, while the
+  same command run by the model did. Text typed after the command name was substituted into the injected
+  command as shell text: a `;` ran a second command (it also matched the command's `allowed-tools`),
+  `$(…)` aborted the invocation, a backquote cut the command short and double quotes were lost. The
+  documentation says that `$ARGUMENTS` expands to the argument string as typed and that injected commands
+  run through the Bash or PowerShell tool the same way as Claude's own shell commands; it says nothing
+  about hooks or about the shell reading the typed text as syntax, and the observed hook bypass does not
+  match that description. It does state that injected commands are checked against permission rules: a
+  deny rule aborts the invocation, and outside auto mode so does any other result than allow unless
+  `allowed-tools` pre-approves the command (deny and ask rules still override `allowed-tools`). So the
+  optional deny-zone guard does not check injected commands, the optional lesson cue hook shows no cue
+  for them, and the Aside start hook does not start Aside for an injected `aside` command. Other versions and the IDE extensions were not tested. To turn injected commands off,
+  set `disableSkillShellExecution: true` in Claude Code settings (a `true` in managed settings cannot be
+  overridden; bundled and managed skills are not affected), review `!` blocks in project and plugin
+  commands and skills before trusting a folder, and do not write injected commands that take arguments.
+  This plugin's commands and skills inject no shell command, and a test keeps it so; the optional
+  `/aside-repl` command is a procedure whose `aside` calls are the agent's own tool calls.
 - **Git hooks are local gates.** Anyone who controls the repository can bypass them
   with `--no-verify` or by changing `core.hooksPath`. Use server-side checks if you
   need enforcement that cannot be bypassed.
@@ -309,7 +339,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.46.0 소스다. 0.45.1 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 0.46.0으로 갱신한다. 0.46.0은 구역과 다른 유니코드 정규화 형식(NFC·NFD)으로 저장된 폴더 이름으로 금지 구역을 벗어나던 길과 커밋 게이트가 놓친 프런트매터 링크 꼴을 막는다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 이번 전환은 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꾸므로, 경고를 `fatal`로 올린 볼트는 승격 해제·모든 엔진 사본 정렬·인증서 재생성(harmless replay 포함)·재승격 순서를 따른다.
+- 보안 수정 대상은 최신 0.47.0 소스다. 0.46.0 이하는 0.47.0으로 갱신한다. 0.46.0과 0.47.0 사이에서는 인증서가 묶는 일곱 파일이 같아, 실제 설치 바이트가 같으면 0.46.0에서 만든 인증서가 그대로 맞는다. 0.45.1 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 갱신한다. 0.46.0부터 구역과 다른 유니코드 정규화 형식(NFC·NFD)으로 저장된 폴더 이름으로 금지 구역을 벗어나던 길과 커밋 게이트가 놓친 프런트매터 링크 꼴을 막는다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 0.45.1 이하에서 오는 전환은 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꾸므로, 경고를 `fatal`로 올린 볼트는 승격 해제·모든 엔진 사본 정렬·인증서 재생성(harmless replay 포함)·재승격 순서를 따른다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리.
@@ -318,6 +348,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 - 새 쓰기 도구는 `vault_handoff_fold.py apply`와 `vault_commit.py`이며 둘 다 직접 부를 때만 돈다. `vault_doctor.py --plugin-scope`는 설정 파일 세 개·vault-config·healthcheck 사본 하나를 읽고, `--plugin-scope-host`만 `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 교훈 단서 훅은 사용자가 병합할 때만 존재하며 힌트나 세션당 1회 `deny`만 내고 실패하면 호출이 그대로 지나간다.
 - Aside 어댑터 훅은 사용자가 승인해 병합한 경우에만 존재하며(기본 `.claude/settings.local.json`), aside 명령 전에 `00-meta/scripts/aside-up.ps1`을 `-ExecutionPolicy Bypass`로 실행한다. Claude Code는 PreToolUse 훅을 명령 권한 확인보다 먼저 실행한다(문서 기준, 실측 아님). 그래서 그 파일이나 볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, 동기화 상대, 공유 폴더) 셸 승인 없이 코드를 실행시킬 수 있고, 스크립트 내용 변경은 설정 변경으로 드러나지 않는다. 신뢰하는 경로에서만 켠다. 훅 명령은 PowerShell 안에서 `$env:CLAUDE_PROJECT_DIR`로 볼트를 찾으므로 Git Bash·PowerShell 훅 셸 모두 같은 파일을 가리키고, 변수가 없으면 아무것도 실행하지 않는다.
 - `aside repl` 스크립트가 출력한 내용은 호출한 에이전트와 그 모델 제공자에게 간다. 외부 전송 금지 자료는 원문을 출력하지 않는다.
+- 슬래시 명령·스킬 본문의 주입 셸 명령(`` !`…` ``, ` ```! ` 블록)은 모델의 턴보다 먼저 실행된다. Claude Code 2.1.252 출력 모드(2026-11-12, 경우마다 1회)에서 훅 기록을 확인한 두 번의 실행 동안 주입 명령줄이 실행한 명령 세 개는 PreToolUse 훅에 한 번도 기록되지 않았고 모델이 직접 실행한 같은 명령은 기록됐다. 명령 이름 뒤에 친 글자는 셸 문법으로 해석됐다. 그래서 deny zone 가드는 주입 명령을 보지 못하고, 교훈 단서 훅도 단서를 보이지 않으며, Aside 자동 기동 훅도 주입된 aside 명령 앞에서 돌지 않는다. 문서는 주입 명령이 권한 규칙 검사를 거친다고 적고(deny 규칙이면 호출이 중단된다), 훅에 대해서는 적지 않는다. 끄려면 설정 `disableSkillShellExecution: true`를 쓰고, 인자를 받는 주입 명령을 만들지 않는다. 이 플러그인의 명령·스킬에는 주입 명령이 없고 시험이 이를 지킨다.
 - deny zone 가드 훅은 사용자가 따로 승인해 병합한 경우에만 존재한다(기본 `.claude/settings.local.json`, `/vault-init`은 답이 없으면 설치하지 않는다). 병합하면 Read·Grep·Glob·Edit·Write·NotebookEdit·Bash·PowerShell·Monitor 호출마다 `00-meta/scripts/deny-guard.py`를 PATH의 `python`으로 실행하고, 구역 이름이나 가드 제어 파일 이름이 보이는 PowerShell 명령에는 `00-meta/scripts/ps-parse.ps1`도 `-ExecutionPolicy Bypass`로 실행한다. `deny`·`ask`만 내고 `allow`는 내지 않는다.
 - 가드이지 샌드박스가 아니다. 실행된 프로그램·스크립트가 스스로 여는 파일, 구역 이름을 쓰지 않고 실행 중에 조립한 경로(`Join-Path 90 -assets` 등), 볼트 루트에서 경로 없이 도는 Grep·Glob, 확인 뒤의 정션 바꿔치기, 훅 matcher 밖의 도구(MCP 도구 등)와 도구 호출 없이 실행되는 명령(다른 훅, 플러그인이 저절로 시작하는 monitor)은 보지 못한다. Claude Code v2.1.295 미만에서는 가드가 충돌하거나 시간을 넘기거나 python이 없으면 호출이 그대로 진행된다(fail-open). v2.1.295 이상에서는 반대로 호출이 막히므로, python이 깨지면 그 훅 그룹을 지워 되돌린다. 가드 스크립트·`00-meta/vault-config.json`·볼트의 `.claude/`를 쓸 수 있는 누구든(편집이 허용된 다른 에이전트, Codex 세션, 동기화 상대) 가드를 끄거나 구역을 바꾸거나 매 호출 전에 실행될 코드를 바꿀 수 있다. Claude Code에서 이 파일들을 이름으로 가리키는 편집·명령은 확인(ask)만 받고, 이름을 쓰지 않고 닿는 명령(상위 폴더, 스크립트)과 Claude Code 밖의 변경은 보지 못한다.
 - 0.18.0의 Jarvis는 호스트가 허용 경로에서 선택한 제한된 근거만 보내며 모델 도구는 없다.
