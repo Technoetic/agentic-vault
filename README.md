@@ -41,8 +41,8 @@ v0.45.1에 대한 외부 검토가 찾은 결함 일곱 가지를 고친다.
 - [`/vault-lint`](commands/vault-lint.md)의 프런트매터 검사는 YAML이 중첩 목록으로 읽는 따옴표
   없는 위키링크(흐름 목록 안, `see-also:` 같은 키 뒤, 다음 줄, 중첩 목록 항목, `![[...]]` 임베드)를
   더 찾고, 블록 스칼라(`|`, `>`)·따옴표 문자열 안의 줄은 더 이상 보고하지 않는다.
-- 알 수 없는 최상위 설정 키는 리포트 §0·콘솔 줄·doctor `config_warnings`에 가장 가까운 키와 함께
-  경고로 나온다(종료 코드는 그대로). `hot_note`·`handoff_note`는 비우거나 `.md` 노트를 가리켜야
+- 알 수 없는 최상위 설정 키는 리포트 §0·doctor `config_warnings`에 가장 가까운 키와 함께 경고로
+  나오고 콘솔 줄에는 그 건수가 붙는다(종료 코드는 그대로). `hot_note`·`handoff_note`는 비우거나 `.md` 노트를 가리켜야
   하며, 다른 값은 설정 오류다. `--vault`로 준 경로가 없거나 폴더가 아니면 healthcheck와 doctor가
   종료 코드 2로 끝나고, 새 `--require-vault`는 설정 없는 폴더도 2로 끝낸다([사용법](docs/reliability.md)).
 - 템플릿 그대로의 handoff 기준 커밋 `(없음)`은 더 이상 session-end 계약 위반이 아니다. git
@@ -347,7 +347,7 @@ compare folder names by Unicode canonical caseless matching, so a name stored de
 optional deny guard. The front-matter check finds more unquoted wiki links that YAML reads
 as nested lists and stops reporting lines inside block scalars and quoted strings. Unknown
 top-level configuration keys are reported as advisories, `hot_note` and `handoff_note` must
-name a `.md` note, an explicit `--vault` that is not a folder exits 2, the template's
+be empty or name a `.md` note, an explicit `--vault` that is not a folder exits 2, the template's
 placeholder anchor is no longer a contract violation, and the Telegram butler shows its
 check mark only for a complete clean check.
 
@@ -1536,7 +1536,7 @@ claude
 | `staged_growth_max_tokens` | 위 검사의 한 커밋 증가 상한(0 이상 정수). 없거나 0이면 증가 상한 없음 |
 | `handoff_fold` | `vault_handoff_fold.py` 선택 설정 객체. `unresolved_prefixes`(기본 `unresolved:`)와 `protect_titles`(기본 없음) — [handoff-fold.md](docs/handoff-fold.md) |
 
-위 두 표의 키와 `fm_exempt_zones`·`warning_policy`·`memory_revocation_file`·`privileged_notes`·`lint_max_warnings`·`promotion_review_sessions` 밖의 최상위 키는 적용되지 않는다. full 헬스체크는 그런 키 이름을 리포트 §0(설정 경고)과 콘솔 요약 줄에, Doctor는 `config_warnings`에 가장 가까운 알려진 키와 함께 적는다(값은 적지 않는다). 종료 코드는 바뀌지 않는다. `deny_zone`을 `deny_zones`로 고칠 때는 `deny_zones`가 기본 금지 구역 5개를 대체하므로 그 5개도 함께 적는다.
+위 두 표의 키와 `fm_exempt_zones`·`warning_policy`·`memory_revocation_file`·`privileged_notes`·`lint_max_warnings`·`promotion_review_sessions` 밖의 최상위 키는 적용되지 않는다. full 헬스체크는 그런 키 이름을 리포트 §0(설정 경고)에, Doctor는 `config_warnings`에 가장 가까운 알려진 키와 함께 적고(값은 적지 않는다), 헬스체크 콘솔 요약 줄에는 그 건수를 붙인다. 종료 코드는 바뀌지 않는다. `deny_zone`을 `deny_zones`로 고칠 때는 `deny_zones`가 기본 금지 구역 5개를 대체하므로 그 5개도 함께 적는다.
 
 </details>
 
@@ -1584,7 +1584,7 @@ claude
 | 🔴 **치명** (exit 1) | 프런트매터 붕괴 · 필수 키 누락 · Enum 위반 · **따옴표 없는 프런트매터 위키링크**(YAML 오파싱 = 메타데이터 계층 붕괴) · 로그 태그 누락·malformed 로그라인 | `/vault-lint`가 **즉시 치유** |
 | 🟡 **관리성** (exit 0) | 데드링크 · 고아/준고아 노드 · 인덱스 미등록 · 프런트매터 과대 · rules 무결성 · **세션 주입 토큰 예산 초과** · 읽기 실패 노트(§14, v0.8.4) · 따라가지 않은 링크·정션 경로(§14b) · 노화 문서(선택) · SSOT 사실 모순(선택) · 동기화 충돌·임시 파일 이름과 checkpoint 이후 바뀐 엔진 노트(선택, §15 경고) | 리포트 누적 → **사용자 확인 후** 스텁 생성·링크 교정·아카이브 |
 
-명령줄에 준 `--vault` 경로가 없거나 폴더가 아니면 두 모드 모두 exit 2로 끝나고, `--vault` 없이 실행한 경로나 `00-meta/vault-config.json`이 없는 폴더는 "볼트 아님"으로 exit 0이지만 `--require-vault`를 주면 그 경우도 exit 2다.
+명령줄에 준 `--vault` 경로가 없거나 폴더가 아니면 두 모드 모두 exit 2로 끝나고, `--vault` 없이 실행한 경로나 `00-meta/vault-config.json`이 없는 폴더는 full 모드에서 "볼트 아님"으로 exit 0이지만 `--require-vault`를 주면 그 경우도 exit 2다.
 
 검사 엔진의 두 모드는 목적과 입출력이 다르다.
 
