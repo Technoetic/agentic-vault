@@ -1797,10 +1797,11 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                       "flags-off", "independent source review", "/aside-repl")
     # Fixed boundary texts (what ran, on what, and what did not run).
     BOUNDARY_TEXTS = (
-        "루트 안내(AGENTS.md·CLAUDE.md)가 다른 폴더의 세션에 읽히지 않는 것은 Claude Code 2.1.252 출력 모드에서 "
-        "--plugin-dir로 플러그인을 불러 한 번 확인했다. 마켓플레이스 설치본, IDE 확장, 플러그인 파일을 읽는 턴은 "
-        "시험하지 않았고 Codex는 실행하지 않았다(호스트 문서의 탐색 규칙을 따른다). 플러그인 체크아웃을 볼트 안에 "
-        "두면 Claude Code가 그 CLAUDE.md를 읽을 수 있다.",
+        "기여자 안내(AGENTS.md와 이를 불러오는 .claude/CLAUDE.md)가 다른 폴더의 세션에 읽히지 않는 것은 Claude Code "
+        "2.1.252 출력 모드에서 --plugin-dir로 플러그인을 불러 한 번 확인했다. 마켓플레이스 설치본, IDE 확장, 플러그인 "
+        "파일을 읽는 턴은 시험하지 않았고 Codex는 실행하지 않았다(호스트 문서의 탐색 규칙을 따른다). 플러그인 체크아웃 "
+        "폴더에서 세션을 시작하면(볼트 안에 둔 체크아웃 포함) Claude Code가 그 .claude/CLAUDE.md를 읽는다. 플러그인 "
+        "루트에는 CLAUDE.md를 두지 않는다: claude plugin validate --strict가 루트의 CLAUDE.md를 경고로 막는다(2.1.252).",
         "엔진 사본 소유를 밝히는 계약 한 줄은 계획해 규칙 문구 시험을 했으나 통과하지 못해 넣지 않았다: 시험한 세 "
         "문구가 모두, 사용자가 명시적으로 요청한 볼트 사본 수정을 거절하게 만들었다(줄 없이 4건 중 3건 수행, 줄이 "
         "있으면 0건; 로컬 모델 하나, 문구마다 1회, 지어낸 사례 — "
@@ -1825,10 +1826,11 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         "말로 한 요청, Codex에서는 실행하지 않았다. 절차 글은 동작을 강제하지 못한다.",
     )
     RECORD_LIMITS = (
-        "The root guide was checked on Claude Code 2.1.252 in print mode with `--plugin-dir`, one run each: a "
-        "session in another folder did not see it and a session inside the checkout did. A marketplace "
-        "installation, the IDE extension and a turn that reads a plugin file were not tested, and Codex was "
-        "not run.",
+        "The contributor guide (`AGENTS.md` and `.claude/CLAUDE.md`, which imports it) was checked on Claude Code "
+        "2.1.252 in print mode with `--plugin-dir`, one run each: a session in another folder did not see it and a "
+        "session inside the checkout did. A marketplace installation, the IDE extension and a turn that reads a "
+        "plugin file were not tested, and Codex was not run. No `CLAUDE.md` is placed at the plugin root, because "
+        "`claude plugin validate --strict` rejects one.",
         "The two bridge options were checked on Claude Code 2.1.252, one run per case: with `--bare` only up "
         "to option parsing (the release machine has no API key), and without `--bare`, logged in, with an "
         "answer. Generation with authentication in bare mode and whether bare mode applies the effort level "
@@ -2046,9 +2048,43 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         readme = README.read_text(encoding="utf-8")
         tree = readme[readme.index("agentic-vault/\n├── .claude-plugin/"):]
         tree = tree[:tree.index("```")]
-        self.assertIn("AGENTS.md · CLAUDE.md", tree)
+        # Root AGENTS.md and .claude/CLAUDE.md, each on its own top-level line; no root CLAUDE.md.
+        entries = [line.split("←")[0].strip() for line in tree.splitlines() if line.startswith("├── ")]
+        self.assertIn("├── AGENTS.md", entries)
+        self.assertIn("├── .claude/CLAUDE.md", entries)
+        self.assertNotIn("AGENTS.md · CLAUDE.md", tree)
+        self.assertIn("← Claude Code가 위 안내를 불러오는 한 줄 (@../AGENTS.md)", tree)
         docs_index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         self.assertIn("](../AGENTS.md)", docs_index)
+
+    def test_contributor_guide_layout_is_stated_as_shipped(self) -> None:
+        # The guide ships as root AGENTS.md plus .claude/CLAUDE.md; no text may name a root CLAUDE.md.
+        release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
+        changes = _section(release, "## 변경")
+        first = next(line for line in changes.splitlines() if line.startswith("- "))
+        self.assertTrue(first.startswith(
+            "- 저장소 루트에 기여자·에이전트 안내 [AGENTS.md](../../AGENTS.md)를 두고, Claude Code가 이를 불러오도록 "
+            ".claude/CLAUDE.md(한 줄: @../AGENTS.md)를 둔다. 유지관리자가 설계와 릴리스를 정하고, "), first)
+        self.assertIn("릴리스 ZIP과 설치본에 AGENTS.md와 .claude/CLAUDE.md가 늘어난다. 플러그인 동작은 바뀌지 않는다.",
+                      _section(release, "## 하위호환·업그레이드").splitlines())
+        record = _folded(V0470ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8"))
+        self.assertIn("root `AGENTS.md` and `.claude/CLAUDE.md`", record)
+        readme = README.read_text(encoding="utf-8")
+        korean = _section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령")
+        english = _section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
+        self.assertIn(".claude/CLAUDE.md", korean)
+        self.assertIn("`.claude/CLAUDE.md`", english)
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        texts = {"release": release, "record": record, "readme": readme, "codex_long": codex["interface"]["longDescription"],
+                 "docs_codex": (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8"),
+                 "docs_index": (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")}
+        for name, text in texts.items():
+            folded = _folded(text)
+            for stale in ("AGENTS.md·CLAUDE.md", "AGENTS.md · CLAUDE.md", "이를 가져오는 CLAUDE.md",
+                          "imported by `CLAUDE.md`", "and `CLAUDE.md` (an import", "그 CLAUDE.md를",
+                          "the `CLAUDE.md` of a plugin checkout", "neither root file", "has both at its top level"):
+                with self.subTest(text=name, stale=stale):
+                    self.assertNotIn(stale, folded)
 
     def test_hardening_ownership_subsection_states_the_dropped_result(self) -> None:
         text = self.HARDENING.read_text(encoding="utf-8")

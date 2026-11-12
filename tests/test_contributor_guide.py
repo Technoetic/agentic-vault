@@ -2,8 +2,8 @@
 
 `AGENTS.md` tells people and coding agents who change this repository which
 files carry deliberate verbatim copies, which files the warning-promotion
-certificate binds and which commands CI runs; `CLAUDE.md` imports it for
-Claude Code. These tests read the guide and the repository side by side, so a
+certificate binds and which commands CI runs; `.claude/CLAUDE.md` imports it
+for Claude Code. These tests read the guide and the repository side by side, so a
 new marked copy, a renamed test or a changed CI command fails here until the
 guide follows. The guide is not a plugin component and is never installed into
 a vault.
@@ -87,7 +87,11 @@ class ContributorGuideTests(unittest.TestCase):
         return _text(path)
 
     def test_claude_md_imports_the_guide(self) -> None:
-        self.assertEqual(self._read("CLAUDE.md"), "# agentic-vault repository\n\n@AGENTS.md\n")
+        # Claude Code reads .claude/CLAUDE.md as project memory; the import is relative to that file.
+        self.assertEqual(self._read(".claude/CLAUDE.md"), "# agentic-vault repository\n\n@../AGENTS.md\n")
+        guide = " ".join(self._read("AGENTS.md").split())
+        self.assertIn("`.claude/CLAUDE.md` imports this file for Claude Code; Codex reads it directly.", guide)
+        self.assertNotIn("`CLAUDE.md` in this folder", guide)
 
     def test_guide_lists_every_marked_copy(self) -> None:
         guide = self._read("AGENTS.md")
@@ -170,7 +174,7 @@ class ContributorGuideTests(unittest.TestCase):
         self.assertTrue((ROOT / "tests" / "test_rule_sources.py").is_file())
 
     def test_guide_is_public_safe_and_engine_neutral(self) -> None:
-        texts = {name: self._read(name) for name in ("AGENTS.md", "CLAUDE.md")}
+        texts = {name: self._read(name) for name in ("AGENTS.md", ".claude/CLAUDE.md")}
         for name, text in texts.items():
             with self.subTest(file=name):
                 self.assertNotIn("agentic-vault:", text)
@@ -185,7 +189,11 @@ class ContributorGuideTests(unittest.TestCase):
     def test_root_guides_are_not_plugin_components(self) -> None:
         # Both files must exist for the rest of this test to say anything.
         self._read("AGENTS.md")
-        self._read("CLAUDE.md")
+        self._read(".claude/CLAUDE.md")
+        # No CLAUDE.md at the plugin root: `claude plugin validate --strict` rejects one, because the
+        # validator warns that a root CLAUDE.md is not loaded as project context and --strict treats
+        # warnings as errors (Claude Code 2.1.252).
+        self.assertFalse((ROOT / "CLAUDE.md").exists())
         for manifest in MANIFESTS:
             with self.subTest(manifest=manifest):
                 text = _text(ROOT / manifest)
