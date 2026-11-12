@@ -399,5 +399,164 @@ class IgnoredRowTests(LessonDeltaFixture):
         self.assertNotIn('ignored_rows', self.prepare([{'op': 'INC', 'id': 'L-001'}]))
 
 
+REASON = '도구 교체로 원인이 사라짐'
+TEMPLATES = SCRIPTS.parents[2] / 'assets/templates'
+
+
+class RetireReasonTests(LessonDeltaFixture):
+    """RETIRE takes an optional reason and date; they live only in the status cell."""
+
+    HEADING = 'Narrative\r\n## M-031 — Keep originals\r\n\r\n**증상:** old\r\n'
+
+    def retire(self, identifier='L-001', reason=REASON, day='2026-11-12'):
+        return {'op': 'RETIRE', 'id': identifier, 'reason': reason, 'date': day}
+
+    def refused(self, ops):
+        with self.assertRaises(self.module.LessonDeltaError) as caught:
+            self.prepare(ops)
+        return str(caught.exception)
+
+    def records(self):
+        entries = self.module._inventory(self.target.read_bytes(), 'lesson:notes/lessons.md')[0]
+        return [(r['id'], r['kind'], r['state'], r['count']) for r in entries]
+
+    def test_retire_with_reason_writes_the_reason_into_the_status_cell(self):
+        self.apply(self.prepare([self.retire()]))
+        lines = self.target.read_bytes().splitlines(keepends=True)
+        expected = ('- 2026-10-01 | 횟수 2 | [L-001] Check bytes | 근거: old | 상태: retired(' + REASON
+                    + ', 2026-11-12) <!-- agentic-vault:lesson {"count":2,"id":"L-001","references":[],'
+                    '"state":"retired"} -->\r\n').encode()
+        self.assertEqual(lines[5], expected)
+        old = self.original.splitlines(keepends=True)
+        self.assertEqual(lines[:5] + lines[6:], old[:5] + old[6:])
+
+    def test_retire_without_reason_writes_the_same_bytes_as_before(self):
+        p = self.prepare([{'op': 'RETIRE', 'id': 'L-001'}])
+        self.assertEqual(p['operations'], [{'op': 'RETIRE', 'id': 'L-001', 'references': []}])
+        self.apply(p)
+        self.assertEqual(self.target.read_bytes().splitlines(keepends=True)[5],
+                         ('- 2026-10-01 | 횟수 2 | [L-001] Check bytes | 근거: old | 상태: retired '
+                          '<!-- agentic-vault:lesson {"count":2,"id":"L-001","references":[],'
+                          '"state":"retired"} -->\r\n').encode())
+
+    def test_the_marker_keeps_the_four_keys_older_readers_accept(self):
+        self.apply(self.prepare([self.retire()]))
+        line = self.target.read_text(encoding='utf-8').splitlines()[5]
+        marker = line[line.index('<!--'):]
+        self.assertNotIn(REASON, marker)
+        data = json.loads(marker[len('<!-- agentic-vault:lesson '):-len(' -->')])
+        self.assertEqual(set(data), {'id', 'count', 'state', 'references'})
+        self.assertEqual(data['state'], 'retired')
+
+    def test_invalid_reasons_are_refused_with_a_fixed_code(self):
+        bad = ['', '   ', ' lead', 'trail ', 'x' * 201, 'a' + chr(10) + 'b', 'a' + chr(9) + 'b', 'a' + chr(0) + 'b',
+               'a' + chr(0x202e) + 'b', 'a' + chr(0x200b) + 'b', 'a' + chr(0x2028) + 'b', 'a' + chr(0x2029) + 'b',
+               'a<!--b', 'a-->b', 'a | b', 'agentic-vault:lesson x', 123, None, ['x']]
+        for value in bad:
+            with self.subTest(value=ascii(value)[:30]):
+                self.assertEqual(self.refused([self.retire(reason=value)]), 'invalid_retire_reason')
+        for value in ('x' * 200, '가' * 200, 'a|b', '도구(v2) 교체, 정책 변경'):
+            with self.subTest(value=value[:10]):
+                self.prepare([self.retire(reason=value)])
+        self.assertEqual(self.target.read_bytes(), self.original)
+
+    def test_a_reason_and_a_date_come_together(self):
+        cases = [({'reason': REASON}, 'explicit_date_required'),
+                 ({'reason': REASON, 'date': '2026/11/12'}, 'explicit_date_required'),
+                 ({'reason': REASON, 'date': '2026-13-01'}, 'invalid_date'),
+                 ({'date': '2026-11-12'}, 'invalid_operation_fields')]
+        for extra, code in cases:
+            with self.subTest(extra=extra):
+                self.assertEqual(self.refused([{'op': 'RETIRE', 'id': 'L-001', **extra}]), code)
+        for op in ({'op': 'INC', 'id': 'L-001'}, {'op': 'EDIT', 'id': 'L-001', 'text': 'x'},
+                   {'op': 'CUES', 'id': 'L-001', 'cues': []}):
+            with self.subTest(op=op['op']):
+                self.assertEqual(self.refused([{**op, 'reason': REASON, 'date': '2026-11-12'}]),
+                                 'invalid_operation_fields')
+                self.assertEqual(self.refused([{**op, 'reason': REASON}]), 'invalid_operation_fields')
+        self.assertEqual(self.target.read_bytes(), self.original)
+
+    def test_a_reason_can_be_added_once_and_is_never_dropped(self):
+        self.apply(self.prepare([{'op': 'RETIRE', 'id': 'L-001'}]))
+        self.apply(self.prepare([self.retire()]))
+        self.assertIn(('상태: retired(' + REASON + ', 2026-11-12) <!--').encode(), self.target.read_bytes())
+        self.assertEqual(self.refused([self.retire(reason='other', day='2026-11-13')]), 'retire_reason_exists')
+        self.assertEqual(self.refused([{'op': 'RETIRE', 'id': 'L-001'}]), 'no_change')
+        inventory = self.prepare([{'op': 'ADD', 'text': 'probe', 'date': '2026-11-12'}])['inventory']
+        legacy = [x['id'] for x in inventory if x['text'] == 'Legacy lesson'][0]
+        self.assertEqual(self.refused([self.retire(legacy, 'a'), self.retire(legacy, 'b')]), 'retire_reason_exists')
+
+    def test_a_hand_written_reasoned_cell_is_kept(self):
+        raw = self.original.replace('상태: 관찰중\r\n'.encode(), '상태: retired(손으로 적음, 2026-11-01)\r\n'.encode(), 1)
+        self.target.write_bytes(raw)
+        self.apply(self.prepare([{'op': 'RETIRE', 'id': 'L-001'}]))
+        self.assertIn('상태: retired(손으로 적음, 2026-11-01) <!--'.encode(), self.target.read_bytes())
+
+    def test_a_heading_record_refuses_a_reason(self):
+        original = self.HEADING.encode()
+        self.target.write_bytes(original)
+        self.assertEqual(self.refused([self.retire('M-031')]), 'retire_reason_unsupported')
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_a_status_line_after_the_heading_marker_keeps_the_record(self):
+        # The placement the mistakes template asks for: the status line goes after the marker line.
+        self.target.write_bytes(self.HEADING.encode())
+        self.apply(self.prepare([{'op': 'INC', 'id': 'M-031'}, {'op': 'RETIRE', 'id': 'M-031'}]))
+        lines = self.target.read_bytes().splitlines(keepends=True)
+        self.assertTrue(lines[2].startswith(b'<!-- agentic-vault:lesson '))
+        lines.insert(3, '상태: retired(사유, 2026-11-12)\r\n'.encode())
+        self.target.write_bytes(b''.join(lines))
+        self.assertEqual(self.records(), [('M-031', 'heading', 'retired', 2)])
+        self.assertEqual(self.refused([{'op': 'RETIRE', 'id': 'M-031'}]), 'no_change')
+
+    def test_a_line_between_heading_and_marker_hides_the_marker(self):
+        # v0.46.0 behaviour, unchanged: the marker is read only on the line right after the heading.
+        self.target.write_bytes(self.HEADING.encode())
+        self.apply(self.prepare([{'op': 'INC', 'id': 'M-031'}, {'op': 'RETIRE', 'id': 'M-031'}]))
+        lines = self.target.read_bytes().splitlines(keepends=True)
+        lines.insert(2, '상태: retired(사유, 2026-11-12)\r\n'.encode())
+        self.target.write_bytes(b''.join(lines))
+        self.assertEqual(self.records(), [('M-031', 'heading', 'active', 1)])
+
+    def test_add_then_retire_with_a_reason_in_one_proposal(self):
+        identifier = self.prepare([{'op': 'ADD', 'text': 'Short lived', 'date': '2026-11-01'}])['changes'][0]['id']
+        self.apply(self.prepare([{'op': 'ADD', 'text': 'Short lived', 'date': '2026-11-01'},
+                                 self.retire(identifier)]))
+        self.assertIn(('| Short lived | 근거: host-provided references | 상태: retired(' + REASON
+                       + ', 2026-11-12) <!--').encode(), self.target.read_bytes())
+
+    def test_a_row_retired_with_a_reason_stays_retired_for_every_operation(self):
+        self.apply(self.prepare([self.retire()]))
+        for op in ({'op': 'INC', 'id': 'L-001'}, {'op': 'EDIT', 'id': 'L-001', 'text': 'x'},
+                   {'op': 'CUES', 'id': 'L-001', 'cues': []}):
+            with self.subTest(op=op['op']):
+                self.assertEqual(self.refused([op]), 'retired_lesson')
+        p = self.prepare([{'op': 'ADD', 'text': 'probe', 'date': '2026-11-12'}])
+        self.assertEqual([x['state'] for x in p['inventory']], ['retired', 'active'])
+
+    def test_cli_retire_reason_round_trip(self):
+        script = SCRIPTS / 'vault_lesson_delta.py'
+        op = [self.retire(reason='정책 변경')]
+        run = subprocess.run([sys.executable, str(script), '--vault', str(self.vault), 'prepare', '--path',
+                              'notes/lessons.md'], input=json.dumps(op, ensure_ascii=False).encode('utf-8'),
+                             capture_output=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertTrue(run.stdout.isascii(), 'JSON CLI output must survive Windows console encodings')
+        run = subprocess.run([sys.executable, str(script), '--vault', str(self.vault), 'apply', '--approve'],
+                             input=run.stdout, capture_output=True)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        row = self.target.read_bytes().splitlines()[5].decode('utf-8')
+        self.assertIn('| 상태: retired(정책 변경, 2026-11-12) <!--', row)
+
+    def test_the_ledger_template_documents_both_retired_forms(self):
+        text = (TEMPLATES / 'lessons.md').read_text(encoding='utf-8')
+        line = next(line for line in text.splitlines() if line.startswith('형식: `- YYYY-MM-DD'))
+        states = line[line.index('상태: ') + len('상태: '):].rstrip('`').split('|')
+        self.assertIn('retired', states)
+        self.assertIn('retired(사유, YYYY-MM-DD)', states)
+        self.assertIn('낱말 `retired`는 번역하지 않는다', text)
+        self.assertTrue(self.module.RETIRED_CELL.fullmatch('상태: retired(사유, 2026-11-12)'))
+
+
 if __name__ == '__main__':
     unittest.main()

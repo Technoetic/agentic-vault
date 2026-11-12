@@ -26,6 +26,7 @@ import vault_adapters  # noqa: E402
 HINT = {'kind': 'hint', 'text': 'A pipe hid the exit code in a past run', 'command_contains': [' | tail']}
 GUARD = {'kind': 'guard', 'text': 'A paid call ran after a failed step', 'tools': ['Bash'],
          'command_prefix': ['paid-tool']}
+RETIRE_REASON = '도구 교체로 원인이 사라짐'
 
 
 def marker(identifier, cues=None, count=1, state='active'):
@@ -96,6 +97,12 @@ class BuildTests(VaultCase):
         result = self.module.build_cues(self.vault)
         self.assertEqual(result['document']['cues'], [])
         self.assertEqual(result['skipped']['status'], len(refused))
+
+    def test_a_reasoned_retired_cell_stays_out_even_with_an_active_marker(self):
+        self.ledger(row('L-001', 'retired(도구 교체, 2026-11-12)', [HINT]), row('L-002', '관찰중', [HINT]))
+        result = self.module.build_cues(self.vault)
+        self.assertEqual([cue['id'] for cue in result['document']['cues']], ['L-002'])
+        self.assertEqual(result['skipped']['status'], 1)
 
     def test_every_status_in_force_is_still_compiled(self):
         statuses = ('관찰중', '승격제안', 'active', '승격완료(→규칙)', '승격완료(검증중→규칙, 2026-10-01, abc)')
@@ -557,6 +564,22 @@ class EndToEndTests(HookCase):
         compiler.write_cues(self.vault)
         self.assertIsNone(self.decide(self.payload('other | tail -1', session='s2')))
 
+    def test_retiring_with_a_reason_removes_the_cue(self):
+        delta = importlib.import_module('vault_lesson_delta')
+        compiler = importlib.import_module('vault_lesson_cues')
+        ledger = self.ledger(row('L-001', '관찰중', [HINT]))
+        compiler.write_cues(self.vault)
+        result = self.decide(self.payload('make | tail -1'))['hookSpecificOutput']
+        self.assertIn(HINT['text'], result['additionalContext'])
+        delta.apply_delta(self.vault, delta.prepare_delta(self.vault, '00-meta/lessons.md', [
+            {'op': 'RETIRE', 'id': 'L-001', 'reason': RETIRE_REASON, 'date': '2026-11-12'}]), approve=True)
+        self.assertIn('상태: retired(' + RETIRE_REASON + ', 2026-11-12) <!--', ledger.read_text(encoding='utf-8'))
+        result = compiler.build_cues(self.vault)
+        self.assertEqual(result['document']['cues'], [])
+        self.assertEqual(result['skipped']['retired'], 1)
+        compiler.write_cues(self.vault)
+        self.assertIsNone(self.decide(self.payload('other | tail -1', session='s2')))
+
 
 class ProcessTests(HookCase):
     """The hook as Claude Code starts it: python -X utf8 -I, a copy, no vault_* module."""
@@ -622,7 +645,7 @@ class AssetTests(unittest.TestCase):
         text = (ASSETS / 'guide.md').read_text(encoding='utf-8')
         for literal in ('https://code.claude.com/docs/en/hooks', 'next model request', 'alongside the tool result',
                         'cannot change', 'advisory', 'not been measured', 'onFailure', '00-meta/lesson-cues.json',
-                        'vault_lesson_cues.py', 'factual statements'):
+                        'vault_lesson_cues.py', 'factual statements', 'retired(reason, YYYY-MM-DD)'):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
 
