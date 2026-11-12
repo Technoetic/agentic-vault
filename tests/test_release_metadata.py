@@ -1956,6 +1956,23 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         entry = _folded(section[section.index("\n18. "):section.index("\n19. ")])
         self.assertIn(f"2026-11-12~13의 표({len(rows)}행)", entry)
 
+    def _default_change_entry(self, number: int) -> str:
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")
+        start = section.index(f"\n{number}. ")
+        end = section.find(f"\n{number + 1}. ", start)
+        return _folded(section[start:end if end != -1 else len(section)])
+
+    def test_v0470_entry_19_names_recall_by_mechanism(self) -> None:
+        # Measured on 2e22557 by the reconcile step and two sceptics (findings TS-1 and RD-1): with the
+        # command file installed, recall returns it for a query made of its words and its diagnostics rise.
+        entry = self._default_change_entry(19)
+        sentence = (
+            "recall도 이 파일을 검색 대상 파일로 읽는다: 질의가 이 파일의 낱말과 맞으면 결과에 이 파일이 나오고, 진단의 "
+            "files_considered·files_read가 1씩 늘고 bytes_read가 늘며, 폴더 항목도 세는 entries_scanned는 이 파일과 "
+            "새로 생긴 폴더 수만큼 는다(.claude/commands가 이미 있으면 1, 그 폴더만 새로 생기면 2)."
+        )
+        self.assertIn(sentence + " 대상: 명령을 설치한 볼트.", entry)
+
     def test_v0470_no_placeholder_left(self) -> None:
         import re
 
