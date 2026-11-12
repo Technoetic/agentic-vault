@@ -139,6 +139,14 @@ class FoldTests(unittest.TestCase):
         self.assertTrue(vault_paths.zone_matches([OMEGA_YPO_ZONE_PATH], zone))
         letter = chr(0x1FAA)  # without a further mark the upper-case spelling is the same name
         self.assertTrue(vault_paths.zone_matches([letter.upper()], letter))
+        # The cause is U+0345 itself, also after another base: normalization moves the grave in front of it.
+        latin = "A" + chr(0x345) + chr(0x300)
+        self.assertEqual(latin.upper().casefold(), latin.casefold())
+        self.assertFalse(vault_paths.zone_matches([latin.upper()], latin))
+        # A mark that normalization leaves behind U+0345 (combining class 0) changes nothing.
+        joined = letter + chr(0x34F)
+        self.assertTrue(vault_paths.zone_matches([joined.upper()], joined))
+        self.assertTrue(vault_paths.zone_matches([joined.casefold()], joined))
 
 
 class FoldPropertyTests(unittest.TestCase):
