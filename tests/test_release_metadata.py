@@ -2170,6 +2170,20 @@ class V0470SharedSurfaceTests(unittest.TestCase):
                       long_description)
         self.assertEqual(long_description.count(V0310_CODEX_UPGRADE_SENTENCE), 1)
 
+    def test_readme_korean_section_conditions_the_certificate_sentence(self) -> None:
+        # The certificate stays valid only for a vault that comes from v0.46.0 (finding RD-4).
+        korean = _folded(_section(README.read_text(encoding="utf-8"),
+                                  "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령"))
+        for sentence in ("v0.46.0에서 올 때는 인증서가 묶는 일곱 파일이 같아 경고 승격 인증서를 다시 만들 필요가 없다"
+                         "(실제 설치 바이트가 같을 때).",
+                         "v0.45.1 이하에서 올 때는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)를 "
+                         "따른다."):
+            with self.subTest(sentence=sentence[:20]):
+                self.assertIn(sentence, korean)
+        self.assertNotIn("인증서가 묶는 일곱 파일은 바뀌지 않아", korean)
+        self.assertIn("\n## 하위호환·업그레이드\n",
+                      (REPO_ROOT / "docs/releases/v0.46.0.md").read_text(encoding="utf-8"))
+
     def test_contributor_guide_layout_is_stated_as_shipped(self) -> None:
         # The guide ships as root AGENTS.md plus .claude/CLAUDE.md; no text may name a root CLAUDE.md.
         release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
