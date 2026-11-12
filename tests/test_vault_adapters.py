@@ -300,6 +300,14 @@ class AdapterAssetTests(unittest.TestCase):
                       "있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.", lines)
         self.assertNotIn("`grep -c`로 건수만 보고", text)
 
+    def test_repl_command_closes_tabs_with_the_global_function(self) -> None:
+        # 2026-11-13 (fact A15, one run): closeTab is a global function of the repl, not a method of the
+        # tab object that openTab returns; a trial run that wrote tab.closeTab() got "not a function".
+        lines = COMMAND.read_text(encoding="utf-8").splitlines()
+        self.assertIn("- 스크립트가 연 탭은 스크립트 끝에서 전역 함수 `closeTab(탭)`으로 닫는다(`openTab`이 돌려준 탭 객체의 "
+                      "메서드가 아니다). 브라우저 창은 닫지 않는다(창이 닫히면 CLI 데몬도 종료된다).", lines)
+        self.assertNotIn("- 스크립트가 연 탭은 스크립트 끝에서 `closeTab`으로 닫는다.", "\n".join(lines))
+
     def test_repl_command_and_guide_state_no_unmeasured_limit(self) -> None:
         command = COMMAND.read_text(encoding="utf-8")
         guide = (ASSETS / "operations-guide.md").read_text(encoding="utf-8")
@@ -326,7 +334,13 @@ class AdapterAssetTests(unittest.TestCase):
         section = _section(text, new)
         rows = [line for line in section.splitlines() if line.startswith("|")]
         self.assertEqual(rows[1], "|---|---|---|")
-        self.assertEqual(len(rows) - 2, 13)
+        self.assertEqual(len(rows) - 2, 14)
+        # 2026-11-13 (fact A15, one run): closeTab is a global function, placed after the row on tabs of one call.
+        close_tab = ("| `closeTab` 호출 형태 | `closeTab`은 repl의 전역 함수였고 `openTab`이 돌려준 탭 객체에는 `closeTab` "
+                     "메서드가 없었다(`typeof`로 확인). `await closeTab(탭)`은 오류 없이 끝났고 그 페이지의 탭이 "
+                     "`listBrowserTabs()`에 남지 않았다(1회, 2026-11-13) | 스크립트가 연 탭은 `closeTab(탭)`으로 닫는다 |")
+        self.assertIn(close_tab, rows)
+        self.assertTrue(rows[rows.index(close_tab) - 1].startswith("| 한 호출에서 연 탭 |"))
         for literal in ('"$(cat 파일.js)"', "subprocess.run(['aside', 'repl', 코드])", "PowerShell 5.1",
                         "계정·세션 폴더 줄은 없었다", "< 파일.js", "계정과 세션 폴더 경로", "openTab('file:///…')",
                         "listBrowserTabs()", "getTabs()", "import(", "30.0초", "./artifacts/x.png", "120s timeout"):
