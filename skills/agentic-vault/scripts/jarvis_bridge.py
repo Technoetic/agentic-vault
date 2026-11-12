@@ -59,6 +59,8 @@ DEFAULTS = {
     "qa_hourly_limit": 6,
     "qa_timeout_sec": 180,
     "claude_cmd": "claude",
+    "model": "",
+    "effort": "",
 }
 
 # 모델은 파일을 직접 읽지 않는다. 호스트가 검사한 최소 근거만 stdin으로 전달한다.
@@ -76,6 +78,11 @@ _WINDOWS_BATCH_SUFFIXES = frozenset({".bat", ".cmd"})
 # argv 요소에 들어가면 안 되는 C0·DEL·C1 제어문자(줄바꿈·NUL 포함).
 _ARGV_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
+# 선택 키 jarvis.effort가 받는 값(설치된 claude CLI의 --effort 단계와 같다).
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# jarvis.model: ASCII 영문자·숫자로 시작해 옵션으로 읽히지 않고, 공백·따옴표·제어문자가 없다.
+_CLAUDE_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+\[\]-]{0,255}")
+
 # 실패한 작업의 재시도 간격(초): 첫 대기는 base, 연속 실패마다 2배, cap에서 멈춘다.
 INBOUND_RETRY_BASE_SEC = 5.0
 INBOUND_RETRY_CAP_SEC = 60.0
@@ -84,6 +91,9 @@ SCHEDULED_RETRY_CAP_SEC = 3600.0
 # 같은 업데이트에서 예외가 연속으로 몇 번 나야 건너뛰는지. 그 전까지는 수신 백오프로
 # 다시 시도해 일시적인 I/O 오류(백신·동기화 도구의 파일 잠금 등)로 캡처를 잃지 않는다.
 UPDATE_MAX_ATTEMPTS = 3
+# 같은 정기 브리핑 회차가 연속으로 몇 번 실패하면(생성 실패·생성 중 예외·전송 실패) 그 회차를
+# 건너뛰고 소유자에게 한 번 알리는지. 횟수는 메모리에만 두므로 재시작하면 0부터 센다.
+BRIEFING_MAX_ATTEMPTS = 8
 # 시간 초과로 claude를 끝낸 뒤 남은 출력을 거두는 데 기다리는 최대 시간(초).
 CHILD_KILL_GRACE_SEC = 5.0
 
@@ -145,12 +155,15 @@ class BriefingState:
             self, day: date, fired: set[tuple[int, int]],
             pending: list[tuple[int, int]], skipped: set[tuple[int, int]],
             started_at: datetime,
+            failed_attempts: dict[tuple[int, int], int] | None = None,
             ) -> None:
         self.day = day
         self.fired = fired
         self.pending = pending
         self.skipped = skipped
         self.started_at = started_at
+        # 회차별 연속 실패 횟수(메모리 전용). 상태 파일 형식은 바꾸지 않는다.
+        self.failed_attempts: dict[tuple[int, int], int] = dict(failed_attempts or {})
 
 
 class GenerationResult:
@@ -417,6 +430,22 @@ def parse_briefing_slots(block: dict) -> list[tuple[int, int]]:
     return sorted(slots)
 
 
+def parse_claude_model_options(block: dict) -> tuple[str, str]:
+    """Validate the optional jarvis.model and jarvis.effort; "" means unset."""
+    model = block.get("model", "")
+    if not isinstance(model, str) or (
+            model and _CLAUDE_MODEL_NAME.fullmatch(model) is None):
+        raise JarvisConfigError(
+            "jarvis.model must be empty or a model name that starts with an ASCII letter "
+            "or digit and uses only ASCII letters, digits and . _ : @ / + [ ] - "
+            "(at most 256 characters)")
+    effort = block.get("effort", "")
+    if not isinstance(effort, str) or (effort and effort not in CLAUDE_EFFORT_LEVELS):
+        raise JarvisConfigError(
+            "jarvis.effort must be empty or one of low, medium, high, xhigh, max")
+    return model, effort
+
+
 def is_authorized_private_message(message: dict, whitelist: set[int]) -> bool:
     sender = (message.get("from") or {}).get("id")
     chat = message.get("chat") or {}
@@ -486,6 +515,7 @@ def load_jarvis_config(vault: Path) -> dict | None:
         raise JarvisConfigError("jarvis.claude_cmd must be a non-empty string")
     if _ARGV_CONTROL_CHARACTERS.search(claude_cmd):
         raise JarvisConfigError("jarvis.claude_cmd must not contain control characters")
+    cfg["model"], cfg["effort"] = parse_claude_model_options(cfg)
     # Q&A 가드에 필요한 볼트 수준 키를 함께 전달
     cfg["_deny_zones"] = vault_cfg.get("deny_zones", [])
     cfg["_language"] = vault_cfg.get("language", "ko")
@@ -692,6 +722,15 @@ def _claude_guard(cfg: dict) -> str:
 
 def build_claude_command(executable: str, cfg: dict) -> list[str]:
     """Build the fixed argv. The prompt is never part of it (it goes to stdin)."""
+    try:
+        model, effort = parse_claude_model_options(cfg)
+    except JarvisConfigError:
+        raise ClaudeLaunchError(
+            "invalid-model-option",
+            "⚠️ jarvis.model 또는 jarvis.effort 설정이 올바르지 않아 claude를 실행하지 않습니다."
+            ) from None
+    model_arguments = [*(["--model", model] if model else []),
+                       *(["--effort", effort] if effort else [])]
     command = [
         executable, "-p", "--bare",
         "--tools", CLAUDE_MODEL_TOOLS,
@@ -700,6 +739,7 @@ def build_claude_command(executable: str, cfg: dict) -> list[str]:
         "--no-session-persistence",
         "--strict-mcp-config",
         "--settings", CLAUDE_SESSION_SETTINGS,
+        *model_arguments,
         "--append-system-prompt", _claude_guard(cfg),
     ]
     if any(_contains_control_character(argument) for argument in command):
@@ -1228,6 +1268,16 @@ def load_briefing_state(
         skipped=skipped, started_at=started_at)
 
 
+def _briefing_skip_notice(day_value: date, slot: tuple[int, int], attempts: int) -> str:
+    """Owner notice for a skipped slot: what happened, never a guessed cause."""
+    _emoji, name = briefing_label(slot)
+    return (
+        f"⚠️ {day_value.month}월 {day_value.day}일 {_format_briefing_slot(slot)} {name} "
+        f"브리핑을 {attempts}번 시도했지만 만들거나 보내지 못해 이 회차는 건너뜁니다. "
+        "다음 회차는 예정대로 진행합니다. 지금 받으려면 /brief를 보내세요. "
+        "실패 기록은 브리지 로그에 있습니다.")
+
+
 def _briefing_prompt(vault: Path, cfg: dict) -> str:
     return (
         f"오늘({date.today().isoformat()}) 정기 브리핑을 만들어라. "
@@ -1673,37 +1723,73 @@ def send_due_briefings(
         slots: list[tuple[int, int]], state: BriefingState, state_file: Path,
         sender: Callable[[str, int, str], bool],
         generator: Callable[[Path, dict], GenerationResult] = generate_brief,
+        max_attempts: int = BRIEFING_MAX_ATTEMPTS,
         ) -> BriefingState:
-    """Persist due work before generation and acknowledge one delivered head at a time."""
+    """Persist due work before generation and acknowledge one delivered head at a time.
+
+    A slot whose attempts keep failing is skipped after ``max_attempts`` in a
+    row, or after one more failure once its day is over, and the owner is told
+    once. A skipped slot leaves ``pending`` but is not written as ``fired``.
+    """
     if state.day > now.date():
         raise JarvisConfigError("last_brief day is in the future")
 
-    def drain_pending() -> bool:
+    def give_up(slot: tuple[int, int], attempts: int, reason: str) -> None:
+        next_pending = state.pending[1:]
+        _write_briefing_state(state_file, state.day, state.fired, next_pending)
+        state.pending = next_pending
+        state.skipped.add(slot)
+        state.failed_attempts.pop(slot, None)
+        label = f"{state.day.isoformat()} {_format_briefing_slot(slot)}"
+        log(f"스케줄 브리핑 건너뜀({label}) — {reason}")
+        if not sender(token, chat_id, _briefing_skip_notice(state.day, slot, attempts)):
+            log(f"스케줄 브리핑 건너뜀 안내 전송 실패({label}) — 다시 보내지 않음")
+
+    def drain_pending(day_over: bool) -> bool:
         while state.pending:
             slot = state.pending[0]
             emoji, name = briefing_label(slot)
             log("스케줄 브리핑 생성(%s %02d:%02d)" % (
                 name, slot[0], slot[1]))
-            generated = generator(vault, cfg)
-            if not generated.ok:
-                log("스케줄 브리핑 생성 실패 — pending 유지")
+            failure = detail = None
+            try:
+                generated = generator(vault, cfg)
+            except JarvisConfigError:
+                raise
+            except Exception as error:
+                failure, detail = "생성 오류", _error_label(error)
+            else:
+                if not generated.ok:
+                    failure = "생성 실패"
+                elif not sender(
+                        token, chat_id,
+                        f"{emoji} {name} 브리핑\n" + generated.text):
+                    failure = "전송 실패"
+            if failure is None:
+                next_fired = set(state.fired)
+                next_fired.add(slot)
+                next_pending = state.pending[1:]
+                _write_briefing_state(
+                    state_file, state.day, next_fired, next_pending)
+                state.fired = next_fired
+                state.pending = next_pending
+                state.failed_attempts.pop(slot, None)
+                continue
+            attempts = state.failed_attempts.get(slot, 0) + 1
+            state.failed_attempts[slot] = attempts
+            where = _format_briefing_slot(slot) + (f", {detail}" if detail else "")
+            log(f"스케줄 브리핑 {failure}({where}) — 시도 {attempts}/{max_attempts}")
+            if day_over:
+                give_up(slot, attempts, f"날이 바뀐 뒤 다시 실패(시도 {attempts}회)")
+            elif attempts >= max_attempts:
+                give_up(slot, attempts, f"{attempts}회 연속 실패")
+            else:
                 return False
-            if not sender(
-                    token, chat_id,
-                    f"{emoji} {name} 브리핑\n" + generated.text):
-                return False
-            next_fired = set(state.fired)
-            next_fired.add(slot)
-            next_pending = state.pending[1:]
-            _write_briefing_state(
-                state_file, state.day, next_fired, next_pending)
-            state.fired = next_fired
-            state.pending = next_pending
         return True
 
     if state.day < now.date():
-        if state.pending and not drain_pending():
-            return state
+        if state.pending:
+            drain_pending(day_over=True)
         cold_activation = state.started_at.date() == now.date()
         if cold_activation:
             startup_clock = (state.started_at.hour, state.started_at.minute)
@@ -1716,6 +1802,7 @@ def send_due_briefings(
         state.fired = set()
         state.pending = []
         state.skipped = next_skipped
+        state.failed_attempts = {}
 
     current_clock = (now.hour, now.minute)
     newly_due = [
@@ -1731,7 +1818,7 @@ def send_due_briefings(
             state_file, state.day, state.fired, complete_pending)
         state.pending = complete_pending
 
-    drain_pending()
+    drain_pending(day_over=False)
     return state
 
 
@@ -1761,7 +1848,7 @@ def run_scheduled_briefings(
         ) -> BriefingState:
     """Run due briefings unless a previous failure is still backing off.
 
-    A failed generation or send keeps the slot pending (see send_due_briefings);
+    A failed generation or send keeps the slot pending (see send_due_briefings) until it is skipped there;
     without a delay every loop pass would start another ``claude -p`` run.
     """
     if not backoff.ready():

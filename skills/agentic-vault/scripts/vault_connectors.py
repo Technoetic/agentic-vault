@@ -182,6 +182,7 @@ def _jarvis_config(config, bridge):
         if (not isinstance(command, str) or not command.strip()
                 or bridge._ARGV_CONTROL_CHARACTERS.search(command)):
             raise ValueError
+        bridge.parse_claude_model_options(cfg)
     except (bridge.JarvisConfigError, KeyError, TypeError, ValueError, OverflowError):
         return _stage("invalid", "jarvis_configuration_invalid"), None
     if not ids:
