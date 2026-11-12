@@ -155,6 +155,8 @@ v0.47.0부터 `vault_lesson_delta.py`의 RETIRE는 선택형 `reason`과 `date`�
   않는다. 표지는 예전과 같은 키와 `state: retired`를 담으므로, v0.46.0 이하의 도구도 이 줄을 읽고 교훈 단서 컴파일은
   예전처럼 은퇴한 줄을 뺀다.
 - `reason`이 없으면 상태 칸은 예전처럼 `상태: retired`이고, 사유 없는 옛 제안은 같은 바이트로 다시 계산되어 적용된다.
+  다만 상태 칸이 이미 `상태: retired(…, YYYY-MM-DD)`인 줄은 그 칸을 그대로 두므로, 그런 줄에 v0.46.0이 준비한 사유 없는
+  제안은 `proposal_changed_or_stale`로 거부되고 다시 준비해야 한다.
 - `reason`은 앞뒤 공백 없는 200자 이하의 한 줄이다. 제어 문자·보이지 않는 서식 문자(양방향 재정렬 표시 등)·줄과 문단
   구분자, `<!--`, `-->`, 칸 구분자 ` | `, `agentic-vault:lesson`을 담으면 `invalid_retire_reason`으로 거부한다.
   `date`는 ADD와 같은 `YYYY-MM-DD`이고 오류도 같다(`explicit_date_required`, `invalid_date`). 날짜만 넘기면
