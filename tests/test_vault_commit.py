@@ -73,6 +73,9 @@ def seed_vault():
 
     The caller has already isolated git. Most of a test's setup was git processes,
     which are slowest on the Windows runners.
+    Git's automatic maintenance is off:
+    started by a commit, it runs in the background and can add and remove files
+    under .git while shutil.copytree copies the folder.
     """
     if "vault" in _SEED:
         return _SEED["vault"]
@@ -84,7 +87,9 @@ def seed_vault():
     for key, value in (("user.name", "Synthetic Writer"),
                        ("user.email", "writer@example.invalid"),
                        ("core.autocrlf", "false"),
-                       ("commit.gpgsign", "false")):
+                       ("commit.gpgsign", "false"),
+                       ("maintenance.auto", "false"),
+                       ("gc.auto", "0")):
         run_git(vault, "config", key, value)
     write_file(vault, "00-meta/vault-config.json", json.dumps({
         "required_keys": ["title"], "enums": {},
