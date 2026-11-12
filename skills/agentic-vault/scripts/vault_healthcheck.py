@@ -924,11 +924,15 @@ def estimate_tokens(text: str) -> int:
 
 # 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
 # The v0.45.1 line rule, still applied where a block node starts (and where the front matter
-# is a root scalar or ends inside an open quote or flow); unquoted_frontmatter_link_lines() below.
+# is a root scalar, or an open quote or flow reaches its end or a '...' line);
+# unquoted_frontmatter_link_lines() below.
 UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
 _FM_BLOCK_HEADER_RE = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?$")
 _FM_HEADER_DIGIT_RE = re.compile(r"[|>][+-]?([1-9])")
 _FM_DOC_END_RE = re.compile(r"\.\.\.(?:[ \t]|$)")
+# Indicators left over at a node start once the scanner has handled '-', '?', ':', flows,
+# quotes, block scalar headers, aliases, anchors, tags and comments: YAML stops there.
+_FM_NOT_PLAIN_START = frozenset(",]}%@`|>")
 
 
 def _fm_indent(line: str) -> int:
@@ -998,12 +1002,15 @@ class _FrontmatterLinkScan:
         self.node_col = -1
         self.node_owner = -1
         self.open_line: int | None = None
+        self.cut: list[tuple[int, int]] = []  # quotes or flows a '...' line cut (YAML errors)
         self.flag = False
 
     def line(self, line: str, number: int) -> bool:
         self.flag = False
         self.collection_before = self.collection
         if _FM_DOC_END_RE.match(line):  # '...' ends every node
+            if self.mode in ("quoted", "flow") and self.open_line is not None:
+                self.cut.append((self.open_line + 1, number))  # rule (d) up to the '...' line
             self.mode = "block"
             self.quote = ""
             self.depth = 0
@@ -1129,6 +1136,8 @@ class _FrontmatterLinkScan:
                 while j < n and line[j] not in " \t,[]{}":
                     j += 1
                 item = ("after", j, i, owner)
+            elif char in _FM_NOT_PLAIN_START:  # cannot start a plain scalar (YAML error)
+                self.mode = "block"
             else:  # plain scalar or implicit key
                 k = i
                 while k < n and not _fm_comment_start(line, k) and not _fm_indicator(line, k, ":"):
@@ -1200,9 +1209,13 @@ def unquoted_frontmatter_link_lines(fm: str) -> list[int]:
     lines = fm.splitlines()
     scan = _FrontmatterLinkScan()
     reported = [number for number, line in enumerate(lines) if scan.line(line, number)]
+    cut = list(scan.cut)
     if scan.mode in ("quoted", "flow") and scan.open_line is not None:
-        # rule (d): the front matter ends inside a quote or flow (a YAML error)
-        later = (number for number in range(scan.open_line + 1, len(lines))
+        cut.append((scan.open_line + 1, len(lines)))
+    if cut:
+        # rule (d): a quote or flow stays open to the end of the front matter or is cut by a
+        # '...' line (a YAML error either way); the v0.45.1 line rule applies inside it
+        later = (number for start, end in cut for number in range(start, end)
                  if UNQUOTED_FM_LINK_RE.match(lines[number]))
         reported = sorted(set(reported).union(later))
     return reported
