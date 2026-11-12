@@ -342,6 +342,12 @@ class AdvancedRetrievalTests(unittest.TestCase):
                 second_reads += 1
                 if second_reads == 2:
                     first.write_text("rollback FIRST_NEW\n", encoding="utf-8")
+                    # The rewrite keeps the size, so the final sweep can see it only through the file
+                    # times. Two writes inside one file-time tick share them, and the test then failed
+                    # (about one run in three when repeated in one process on Windows). Move the
+                    # modification time on explicitly so that the result does not depend on the clock.
+                    stamp = first.stat()
+                    os.utime(first, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
             return result
         with mock.patch.object(retrieval._legacy, "_read_regular_bytes", side_effect=replace_earlier_after_later):
             result = self.run_retrieval(backend="hybrid")
