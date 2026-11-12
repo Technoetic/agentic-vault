@@ -1741,7 +1741,7 @@ class V0460ErrataTests(unittest.TestCase):
                     self.assertNotIn(digest[:8], errata)
 
 
-# v0.47.0: eleven items from an outside review that compared the plugin with a vendor prompting
+# v0.47.0: eleven items from a review that compared the plugin with a vendor prompting
 # guide. Item 2 was tried and not shipped, no certificate-bound file changed (the v0.46.0
 # fingerprint stays), and only the health check, the Aside clause and the new command asset move to
 # engine=0.47.0. The note fixes the publication order; the record specifies gates, not results.
@@ -2067,6 +2067,34 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertIn("← Claude Code가 위 안내를 불러오는 한 줄 (@../AGENTS.md)", tree)
         docs_index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         self.assertIn("](../AGENTS.md)", docs_index)
+
+    def test_v0470_texts_call_the_review_a_comparison(self) -> None:
+        # The comparison with the vendor guide was made for the maintainer by read-only agents, and
+        # a second set of agents checked their findings; no third party took part. The v0.47.0
+        # texts say so and never call it an outside review (the published v0.46.0 texts keep theirs).
+        release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
+        opening = release[:release.index("\n## ")]
+        self.assertIn("대조 검토", opening)
+        self.assertNotIn("외부 검토", release)
+        readme = README.read_text(encoding="utf-8")
+        korean = _section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령")
+        self.assertIn("이 플러그인을 공급사의 프롬프트 작성 안내서와 견준 대조 검토가 찾은 열한 항목", _folded(korean))
+        self.assertNotIn("외부", korean)
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v0.47.0**"))
+        self.assertIn("대조 검토에서 나온 열한 항목", current)
+        self.assertNotIn("외부 검토", current)
+        english = _section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
+        codex_doc = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        codex_section = _section(codex_doc, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
+        codex_long = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        texts = {"readme": english, "docs_codex": codex_section,
+                 "codex_long": codex_long["interface"]["longDescription"],
+                 "record": V0470ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8")}
+        for name, text in texts.items():
+            with self.subTest(text=name):
+                folded = _folded(text)
+                self.assertIn("a review that compared the plugin with a vendor prompting guide", folded)
+                self.assertNotIn("outside", folded.lower())
 
     def test_contributor_guide_layout_is_stated_as_shipped(self) -> None:
         # The guide ships as root AGENTS.md plus .claude/CLAUDE.md; no text may name a root CLAUDE.md.
