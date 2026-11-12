@@ -295,9 +295,18 @@ class AdapterAssetTests(unittest.TestCase):
         self.assertNotIn("bash 셸이 없으면 실행하지", text)  # a host without bash gets the Python route
         # A host on the shell-free Python route may have no grep: the after-run check names both ways
         # to count the not-running message.
+        # The start hook acts only on commands that begin with `aside` (settings-hooks.json), and the
+        # Python route begins with `python`: on Windows the helper runs first even when the hook is on,
+        # and again directly before the one retry.
         self.assertIn("- 실행 뒤 종료 코드와 출력 파일의 바이트 수·SHA-256을 확인한다. 실패했으면 출력·오류 파일에 "
                       "\"Aside isn't running\"이 있는지 건수만 센다(bash 셸이면 `grep -c`, 없으면 Python으로 센다). "
-                      "있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.", lines)
+                      "있으면 2단계 1번을 다시 하되 Windows에서는 훅이 있어도 도우미를 직접 실행하고, 한 번만 다시 "
+                      "실행한다.", lines)
+        self.assertNotIn("있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.", text)
+        self.assertIn("1. CLAUDE.md의 Aside 조항이 정한 기동 절차를 따른다(Windows에서 자동 기동 훅이 없으면 볼트 루트에서 "
+                      "`powershell -NoProfile -ExecutionPolicy Bypass -File 00-meta/scripts/aside-up.ps1`). "
+                      "4단계의 Python 경로로 넘길 때는 자동 기동 훅이 `aside`로 시작하는 명령에만 동작하므로, "
+                      "Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", lines)
         self.assertNotIn("`grep -c`로 건수만 보고", text)
 
     def test_repl_command_closes_tabs_with_the_global_function(self) -> None:
@@ -366,6 +375,11 @@ class AdapterAssetTests(unittest.TestCase):
                         '"$(cat <파일>)"', "subprocess.run(['aside', 'repl', 코드])"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
+        # The hook does not see the Python route (its command begins with `python`), so that route
+        # runs the helper even when the hook is on.
+        self.assertIn("Claude Code에서 자동 기동 훅(`.claude/settings.local.json`)을 켰다면 따로 실행하지 않는다. "
+                      "다만 훅은 `aside`로 시작하는 명령에만 동작하므로, bash 셸이 없어 Python으로 `aside repl`을 부를 "
+                      "때는 훅이 있어도 먼저 아래 도우미를 실행한다. 훅이 없으면", text)
 
     def test_assets_carry_no_personal_or_vault_specific_data(self) -> None:
         assets = sorted(path for path in ADAPTERS.glob("*/*") if path.is_file())
