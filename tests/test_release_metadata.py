@@ -1820,8 +1820,8 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         "주입 명령이 훅을 거치지 않는다는 관찰은 Claude Code 2.1.252 출력 모드에서 경우마다 1회 본 것이며, 훅 기록은 "
         "두 번의 실행에서 확인했다. repl 전달 방식은 Windows 11, Aside CLI 1.26.916.1741에서 2026-11-12~13에 "
         "실측했다: Git Bash에서 인자로 넘기기와 Python에서 셸 없이 넘기기는 스크립트가 그대로 전달됐고, Windows "
-        "PowerShell 5.1에서 인자로 넘기면 큰따옴표가 사라져 실패했다(1회). PowerShell 7, macOS, Linux와 Codex 세션의 "
-        "실행은 시험하지 않았다. /aside-repl은 최종 파일로 Claude Code 2.1.252 출력 모드에서 공개 페이지 하나로 한 번 "
+        "PowerShell 5.1에서 인자로 넘기면 큰따옴표가 사라져 실패했다(1회). 같은 PowerShell 5.1에서 Python 한 줄 "
+        "경로로 넘기면 그대로 전달됐다(1회). PowerShell 7, macOS, Linux와 Codex 세션의 실행은 시험하지 않았다. /aside-repl은 최종 파일로 Claude Code 2.1.252 출력 모드에서 공개 페이지 하나로 한 번 "
         "실행했다(기동 도우미와 aside repl 줄은 에이전트 자신의 도구 호출로 실행됐다). IDE 확장, 슬래시 명령 없이 "
         "말로 한 요청, Codex에서는 실행하지 않았다. 절차 글은 동작을 강제하지 못한다.",
     )
@@ -1949,6 +1949,12 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                          [str(n) for n in range(1, self.DEFAULT_CHANGES + 1)])
         # Item 2 was not shipped, so no entry concerns a change of the architecture rule.
         self.assertIn("상시 로드 규칙 `vault-architecture.md`는 그대로다", _folded(section))
+        # Entry 18 states the row count of the guide skeleton's 2026-11-12~13 table as it ships.
+        guide = (REPO_ROOT / "assets/adapters/aside/operations-guide.md").read_text(encoding="utf-8")
+        table = _section(guide, "## 엔진 개발 실측: repl 호출 (Windows 11, CLI 1.26.916.1741, 2026-11-12~13)")
+        rows = [line for line in table.splitlines() if line.startswith("|")][2:]
+        entry = _folded(section[section.index("\n18. "):section.index("\n19. ")])
+        self.assertIn(f"2026-11-12~13의 표({len(rows)}행)", entry)
 
     def test_v0470_no_placeholder_left(self) -> None:
         import re
@@ -2009,12 +2015,17 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         for text in self.BOUNDARY_TEXTS:
             with self.subTest(boundary=text[:30]):
                 self.assertIn(text, boundaries)
-        # The PowerShell 5.1 statement appears once, as the measured failure with its run count.
-        self.assertEqual(boundaries.count("PowerShell 5.1"), 1)
-        start = boundaries.index("PowerShell 5.1")
-        sentence = boundaries[start:boundaries.index("실패했다(1회).", start)]
-        self.assertNotIn("다. ", sentence)
-        self.assertNotIn("\n", sentence)
+        # PowerShell 5.1 appears twice, each time in one measured sentence with its run count: the
+        # direct argument failed, the command's one-line Python route passed the script intact.
+        self.assertEqual(boundaries.count("PowerShell 5.1"), 2)
+        position = 0
+        for ending in ("실패했다(1회).", "그대로 전달됐다(1회)."):
+            with self.subTest(powershell_sentence=ending):
+                start = boundaries.index("PowerShell 5.1", position)
+                sentence = boundaries[start:boundaries.index(ending, start)]
+                self.assertNotIn("다. ", sentence)
+                self.assertNotIn("\n", sentence)
+                position = start + len(sentence)
         self.assertNotIn("영수증", release)
         self.assertNotIn("호스트 문서와 영수증에", release)
         limits = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Limits"))

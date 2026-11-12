@@ -318,12 +318,18 @@ class AdapterAssetTests(unittest.TestCase):
         section = _section(text, new)
         rows = [line for line in section.splitlines() if line.startswith("|")]
         self.assertEqual(rows[1], "|---|---|---|")
-        self.assertEqual(len(rows) - 2, 12)
+        self.assertEqual(len(rows) - 2, 13)
         for literal in ('"$(cat 파일.js)"', "subprocess.run(['aside', 'repl', 코드])", "PowerShell 5.1",
                         "계정·세션 폴더 줄은 없었다", "< 파일.js", "계정과 세션 폴더 경로", "openTab('file:///…')",
                         "listBrowserTabs()", "getTabs()", "import(", "30.0초", "./artifacts/x.png", "120s timeout"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, "\n".join(rows))
+        # 2026-11-13: the command's one-line Python route typed in Windows PowerShell 5.1 (one run).
+        python_in_powershell = [row for row in rows if "PowerShell 5.1" in row and "Python 한 줄" in row]
+        self.assertEqual(len(python_in_powershell), 1)
+        for literal in ("큰따옴표·작은따옴표·템플릿 문자열·한글", "그대로 실행됐다", "(1회)"):
+            with self.subTest(python_route_literal=literal):
+                self.assertIn(literal, python_in_powershell[0])
         intro = text[text.index("# Aside CLI 운영 가이드"):text.index("## 명령과 데이터 경로")]
         self.assertIn("표 두 개", intro)
 
