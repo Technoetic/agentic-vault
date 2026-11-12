@@ -195,6 +195,44 @@ class ScanAnchorDriftTests(_OwnedRoot):
              "- 의미: 세션이 session-end 없이 닫혔을 개연성 — handoff·장기기억(remember)이 그만큼 낡았다.",
              f"- 조치: session-end 실행(anchor 갱신 + 교훈 커밋). 중간 확인: `git log --oneline {anchor}..HEAD`"]))
 
+    def test_contract_hex_anchor_after_a_leftover_placeholder_line(self) -> None:
+        # v0.45.1 skipped the placeholder line and evaluated the hex anchor below it.
+        repo = self.root / "repo"
+        init_repo(repo)
+        vault = repo / "vault"
+        self.write_handoff(vault)
+        anchor = commit_file(repo, "vault/h.md", (vault / "h.md").read_text(encoding="utf-8"))[:7]
+        for number in range(5):
+            commit_file(repo, "outside.txt", f"{number}\n")
+        self.write_handoff(vault, PLACEHOLDER_LINE + f"**기준 커밋(anchor):** `{anchor}`\n")
+        self.assertEqual(self.scan(vault), (
+            f"anchor drift 5커밋 — session-end 누락 의심 (anchor `{anchor}` {FIXED_DAY} 이후 미갱신)",
+            [f"- ⚠️ **HEAD가 anchor `{anchor}`({FIXED_DAY})보다 5커밋 앞선다** (임계 3).",
+             "- 의미: 세션이 session-end 없이 닫혔을 개연성 — handoff·장기기억(remember)이 그만큼 낡았다.",
+             f"- 조치: session-end 실행(anchor 갱신 + 교훈 커밋). 중간 확인: `git log --oneline {anchor}..HEAD`"]))
+
+    def test_contract_hex_anchor_at_head_after_a_leftover_placeholder_line(self) -> None:
+        vault = self.root / "vault"
+        init_repo(vault)
+        for text in ("one\n", "two\n", "three\n", "four\n"):
+            anchor = commit_file(vault, "a.md", text)
+        self.write_handoff(vault, PLACEHOLDER_LINE + f"**기준 커밋(anchor):** `{anchor}`\n")
+        self.assertEqual(self.scan(vault), (
+            None, [f"- 정상: anchor `{anchor}`({FIXED_DAY}) 대비 HEAD 0커밋 (임계 3 미만)"]))
+
+    def test_contract_unresolvable_hex_anchor_after_a_leftover_placeholder_line(self) -> None:
+        vault = self.root / "vault"
+        init_repo(vault)
+        for text in ("one\n", "two\n", "three\n", "four\n"):
+            commit_file(vault, "a.md", text)
+        self.write_handoff(vault, PLACEHOLDER_LINE + "**기준 커밋(anchor):** `abcdef1`\n")
+        self.assertEqual(self.scan(vault), (
+            "anchor `abcdef1`를 git이 해석하지 못함 — 이력 재작성/오타 의심",
+            ["- ⚠️ anchor `abcdef1` 해석 불가. handoff가 가리키는 시점이 리포에 없다."]))
+        bare = self.root / "bare"
+        self.write_handoff(bare, PLACEHOLDER_LINE + "**기준 커밋(anchor):** `abcdef1`\n")
+        self.assertEqual(self.scan(bare), (None, ["- 판정 불가: git 리포가 아니거나 git 실행 실패"]))
+
     def test_contract_hex_anchor_without_git(self) -> None:
         vault = self.root / "vault"
         self.write_handoff(vault, "**기준 커밋(anchor):** `abc1234`\n")
