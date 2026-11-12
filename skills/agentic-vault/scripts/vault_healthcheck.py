@@ -867,7 +867,10 @@ def scan_anchor_drift(vault: Path, handoff_rel: str,
     handoff = vault / handoff_rel
     if not handoff.is_file():
         return None, [f"- 판정 불가: handoff 없음 ({handoff_rel})"]
-    m = ANCHOR_RE.search(read_vault_text(vault, handoff, "handoff_note", deny_zones))
+    # A hex anchor line wins over a leftover placeholder line, wherever it stands (as in v0.45.1,
+    # whose pattern did not match the placeholder); the placeholder counts only without one.
+    matches = list(ANCHOR_RE.finditer(read_vault_text(vault, handoff, "handoff_note", deny_zones)))
+    m = next((match for match in matches if match.group(1)), matches[0] if matches else None)
     if not m:
         return ("handoff에 기준 커밋(anchor) 줄이 없음 — session-end 계약 위반",
                 ["- ⚠️ handoff에 `**기준 커밋(anchor):**` 줄이 없다. "
