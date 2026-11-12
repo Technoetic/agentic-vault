@@ -55,7 +55,7 @@ import subprocess
 import sys
 import unicodedata
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
@@ -455,6 +455,13 @@ def validate_config(raw: object) -> dict:
     for key in _PATH_KEYS:
         if key in config:
             config[key] = _normalize_relative_path(config[key], key, allow_empty=True)
+
+    # SessionStart injects these two notes, so they must be Markdown notes
+    # (any letter case), as in vault_state.py. The message never shows the value.
+    for key in ("hot_note", "handoff_note"):
+        value = config.get(key)
+        if value and PurePosixPath(value).suffix.casefold() != ".md":
+            raise HealthcheckError(f"{key} must name a Markdown note (.md)")
 
     for key in _PATH_LIST_KEYS:
         if key not in config:
