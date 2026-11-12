@@ -1,6 +1,7 @@
 """Verifier subprocess failures must not leave children holding temporary resources."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -139,6 +140,7 @@ class CodexVerificationTests(unittest.TestCase):
             "assets/adapters/lesson-cues/settings-hooks.json",
             "assets/adapters/lesson-cues/guide.md",
             "assets/adapters/aside/aside-up.ps1",
+            "assets/adapters/aside/aside-repl-command.md",
         )
         for relative in resources:
             resource = source / relative
@@ -601,6 +603,46 @@ class CodexVerificationTests(unittest.TestCase):
 
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_installed_aside_command_asset_must_exist_and_match(self) -> None:
+        # The adapter report compares an installed /aside-repl command with this bundled copy.
+        relative = "assets/adapters/aside/aside-repl-command.md"
+        for mutation in ("changed", "missing"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                source = self.make_plugin_fixture(Path(temporary))
+
+                def mutate_cache(cached):
+                    resource = cached / relative
+                    if mutation == "missing":
+                        resource.unlink()
+                    else:
+                        resource.write_text("Changed command resource\n", encoding="utf-8")
+
+                with self.assertRaises((RuntimeError, FileNotFoundError)):
+                    self.verify_fixture(source, mutate_cache=mutate_cache)
+
+    def test_verifier_compares_every_bundled_file_the_adapter_report_reads(self) -> None:
+        # Every BUNDLED_* file of the adapter report is byte-compared after the native install.
+        tree = ast.parse((ROOT / "scripts/verify_codex_plugin.py").read_text(encoding="utf-8"))
+        compared: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple):
+                names = {element.value for element in node.iter.elts
+                         if isinstance(element, ast.Constant) and isinstance(element.value, str)}
+                if "skills/agentic-vault/scripts/vault_adapters.py" in names:
+                    compared |= names
+        self.assertIn("assets/adapters/aside/aside-up.ps1", compared)
+        scripts = str(ROOT / "skills" / "agentic-vault" / "scripts")
+        sys.path.insert(0, scripts)
+        try:
+            import vault_adapters
+        finally:
+            sys.path.remove(scripts)
+        bundled = {name: value for name, value in vars(vault_adapters).items() if name.startswith("BUNDLED_")}
+        self.assertIn("BUNDLED_COMMAND", bundled)  # the /aside-repl command asset (v0.47.0)
+        for name, path in sorted(bundled.items()):
+            with self.subTest(constant=name):
+                self.assertIn(Path(path).resolve().relative_to(ROOT.resolve()).as_posix(), compared)
 
     def test_installed_zone_healthcheck_and_bridge_resources_must_exist_and_match(self) -> None:
         # The shared deny-zone matcher, the health check and the Telegram bridge carry the
