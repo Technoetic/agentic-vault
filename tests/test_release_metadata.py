@@ -2225,42 +2225,62 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("with the hook log checked in two runs (the probe command pre-approved its injected command "
                       "with `allowed-tools`).", limits)
 
-    # Fix round 3: a timing-dependent test that the local gates found. The test moves the rewritten
-    # file's modification time on explicitly (runtime code unchanged), and both documents name the
-    # limit of the final source sweep that lies behind it.
-    TIMING_FIX_OPENING = "그 밖에 릴리스 게이트가 찾은 기존 시험의 시간 의존 결함 하나를 고쳤다(런타임 코드는 그대로다)."
+    # Fix round 3: a timing-dependent test that failed again in the local gates. The test moves the
+    # rewritten file's modification time on explicitly (runtime code unchanged), and both documents
+    # name the limit of the final source sweep that lies behind it. Fix round 4: the test was already
+    # listed as unstable in the v0.23.0 verification document and the v0.25.0 and v0.26.0 release
+    # notes, so neither document presents it as a first discovery; and the limit is stated as equal
+    # file times (one tick, or on Windows a rewrite whose modification time is put back, because
+    # `st_ctime_ns` is the creation time there), not as a matter of speed only.
+    TIMING_FIX_OPENING = (
+        "그 밖에 이전 릴리스 문서에 불안정한 시험으로 적혀 있던 시험 하나가 이번 릴리스 게이트에서 다시 떨어져 "
+        "그 시간 의존 결함을 고쳤다(런타임 코드는 그대로다)."
+    )
+    EARLIER_LISTINGS = (
+        "이 시험은 [v0.23.0의 검증 문서](../verification/v0.23.0.md)와 [v0.25.0](v0.25.0.md)·[v0.26.0](v0.26.0.md) "
+        "릴리스 노트에 불안정한 시험으로 적혀 있었고, v0.26.0에서는 다루지 않은 채 남았다."
+    )
     TIMING_FIX_BULLET = (
         "- 시험: [tests/test_vault_retrieval.py](../../tests/test_vault_retrieval.py)의 "
         "`test_later_source_verification_cannot_leave_earlier_source_stale`은 같은 크기로 다시 쓴 출처를 마지막 "
-        "재확인이 알아채는지 보는데, 두 번의 쓰기가 같은 파일 시각 눈금에 들어가면 떨어졌다. 이 릴리스의 첫 후보 "
+        "재확인이 알아채는지 보는데, 두 번의 쓰기가 같은 파일 시각 눈금에 들어가면 떨어졌다. " + EARLIER_LISTINGS +
+        " 이 릴리스의 첫 후보 "
         "커밋에서 전체 로컬 시험을 두 번 돌린 가운데 한 번 떨어졌고, 그 시험만 한 프로세스에서 300번 반복하면 그 "
         "커밋에서 97번, v0.46.0에서 86번 떨어졌다(Windows 11, Python 3.12). 시험이 다시 쓴 파일의 수정 시각을 "
         "명시적으로 뒤로 옮기게 고쳤다. 런타임 코드는 바뀌지 않는다."
     )
     SWEEP_LIMIT_BULLET = (
         "- 검색의 마지막 출처 재확인(`vault_retrieval.py`)은 파일의 장치·inode·크기와 파일 시각"
-        "(`st_mtime_ns`·`st_ctime_ns`)을 견준다. 출처의 내용 해시를 확인한 뒤 그 파일이 같은 크기로, 파일 시각이 "
-        "구별되지 않을 만큼 빨리 제자리에서 다시 쓰이면 이 재확인은 알아채지 못한다. v0.46.0에도 있던 한계이며 이번 "
+        "(`st_mtime_ns`·`st_ctime_ns`)을 처음 읽기 전의 값과 견준다. 출처의 내용 해시를 확인한 뒤 그 파일이 같은 "
+        "크기로 제자리에서 다시 쓰이고 이 값들이 그대로 남으면 이 재확인은 알아채지 못한다. 두 쓰기가 같은 파일 시각 "
+        "눈금에 들어갈 때 그렇고, Windows에서는 `st_ctime_ns`가 만든 시각이어서 수정 시각을 되돌린 다시 쓰기도 "
+        "그렇다(Windows 11, Python 3.12에서 20번 가운데 20번 옛 내용이 나왔다). v0.46.0에도 있던 한계이며 이번 "
         "릴리스에서 고치지 않았다(위 시험 수정은 시험만 바꾼다)."
     )
     RECORD_TIMING_SCOPE = (
-        "It also fixes one timing-dependent test that the local gates of this release found "
-        "(`tests/test_vault_retrieval.py`); runtime code is unchanged by that fix."
+        "It also fixes one timing-dependent test (`tests/test_vault_retrieval.py`) that earlier release documents "
+        "had listed as unstable and that failed again in the local gates of this release; runtime code is unchanged "
+        "by that fix."
     )
     RECORD_TIMING_EVIDENCE = (
-        "- Test fix found by the local gates: `tests/test_vault_retrieval.py` "
+        "- Test fix (a test listed as unstable since v0.23.0 that failed again in this release's local gates): "
+        "`tests/test_vault_retrieval.py` "
         "`AdvancedRetrievalTests.test_later_source_verification_cannot_leave_earlier_source_stale` moves the "
         "rewritten file's modification time on explicitly. The receipt names the record of that test repeated 300 "
         "times in one process on the v0.46.0 tree and on the final commit."
     )
     RECORD_SWEEP_LIMIT = (
-        "The final source sweep of retrieval compares file identity, size and file times; a same-size in-place "
-        "rewrite that leaves those equal after the source's content hash was verified is not noticed. This limit is "
-        "in v0.46.0 as well and is not fixed in this release."
+        "The final source sweep of retrieval compares file identity, size and file times with the values taken "
+        "before the first read; a same-size in-place rewrite that leaves those equal after the source's content hash "
+        "was verified is not noticed (two writes inside one file-time tick, or on Windows a rewrite whose "
+        "modification time is put back, because `st_ctime_ns` is the creation time there). This limit is in v0.46.0 "
+        "as well and is not fixed in this release."
     )
     TIMING_TEST = "test_later_source_verification_cannot_leave_earlier_source_stale"
 
     def test_v0470_note_states_the_timing_test_fix_and_the_sweep_limit(self) -> None:
+        import re
+
         release = self.RELEASE.read_text(encoding="utf-8")
         opening = _folded(release[:release.index("\n## 변경\n")])
         self.assertIn("통과하지 못해 넣지 않았다. " + self.TIMING_FIX_OPENING + " 새 옵션 없이도", opening)
@@ -2271,18 +2291,33 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(changes[fixture + 1], self.TIMING_FIX_BULLET)
         self.assertIn("수정 시각을 명시적으로 뒤로 옮기게 고쳤다", changes[fixture + 1])
         self.assertIn("런타임 코드는 바뀌지 않는다", changes[fixture + 1])
+        # The sentence about the earlier listings links three earlier documents, and each one names the test.
+        links = re.findall(r"\]\(([^)]+)\)", self.EARLIER_LISTINGS)
+        self.assertEqual(links, ["../verification/v0.23.0.md", "v0.25.0.md", "v0.26.0.md"])
+        for link in links:
+            target = (self.RELEASE.parent / link).resolve()
+            self.assertTrue(target.is_file(), link)
+            self.assertIn(self.TIMING_TEST, target.read_text(encoding="utf-8"), link)
+        # The release note no longer reads like a first discovery of the test.
+        self.assertNotIn("릴리스 게이트가 찾은", release)
         # The limit stands directly before the last boundary (injected commands and the repl).
         boundaries = [line for line in _section(release, "## 알려진 경계").splitlines() if line.startswith("- ")]
         self.assertTrue(boundaries[-1].startswith("- 주입 명령이 훅을 거치지 않는다는 관찰은"), boundaries[-1][:40])
         self.assertEqual(boundaries[-2], self.SWEEP_LIMIT_BULLET)
         self.assertIn("이 재확인은 알아채지 못한다", boundaries[-2])
         self.assertIn("v0.46.0에도 있던 한계", boundaries[-2])
+        # The condition is equal file times compared with the stamp taken before the first read, and a
+        # rewrite on Windows whose modification time is put back is named; speed is not the only case.
+        self.assertIn("처음 읽기 전의 값과 견준다", boundaries[-2])
+        self.assertIn("수정 시각을 되돌린 다시 쓰기도 그렇다", boundaries[-2])
+        self.assertNotIn("구별되지 않을 만큼 빨리", release)
 
     def test_v0470_record_states_the_timing_test_fix_and_the_sweep_limit(self) -> None:
         import re
 
         record = self.VERIFICATION.read_text(encoding="utf-8")
         self.assertIn(self.RECORD_TIMING_SCOPE, _folded(_section(record, "## Release content and scope")))
+        self.assertNotIn("that the local gates of this release found", _folded(record))
         # The evidence bullet of the test fix follows the bullet of item 11.
         evidence = _section(record, "## Required feature evidence")
         bullets = [_folded(part) for part in re.split(r"\n(?=- )", evidence) if part.startswith("- ")]
@@ -2313,6 +2348,14 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(fields, ["st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns"])
         sweep = next(line for line in source.splitlines() if '"final source sweep"' in line)
         self.assertIn('_stamp(path) != documents[rel]["stamp"]', sweep)
+        # "처음 읽기 전의 값" / "the values taken before the first read": the stamp kept for each source is
+        # the one taken before the source is first read.
+        lines = source.splitlines()
+        kept = next(index for index, line in enumerate(lines)
+                    if line.lstrip().startswith("documents[rel] = {") and '"stamp": before' in line)
+        taken = max(index for index in range(kept) if lines[index].strip() == "before = _stamp(path)")
+        read = max(index for index in range(kept) if "_legacy._read_markdown(path" in lines[index])
+        self.assertLess(taken, read)
 
 
 # v0.47.0 shared surfaces: README, SECURITY.md, docs/codex.md, docs/hardening.md, docs/README.md and
