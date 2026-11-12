@@ -1988,6 +1988,48 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                     for keyword in node.keywords if keyword.arg == "default"]
         self.assertEqual([ast.literal_eval(value) for value in defaults], [5])
 
+    WORDING_BULLET_START = (
+        '- 문구 정리: 새 볼트의 hot·handoff 템플릿 제목은 "500단어 이내" 대신 "500단어 권고"라고 하고, hot 템플릿 '
+        '본문은 세션 주입 예산(`hot_max_tokens`) 안에 들도록 압축하라고 한다. SKILL.md는 hot을 "500단어 스냅숏" 대신 '
+        '"짧은 현재 상태 스냅숏"으로 부르고, 종료 때 "500단어 이내로 재작성" 대신 핵심 결정·다음 행동을 앞에 두라고 '
+        '한다. 상시 로드 규칙 `vault-architecture.md`의 문구는 바꾸지 않았다.'
+    )
+    ENTRY_7_START = (
+        '7. 새 볼트의 hot·handoff 템플릿 제목은 "500단어 이내" 대신 "500단어 권고"라고 하고, hot 템플릿 본문은 세션 '
+        '주입 예산(`hot_max_tokens`) 안에 들도록 압축하라고 한다. SKILL.md는 hot을 "짧은 현재 상태 스냅숏"으로 '
+        '부르고, 종료 때 `hot_note`를 핵심 결정·다음 행동이 앞에 오게 다시 쓰라고 한다. 상시 로드 규칙 '
+        '`vault-architecture.md`는 그대로다'
+    )
+
+    def test_v0470_500_word_passages_state_what_each_file_changed(self) -> None:
+        # Only the hot template names the injection budget; the handoff template changed its title only,
+        # and SKILL.md changed two phrases (final check of the documents, F3).
+        changes = _section(self.RELEASE.read_text(encoding="utf-8"), "## 변경")
+        start = changes.index("- 문구 정리:")
+        bullet = _folded(changes[start:changes.index("\n- ", start)])
+        entry = self._default_change_entry(7)
+        self.assertTrue(bullet.startswith(self.WORDING_BULLET_START), bullet)
+        self.assertTrue(entry.startswith(self.ENTRY_7_START), entry)
+        for name, passage in (("bullet", bullet), ("entry 7", entry)):
+            with self.subTest(passage=name):
+                self.assertIn("hot 템플릿 본문은 세션 주입 예산(`hot_max_tokens`) 안에", passage)
+                self.assertNotIn('"500단어 권고"와 세션 주입', passage)
+        # The phrases the passages state, in the files they describe.
+        hot = (REPO_ROOT / "assets/templates/hot.md").read_text(encoding="utf-8")
+        handoff = (REPO_ROOT / "assets/templates/handoff.md").read_text(encoding="utf-8")
+        skill = (REPO_ROOT / "skills/agentic-vault/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("`hot_max_tokens`", hot)
+        self.assertNotIn("hot_max_tokens", handoff)
+        for name, template in (("hot", hot), ("handoff", handoff)):
+            title = next(line for line in template.splitlines() if line.startswith("# "))
+            with self.subTest(title=name):
+                self.assertIn("500단어 권고", title)
+                self.assertNotIn("500단어 이내", title)
+        self.assertIn("hot(짧은 현재 상태 스냅숏)", skill)
+        self.assertNotIn("500단어 스냅숏", skill)
+        self.assertIn("`hot_note`를 핵심 결정·다음 행동이 앞에 오게 다시 쓰고", skill)
+        self.assertNotIn("500단어 이내로 재작성", skill)
+
     def test_v0470_note_states_the_shared_briefing_backoff(self) -> None:
         # The retry backoff is shared by all pending slots and returns to its base only when `pending` is
         # empty (finding BR-1; the behaviour is pinned in tests/test_jarvis_bridge.py).
