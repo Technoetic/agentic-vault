@@ -1300,10 +1300,13 @@ class Guard:
         """Zones named in a raw command (zones_in), and whether a control name is.
 
         A second look drops quotes, backslashes, braces and commas, so 90-ass"ets"
-        and 90-ass\\ets still show the zone name.
+        and 90-ass\\ets still show the zone name. They are also dropped before the
+        fold: casefold turns U+0345 into a starter, after which the marks around a
+        dropped escape can no longer reorder to the zone's folded spelling.
         """
         base = fold_path_part(text)
-        variants = (base, re.sub(r"[\"'\\{},]", "", base))
+        unescape = re.compile(r"[\"'\\{},]")
+        variants = (base, unescape.sub("", base), fold_path_part(unescape.sub("", text)))
         named = [set(self.zones_in(variant)) for variant in variants]
         zones = [zone for zone in self.zones if any(zone in found for found in named)]
         return zones, any(self.control_named(variant) for variant in variants)
