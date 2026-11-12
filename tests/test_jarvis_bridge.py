@@ -1203,6 +1203,63 @@ class JarvisBriefingTests(unittest.TestCase):
         sender.assert_called_once()
         self.assertEqual(sender.call_args.args[2], "🌅 아침 브리핑\nbody")
 
+    def test_same_day_give_up_continues_with_the_next_pending_slot(self):
+        # After a same-day give-up the pass goes on to the next pending slot instead of returning.
+        slots = [(7, 30), (7, 31)]
+        now = datetime(2026, 9, 1, 7, 31)
+        state = self._load(datetime(2026, 9, 1, 7, 0), slots)
+        generator = Mock(side_effect=[
+            *[_BRIDGE.GenerationResult(False, "fail")] * 8,
+            _BRIDGE.GenerationResult(True, "body")])
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "log"):
+            for _call in range(8):
+                state = self._send_with(state, now, sender, generator, slots)
+
+        self.assertEqual(generator.call_count, 9)
+        messages = [call.args[2] for call in sender.call_args_list]
+        self.assertEqual(len(messages), 2)
+        self.assertIn("9월 1일 07:30 아침 브리핑을 8번 시도했지만", messages[0])
+        self.assertEqual(messages[1], "🌅 아침 브리핑\nbody")
+        self.assertEqual(state.fired, {(7, 31)})
+        self.assertEqual(state.pending, [])
+        self.assertEqual(self._disk_state(), {
+            "version": 1, "day": "2026-09-01", "fired": ["07:31"], "pending": [],
+        })
+
+    def test_give_up_state_write_failure_changes_nothing_in_memory(self):
+        # The give-up writes the state before memory changes: when that write fails, the slot stays
+        # pending in memory, is not skipped and no notice goes out; the next call gives it up once.
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        generator = Mock(return_value=_BRIDGE.GenerationResult(False, "fail"))
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "log"):
+            for _call in range(7):
+                state = self._send_with(state, now, sender, generator, slots)
+            with patch.object(
+                    _BRIDGE, "_write_briefing_state", side_effect=OSError("disk full")), \
+                    self.assertRaises(OSError):
+                self._send_with(state, now, sender, generator, slots)
+
+            self.assertEqual(generator.call_count, 8)
+            self.assertEqual(state.pending, [(7, 30)])
+            self.assertNotIn((7, 30), state.skipped)
+            sender.assert_not_called()
+            self.assertEqual(self._disk_state()["pending"], ["07:30"])
+
+            state = self._send_with(state, now, sender, generator, slots)
+
+        self.assertEqual(generator.call_count, 9)
+        sender.assert_called_once()
+        self.assertIn("9번 시도했지만", sender.call_args.args[2])
+        self.assertEqual(state.pending, [])
+        self.assertIn((7, 30), state.skipped)
+        self.assertEqual(self._disk_state()["pending"], [])
+
     def test_generator_exception_counts_and_a_config_error_still_stops(self):
         slots = [(7, 30)]
         now = datetime(2026, 9, 1, 7, 30)
@@ -3617,8 +3674,8 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
                 _BRIDGE.RetryBackoff(base, cap)
 
     def _drive_scheduled_briefings(self, clock, backoff, now, slots, state, state_file,
-                                   cfg=None):
-        for second in range(0, 20_000, 30):
+                                   cfg=None, seconds=20_000):
+        for second in range(0, seconds, 30):
             clock[0] = float(second)
             state = _BRIDGE.run_scheduled_briefings(
                 self.vault, cfg or self.brief_cfg, "12345:secret", 111, now, slots,
@@ -3735,6 +3792,43 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
         refuse.assert_not_called()
         self.assertEqual(restarted.pending, [])
         self.assertEqual(restarted.fired, set())
+
+    def test_a_second_pending_slot_continues_the_shared_backoff(self):
+        # One backoff serves the briefing job and returns to its base only when `pending` is empty.
+        # With two slots pending at once, the second slot is tried in the same pass right after the
+        # first is given up (gap 0) and then continues from the gap the first slot's failures reached.
+        clock = [0.0]
+        backoff = _BRIDGE.RetryBackoff(60, 3600, clock=lambda: clock[0])
+        slots = [(7, 30), (7, 31)]
+        now = datetime(2026, 9, 1, 7, 31)
+        state_file = self.root / "brief" / "last_brief"
+        state = _BRIDGE.load_briefing_state(state_file, slots, datetime(2026, 9, 1, 7, 0))
+        cfg = {**self.brief_cfg, "claude_cmd": "claude", "_deny_zones": [],
+               "_language": "ko", "qa_timeout_sec": 30}
+        launches = []
+
+        def failing_cli(*_args, **_kwargs):
+            launches.append(clock[0])
+            return Mock(returncode=1, stdout="", stderr="")
+
+        with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
+                patch.object(_BRIDGE, "run_with_stdin", side_effect=failing_cli), \
+                patch.object(_BRIDGE, "_git", return_value="git"), \
+                patch.object(_BRIDGE, "tg_send", return_value=True) as sender:
+            state = self._drive_scheduled_briefings(
+                clock, backoff, now, slots, state, state_file, cfg, seconds=40_000)
+
+        gaps = [later - earlier for earlier, later in zip(launches, launches[1:])]
+        self.assertEqual(len(launches), 16)
+        self.assertEqual(
+            gaps,
+            [60, 120, 240, 480, 960, 1920, 3600, 0, 3600, 3600, 3600, 3600, 3600, 3600, 3600])
+        notices = [call.args[2] for call in sender.call_args_list]
+        self.assertEqual(len(notices), 2)
+        self.assertIn("9월 1일 07:30 아침 브리핑을 8번 시도했지만", notices[0])
+        self.assertIn("9월 1일 07:31 아침 브리핑을 8번 시도했지만", notices[1])
+        self.assertEqual(state.pending, [])
+        self.assertEqual(backoff.failures, 0)
 
     def test_setup_states_the_briefing_attempt_limit_and_refusal_limit(self):
         text = (_ROOT / "commands" / "vault-jarvis-setup.md").read_text(encoding="utf-8")
