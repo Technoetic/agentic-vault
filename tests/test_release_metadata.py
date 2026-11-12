@@ -1741,8 +1741,10 @@ class V0460ErrataTests(unittest.TestCase):
                     self.assertNotIn(digest[:8], errata)
 
 
-# v0.47.0: eleven items from a review that compared the plugin with a vendor prompting
-# guide. Item 2 was tried and not shipped, no certificate-bound file changed (the v0.46.0
+# v0.47.0: eleven items. Items 1-8 come from a review that compared the plugin with a vendor
+# prompting guide, item 9 (the /aside-repl procedure command) is a request handled in the same
+# review, and items 10 and 11 (the seed repository race, the v0.46.0 errata) are carried over from
+# the v0.46.0 release. Item 2 was tried and not shipped, no certificate-bound file changed (the v0.46.0
 # fingerprint stays), and only the health check, the Aside clause and the new command asset move to
 # engine=0.47.0. The note fixes the publication order; the record specifies gates, not results.
 class V0470ReleaseMetadataTests(unittest.TestCase):
@@ -2376,6 +2378,46 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         ("W2, last line", "15/16", "8/8", "0/4", "0/4"),
         ("W3, last line", "15/16", "8/8", "0/4", "0/4"),
     )
+    # Where the eleven items come from, as each of the seven places states it: items 1-8 from the
+    # review that compared the plugin with the vendor guide, item 9 a request handled in the same
+    # review, items 10 and 11 carried over from the v0.46.0 release.
+    SOURCE_RELEASE_OPENING = "견준 대조 검토가 고칠 곳을 찾았다. 이번 릴리스는 열한 항목을 다룬다."
+    SOURCE_RELEASE_SPLIT = (
+        "이 가운데 `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이고, 시험 fixture의 경합과 "
+        "v0.46.0 문서 정정은 v0.46.0 릴리스에서 넘어온 것이며, 나머지 여덟(넣지 않은 계약 한 줄 포함)은 "
+        "그 검토가 찾은 것이다."
+    )
+    SOURCE_RECORD = (
+        "v0.47.0 builds on published v0.46.0 at `e47d0a2cca599538bbe4351eba908e5fa4290fda` and takes up "
+        "eleven items ([release note](../releases/v0.47.0.md)). Items 1 to 8 come from a review that "
+        "compared the plugin with a vendor prompting guide, item 9 is a request handled in the same review, "
+        "and items 10 and 11 are carried over from the v0.46.0 release:"
+    )
+    SOURCE_README_KOREAN = (
+        "열한 항목을 다룬다. 여덟은 이 플러그인을 공급사의 프롬프트 작성 안내서와 견준 대조 검토가 찾은 "
+        "것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 시험 fixture의 경합과 v0.46.0 "
+        "문서 정정은 v0.46.0 릴리스에서 넘어온 것이다."
+    )
+    SOURCE_README_ENGLISH = (
+        "This release takes up eleven items: eight from a review that compared the plugin with a vendor "
+        "prompting guide, one request handled in the same review (the `/aside-repl` procedure command) and "
+        "two carried over from the v0.46.0 release (a test fixture race and errata for its documents)."
+    )
+    SOURCE_README_CURRENT = (
+        ")을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 "
+        "요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다."
+    )
+    SOURCE_CODEX_DOC = (
+        "v0.47.0 takes up eleven items: eight from a review that compared the plugin with a vendor prompting "
+        "guide, one request handled in the same review (the `/aside-repl` procedure command) and two carried "
+        "over from the v0.46.0 release."
+    )
+    SOURCE_CODEX_LONG = (
+        "Release v0.47.0 takes up eleven items, eight of them from a review that compared the plugin with a "
+        "vendor prompting guide, one a request handled in the same review and two carried over from v0.46.0:"
+    )
+    SOURCE_STALE = ("그 가운데 열한 항목", "대조 검토가 찾은 열한 항목", "대조 검토에서 나온 열한 항목",
+                    "eleven items from a review", "eleven items of a review")
 
     def test_readme_tree_lists_the_contributor_guide(self) -> None:
         readme = README.read_text(encoding="utf-8")
@@ -2400,10 +2442,10 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertNotIn("외부 검토", release)
         readme = README.read_text(encoding="utf-8")
         korean = _section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령")
-        self.assertIn("이 플러그인을 공급사의 프롬프트 작성 안내서와 견준 대조 검토가 찾은 열한 항목", _folded(korean))
+        self.assertIn(self.SOURCE_README_KOREAN, _folded(korean))
         self.assertNotIn("외부", korean)
         current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v0.47.0**"))
-        self.assertIn("대조 검토에서 나온 열한 항목", current)
+        self.assertIn(self.SOURCE_README_CURRENT, current)
         self.assertNotIn("외부 검토", current)
         english = _section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
         codex_doc = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
@@ -2417,6 +2459,55 @@ class V0470SharedSurfaceTests(unittest.TestCase):
                 folded = _folded(text)
                 self.assertIn("a review that compared the plugin with a vendor prompting guide", folded)
                 self.assertNotIn("outside", folded.lower())
+
+    def test_v0470_texts_say_where_the_eleven_items_come_from(self) -> None:
+        # Items 1-8 are findings of the comparison review (item 2 included, tried and not shipped),
+        # item 9 is a request handled in the same review, and items 10 and 11 are carried over from
+        # the v0.46.0 release; none of the seven places may say that all eleven come from the review.
+        import re
+        release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
+        record = V0470ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8")
+        readme = README.read_text(encoding="utf-8")
+        codex_doc = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        codex_long = json.loads(
+            (REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))["interface"]["longDescription"]
+        opening = _folded(release[:release.index("\n## ")])
+        scope = _section(record, "## Release content and scope")
+        korean = _folded(_section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령"))
+        english = _folded(_section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command"))
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v0.47.0**"))
+        codex_section = _folded(_section(codex_doc,
+                                         "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command"))
+        expected = (
+            ("release opening", opening,
+             "안내서(아래 `참고와 기존 활용의 차이`)와 " + self.SOURCE_RELEASE_OPENING + " 저장소 기여자 안내,"),
+            ("release opening", opening,
+             "v0.46.0 문서 정정이다. " + self.SOURCE_RELEASE_SPLIT + " 엔진 사본 소유를 밝히는 계약 한 줄은"),
+            ("record scope", _folded(scope), self.SOURCE_RECORD),
+            ("readme korean", korean, self.SOURCE_README_KOREAN),
+            ("readme english", english, self.SOURCE_README_ENGLISH),
+            ("readme current", current, "안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내,"),
+            ("readme current", current, "v0.46.0 문서 정정" + self.SOURCE_README_CURRENT),
+            ("docs codex", codex_section, self.SOURCE_CODEX_DOC),
+        )
+        for name, text, sentence in expected:
+            with self.subTest(text=name, sentence=sentence[:40]):
+                self.assertIn(sentence, text)
+        self.assertTrue(korean.startswith("## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령 "
+                                          + self.SOURCE_README_KOREAN))
+        self.assertTrue(english.startswith("## v0.47.0 — guide-comparison fixes and the aside-repl procedure "
+                                           "command " + self.SOURCE_README_ENGLISH))
+        self.assertTrue(codex_section.startswith("## v0.47.0 — guide-comparison fixes and the aside-repl "
+                                                 "procedure command " + self.SOURCE_CODEX_DOC))
+        self.assertTrue(codex_long.startswith(self.SOURCE_CODEX_LONG + " a contributor guide at the repository root"))
+        # The numbers the record's sentence names exist in its item list.
+        self.assertEqual(re.findall(r"^- Item (\d+)\b", scope, re.MULTILINE), [str(n) for n in range(1, 12)])
+        texts = {"release": release, "record": record, "readme": readme, "docs_codex": codex_doc,
+                 "codex_long": codex_long}
+        for name, text in texts.items():
+            for stale in self.SOURCE_STALE:
+                with self.subTest(text=name, stale=stale):
+                    self.assertNotIn(stale, _folded(text))
 
     def test_v0470_note_describes_the_skip_notice_as_the_bridge_sends_it(self) -> None:
         # The notice names the slot as well as its date, time and attempt count, and guesses no cause
