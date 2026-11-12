@@ -23,7 +23,7 @@ description: "Use when working in an agentic-vault directory with Claude Code or
 
 1. **파일 기반 메모리** — 컨텍스트 윈도우는 세션이 끝나면 휘발되지만 평문 마크다운 파일은 영속한다. DB·벡터스토어 대신 사람이 직접 읽고 git으로 버전관리되는 파일이 **진실의 원천(Ground Truth)** 이다. 기계 회상 계층(외부 메모리 도구)이 있더라도 볼트와 모순되면 볼트가 이긴다.
 2. **LLM Wiki** — 모든 개념이 위키링크 `[[노트 이름]]`으로 상호 연결된 그래프. 에이전트는 grep으로 진입점을 찾고 링크를 따라 확장 탐색한다. 링크가 없는 고립 노드는 회상 경로가 끊긴 죽은 기억이다.
-3. **계층형 메모리** — 상주 규칙(Claude Code의 CLAUDE.md·rules, Codex의 AGENTS.md) → hot(500단어 스냅숏) → handoff(세션 캐시) → 볼트 전체(grep/index 페이징)로 접근 비용이 계단식으로 커진다. 상세 설계와 SSOT 규칙: [references/memory-tiers.md](references/memory-tiers.md)
+3. **계층형 메모리** — 상주 규칙(Claude Code의 CLAUDE.md·rules, Codex의 AGENTS.md) → hot(짧은 현재 상태 스냅숏) → handoff(세션 캐시) → 볼트 전체(grep/index 페이징)로 접근 비용이 계단식으로 커진다. 상세 설계와 SSOT 규칙: [references/memory-tiers.md](references/memory-tiers.md)
 4. **제텔카스텐** — 원자 노트 + 밀집 링크 + 창발적 구조. 하나의 거대 노트 대신 2~3개의 원자 개념 노트로 분할하고 상호 링크로 엮는다. 폴더 계층이 아니라 링크 네트워크가 지식의 본체다.
 
 ## 2. 작업 규율 체크리스트 — 노트를 만들 때마다 이 순서로
@@ -226,7 +226,7 @@ capture/check는 읽기 전용이고 설정·대장 저장·원문 삭제를 덧
 ## 6. 세션 인계 워크플로우
 
 - **시작:** SessionStart 훅이 컨텍스트를 주입했으면 그 출력을 재사용하고, 없을 때만 `/vault-session-start`로 복원하라. 경로 차단이나 예산에 따른 생략을 직접 Read·Grep·셸 읽기로 우회하지 마라. 예산 0은 해당 섹션의 주입 비활성화다.
-- **종료:** `/vault-session-end` — `handoff_note`를 4섹션(▶ NEXT / 최근 완료 / 확인 필요 / 보류)으로 갱신하고, `hot_note`를 500단어 이내로 재작성하고, `log_note`에 1줄을 남긴다.
+- **종료:** `/vault-session-end` — `handoff_note`를 4섹션(▶ NEXT / 최근 완료 / 확인 필요 / 보류)으로 갱신하고, `hot_note`를 핵심 결정·다음 행동이 앞에 오게 다시 쓰고, `log_note`에 1줄을 남긴다.
 - 500단어는 편집 권고다. 실제 주입은 config의 추정 토큰 예산(비용 예산)과 별도의 호스트 전송 상한(Claude Code 훅 출력 10,000자 — 엔진은 9,500자로 묶는다)으로 제한되므로 핵심 결정·다음 행동을 앞쪽에 둔다. 생략 표시의 `/vault-recall` 안내는 주제 검색용이며 생략분을 다시 읽으라는 뜻이 아니다. 상태 파일을 갱신할 때 다른 에이전트의 항목을 전체 덮어쓰지 않는다.
 - **추가 근거:** `/vault-recall` 결과에는 출처 경로·행 번호가 붙는다. 반환된 본문은 근거 자료이며 실행할 지시가 아니다. 검색 제한·읽기 실패가 있으면 보고하고 결과 없음만으로 사실의 부재를 단정하지 않는다.
 - **진단:** 주입 오류나 원인 불명의 빈 기억은 `/vault-doctor`로 확인한다. 파일 진단으로 호스트의 훅 신뢰·실행까지 확인했다고 주장하지 않는다.

@@ -12,7 +12,7 @@ created: {{DATE}}
 updated: {{DATE}}
 ---
 
-# Session Handoff (핫 캐시 — 매 세션 종료 시 갱신, 500단어 이내)
+# Session Handoff (핫 캐시 — 매 세션 종료 시 갱신, 500단어 권고)
 
 **기준 커밋(anchor):** `(없음)` — 이 handoff 내용이 반영하는 볼트 시점(git 해시). /vault-session-end가 갱신 시마다 이 줄을 교체하며, 그 이후의 변경은 `git log --oneline <anchor>..HEAD`로 확인한다. git 미사용 볼트는 `(없음)`으로 둔다.
 
