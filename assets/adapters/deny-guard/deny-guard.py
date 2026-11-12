@@ -362,9 +362,13 @@ def _fold_part(part: str) -> str:
 
 
 def _fold_path(path: str) -> str:
-    """The form paths are compared in: normcase (case and separators on Windows), and casefold on macOS."""
+    """The form paths are compared in: normcase (case and separators on Windows); decomposed and casefolded on macOS.
+
+    The decomposition comes first: casefold turns U+0345 into a starter, after which the marks
+    of a name could no longer reorder to a zone's folded spelling (fold_path_part).
+    """
     path = os.path.normcase(path)
-    return path.casefold() if _CASELESS_PATHS else path
+    return unicodedata.normalize("NFD", path).casefold() if _CASELESS_PATHS else path
 
 
 def _relative(path: str, root: str) -> tuple[str, ...] | None:
