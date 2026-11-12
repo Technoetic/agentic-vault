@@ -79,14 +79,23 @@ def idle_summary(status: str, exit_code: int) -> dict:
 
 
 def run_healthcheck(*arguments: str) -> tuple[int, str, str]:
-    """Call the health check's main() with these arguments; returns (rc, stdout, stderr)."""
+    """Call the health check's main() with these arguments; returns (rc, stdout, stderr).
+
+    The scripts folder is on `sys.path` during the call, as it is when the health
+    check runs as a program: the warning analyzer imports its extensions lazily.
+    """
     out, err = io.StringIO(), io.StringIO()
-    with mock.patch.object(sys, "argv", [str(HEALTHCHECK), *arguments]), \
-            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            code = vault_healthcheck.main()
-        except SystemExit as stop:  # argparse usage errors
-            code = stop.code
+    saved_path = list(sys.path)
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        with mock.patch.object(sys, "argv", [str(HEALTHCHECK), *arguments]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = vault_healthcheck.main()
+            except SystemExit as stop:  # argparse usage errors
+                code = stop.code
+    finally:
+        sys.path[:] = saved_path
     return code, out.getvalue(), err.getvalue()
 
 
@@ -218,7 +227,7 @@ class CheckedSummaryTests(_SummaryCase):
         self.assertEqual(parsed["unreadable"], 0)
         self.assertIs(parsed["complete"], False)
         self.assertIs(parsed["extension_input_complete"], False)
-        for hidden in ("linked", "Hidden", "LINKED-SENTINEL", str(outside)):
+        for hidden in ("20-knowledge", "linked/", "Hidden", "LINKED-SENTINEL", str(outside)):
             self.assertNotIn(hidden, line)
 
     def test_unreadable_note_makes_the_check_incomplete(self) -> None:
