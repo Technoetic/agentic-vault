@@ -357,7 +357,7 @@ CHECKER_SHA256_V0330 = "af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7
 CHECKER_SHA256_V0340 = "be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f"
 # Declared v0.46.0 fingerprint, written by hand after F1 (deny zones fold Unicode
 # normalization) changed vault_paths.py and vault_lint_extensions.py.
-CHECKER_SHA256_V0460 = "3f5e5f6fdd75e230d154e7590dba8479e06bb7e0077ff9784af1373b6d12213c"
+CHECKER_SHA256_V0460 = "09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d"
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
 CURRENT_CHECKER_SECTION = "## v0.35.1 source and certificate migration"

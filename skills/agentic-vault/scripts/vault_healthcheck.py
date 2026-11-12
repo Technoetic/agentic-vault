@@ -248,13 +248,15 @@ def unsafe_path_segment(part: str) -> bool:
 def fold_path_part(part: str) -> str:
     """Return one path segment in the form deny and exclude zones compare.
 
-    Case and Unicode normalization are ignored: NFC, then casefold, then NFC
-    again, because casefold can return a string that is not NFC. ASCII text
-    needs casefold only.
+    Case and Unicode normalization are ignored: two segments fold to the same
+    text exactly when they are canonical caseless matches (NFD, casefold, NFD),
+    and the result is returned in NFC. ASCII text needs casefold only.
     """
     if part.isascii():
         return part.casefold()
-    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold())
+    return unicodedata.normalize(
+        "NFC", unicodedata.normalize("NFD", unicodedata.normalize("NFD", part).casefold())
+    )
 # --- END SHARED PATH RULE ---
 
 
