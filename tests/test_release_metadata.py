@@ -1964,14 +1964,29 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
 
     def test_v0470_entry_19_names_recall_by_mechanism(self) -> None:
         # Measured on 2e22557 by the reconcile step and two sceptics (findings TS-1 and RD-1): with the
-        # command file installed, recall returns it for a query made of its words and its diagnostics rise.
+        # command file installed, recall reads it as one more candidate file and its diagnostics rise.
+        # Recall ranks the matching files and returns at most `--limit` of them, and it stops at its file,
+        # entry and read-byte limits, where the counters no longer rise; a vault with six matching notes
+        # left the command file out of the five results (final check F1). The entry states both bounds.
         entry = self._default_change_entry(19)
         sentence = (
-            "recall도 이 파일을 검색 대상 파일로 읽는다: 질의가 이 파일의 낱말과 맞으면 결과에 이 파일이 나오고, 진단의 "
+            "recall도 이 파일을 검색 대상 파일로 읽는다: 질의가 이 파일의 낱말과 맞으면 다른 파일과 함께 순위가 매겨져 "
+            "결과(`--limit`, 기본 5개)에 나올 수 있고, 검색 상한(파일 수·항목 수·읽기 바이트) 안에서는 진단의 "
             "files_considered·files_read가 1씩 늘고 bytes_read가 늘며, 폴더 항목도 세는 entries_scanned는 이 파일과 "
             "새로 생긴 폴더 수만큼 는다(.claude/commands가 이미 있으면 1, 그 폴더만 새로 생기면 2)."
         )
         self.assertIn(sentence + " 대상: 명령을 설치한 볼트.", entry)
+        self.assertIn("나올 수 있고", entry)
+        self.assertIn("검색 상한", entry)
+        self.assertNotIn("결과에 이 파일이 나오고", entry)
+        # The default of `--limit` that the entry names, read from the source (the module is not imported).
+        recall = ast.parse((REPO_ROOT / "skills/agentic-vault/scripts/vault_recall.py").read_text(encoding="utf-8"))
+        defaults = [keyword.value for node in ast.walk(recall)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add_argument" and node.args
+                    and isinstance(node.args[0], ast.Constant) and node.args[0].value == "--limit"
+                    for keyword in node.keywords if keyword.arg == "default"]
+        self.assertEqual([ast.literal_eval(value) for value in defaults], [5])
 
     def test_v0470_note_states_the_shared_briefing_backoff(self) -> None:
         # The retry backoff is shared by all pending slots and returns to its base only when `pending` is
