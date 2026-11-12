@@ -44,11 +44,17 @@ SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 TEMPLATE_ZONES = ("10-inbox/_processed", "20-knowledge/_archive", "50-projects/_completed",
                   "90-assets", ".obsidian")
 HOOK_MATCHER = "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell|Monitor"
-# SHA-256 of the v0.31.0 blobs (21c4b47) with LF line ends. A Windows checkout
-# may write them with CRLF, so the test hashes the file with CRLF folded to LF.
+# SHA-256 of the v0.31.0 blob (21c4b47) with LF line ends. A Windows checkout
+# may write it with CRLF, so the test hashes the file with CRLF folded to LF.
 V0310_TEMPLATE_SHA256 = {
-    "assets/templates/vault-config.json": "f93011367fa87bde599b8f8174447302ace8dadb2239cf5d31a24f28571c786b",
     "assets/templates/settings-permissions.json": "54ae16fa421b9759e27b3bdc51b902ea94a549ee490aaee22a299f50cc50ae6a",
+}
+# The config template changed twice in v0.47.0 and in no other way since v0.31.0:
+# the jarvis block gained the empty optional keys "model" and "effort", and the
+# gates.note_move note now separates inbox quarantine from archive moves.
+# SHA-256 of the result with LF line ends (folded the same way).
+V0470_CONFIG_TEMPLATE_SHA256 = {
+    "assets/templates/vault-config.json": "fcca4f3c3d5b2a63e93016c6a728d758ef1a5230e2464b1ccf3ddcb784646e62",
 }
 _LOADED: dict = {}
 
@@ -1525,11 +1531,15 @@ class DefaultInstallUnchangedTests(unittest.TestCase):
         self.assertNotIn("deny-guard", text)
         self.assertNotIn("ps-parse", text)  # the PowerShell parser runs only under the opt-in guard
 
-    def test_permission_and_config_templates_are_unchanged_since_v0310(self) -> None:
-        for rel_path, expected in V0310_TEMPLATE_SHA256.items():
+    def test_permission_and_config_templates_are_unchanged_except_v0470_notes_and_keys(self) -> None:
+        for rel_path, expected in {**V0310_TEMPLATE_SHA256, **V0470_CONFIG_TEMPLATE_SHA256}.items():
             with self.subTest(path=rel_path):
                 data = (ROOT / rel_path).read_bytes().replace(b"\r\n", b"\n")
                 self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+        config = (ROOT / "assets" / "templates" / "vault-config.json").read_text(encoding="utf-8")
+        for name in ("deny-guard", "ps-parse", "PreToolUse"):
+            with self.subTest(absent=name):
+                self.assertNotIn(name, config)
 
 
 class ModuleLayoutTests(unittest.TestCase):

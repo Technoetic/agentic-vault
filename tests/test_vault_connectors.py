@@ -235,7 +235,10 @@ class ConnectorTests(unittest.TestCase):
         for block in ({"enabled": "yes"}, {"enabled": True, "telegram_user_ids": [-1]},
                       {"enabled": True, "claude_cmd": "private\ncommand"},
                       {"enabled": True, "qa_timeout_sec": 0},
-                      {"enabled": True, "briefing_times": ["25:00"]}):
+                      {"enabled": True, "briefing_times": ["25:00"]},
+                      {"enabled": True, "model": "private model"},
+                      {"enabled": True, "model": "-private"},
+                      {"enabled": True, "effort": "private"}):
             with self.subTest(block=block):
                 self.write_config(jarvis=block)
                 report, _code = self.diagnose()

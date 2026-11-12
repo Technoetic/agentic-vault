@@ -124,6 +124,13 @@ class TemplateContractTests(unittest.TestCase):
             self.assertTrue(action.strip(), "행동 이름은 비어 있을 수 없다")
             self.assertTrue(spec, f"{action} 은 최소 한 필드를 가져야 한다")
 
+    def test_note_move_note_separates_quarantine_from_archive(self):
+        raw = json.loads(CONFIG_TEMPLATE.read_text(encoding="utf-8"))
+        note_move = raw["gates"]["note_move"]
+        self.assertIn("인박스", note_move["note"])
+        self.assertIn("사용자 승인 뒤", note_move["note"])
+        self.assertIs(note_move["confirm"], False)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

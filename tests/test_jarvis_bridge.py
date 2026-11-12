@@ -226,6 +226,48 @@ class JarvisConfigLoadingTests(unittest.TestCase):
         self.assertEqual(loaded["qa_hourly_limit"], 6)
         self.assertEqual(loaded["qa_timeout_sec"], 180)
 
+    def test_optional_model_and_effort_are_validated(self):
+        self._write({"jarvis": self.valid})
+        loaded = _BRIDGE.load_jarvis_config(self.vault)
+        self.assertEqual((loaded["model"], loaded["effort"]), ("", ""))
+
+        valid_models = (
+            "", "opus", "claude-opus-5-5", "sonnet[1m]",
+            "us.anthropic.claude-x-v1:0",
+            "arn:aws:bedrock:us-east-1:1:inference-profile/x",
+            "claude-opus-4@20250514", "a" * 256,
+        )
+        valid_efforts = ("", "low", "medium", "high", "xhigh", "max")
+        for model in valid_models:
+            for effort in valid_efforts:
+                with self.subTest(model=model, effort=effort):
+                    self._write({"jarvis": {**self.valid, "model": model, "effort": effort}})
+                    loaded = _BRIDGE.load_jarvis_config(self.vault)
+                    self.assertEqual(loaded["model"], model)
+                    self.assertEqual(loaded["effort"], effort)
+
+        invalid_models = (
+            "-p", "--dangerously-skip-permissions", " opus", "opus ", "op us",
+            "opus\n", "opus\t", "opus\x00", "opus\x85", "opus　", '"opus"',
+            "모델", "opus;rm", "a" * 257, None, 1, [], {},
+        )
+        for model in invalid_models:
+            with self.subTest(model=model):
+                self._write({"jarvis": {**self.valid, "model": model}})
+                with self.assertRaises(_BRIDGE.JarvisConfigError) as raised:
+                    _BRIDGE.load_jarvis_config(self.vault)
+                if isinstance(model, str):
+                    self.assertNotIn(model.strip(), str(raised.exception))
+        invalid_efforts = (
+            "LOW", "Low", " low", "low\n", "fast", "auto", "none", "minimal",
+            None, 1,
+        )
+        for effort in invalid_efforts:
+            with self.subTest(effort=effort):
+                self._write({"jarvis": {**self.valid, "effort": effort}})
+                with self.assertRaises(_BRIDGE.JarvisConfigError):
+                    _BRIDGE.load_jarvis_config(self.vault)
+
 
 class JarvisTelegramBoundaryTests(unittest.TestCase):
     token = "12345:Secret_value-9"
@@ -1114,6 +1156,109 @@ class JarvisBriefingTests(unittest.TestCase):
         self.assertEqual(state.fired, {(7, 30)})
         self.assertEqual(state.pending, [])
 
+    def _send_with(self, state, now, sender, generator, slots):
+        return _BRIDGE.send_due_briefings(
+            self.vault, self.cfg, "12345:secret", 111, now,
+            slots, state, self.state_file, sender, generator)
+
+    @staticmethod
+    def _logged(logger) -> str:
+        return " ".join(call.args[0] for call in logger.call_args_list)
+
+    def test_send_failures_count_and_an_undelivered_notice_is_not_resent(self):
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        generator = Mock(return_value=_BRIDGE.GenerationResult(True, "body"))
+        sender = Mock(return_value=False)
+
+        with patch.object(_BRIDGE, "log") as logger:
+            for _call in range(11):
+                state = self._send_with(state, now, sender, generator, slots)
+
+        self.assertEqual(generator.call_count, 8)
+        self.assertEqual(sender.call_count, 9)
+        self.assertEqual(state.pending, [])
+        logged = self._logged(logger)
+        self.assertIn("스케줄 브리핑 전송 실패(07:30) — 시도 1/8", logged)
+        self.assertIn(
+            "스케줄 브리핑 건너뜀 안내 전송 실패(2026-09-01 07:30) — 다시 보내지 않음",
+            logged)
+
+    def test_success_before_the_limit_clears_the_count(self):
+        slots = [(7, 30), (13, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        generator = Mock(side_effect=[
+            *[_BRIDGE.GenerationResult(False, "fail")] * 7,
+            _BRIDGE.GenerationResult(True, "body")])
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "log"):
+            for _call in range(8):
+                state = self._send_with(state, now, sender, generator, slots)
+
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.failed_attempts, {})
+        sender.assert_called_once()
+        self.assertEqual(sender.call_args.args[2], "🌅 아침 브리핑\nbody")
+
+    def test_generator_exception_counts_and_a_config_error_still_stops(self):
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state = self._load(now, slots)
+        generator = Mock(side_effect=RuntimeError("CONTENT-SENTINEL"))
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "log") as logger:
+            for _call in range(10):
+                state = self._send_with(state, now, sender, generator, slots)
+
+        self.assertEqual(generator.call_count, 8)
+        sender.assert_called_once()
+        self.assertIn("건너뜁니다", sender.call_args.args[2])
+        self.assertEqual(state.pending, [])
+        logged = self._logged(logger)
+        self.assertIn("스케줄 브리핑 생성 오류(07:30, RuntimeError at", logged)
+        self.assertNotIn("CONTENT-SENTINEL", logged)
+
+        config_state_file = self.root / "config-error" / "last_brief"
+        config_state = _BRIDGE.load_briefing_state(config_state_file, slots, now)
+        config_error = Mock(side_effect=_BRIDGE.JarvisConfigError("bad config"))
+        with patch.object(_BRIDGE, "log"), self.assertRaises(_BRIDGE.JarvisConfigError):
+            _BRIDGE.send_due_briefings(
+                self.vault, self.cfg, "12345:secret", 111, now, slots,
+                config_state, config_state_file, sender, config_error)
+
+    def test_prior_day_pending_gets_one_attempt_and_the_new_day_runs_in_the_same_pass(self):
+        slots = [(7, 30), (19, 30)]
+        self.state_file.parent.mkdir(parents=True)
+        self.state_file.write_text(json.dumps({
+            "version": 1, "day": "2026-09-01", "fired": ["07:30"],
+            "pending": ["19:30"],
+        }), encoding="utf-8")
+        state = self._load(datetime(2026, 9, 1, 20, 0), slots)
+        state.failed_attempts[(19, 30)] = 3
+        generator = Mock(side_effect=[
+            _BRIDGE.GenerationResult(False, "fail"),
+            _BRIDGE.GenerationResult(True, "body")])
+        sender = Mock(return_value=True)
+
+        with patch.object(_BRIDGE, "log") as logger:
+            state = self._send_with(
+                state, datetime(2026, 9, 2, 7, 30), sender, generator, slots)
+
+        self.assertEqual(generator.call_count, 2)
+        self.assertEqual(state.day, date(2026, 9, 2))
+        self.assertEqual(state.fired, {(7, 30)})
+        self.assertEqual(state.pending, [])
+        self.assertEqual(state.failed_attempts, {})
+        messages = [call.args[2] for call in sender.call_args_list]
+        self.assertEqual(len(messages), 2)
+        self.assertIn("9월 1일 19:30 저녁 브리핑을 4번 시도했지만", messages[0])
+        self.assertTrue(messages[1].startswith("🌅 아침 브리핑"), messages[1])
+        self.assertIn("날이 바뀐 뒤 다시 실패(시도 4회)", self._logged(logger))
+
     def test_legacy_dates_migrate_globally_and_inside_namespace(self):
         slots = [(7, 30)]
         global_root = self.root / "global"
@@ -1263,6 +1408,35 @@ class JarvisBriefingTests(unittest.TestCase):
                 self.assertIn("`briefing_times`", text)
                 self.assertIn("`briefing_time`", text)
                 self.assertIn("없을 때만", text)
+
+    def test_template_and_setup_describe_optional_model_and_effort(self):
+        template = json.loads(
+            (_ROOT / "assets" / "templates" / "vault-config.json").read_text(
+                encoding="utf-8"))
+        block = template["jarvis"]
+        self.assertEqual(block["model"], "")
+        self.assertEqual(block["effort"], "")
+        self.assertEqual(_BRIDGE.parse_claude_model_options(block), ("", ""))
+        executable = os.path.abspath(_FAKE_CLAUDE)
+        cfg = {**_BRIDGE.DEFAULTS, **block, "_deny_zones": [], "_language": "ko",
+               "_hot_note": "00-meta/hot.md"}
+        # With the template's empty keys the argv is the v0.46.0 argv.
+        self.assertEqual(
+            _BRIDGE.build_claude_command(executable, cfg),
+            [executable, *_FIXED_ARGV_HEAD, _BRIDGE._claude_guard(cfg)])
+        # The --effort levels listed by `claude --help` of Claude Code 2.1.252.
+        self.assertEqual(
+            _BRIDGE.CLAUDE_EFFORT_LEVELS, ("low", "medium", "high", "xhigh", "max"))
+
+        setup = (_ROOT / "commands" / "vault-jarvis-setup.md").read_text(encoding="utf-8")
+        for literal in (
+                "`jarvis.model`·`jarvis.effort`",
+                "`low`·`medium`·`high`·`xhigh`·`max`",
+                "비어 있으면 브리지는 `--model`·`--effort`를 넘기지 않아",
+                "`--bare`에서 인증된 응답 생성과 노력 수준이 실제로 적용되는지는 "
+                "확인하지 않았다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, setup)
 
     def test_user_docs_disclose_deny_zones_are_not_an_os_security_boundary(self):
         disclosure = "deny zone 제한은 호스트의 경로 정책이며 OS 수준 보안 경계가 아니다."
@@ -2932,6 +3106,43 @@ class JarvisClaudeLaunchTests(unittest.TestCase):
                        "--add-dir", "--permission-mode", "--mcp-config"):
             self.assertNotIn(absent, command)
 
+    def test_model_and_effort_are_passed_only_when_set(self):
+        executable = os.path.abspath(_FAKE_CLAUDE)
+        cases = (
+            ({}, []),
+            ({"model": "", "effort": ""}, []),
+            ({"model": "claude-opus-5-5"}, ["--model", "claude-opus-5-5"]),
+            ({"effort": "low"}, ["--effort", "low"]),
+            ({"model": "sonnet[1m]", "effort": "max"},
+             ["--model", "sonnet[1m]", "--effort", "max"]),
+        )
+        for overrides, extra in cases:
+            with self.subTest(overrides=overrides):
+                cfg = _claude_cfg(**overrides)
+                self.assertEqual(
+                    _BRIDGE.build_claude_command(executable, cfg),
+                    [executable, *_FIXED_ARGV_HEAD[:-1], *extra,
+                     "--append-system-prompt", _BRIDGE._claude_guard(cfg)])
+
+    def test_invalid_model_option_in_cfg_refuses_launch(self):
+        for overrides in (
+                {"model": "--help"}, {"model": "op us"}, {"effort": "fast"},
+                {"model": None}):
+            with self.subTest(overrides=overrides):
+                self.logger.reset_mock()
+                with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
+                        patch.object(
+                            _BRIDGE, "run_with_stdin",
+                            side_effect=AssertionError("launched")) as runner:
+                    result = _BRIDGE.generate_claude(
+                        self.vault, _claude_cfg(**overrides), "질문")
+
+                self.assertFalse(result.ok)
+                runner.assert_not_called()
+                logged = self._logged()
+                self.assertIn("claude 실행 거부: invalid-model-option", logged)
+                self.assertNotIn("not-found", logged)
+
     def test_timeout_bounds_a_large_prompt_that_the_child_never_reads(self):
         # Review probe: subprocess.run(input=...) wrote stdin before its
         # timeout started on Windows, so a child that stalled before reading a
@@ -3405,7 +3616,16 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
             with self.subTest(base=base, cap=cap), self.assertRaises(ValueError):
                 _BRIDGE.RetryBackoff(base, cap)
 
-    def test_failed_briefing_generation_backs_off_until_the_cap(self):
+    def _drive_scheduled_briefings(self, clock, backoff, now, slots, state, state_file,
+                                   cfg=None):
+        for second in range(0, 20_000, 30):
+            clock[0] = float(second)
+            state = _BRIDGE.run_scheduled_briefings(
+                self.vault, cfg or self.brief_cfg, "12345:secret", 111, now, slots,
+                state, state_file, backoff)
+        return state
+
+    def test_failed_briefing_generation_backs_off_then_stops_at_the_attempt_limit(self):
         clock = [0.0]
         backoff = _BRIDGE.RetryBackoff(60, 3600, clock=lambda: clock[0])
         slots = [(7, 30)]
@@ -3420,32 +3640,112 @@ class JarvisDaemonDurabilityTests(unittest.TestCase):
 
         with patch.object(_BRIDGE, "generate_claude", side_effect=failing_generation), \
                 patch.object(_BRIDGE, "_git", return_value="git"), \
-                patch.object(_BRIDGE, "tg_send", return_value=True) as idle_sender:
-            for second in range(0, 20_000, 30):
-                clock[0] = float(second)
-                state = _BRIDGE.run_scheduled_briefings(
-                    self.vault, self.brief_cfg, "12345:secret", 111, now, slots,
-                    state, state_file, backoff)
+                patch.object(_BRIDGE, "tg_send", return_value=True) as sender:
+            state = self._drive_scheduled_briefings(
+                clock, backoff, now, slots, state, state_file)
 
-        idle_sender.assert_not_called()
         self.assertNotIn("스케줄 브리핑 오류", self._logged())
         gaps = [later - earlier for earlier, later in zip(attempts, attempts[1:])]
-        self.assertEqual(gaps, [60, 120, 240, 480, 960, 1920, 3600, 3600, 3600, 3600])
-        self.assertEqual(state.pending, [(7, 30)])
+        self.assertEqual(gaps, [60, 120, 240, 480, 960, 1920, 3600])
+        self.assertEqual(state.pending, [])
+        sender.assert_called_once()
+        self.assertIn("건너뜁니다", sender.call_args.args[2])
+        self.assertEqual(backoff.failures, 0)
 
-        clock[0] = attempts[-1] + 3600
-        with patch.object(
-                _BRIDGE, "generate_claude",
-                return_value=_BRIDGE.GenerationResult(True, "brief")), \
+    def test_briefing_that_recovers_on_the_last_attempt_is_delivered(self):
+        clock = [0.0]
+        backoff = _BRIDGE.RetryBackoff(60, 3600, clock=lambda: clock[0])
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state_file = self.root / "brief" / "last_brief"
+        state = _BRIDGE.load_briefing_state(state_file, slots, now)
+        attempts = []
+
+        def generation(*_args):
+            attempts.append(clock[0])
+            if len(attempts) < 8:
+                return _BRIDGE.GenerationResult(False, "⚠️ 응답 생성에 실패했습니다.")
+            return _BRIDGE.GenerationResult(True, "brief")
+
+        with patch.object(_BRIDGE, "generate_claude", side_effect=generation), \
                 patch.object(_BRIDGE, "_git", return_value="git"), \
                 patch.object(_BRIDGE, "tg_send", return_value=True) as sender:
-            state = _BRIDGE.run_scheduled_briefings(
-                self.vault, self.brief_cfg, "12345:secret", 111, now, slots,
-                state, state_file, backoff)
+            state = self._drive_scheduled_briefings(
+                clock, backoff, now, slots, state, state_file)
 
+        gaps = [later - earlier for earlier, later in zip(attempts, attempts[1:])]
+        self.assertEqual(gaps, [60, 120, 240, 480, 960, 1920, 3600])
         sender.assert_called_once()
+        self.assertEqual(sender.call_args.args[2], "🌅 아침 브리핑\nbrief")
+        self.assertEqual(state.fired, {(7, 30)})
         self.assertEqual(state.pending, [])
         self.assertEqual(backoff.failures, 0)
+
+    def test_always_failing_cli_is_given_up_after_max_attempts_and_owner_told_once(self):
+        clock = [0.0]
+        backoff = _BRIDGE.RetryBackoff(60, 3600, clock=lambda: clock[0])
+        slots = [(7, 30)]
+        now = datetime(2026, 9, 1, 7, 30)
+        state_file = self.root / "brief" / "last_brief"
+        state = _BRIDGE.load_briefing_state(state_file, slots, now)
+        cfg = {**self.brief_cfg, "claude_cmd": "claude", "_deny_zones": [],
+               "_language": "ko", "qa_timeout_sec": 30}
+        launches = []
+
+        def failing_cli(*_args, **_kwargs):
+            launches.append(clock[0])
+            return Mock(returncode=1, stdout="", stderr="CONTENT-SENTINEL")
+
+        with patch.object(_BRIDGE.shutil, "which", return_value=_FAKE_CLAUDE), \
+                patch.object(_BRIDGE, "run_with_stdin", side_effect=failing_cli), \
+                patch.object(_BRIDGE, "_git", return_value="git"), \
+                patch.object(_BRIDGE, "tg_send", return_value=True) as sender:
+            state = self._drive_scheduled_briefings(
+                clock, backoff, now, slots, state, state_file, cfg)
+
+        gaps = [later - earlier for earlier, later in zip(launches, launches[1:])]
+        self.assertEqual(len(launches), 8)
+        self.assertEqual(gaps, [60, 120, 240, 480, 960, 1920, 3600])
+        self.assertEqual(_BRIDGE.BRIEFING_MAX_ATTEMPTS, 8)
+        sender.assert_called_once()
+        notice = sender.call_args.args[2]
+        for expected in ("9월 1일 07:30", "8번 시도했지만", "건너뜁니다", "/brief"):
+            self.assertIn(expected, notice)
+        for guessed_cause in ("거절", "장애", "refus", "네트워크", "인증"):
+            self.assertNotIn(guessed_cause, notice)
+        self.assertEqual(state.pending, [])
+        self.assertEqual(state.fired, set())
+        self.assertIn((7, 30), state.skipped)
+        self.assertEqual(
+            state_file.read_text(encoding="utf-8"),
+            '{"version":1,"day":"2026-09-01","fired":[],"pending":[]}')
+        self.assertEqual(backoff.failures, 0)
+        logged = self._logged()
+        self.assertIn("스케줄 브리핑 생성 실패(07:30) — 시도 1/8", logged)
+        self.assertIn("스케줄 브리핑 생성 실패(07:30) — 시도 8/8", logged)
+        self.assertIn("스케줄 브리핑 건너뜀(2026-09-01 07:30) — 8회 연속 실패", logged)
+        self.assertNotIn("CONTENT-SENTINEL", logged)
+
+        later = datetime(2026, 9, 1, 10, 0)
+        restarted = _BRIDGE.load_briefing_state(state_file, slots, later)
+        refuse = Mock(side_effect=AssertionError("must not run"))
+        restarted = _BRIDGE.send_due_briefings(
+            self.vault, cfg, "12345:secret", 111, later, slots, restarted,
+            state_file, refuse, refuse)
+        refuse.assert_not_called()
+        self.assertEqual(restarted.pending, [])
+        self.assertEqual(restarted.fired, set())
+
+    def test_setup_states_the_briefing_attempt_limit_and_refusal_limit(self):
+        text = (_ROOT / "commands" / "vault-jarvis-setup.md").read_text(encoding="utf-8")
+        for literal in (
+                f"같은 회차가 {_BRIDGE.BRIEFING_MAX_ATTEMPTS}번 연속 실패하면",
+                "이 안내가 전달되지 않아도 다시 보내지 않고 로그에만 남긴다.",
+                "날이 바뀔 때 전날의 `pending` 회차는 한 번만 더 시도하고",
+                "시도 횟수는 브리지 메모리에만 두므로 브리지를 다시 시작하면 0부터 센다.",
+                "모델 제공자의 요청 거절과 장애·빈 응답을 구별하지 못하며"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
 
     def test_failed_butler_delivery_backs_off_instead_of_rerunning_each_pass(self):
         clock = [0.0]
