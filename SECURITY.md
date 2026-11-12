@@ -50,6 +50,9 @@ In scope:
 - **Hooks**: the SessionStart injection hook (`hooks/`) and the vault git hooks
   and staged checker (`assets/git-hooks/`, `vault_healthcheck.py --staged`),
   including path containment, deny zones and link or junction handling.
+  SessionStart injects only Markdown notes: `hot_note` and `handoff_note` must
+  be empty or name a `.md` file (any letter case), and any other value is a
+  configuration error, so nothing is injected.
 - **Optional Aside adapter** (`assets/adapters/aside/`, `vault_adapters.py`): the
   PreToolUse hook that a user may merge into a vault's Claude settings (by default
   `.claude/settings.local.json`; with Claude Code's `if` filter it runs Windows
