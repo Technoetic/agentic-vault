@@ -2096,6 +2096,16 @@ class V0470SharedSurfaceTests(unittest.TestCase):
                 self.assertIn("a review that compared the plugin with a vendor prompting guide", folded)
                 self.assertNotIn("outside", folded.lower())
 
+    def test_v0470_note_describes_the_skip_notice_as_the_bridge_sends_it(self) -> None:
+        # The notice names the slot as well as its date, time and attempt count, and guesses no cause
+        # (jarvis_bridge._briefing_skip_notice); the note must not say it holds only date, time and count.
+        bridge = self.JARVIS_BRIDGE.read_text(encoding="utf-8")
+        notice = bridge[bridge.index("def _briefing_skip_notice"):bridge.index("def _briefing_prompt")]
+        self.assertIn("{name}", notice)
+        changes = _folded(_section(V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        self.assertIn("소유자에게 날짜·시각·회차 이름과 시도 횟수를 적고 원인은 짐작하지 않는 안내를 한 번 보낸다.", changes)
+        self.assertNotIn("시도 횟수만 담은 안내", changes)
+
     def test_contributor_guide_layout_is_stated_as_shipped(self) -> None:
         # The guide ships as root AGENTS.md plus .claude/CLAUDE.md; no text may name a root CLAUDE.md.
         release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
