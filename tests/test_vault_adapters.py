@@ -291,6 +291,12 @@ class AdapterAssetTests(unittest.TestCase):
                 self.assertNotIn("ARGUMENTS", body)
         self.assertNotIn("실측한 전달 방식은 bash 셸에서", text)
         self.assertNotIn("bash 셸이 없으면 실행하지", text)  # a host without bash gets the Python route
+        # A host on the shell-free Python route may have no grep: the after-run check names both ways
+        # to count the not-running message.
+        self.assertIn("- 실행 뒤 종료 코드와 출력 파일의 바이트 수·SHA-256을 확인한다. 실패했으면 출력·오류 파일에 "
+                      "\"Aside isn't running\"이 있는지 건수만 센다(bash 셸이면 `grep -c`, 없으면 Python으로 센다). "
+                      "있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.", lines)
+        self.assertNotIn("`grep -c`로 건수만 보고", text)
 
     def test_repl_command_and_guide_state_no_unmeasured_limit(self) -> None:
         command = COMMAND.read_text(encoding="utf-8")
