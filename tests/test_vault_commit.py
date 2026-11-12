@@ -245,6 +245,25 @@ class ScopeTests(VaultCommitCase):
         self.assertEqual(self.staged(), [])
 
 
+class SeedQuiescenceTests(VaultCommitCase):
+    """The shared seed starts no background git work that a later copy could race."""
+
+    def test_the_seed_switches_automatic_maintenance_off(self):
+        # The private copy carries the seed's .git/config.
+        self.assertEqual(self.git("config", "--local", "--get", "maintenance.auto").stdout.strip(), b"false")
+        self.assertEqual(self.git("config", "--local", "--get", "gc.auto").stdout.strip(), b"0")
+
+    def test_a_commit_in_a_copy_starts_no_automatic_maintenance(self):
+        trace = Path(self.temp.name) / "trace2.json"
+        self.git("commit", "--allow-empty", "-q", "-m", "probe", env={"GIT_TRACE2_EVENT": str(trace)})
+        events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertTrue(any(event.get("event") == "start" for event in events))  # Trace2 ran
+        automatic = [event.get("argv") for event in events if event.get("event") == "child_start"
+                     and ("maintenance" in (event.get("argv") or [])
+                          or {"gc", "--auto"} <= set(event.get("argv") or []))]
+        self.assertEqual(automatic, [])
+
+
 class PreconditionTests(VaultCommitCase):
     def test_hash_mismatch_refuses_before_touching_the_index(self):
         self.write("notes/mine.md", b"mine v2\n")
