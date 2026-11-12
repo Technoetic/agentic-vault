@@ -1263,12 +1263,76 @@ def do_status(vault: Path, started: float) -> str:
             f"\n· 브리지 가동: {up_h:.1f}시간")
 
 
+HEALTH_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
+_HEALTH_SUMMARY_COUNTS = ("exit_code", "notes_checked", "issues", "critical", "evidence_skipped",
+                          "unreadable", "skipped_links", "linked_worktree_copies")
+_HEALTH_SUMMARY_FLAGS = ("complete", "extension_input_complete", "warning_promotion_active")
+
+
+def _health_summary(returncode: int, stdout: object) -> dict | None:
+    """The checker's --json-summary line, or None when it cannot be trusted."""
+    if not isinstance(stdout, str):
+        return None
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        summary = json.loads(lines[-1])
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(summary, dict) or summary.get("schema") != HEALTH_SUMMARY_SCHEMA:
+        return None
+    if summary.get("status") not in ("checked", "not_vault", "vault_not_found", "error"):
+        return None
+    for key in _HEALTH_SUMMARY_COUNTS:
+        value = summary.get(key)
+        if type(value) is not int or value < 0:
+            return None
+    if any(type(summary.get(key)) is not bool for key in _HEALTH_SUMMARY_FLAGS):
+        return None
+    if summary["exit_code"] != returncode:
+        return None
+    if summary["status"] == "checked" and returncode != (1 if summary["critical"] > 0 else 0):
+        return None
+    return summary
+
+
+def _butler_health_line(returncode: int, stdout: object) -> str:
+    """Map the health check's result to the butler line (counts only, never paths)."""
+    summary = _health_summary(returncode, stdout)
+    if summary is None:
+        log(f"healthcheck 요약 확인 불가(종료 코드 {returncode})")
+        return (f"· healthcheck: 결과 확인 불가 ⚠️ (종료 코드 {returncode}) — "
+                "브리지 옆 검사기 버전 확인")
+    status = summary["status"]
+    if status == "error":
+        return "· healthcheck: 검사 오류 ⚠️ — 설정·경로 확인 필요(세션에서 /vault-lint)"
+    if status == "not_vault":
+        return "· healthcheck: 볼트 설정 없음 ⚠️ — 00-meta/vault-config.json 확인"
+    if status == "vault_not_found":
+        return "· healthcheck: 볼트 폴더 없음 ⚠️"
+    unchecked = (f"읽기 실패 {summary['unreadable']}건·"
+                 f"링크/정션 제외 {summary['skipped_links']}건")
+    if summary["critical"] > 0:
+        line = f"· healthcheck: 치명 위반 {summary['critical']}건 🚨 — 세션에서 /vault-lint 필요"
+        return line if summary["complete"] else f"{line} · 일부 미검사({unchecked})"
+    if not summary["complete"]:
+        return f"· healthcheck: 치명 0건, 일부 미검사 ⚠️ — {unchecked}(리포트 §14·§14b)"
+    if summary["extension_input_complete"]:
+        return f"· healthcheck: 치명 없음 ✅ (노트 {summary['notes_checked']}개)"
+    # The warning extensions saw incomplete input; with promotion active a
+    # finding that should have been fatal may have stayed a warning.
+    mark = "⚠️" if summary["warning_promotion_active"] else "✅"
+    return (f"· healthcheck: 치명 없음 {mark} (노트 {summary['notes_checked']}개) · "
+            f"확장 경고 분석 일부 생략(근거 용량 한도 {summary['evidence_skipped']}건)")
+
+
 def do_butler(vault: Path, cfg: dict) -> str:
     lines = ["🧹 집사 보고"]
     hc = Path(__file__).parent / "vault_healthcheck.py"
     if hc.is_file():
         try:
-            r = subprocess.run([sys.executable, str(hc), "--vault", str(vault)],
+            r = subprocess.run([sys.executable, str(hc), "--vault", str(vault), "--json-summary"],
                                cwd=str(vault), capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=300,
                                env=child_process_env())
@@ -1276,8 +1340,7 @@ def do_butler(vault: Path, cfg: dict) -> str:
             log(f"healthcheck 실행 실패({type(error).__name__})")
             lines.append("· healthcheck: 실행 실패 ⚠️ — 브리지 로그 확인")
         else:
-            lines.append("· healthcheck: " + ("치명 없음 ✅" if r.returncode == 0
-                         else "치명 위반 감지 🚨 — 세션에서 /vault-lint 필요"))
+            lines.append(_butler_health_line(r.returncode, r.stdout))
     else:
         lines.append("· healthcheck: 스크립트 없음(생략)")
     remotes = (_git(vault, "remote") or "").split()
