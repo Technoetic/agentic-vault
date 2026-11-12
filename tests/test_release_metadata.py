@@ -2268,6 +2268,23 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertIn(f"since v0.47.0 a scheduled briefing slot that fails {attempts} times in a row is skipped",
                       readme)
 
+    def test_skip_notice_wording_names_the_slot_in_every_text(self) -> None:
+        # The notice also names the slot and guesses no cause (jarvis_bridge._briefing_skip_notice), so no
+        # text may say it holds only the date, time and attempt count (host result HR-7, finding BR-4).
+        phrase = "회차의 날짜·시각·이름과 시도 횟수를 적고 원인은 짐작하지 않는 안내를 한 번 보낸다"
+        readme = README.read_text(encoding="utf-8")
+        setup = self.JARVIS_SETUP.read_text(encoding="utf-8")
+        release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
+        for name, text in (("readme", readme), ("setup", setup)):
+            with self.subTest(text=name):
+                self.assertEqual(_folded(text).count(phrase), 1)
+        for name, text in (("readme", readme), ("setup", setup), ("release", release)):
+            for stale in ("날짜·시각과 시도 횟수만 담은 안내", "날짜·시각과 시도 횟수가 든 안내"):
+                with self.subTest(text=name, stale=stale):
+                    self.assertNotIn(stale, _folded(text))
+        entries = _folded(_section(release, "## 기본 결과 변경"))
+        self.assertIn("소유자는 날짜·시각·회차 이름과 시도 횟수가 든 안내를 한 번 받는다.", entries)
+
     def test_constraints_guidance_asks_for_scope_reason_and_removal(self) -> None:
         section = _folded(_section(self.HARDENING.read_text(encoding="utf-8"),
                                    "## Compact constraints note (`constraints_note`)"))
