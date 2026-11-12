@@ -44,7 +44,7 @@ v0.45.1에 대한 외부 검토가 찾은 결함 일곱 가지를 고친다.
 - 알 수 없는 최상위 설정 키는 리포트 §0·doctor `config_warnings`에 가장 가까운 키와 함께 경고로
   나오고 콘솔 줄에는 그 건수가 붙는다(종료 코드는 그대로). `hot_note`·`handoff_note`는 비우거나 `.md` 노트를 가리켜야
   하며, 다른 값은 설정 오류다. `--vault`로 준 경로가 없거나 폴더가 아니면 healthcheck와 doctor가
-  종료 코드 2로 끝나고, 새 `--require-vault`는 설정 없는 폴더도 2로 끝낸다([사용법](docs/reliability.md)).
+  종료 코드 2로 끝나고, 새 `--require-vault`는 full 모드에서 설정 없는 폴더도 2로 끝낸다([사용법](docs/reliability.md)).
 - 템플릿 그대로의 handoff 기준 커밋 `(없음)`은 더 이상 session-end 계약 위반이 아니다. git
   볼트에서 볼트 폴더를 바꾼 커밋이 `anchor_drift_threshold`개 이상 쌓였을 때만 알린다.
 - Telegram 집사는 완전하고 깨끗한 검사에만 ✅를 붙이고 치명 건수와 `일부 미검사`를 밝힌다
