@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.45.1"
-EXPECTED_PUBLIC_REF = "0.45.1"
+EXPECTED = "0.46.0"
+EXPECTED_PUBLIC_REF = "0.46.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.45.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.45.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.46.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.46.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.45.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.46.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -361,6 +361,12 @@ CHECKER_SHA256_V0460 = "09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
 CURRENT_CHECKER_SECTION = "## v0.35.1 source and certificate migration"
+# The v0.46.0 section sits above it and runs to the next "## " heading; README's v0.36.x sections
+# between the two print the v0.34.0 digest again.
+V0460_CHECKER_SECTION = "## v0.46.0 source and certificate migration"
+V0460_RETURN_COORDINATION = (
+    "Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination."
+)
 V0340_CHECKER_SECTION = "## v0.34.0 source and certificate migration"
 V0331_CHECKER_SECTION = "## v0.33.1 source and certificate migration"
 SOURCE_CHECKER_ADDENDUM_PATHS = (
@@ -664,6 +670,29 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotEqual(CHECKER_SHA256_V0460, CHECKER_SHA256_V0340)
         self.assertNotEqual(CHECKER_SHA256_V0340, CHECKER_SHA256_V0330)
         self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
+
+    def test_v0460_checker_addenda_state_new_hash_and_coordination(self) -> None:
+        # vault_paths.py and vault_lint_extensions.py changed in v0.46.0, so each addendum opens
+        # with a section that states both fingerprints once and the coordination in both directions.
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
+            with self.subTest(path=rel_path):
+                text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                self.assertEqual(text.count(V0460_CHECKER_SECTION + "\n"), 1)
+                start = text.index(V0460_CHECKER_SECTION + "\n")
+                self.assertLess(start, text.index(CURRENT_CHECKER_SECTION))
+                end = text.find("\n## ", start + len(V0460_CHECKER_SECTION))
+                section = _folded(text[start:end if end != -1 else len(text)])
+                self.assertIn(f"`{CHECKER_SHA256_V0460}`", section)
+                self.assertIn(f"`{CHECKER_SHA256_V0340}`", section)
+                for digest in (CHECKER_SHA256_V0460, CHECKER_SHA256_V0340):
+                    self.assertEqual(section.count(digest[:8]), 1, digest[:8])
+                self.assertIn("`38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a`", section)
+                self.assertIn("`vault_paths.py`", section)
+                self.assertIn("`vault_lint_extensions.py`", section)
+                self.assertIn(SOURCE_CHECKER_COORDINATION, section)
+                self.assertIn(V0460_RETURN_COORDINATION, section)
+                for digest in (CHECKER_SHA256_V0330, CHECKER_SHA256_V0320):
+                    self.assertNotIn(digest[:8], section)
 
     def test_current_checker_addenda_state_release_hash_and_coordination(self) -> None:
         # v0.35.1 retains the actual v0.34.0 checker/corpus bytes; a version-only
@@ -1546,3 +1575,102 @@ class V0340ReleaseMetadataTests(unittest.TestCase):
                      REPO_ROOT / "assets/adapters/aside/aside-up.ps1"):
             with self.subTest(path=path.name):
                 self.assertNotIn("engine=0.34.0", path.read_text(encoding="utf-8"))
+
+
+# v0.46.0: seven defect fixes found by an outside review of v0.45.1. The deny-zone fold changed
+# vault_paths.py and vault_lint_extensions.py, two of the seven certificate-bound files, so the
+# note states both fingerprints and the v0.31.0 upgrade and rollback order; the deny guard and
+# its parser carry the fold and move to engine=0.46.0, unchanged rules and helpers keep theirs.
+class V0460ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.46.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.46.0.md"
+    TITLE = "# v0.46.0 — 금지 구역 정규화와 검사 빈틈 보강"
+    SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 참고와 기존 활용의 차이",
+                "## 검증", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.46.0`이다."
+    CERTIFICATE_STATEMENT = (
+        f"`{CHECKER_SHA256_V0340}`에서 `{CHECKER_SHA256_V0460}`로 바뀐다. 일곱 bound 파일 가운데 바뀐 "
+        "것은 `vault_paths.py`와 `vault_lint_extensions.py`이고 harmless corpus는 같다."
+    )
+    RECORD_OPENING = "This document specifies gates, not measured results."
+    RECORD_SECTIONS = ("## Release content and scope", "## Required feature evidence",
+                       "## Evidence boundaries", "## Final release gates", "## Limits")
+
+    def test_v0460_release_note_sections_and_install_ref(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        lines = release.splitlines()
+        self.assertEqual(lines[0], self.TITLE)
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+        # The closing paragraph after the last section states the install ref and the stamps.
+        closing = _folded(release[release.index("\n" + self.SECTIONS[-1] + "\n"):])
+        self.assertIn(self.INSTALL_REF, closing)
+        self.assertIn("engine=0.46.0", closing)
+
+    def test_v0460_upgrade_and_rollback_order_is_the_v0310_order(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        start = release.index("\n## 하위호환·업그레이드\n")
+        section = release[start:release.index("\n## ", start + 1)]
+        self.assertIn(V0310_UPGRADE_ORDER_LEAD, _folded(section))
+        lines = section.splitlines()
+        first = lines.index(V0310_UPGRADE_STEPS[0])
+        self.assertEqual(tuple(lines[first:first + len(V0310_UPGRADE_STEPS)]), V0310_UPGRADE_STEPS)
+
+    def test_v0460_states_both_checker_hashes_once(self) -> None:
+        for document in (self.RELEASE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            for digest in (CHECKER_SHA256_V0340, CHECKER_SHA256_V0460):
+                with self.subTest(document=document.name, digest=digest[:8]):
+                    self.assertEqual(text.count(digest), 1)
+                    self.assertEqual(text.count(digest[:8]), 1)
+            for digest in (CHECKER_SHA256_V0330, CHECKER_SHA256_V0320):
+                with self.subTest(document=document.name, absent=digest[:8]):
+                    self.assertNotIn(digest[:8], text)
+        self.assertIn(self.CERTIFICATE_STATEMENT, _folded(self.RELEASE.read_text(encoding="utf-8")))
+        record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
+        self.assertIn(f"returned checker fingerprint `{CHECKER_SHA256_V0460}`", record)
+        self.assertIn(f"differs from v0.45.1's `{CHECKER_SHA256_V0340}`", record)
+        self.assertIn("corpus `38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a` is unchanged",
+                      record)
+
+    def test_v0460_record_specifies_gates_not_results(self) -> None:
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        lines = record.splitlines()
+        self.assertEqual(lines[0], "# v0.46.0 verification contract")
+        self.assertTrue(_folded(record).startswith(
+            "# v0.46.0 verification contract " + self.RECORD_OPENING))
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        folded = _folded(record)
+        for literal in ("verification.json", "129", "claude plugin validate --strict",
+                        "Reference Atlas", "both directions", "flags-off"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_v0460_document_links_resolve(self) -> None:
+        import re
+        from urllib.parse import unquote
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
+                if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                with self.subTest(document=document.name, target=target):
+                    self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
+
+    def test_v0460_moves_only_the_guard_stamps(self) -> None:
+        # The deny guard carries the fold and its parser must match its stamp; rule templates,
+        # the Aside helper, the lesson cue hook and the git hooks did not change.
+        for relative in ("assets/adapters/deny-guard/deny-guard.py",
+                         "assets/adapters/deny-guard/ps-parse.ps1"):
+            with self.subTest(stamped=relative):
+                first = (REPO_ROOT / relative).read_text(encoding="utf-8-sig").splitlines()[0]
+                self.assertTrue(first.endswith(" engine=0.46.0"), first)
+        unchanged = (*BROWSER_RULE.parent.glob("vault-*.md"),
+                     REPO_ROOT / "assets/adapters/aside/aside-up.ps1",
+                     REPO_ROOT / "assets/adapters/lesson-cues/lesson-cues.py",
+                     *(REPO_ROOT / "assets/git-hooks").iterdir())
+        self.assertGreaterEqual(len(unchanged), 10)
+        for path in unchanged:
+            with self.subTest(unchanged=path.name):
+                self.assertNotIn("engine=0.46.0", path.read_text(encoding="utf-8-sig"))
