@@ -2,7 +2,7 @@
 
 ## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
 
-v0.47.0 takes up eleven items from an outside review that compared the plugin with a vendor prompting
+v0.47.0 takes up eleven items from a review that compared the plugin with a vendor prompting
 guide. On the Codex side, `init` and `upgrade` offer the optional `/aside-repl` procedure command when
 the Aside clause is present, and Codex reads that file when the clause points to it; the shared
 session-end, process-inbox and lesson-delta changes apply as in Claude Code. The seven certificate-bound
