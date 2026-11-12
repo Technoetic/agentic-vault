@@ -1973,6 +1973,15 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         )
         self.assertIn(sentence + " 대상: 명령을 설치한 볼트.", entry)
 
+    def test_v0470_note_states_the_shared_briefing_backoff(self) -> None:
+        # The retry backoff is shared by all pending slots and returns to its base only when `pending` is
+        # empty (finding BR-1; the behaviour is pinned in tests/test_jarvis_bridge.py).
+        changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        self.assertIn(
+            "최대 1시간)을 따른다. 이 간격은 회차마다 따로 두지 않고 `pending`이 빌 때만 60초로 돌아가므로, 두 회차 "
+            "이상이 함께 `pending`에 있으면 뒤 회차는 앞 회차의 실패로 늘어난 간격에서 이어 시도하고 건너뛰기 안내도 "
+            "그만큼 늦게 온다.", changes)
+
     def test_v0470_no_placeholder_left(self) -> None:
         import re
 
