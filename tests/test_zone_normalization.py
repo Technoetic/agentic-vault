@@ -117,6 +117,29 @@ class FoldTests(unittest.TestCase):
                 for copy in copies:
                     self.assertEqual(copy(value), folded)
 
+    def test_canonical_singletons_fold_to_their_ascii_character(self) -> None:
+        # U+037E (Greek question mark) and U+1FEF (Greek varia) decompose canonically to ';' and '`',
+        # so an ASCII zone that holds one of them also covers the folder spelled with the other.
+        for other, plain in ((chr(0x37E), ";"), (chr(0x1FEF), "`")):
+            with self.subTest(code_point=hex(ord(other))):
+                self.assertEqual(vault_paths.fold_path_part("a" + other + "b"),
+                                 vault_paths.fold_path_part("a" + plain + "b"))
+                self.assertTrue(vault_paths.zone_matches(["a" + other + "b"], "a" + plain + "b"))
+                self.assertNotEqual(("a" + other + "b").casefold(), "a" + plain + "b")  # casefold alone kept them apart
+
+    def test_casefold_equal_names_that_are_not_canonical_caseless_matches(self) -> None:
+        # Contract of the definition (D145): a mark after a letter with ypogegrammeni stays on that
+        # letter. Upper-casing or casefolding moves the iota out and so puts the mark on the iota,
+        # which is another name, although casefold alone compares the two as equal (v0.45.1 did).
+        zone = OMEGA_YPO_ZONE
+        for other in (zone.upper(), zone.casefold()):
+            with self.subTest(other=ascii(other)):
+                self.assertEqual(other.casefold(), zone.casefold())
+                self.assertFalse(vault_paths.zone_matches([other], zone))
+        self.assertTrue(vault_paths.zone_matches([OMEGA_YPO_ZONE_PATH], zone))
+        letter = chr(0x1FAA)  # without a further mark the upper-case spelling is the same name
+        self.assertTrue(vault_paths.zone_matches([letter.upper()], letter))
+
 
 class FoldPropertyTests(unittest.TestCase):
     """Seeded property test: fold equality is Unicode canonical caseless matching.
