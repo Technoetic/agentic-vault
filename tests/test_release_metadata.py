@@ -2213,6 +2213,25 @@ class V0470SharedSurfaceTests(unittest.TestCase):
                 self.assertIn(code, section)
                 self.assertIn(code, literals)
 
+    def test_reasonless_retire_notes_state_the_kept_reason_cell_exception(self) -> None:
+        # A row whose status cell already reads `상태: retired(…, YYYY-MM-DD)` keeps that cell under v0.47.0,
+        # so a reasonless RETIRE proposal that v0.46.0 prepared for it is refused when applied (finding LA-1).
+        literals = {node.value for node in ast.walk(ast.parse(self.LESSON_DELTA.read_text(encoding="utf-8")))
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+        self.assertIn("proposal_changed_or_stale", literals)
+        release = _folded(_section(V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8"),
+                                   "## 하위호환·업그레이드"))
+        self.assertIn(
+            "상태 칸이 이미 `상태: retired(…, YYYY-MM-DD)`인 줄을 빼면 사유 없는 옛 RETIRE 제안은 같은 바이트로 다시 "
+            "준비되고, 제안의 `version`은 1 그대로다. 그런 줄에서는 v0.47.0이 그 칸을 그대로 두므로(기본 결과 변경 "
+            "5번) v0.46.0이 준비한 제안은 `proposal_changed_or_stale`로 거부되며 다시 준비해야 한다.", release)
+        self.assertEqual(release.count("사유 없는 옛 RETIRE 제안은 같은 바이트로"), 1)
+        hardening = _folded(_section(self.HARDENING.read_text(encoding="utf-8"), "## 교훈 은퇴 사유"))
+        self.assertIn(
+            "- `reason`이 없으면 상태 칸은 예전처럼 `상태: retired`이고, 사유 없는 옛 제안은 같은 바이트로 다시 계산되어 "
+            "적용된다. 다만 상태 칸이 이미 `상태: retired(…, YYYY-MM-DD)`인 줄은 그 칸을 그대로 두므로, 그런 줄에 "
+            "v0.46.0이 준비한 사유 없는 제안은 `proposal_changed_or_stale`로 거부되고 다시 준비해야 한다.", hardening)
+
     def test_upgrade_passes_the_offer_flag_once(self) -> None:
         # Among the command lines that run the adapter report, exactly one passes the flag: step 6.
         lines = [line for line in self.UPGRADE.read_text(encoding="utf-8").splitlines()
