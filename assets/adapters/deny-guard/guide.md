@@ -49,8 +49,10 @@
   `ask`로 확인한다. Read로 읽는 것은 그대로 둔다. 셸 명령의 글자에서는 `.claude`를 폴더 자체(`rm -rf .claude`), 바로 안의 와일드카드
   이름(`.claude/*.json`), `.`이나 `..`로 끝나는 경로(`.claude/rules/..`)일 때만 제어 파일 이름으로 본다. 그래서 플러그인 설치
   경로(`~/.claude/plugins/...`)나 `.claude/rules/` 아래 파일을 쓰는 명령은 그 이름 때문에 묻지 않는다.
-- **구역 비교:** 플러그인 `vault_paths.zone_matches`를 그대로 복사해 쓴다. 한 단계 구역(`90-assets`)은 어느 깊이의 같은 이름 폴더든,
-  여러 단계 구역(`10-inbox/_processed`)은 볼트 루트에서 시작할 때만 맞고, 대소문자는 무시한다. 경로는 글자 그대로의 경로와
+- **구역 비교:** 플러그인 `vault_paths.fold_path_part`와 `vault_paths.zone_matches`를 그대로 복사해 쓴다. 한 단계 구역(`90-assets`)은
+  어느 깊이의 같은 이름 폴더든, 여러 단계 구역(`10-inbox/_processed`)은 볼트 루트에서 시작할 때만 맞고, 대소문자와 유니코드 정규화
+  차이는 무시한다(한 이름의 NFC 표기와 NFD 표기는 같은 이름이다). 셸 명령 글자에서 구역 이름을 찾는 검사와 와일드카드 경로의
+  이름 비교도 같은 접기(`fold_path_part`)를 쓴다. 경로는 글자 그대로의 경로와
   `realpath`로 푼 경로를 둘 다 볼트 루트(주어진 경로와 `realpath`로 푼 경로)에 대고 `normcase`로 비교한다. 그래서 구역 밖 폴더가
   정션으로 구역을 가리켜도, 구역 자체가 볼트 밖을 가리키는 정션이어도 잡힌다. Windows에서는 MSYS 경로(`/d/vault/...`)를
   `D:/vault/...`로 바꾸고(`CLAUDE_PROJECT_DIR`가 MSYS 형식이어도 같은 `vault-config.json`을 읽는다), `\\?\` 접두사와 끝의 점·공백,

@@ -1419,7 +1419,7 @@ claude
 |:---|:---|
 | `vault_name` | 볼트 표시 이름 |
 | `language` | 볼트 주 언어 (`ko`, `en` 등) — 생성 노트·브리핑 언어 |
-| `deny_zones` | 읽기·스캔 절대 금지 경로 목록 (격리·아카이브·바이너리 구역) |
+| `deny_zones` | 읽기·스캔 절대 금지 경로 목록 (격리·아카이브·바이너리 구역). 대소문자·NFC/NFD 표기 차이는 무시 |
 | `exclude_dirs` | 스캔 제외 디렉토리 (node_modules, .git 등 — 금지 구역은 아님) |
 | `frontmatter_roots` | 프런트매터 스키마 검사를 적용할 루트 경로 목록 |
 | `frontmatter_exempt_paths` | 위 루트 안에서도 프런트매터 스키마 검사를 면제할 경로 목록 |
