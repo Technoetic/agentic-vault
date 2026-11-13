@@ -562,6 +562,30 @@ class SessionStartTests(unittest.TestCase):
         self.assertLessEqual(sum(healthcheck.estimate_tokens(section.text) for section in result.sections
                                  if section is not None), 2400)
 
+    def test_host_option_defaults_to_the_unchanged_plain_text_path(self) -> None:
+        # v0.48.0 adds --host antigravity; the default and an explicit --host claude
+        # are the Claude Code and Codex path, byte for byte.
+        self.write_config()
+        self.write("00-meta/handoff.md", "Continue the release checklist.")
+        self.write("00-meta/hot.md", "오늘은 안정성 검증을 완료한다.")
+
+        def run(*arguments: str) -> subprocess.CompletedProcess[bytes]:
+            return subprocess.run(
+                [sys.executable, str(SESSION_HOOK), *arguments], cwd=REPO_ROOT,
+                env=self.hook_env(codex=False, claude_project_dir=None),
+                input=b'{"source":"startup"}', stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False, timeout=30,
+            )
+
+        default = run()
+        explicit = run("--host", "claude")
+        unknown = run("--host", "gemini")
+
+        self.assertEqual((default.returncode, default.stderr), (0, b""))
+        self.assertTrue(default.stdout.startswith(HANDOFF_HEADER.encode("utf-8")))
+        self.assertEqual((explicit.returncode, explicit.stdout, explicit.stderr), (0, default.stdout, b""))
+        self.assertEqual((unknown.returncode, unknown.stdout), (2, b""))
+
     def test_non_vault_is_a_quiet_noop(self) -> None:
         result = self.run_hook()
 
@@ -1461,6 +1485,17 @@ class HookWiringTests(unittest.TestCase):
         self.assertTrue(re.fullmatch(matcher, "startup"))
         self.assertTrue(re.fullmatch(matcher, "clear"))
         self.assertTrue(re.fullmatch(matcher, "resume"))
+
+    def test_claude_manifest_keeps_the_default_host(self) -> None:
+        # Only the generated Antigravity package passes --host antigravity; the input
+        # never selects the mode, so the Claude Code hooks stay on the default path.
+        raw = json.loads(HOOKS_CONFIG.read_text(encoding="utf-8"))
+        commands = [hook["command"] for groups in raw["hooks"].values()
+                    for group in groups for hook in group["hooks"]]
+        self.assertTrue(commands)
+        for command in commands:
+            with self.subTest(command=command[-60:]):
+                self.assertNotIn("--host", command)
 
     def test_failed_checker_is_not_retried_with_another_python(self) -> None:
         shell = shutil.which("sh")

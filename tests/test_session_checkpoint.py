@@ -116,6 +116,31 @@ class CheckpointTests(unittest.TestCase):
         mismatch = self.run_hook({'hook_event_name': 'SessionEnd'}, arguments=('--event', 'PreCompact'))
         self.assertIn('invalid checkpoint event', mismatch.stderr)
 
+    def test_event_choices_list_stop_and_the_default_mode_records_it(self):
+        # v0.48.0: vault_state.EVENTS gains Antigravity CLI's Stop, so the --event
+        # choices list it too (a documented change of the default --help output).
+        usage = subprocess.run([sys.executable, str(HOOK), '--help'], capture_output=True, text=True,
+                               encoding='utf-8', timeout=10)
+        self.assertEqual(usage.returncode, 0)
+        self.assertIn('{PreCompact,SessionEnd,Stop}', usage.stdout)
+        result = self.run_hook({'hook_event_name': 'Stop', 'session_id': 'claude-stop'}, arguments=('--event', 'Stop'))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, '', ''))
+        saved = json.loads(self.records()[0].read_text())
+        self.assertEqual([event['event'] for event in saved['events']], ['Stop'])
+        mismatch = self.run_hook({'hook_event_name': 'PreCompact'}, arguments=('--event', 'Stop'))
+        self.assertIn('invalid checkpoint event', mismatch.stderr)
+
+    def test_default_mode_does_not_detect_antigravity_input(self):
+        # Without --host antigravity a camelCase Antigravity event is not a Claude event.
+        event = {'conversationId': 'conversation-1', 'workspacePaths': [str(self.vault)],
+                 'hookEventName': 'Stop', 'fullyIdle': True, 'executionNum': 1}
+        for arguments in ((), ('--host', 'claude')):
+            with self.subTest(arguments=arguments):
+                result = self.run_hook(event, arguments=arguments)
+                self.assertEqual((result.returncode, result.stdout), (0, ''))
+                self.assertEqual(result.stderr, 'agentic-vault: invalid checkpoint event\n')
+        self.assertEqual(self.records(), [])
+
     def test_denied_configured_source_does_not_leave_partial_checkpoint(self):
         self.write('00-meta/vault-config.json', b'{"deny_zones":["private"],"hot_note":"private/no.md"}')
         self.write('private/no.md', b'PRIVATE-NOTE')

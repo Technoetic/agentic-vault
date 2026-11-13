@@ -1673,5 +1673,96 @@ class ReadFailSoftTests(unittest.TestCase):
         self.assertIn("전부를 읽지 못했습니다", stderr.getvalue())
 
 
+class CheckpointStopEventTests(unittest.TestCase):
+    """v0.48.0: an Antigravity CLI Stop checkpoint is read like a PreCompact or SessionEnd one.
+
+    Antigravity CLI has no compaction or session-end event, so its hook records
+    a checkpoint on a fully idle Stop. The opt-in drift check compares the
+    newest checkpoint's note hashes with the notes whatever event wrote it.
+    """
+
+    EVENTS = ("PreCompact", "SessionEnd", "Stop")
+
+    @staticmethod
+    def state_writer():
+        scripts = str(MODULE_PATH.parent)
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import vault_state
+
+        return vault_state
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.config = {
+            "vault_name": "Stop", "required_keys": ["title"], "enums": {},
+            "deny_zones": [".obsidian"], "exclude_dirs": [".git"],
+            "frontmatter_roots": ["20-knowledge"], "index_note": "", "log_note": "00-meta/log.md",
+            "log_tags": ["build"], "hot_note": "00-meta/hot.md",
+            "handoff_note": "50-projects/P/handoff.md", "anchor_drift_threshold": 0,
+            "ssot_note": "", "rules_dir": "", "health_report": "00-meta/health-report.md",
+            "checkpoint_drift_check": True,
+        }
+
+    def make_vault(self, name: str) -> Path:
+        vault = self.root / name
+        for relative, text in {
+            "00-meta/vault-config.json": json.dumps(self.config),
+            "00-meta/hot.md": "# Hot\n\nstate one\n",
+            "00-meta/log.md": "- 2026-11-13 10:00 | tester | [build] entry\n",
+            "50-projects/P/handoff.md": "# Handoff\n\nnext step\n",
+        }.items():
+            path = vault / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode("utf-8"))
+        return vault
+
+    def test_checkpoint_events_are_the_events_the_state_writer_accepts(self) -> None:
+        self.assertEqual(healthcheck._CHECKPOINT_EVENTS, frozenset(self.EVENTS))
+        self.assertEqual(healthcheck._CHECKPOINT_EVENTS, self.state_writer().EVENTS)
+
+    def test_stop_checkpoint_drift_is_reported_like_the_other_events(self) -> None:
+        vault_state = self.state_writer()
+        seen = {}
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                vault = self.make_vault(event)
+                vault_state.write_checkpoint(vault, event, session_id="conversation-1")
+                (vault / "00-meta/hot.md").write_bytes(b"# Hot\n\nedited in another editor\n")
+                (vault / "50-projects/P/handoff.md").unlink()
+                findings = healthcheck.checkpoint_drift_warnings(vault, validate_config(self.config))
+                seen[event] = [(finding["path"], finding["code"], finding["severity"],
+                                finding["details"]["state"], finding["details"]["event"])
+                               for finding in findings]
+        expected = [("00-meta/hot.md", "checkpoint-drift", "warning", "changed"),
+                    ("50-projects/P/handoff.md", "checkpoint-drift", "warning", "missing")]
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                self.assertEqual(seen[event], [(*row, event) for row in expected])
+
+    def test_stop_records_parse_like_the_other_events(self) -> None:
+        def record(*events: str) -> bytes:
+            return json.dumps({
+                "version": 1, "session_sha256": "a" * 64, "config_sha256": "0" * 64,
+                "sources": [{"path": "00-meta/hot.md", "sha256": "b" * 64, "size": 3}],
+                "events": [{"event": event, "at": f"2026-11-13T0{index}:00:00+00:00"}
+                           for index, event in enumerate(events)],
+                "pending_references": [],
+            }).encode("utf-8")
+
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                parsed = healthcheck._parse_checkpoint(record(event))
+                self.assertIsNotNone(parsed)
+                self.assertEqual(parsed[1:3], (event, "2026-11-13T00:00:00+00:00"))
+        mixed = healthcheck._parse_checkpoint(record("Stop", "PreCompact", "SessionEnd", "Stop"))
+        self.assertEqual(mixed[1:3], ("Stop", "2026-11-13T03:00:00+00:00"))
+        for event in ("SessionStart", "stop", "PostInvocation"):
+            with self.subTest(rejected=event):
+                self.assertIsNone(healthcheck._parse_checkpoint(record("Stop", event)))
+
+
 if __name__ == "__main__":
     unittest.main()

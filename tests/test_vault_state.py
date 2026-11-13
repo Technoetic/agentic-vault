@@ -555,6 +555,24 @@ except StateError as e: print(str(e))
         self.assertEqual(state.MAX_BYTES, 256 * 1024)
         self.assertGreater(state.MAX_CHECKPOINT_SOURCE_BYTES, state.MAX_BYTES)
 
+    def test_checkpoint_events_include_the_antigravity_stop(self):
+        # v0.48.0: Antigravity CLI has no compaction or session-end event; its fully
+        # idle Stop is the checkpoint event, kept in the same history as the others.
+        self.assertEqual(state.EVENTS, frozenset({'PreCompact', 'SessionEnd', 'Stop'}))
+        first = state.write_checkpoint(self.vault, 'Stop', session_id='conversation-1')
+        self.assertEqual(first['event'], 'Stop')
+        state.write_checkpoint(self.vault, 'PreCompact', session_id='conversation-1')
+        last = state.write_checkpoint(self.vault, 'Stop', session_id='conversation-1')
+        self.assertEqual(last['path'], first['path'])
+        saved = json.loads((self.vault / last['path']).read_bytes())
+        self.assertEqual([event['event'] for event in saved['events']], ['Stop', 'PreCompact', 'Stop'])
+        self.assertEqual(saved['session_sha256'], sha(b'conversation-1'))
+        for other in ('SessionStart', 'stop', 'STOP', ''):
+            with self.subTest(event=other):
+                with self.assertRaisesRegex(state.StateError, '^invalid_checkpoint_event$'):
+                    state.write_checkpoint(self.vault, other, session_id='conversation-1')
+        self.assertEqual(json.loads((self.vault / last['path']).read_bytes()), saved)
+
     def test_fix3_policy_change_during_last_target_or_source_read_blocks_replace(self):
         original_config = (self.vault / state.CONFIG_PATH).read_bytes()
         real_read = state._Policy.read_note
