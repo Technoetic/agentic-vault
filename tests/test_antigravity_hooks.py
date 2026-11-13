@@ -10,13 +10,17 @@ answer with a JSON object and exit 0.
 
 The generated package registers three handlers per event (the sh wrapper,
 ``py -3`` and ``python``), so a claim file in the temporary folder lets one of
-them act. Every subprocess here gets its own TMP, TEMP and TMPDIR, so the
-claims of one test never meet those of another. The subprocess runs use a
-copy of the hooks and engine scripts and run it from its own folder, the way
-Antigravity CLI runs an installed plugin.
+them act. A claim holds its key for 120 seconds; after that the key is
+processed again. On POSIX, where the temporary folder is shared, the claim
+folder is per user and private. Every subprocess here gets its own TMP, TEMP
+and TMPDIR, so the claims of one test never meet those of another. The
+subprocess runs use a copy of the hooks and engine scripts and run it from its
+own folder, the way Antigravity CLI runs an installed plugin.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import errno
 import hashlib
 import importlib.util
 import io
@@ -24,9 +28,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -94,6 +100,22 @@ def encode(event: dict, fields: dict) -> bytes:
 
 def claim_name(*parts: str) -> str:
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:40]
+
+
+def claims_folder(temp: Path) -> Path:
+    """The claim folder under temp: per user on POSIX, whose /tmp is shared; the plain name on Windows."""
+    return temp / (f"{CLAIMS}-{os.getuid()}" if hasattr(os, "getuid") else CLAIMS)
+
+
+def set_age(path: Path, seconds: float) -> None:
+    """Set path's times to `seconds` ago (a negative age is a time ahead of the clock)."""
+    moment = time.time() - seconds
+    os.utime(path, (moment, moment))
+
+
+def sweepable(name: str) -> bool:
+    """A name the claim sweep removes after two days: 40 lowercase hex characters."""
+    return len(name) == 40 and set(name) <= set("0123456789abcdef")
 
 
 def alias_folder(link: Path, target: Path) -> None:
@@ -186,8 +208,27 @@ class AntigravityHookCase(unittest.TestCase):
         return message["systemMessage"]
 
     def claims(self) -> list[str]:
-        folder = self.temp / CLAIMS
+        folder = claims_folder(self.temp)
         return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
+
+    def age_claim(self, *parts: str, seconds: float) -> None:
+        set_age(claims_folder(self.temp) / claim_name(*parts), seconds)
+
+    def run_unread(self, name: str, raw: bytes) -> tuple[int, bytes]:
+        """Run a hook whose host closed its end of stdout before the answer; return (exit code, stderr)."""
+        worker = subprocess.Popen([sys.executable, f"hooks/{name}", "--host", "antigravity"], cwd=self.plugin,
+                                  env=self.env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        worker.stdout.close()
+        worker.stdout = None  # communicate() must not read the pipe closed above
+        _, stderr = worker.communicate(raw, timeout=60)
+        return worker.returncode, stderr
+
+    @staticmethod
+    def together(workers: list[subprocess.Popen], raw: bytes) -> list[tuple[bytes, bytes]]:
+        """Give every worker its event at the same time, as when Antigravity CLI starts all handlers."""
+        with ThreadPoolExecutor(max_workers=len(workers)) as pool:
+            return list(pool.map(lambda worker: worker.communicate(raw, timeout=60), workers))
 
     def records(self, vault: Path | None = None) -> list[Path]:
         return sorted(((vault or self.vault) / RUNTIME).glob("checkpoint-*.json"))
@@ -342,6 +383,39 @@ class AntigravitySessionStartTests(AntigravityHookCase):
         self.assertEqual([error for _, error in outputs], [b"", b"", b""])
         self.assertEqual(sorted(output == EMPTY for output, _ in outputs), [False, True, True])
         self.assertEqual(sum(b"injectSteps" in output for output, _ in outputs), 1)
+
+    def test_conversation_is_injected_again_once_its_claim_is_older_than_120_seconds(self) -> None:
+        raw = self.start_event(conversationId="conversation-reopened")
+        self.injected(self.start(raw))
+        self.age_claim("SessionStart", "conversation-reopened", seconds=100)
+        within = self.start(raw)
+
+        self.age_claim("SessionStart", "conversation-reopened", seconds=130)
+        again = self.start(raw)
+        renewed = self.start(raw)
+
+        # Within 120 seconds the same conversation is not injected again; after that it is, once.
+        self.assertEqual((within.returncode, within.stdout, within.stderr), (0, EMPTY, b""))
+        self.assertIn("Continue the release checklist.", self.injected(again))
+        self.assertEqual(again.stderr, b"")
+        self.assertEqual((renewed.returncode, renewed.stdout, renewed.stderr), (0, EMPTY, b""))
+        self.assertIn(claim_name("SessionStart", "conversation-reopened"), self.claims())
+        self.assertTrue(all(sweepable(name) for name in self.claims()))
+
+    def test_three_handlers_for_a_reopened_conversation_inject_once(self) -> None:
+        raw = self.start_event(conversationId="conversation-three-again")
+        self.injected(self.start(raw))
+        self.age_claim("SessionStart", "conversation-three-again", seconds=600)
+        workers = [subprocess.Popen([sys.executable, "hooks/session_start.py", "--host", "antigravity"],
+                                    cwd=self.plugin, env=self.env(), stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(3)]
+
+        outputs = self.together(workers, raw)
+
+        self.assertEqual([worker.returncode for worker in workers], [0, 0, 0])
+        self.assertEqual([error for _, error in outputs], [b"", b"", b""])
+        self.assertEqual(sum(b"injectSteps" in output for output, _ in outputs), 1)
+        self.assertEqual(sum(output == EMPTY for output, _ in outputs), 2)
 
     def test_event_without_a_conversation_id_is_not_claimed(self) -> None:
         for _ in range(2):
@@ -524,6 +598,39 @@ class AntigravityStopTests(AntigravityHookCase):
         [record] = self.records()
         self.assertEqual(len(json.loads(record.read_text(encoding="utf-8"))["events"]), 1)
 
+    def test_execution_number_is_recorded_again_once_its_claim_is_older_than_120_seconds(self) -> None:
+        raw = self.stop_event(executionNum=5)
+        results = [self.stop(raw), self.stop(raw)]
+        self.age_claim("Stop", "conversation-stop", "5", seconds=100)
+        results.append(self.stop(raw))
+        [record] = self.records()
+        held = len(json.loads(record.read_text(encoding="utf-8"))["events"])
+
+        self.age_claim("Stop", "conversation-stop", "5", seconds=130)
+        results += [self.stop(raw), self.stop(raw)]
+
+        self.assertEqual([(result.returncode, result.stdout, result.stderr) for result in results],
+                         [(0, EMPTY, b"")] * 5)
+        # One write within 120 seconds; the reused executionNum is written again after that, once.
+        self.assertEqual(held, 1)
+        saved = json.loads(record.read_text(encoding="utf-8"))
+        self.assertEqual([item["event"] for item in saved["events"]], ["Stop", "Stop"])
+
+    def test_three_handlers_for_a_stale_stop_claim_record_once(self) -> None:
+        raw = self.stop_event(executionNum=12)
+        self.assertEqual(self.stop(raw).returncode, 0)
+        self.age_claim("Stop", "conversation-stop", "12", seconds=600)
+        workers = [subprocess.Popen([sys.executable, "hooks/session_checkpoint.py", "--host", "antigravity"],
+                                    cwd=self.plugin, env=self.env(), stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(3)]
+
+        outputs = self.together(workers, raw)
+
+        self.assertEqual([worker.returncode for worker in workers], [0, 0, 0])
+        self.assertEqual(outputs, [(EMPTY, b"")] * 3)
+        [record] = self.records()
+        self.assertEqual(len(json.loads(record.read_text(encoding="utf-8"))["events"]), 2)
+
     def test_no_vault_or_several_vaults_record_nothing(self) -> None:
         plain = self.base / "plain"
         plain.mkdir()
@@ -553,6 +660,32 @@ class AntigravityStopTests(AntigravityHookCase):
         for secret in ("PRIVATE-NOTE", str(self.base), "private/no.md"):
             self.assertNotIn(secret, stderr)
         self.assertEqual(self.records(), [])
+
+
+class ClosedOutputTests(AntigravityHookCase):
+    """A host that stops reading before the answer: exit code 0 and nothing on stderr."""
+
+    def test_closed_stdout_exits_0_without_a_traceback(self) -> None:
+        # More than one 8 KiB stdout buffer (the write itself fails) and a short answer (the flush fails).
+        long_vault = make_vault(self.base / "long vault", handoff="## Context\n" + "history line\n" * 6000)
+        cases = (
+            ("long injection", "session_start.py",
+             self.start_event(conversationId="closed-long", workspacePaths=[str(long_vault)])),
+            ("short injection", "session_start.py", self.start_event(conversationId="closed-short")),
+            ("empty object", "session_start.py", self.start_event(workspacePaths=ABSENT)),
+            ("stop", "session_checkpoint.py", self.stop_event(executionNum=11)),
+        )
+        for label, name, raw in cases:
+            with self.subTest(case=label):
+                # A traceback would name the plugin folder; an empty stderr names no path at all.
+                self.assertEqual(self.run_unread(name, raw), (0, b""))
+        # Only the answers were lost: the claims were made and the checkpoint was written.
+        self.assertEqual(self.claims(), sorted([claim_name("SessionStart", "closed-long"),
+                                                claim_name("SessionStart", "closed-short"),
+                                                claim_name("Stop", "conversation-stop", "11")]))
+        [record] = self.records()
+        self.assertEqual([item["event"] for item in json.loads(record.read_text(encoding="utf-8"))["events"]],
+                         ["Stop"])
 
 
 class AntigravityHelperTests(unittest.TestCase):
@@ -677,7 +810,7 @@ class AntigravityHelperTests(unittest.TestCase):
         self.assertFalse(claim("Stop", "c-1", "1"))
         self.assertTrue(claim("Stop", "c-1", "2"))
 
-        names = sorted(path.name for path in (self.temp / CLAIMS).iterdir())
+        names = sorted(path.name for path in claims_folder(self.temp).iterdir())
         self.assertEqual(names, sorted([claim_name("SessionStart", "c-1"), claim_name("SessionStart", "c-2"),
                                         claim_name("Stop", "c-1", "1"), claim_name("Stop", "c-1", "2")]))
 
@@ -686,13 +819,123 @@ class AntigravityHelperTests(unittest.TestCase):
             self.assertTrue(self.helpers.claim_once("SessionStart", "c-open"))
             self.assertTrue(self.helpers.claim_once("SessionStart", "c-open"))
         # A file where the marker folder belongs: no marker can be made, so every caller acts.
-        shutil.rmtree(self.temp / CLAIMS)
-        (self.temp / CLAIMS).write_bytes(b"")
+        folder = claims_folder(self.temp)
+        shutil.rmtree(folder)
+        folder.write_bytes(b"")
         self.assertTrue(self.helpers.claim_once("SessionStart", "c-file"))
         self.assertTrue(self.helpers.claim_once("SessionStart", "c-file"))
 
+    def test_claim_holds_for_120_seconds_then_the_key_is_processed_again(self) -> None:
+        self.assertEqual(self.helpers.CLAIM_VALID_SECONDS, 120)
+        claim = self.helpers.claim_once
+        folder = claims_folder(self.temp)
+        # SessionStart's key is the conversation ID; Stop's adds the executionNum.
+        for parts in (("SessionStart", "c-renew"), ("Stop", "c-renew", "7")):
+            with self.subTest(key=parts):
+                marker = folder / claim_name(*parts)
+                self.assertTrue(claim(*parts))
+                self.assertFalse(claim(*parts))
+                set_age(marker, 100)  # within 120 seconds: the claim still holds
+                self.assertFalse(claim(*parts))
+                set_age(marker, 130)  # older: stale, so the key is processed again and the claim renewed
+                self.assertTrue(claim(*parts))
+                self.assertFalse(claim(*parts))
+                self.assertLess(abs(time.time() - marker.stat().st_mtime), 60)
+                set_age(marker, -3600)  # ahead of the clock by more than 120 seconds (a clock set back): stale
+                self.assertTrue(claim(*parts))
+                self.assertFalse(claim(*parts))
+        names = sorted(os.listdir(folder))
+        self.assertIn(claim_name("SessionStart", "c-renew"), names)
+        self.assertIn(claim_name("Stop", "c-renew", "7"), names)
+        # Whatever a renewal leaves beside the markers, the two-day sweep can remove.
+        self.assertTrue(all(sweepable(name) for name in names), names)
+
+    def test_one_of_many_simultaneous_callers_renews_a_stale_claim(self) -> None:
+        marker = claims_folder(self.temp) / claim_name("Stop", "c-race", "1")
+        self.assertTrue(self.helpers.claim_once("Stop", "c-race", "1"))
+        callers = 8
+        with ThreadPoolExecutor(max_workers=callers) as pool:
+            for round_index in range(10):
+                with self.subTest(round=round_index):
+                    set_age(marker, 130 + round_index)
+                    start = threading.Barrier(callers)
+
+                    def call(_: int, start: threading.Barrier = start) -> bool:
+                        start.wait(timeout=30)
+                        return self.helpers.claim_once("Stop", "c-race", "1")
+
+                    taken = list(pool.map(call, range(callers)))
+                    self.assertEqual(sorted(taken), [False] * (callers - 1) + [True])
+
+    @unittest.skipIf(hasattr(os, "getuid"), "Windows: the temporary folder belongs to the user")
+    def test_windows_claim_folder_keeps_its_name(self) -> None:
+        self.assertTrue(self.helpers.claim_once("SessionStart", "c-windows"))
+        self.assertEqual(os.listdir(self.temp), [CLAIMS])
+        self.assertEqual(os.listdir(self.temp / CLAIMS), [claim_name("SessionStart", "c-windows")])
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX: a shared temporary folder needs a folder per user")
+    def test_posix_claim_folder_is_per_user_and_private(self) -> None:
+        self.assertTrue(self.helpers.claim_once("SessionStart", "c-private"))
+
+        folder = self.temp / f"{CLAIMS}-{os.getuid()}"
+        info = os.lstat(folder)
+        self.assertTrue(stat.S_ISDIR(info.st_mode))
+        self.assertEqual(info.st_uid, os.getuid())
+        self.assertEqual(stat.S_IMODE(info.st_mode) & 0o077, 0)
+        self.assertEqual(os.listdir(self.temp), [folder.name])
+        self.assertEqual(os.listdir(folder), [claim_name("SessionStart", "c-private")])
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX: a symbolic link planted in the shared temporary folder")
+    def test_posix_claim_folder_behind_a_symbolic_link_is_not_used(self) -> None:
+        planted = self.base / "planted target"
+        planted.mkdir()
+        old = planted / ("e" * 40)
+        old.write_bytes(b"")
+        set_age(old, 3 * 24 * 60 * 60)
+        os.symlink(planted, self.temp / f"{CLAIMS}-{os.getuid()}", target_is_directory=True)
+
+        # Fail open: every caller acts; nothing is made in the target and nothing there is swept.
+        self.assertTrue(self.helpers.claim_once("SessionStart", "c-link"))
+        self.assertTrue(self.helpers.claim_once("SessionStart", "c-link"))
+        self.assertEqual(os.listdir(planted), ["e" * 40])
+
+    def test_claim_folder_of_another_owner_is_not_used(self) -> None:
+        # This user's folder name, made by another user: on POSIX the real check; on
+        # Windows os.getuid is simulated (lstat reports owner 0 there).
+        other = os.lstat(self.temp).st_uid + 4242
+        folder = self.temp / f"{CLAIMS}-{other}"
+        folder.mkdir()
+        old = folder / ("f" * 40)
+        old.write_bytes(b"")
+        set_age(old, 3 * 24 * 60 * 60)
+        with mock.patch.object(self.helpers.os, "getuid", create=True, return_value=other):
+            self.assertTrue(self.helpers.claim_once("SessionStart", "c-owner"))
+            self.assertTrue(self.helpers.claim_once("SessionStart", "c-owner"))
+        self.assertEqual(os.listdir(folder), ["f" * 40])
+
+    def test_claim_folder_that_is_not_a_directory_is_not_used(self) -> None:
+        owner = os.lstat(self.temp).st_uid
+        planted = self.temp / f"{CLAIMS}-{owner}"
+        planted.write_bytes(b"PLANTED")
+        with mock.patch.object(self.helpers.os, "getuid", create=True, return_value=owner):
+            self.assertTrue(self.helpers.claim_once("SessionStart", "c-file"))
+            self.assertTrue(self.helpers.claim_once("SessionStart", "c-file"))
+        self.assertEqual(planted.read_bytes(), b"PLANTED")
+
+    def test_per_user_claim_folder_is_made_0700_and_claims_as_usual(self) -> None:
+        # The POSIX branch on any platform: os.getuid is simulated on Windows.
+        owner = os.lstat(self.temp).st_uid
+        folder = self.temp / f"{CLAIMS}-{owner}"
+        with mock.patch.object(self.helpers.os, "getuid", create=True, return_value=owner), \
+                mock.patch.object(self.helpers.os, "mkdir", wraps=os.mkdir) as made:
+            self.assertTrue(self.helpers.claim_once("SessionStart", "c-user"))
+            self.assertFalse(self.helpers.claim_once("SessionStart", "c-user"))
+        self.assertEqual(made.call_args_list, [mock.call(folder, 0o700)] * 2)
+        self.assertEqual(os.listdir(self.temp), [folder.name])
+        self.assertEqual(os.listdir(folder), [claim_name("SessionStart", "c-user")])
+
     def test_claim_once_sweeps_markers_older_than_two_days(self) -> None:
-        folder = self.temp / CLAIMS
+        folder = claims_folder(self.temp)
         folder.mkdir()
         old = time.time() - 3 * 24 * 60 * 60
         stale = [folder / (f"{index:x}" * 40) for index in range(3)]
@@ -714,7 +957,7 @@ class AntigravityHelperTests(unittest.TestCase):
         self.assertFalse(self.helpers.claim_once("SessionStart", "c-expired"))
 
     def test_claim_sweep_scans_at_most_200_entries(self) -> None:
-        folder = self.temp / CLAIMS
+        folder = claims_folder(self.temp)
         folder.mkdir()
         old = time.time() - 3 * 24 * 60 * 60
         for index in range(260):
@@ -740,6 +983,41 @@ class AntigravityHelperTests(unittest.TestCase):
         expected = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n{}\n"
         self.assertEqual(raw.getvalue(), expected.encode("utf-8"))
         self.assertNotIn(b"\r", raw.getvalue())
+
+    def test_emit_drops_a_failed_write_and_points_the_descriptor_at_the_null_device(self) -> None:
+        # A closed stream raises ValueError; emit raises nothing.
+        closed = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+        closed.close()
+        with mock.patch.object(sys, "stdout", closed):
+            self.helpers.emit({})
+
+        # A closed pipe makes the flush fail. The descriptor behind the stream then
+        # writes to the null device, so the flush at interpreter exit cannot fail again.
+        descriptor, name = tempfile.mkstemp(dir=self.temp)
+        self.addCleanup(os.close, descriptor)
+
+        class ClosedPipe(io.RawIOBase):
+            broken = True
+
+            def writable(self) -> bool:
+                return True
+
+            def fileno(self) -> int:
+                return descriptor
+
+            def write(self, data) -> int:
+                if self.broken:
+                    raise OSError(errno.EINVAL, "Invalid argument")
+                return len(data)
+
+        pipe = ClosedPipe()
+        stream = io.TextIOWrapper(io.BufferedWriter(pipe), encoding="utf-8")
+        with mock.patch.object(sys, "stdout", stream):
+            self.helpers.emit({"injectSteps": []})
+        pipe.broken = False
+        stream.close()
+        os.write(descriptor, b"written after the failure")
+        self.assertEqual(Path(name).read_bytes(), b"")
 
     def test_valid_id(self) -> None:
         valid = self.helpers.valid_id

@@ -104,7 +104,8 @@ def record_antigravity_stop(helpers, explicit_vault=None):
     vault resolved as for SessionStart. The record keeps the SHA-256 of the
     conversation id, never the user input, the transcript or any path. The
     package runs several handlers per event; with an integer executionNum the
-    claim lets one of them write.
+    claim lets one of them write, and the same conversation and executionNum
+    again within 120 seconds writes nothing.
     """
     event = helpers.read_event()
     if (not isinstance(event, dict) or event.get('hookEventName', STOP_EVENT) != STOP_EVENT
