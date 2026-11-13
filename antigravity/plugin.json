@@ -1,0 +1,26 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "agentic-vault",
+  "displayName": "Agentic Vault",
+  "version": "0.48.0",
+  "description": "File-based agentic memory: an Obsidian Zettelkasten vault as the agent's persistent state layer, with session handoff, layered memory and an LLM wiki.",
+  "suggestedPrompts": [
+    "Restore my session context from this vault",
+    "Search this vault for notes on a topic",
+    "Check this vault's integrity"
+  ],
+  "author": {
+    "name": "전문준"
+  },
+  "homepage": "https://github.com/Technoetic/agentic-vault",
+  "repository": "https://github.com/Technoetic/agentic-vault",
+  "license": "MIT",
+  "keywords": [
+    "agentic-memory",
+    "obsidian",
+    "zettelkasten",
+    "llm-wiki",
+    "knowledge-vault",
+    "context-engineering"
+  ]
+}

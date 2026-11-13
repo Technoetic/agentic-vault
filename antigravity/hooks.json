@@ -1,0 +1,38 @@
+{
+  "agentic-vault": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/run_python_hook.sh ./hooks/session_start.py --host antigravity",
+        "timeout": 30
+      },
+      {
+        "type": "command",
+        "command": "py -3 ./hooks/session_start.py --host antigravity",
+        "timeout": 30
+      },
+      {
+        "type": "command",
+        "command": "python ./hooks/session_start.py --host antigravity",
+        "timeout": 30
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "sh ./hooks/run_python_hook.sh ./hooks/session_checkpoint.py --host antigravity",
+        "timeout": 15
+      },
+      {
+        "type": "command",
+        "command": "py -3 ./hooks/session_checkpoint.py --host antigravity",
+        "timeout": 15
+      },
+      {
+        "type": "command",
+        "command": "python ./hooks/session_checkpoint.py --host antigravity",
+        "timeout": 15
+      }
+    ]
+  }
+}

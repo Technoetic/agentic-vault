@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""Reviewable, revision-bound partial changes to Markdown lesson records.
+
+References are explicit Markdown source bindings plus optional observation and
+receipt identifiers. Identifiers link host reports; they do not verify outcomes,
+identify an approver, or authorize a promotion. Proposals and returned receipts
+are local accounting data, not signatures. Prepare is read-only. Apply uses the
+same note lock as P3 and changes only selected record lines/metadata.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import date
+import difflib
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+import unicodedata
+
+import vault_evidence as evidence
+import vault_proposals as proposals
+import vault_state as state
+
+MAX_INPUT_BYTES = 512 * 1024
+MAX_OPERATIONS = 64
+MAX_TEXT_BYTES = 4096
+MAX_REFERENCES = 8
+MAX_COUNT = 1000000
+MAX_CUES = 8
+MAX_CUE_TEXT = 300
+MAX_CUE_VALUES = 8
+MAX_CUE_VALUE = 200
+MAX_RETIRE_REASON = 200
+CUE_KINDS = ('hint', 'guard')
+CUE_MATCHERS = ('command_prefix', 'command_contains', 'path_glob')
+# Line breaks, format marks and controls: they can end a line or hide text from a reader.
+UNSAFE_CATEGORIES = ('Cc', 'Cf', 'Cs', 'Zl', 'Zp')
+META = 'agentic-vault:lesson'
+MARKER = re.compile(r'\s*<!-- agentic-vault:lesson (\{.*\}) -->\s*$')
+HEADING = re.compile(r'^(#{2,6}\s+)(' + state.ITEM_ID_RE.pattern + r')(\s+(?:—|–|-)\s+)(.+)$')
+EXPLICIT = re.compile(r'^\[(' + state.ITEM_ID_RE.pattern + r')\]\s+')
+COMMENT_OPEN = re.compile(r' {0,3}<!--')
+HASH = re.compile(r'[0-9a-f]{64}')
+REF_ID = re.compile(r'[0-9a-f]{32}')
+LEDGER_ROW = re.compile(r'- \d{4}-\d{2}-\d{2}')
+LEDGER_COUNT = re.compile(r'횟수 \d+')
+TOOL_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')
+# The status cell RETIRE writes. The word `retired` stays first so every reader
+# that knows the v0.46.0 cell (vault_lesson_cues.WITHDRAWN) still sees it.
+RETIRED_CELL = re.compile(r'상태: retired(\(.+, \d{4}-\d{2}-\d{2}\))?')
+AUTHORITY = 'observation_data_only'
+
+
+class LessonDeltaError(Exception):
+    """A content-free operational error code."""
+
+
+def encode(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
+                      allow_nan=False).encode('utf-8')
+
+
+def _sha(raw):
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _text(value):
+    if (not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > MAX_TEXT_BYTES
+            or any(ord(c) < 32 for c in value) or '<!--' in value or '-->' in value
+            or ' | ' in value):
+        raise LessonDeltaError('invalid_lesson_text')
+    return value
+
+
+def _date(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        raise LessonDeltaError('explicit_date_required')
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise LessonDeltaError('invalid_date') from exc
+    return value
+
+
+def _reason(value):
+    """A retirement reason: one short visible line inside the status cell."""
+    if (not isinstance(value, str) or not value.strip() or value != value.strip()
+            or len(value) > MAX_RETIRE_REASON
+            or any(unicodedata.category(c) in UNSAFE_CATEGORIES for c in value)
+            or '<!--' in value or '-->' in value or ' | ' in value or META in value):
+        raise LessonDeltaError('invalid_retire_reason')
+    return value
+
+
+def _retired_cell(record, current=None):
+    """Status cell of a retired row; a reason already written is never dropped."""
+    if 'retire_reason' in record:
+        return '상태: retired(' + record['retire_reason'] + ', ' + record['retire_date'] + ')'
+    if current is not None and RETIRED_CELL.fullmatch(current):
+        return current
+    return '상태: retired'
+
+
+def _references(value):
+    if not isinstance(value, list) or len(value) > MAX_REFERENCES:
+        raise LessonDeltaError('invalid_references')
+    result = []
+    for ref in value:
+        if (not isinstance(ref, dict) or not {'path', 'sha256'} <= set(ref)
+                or set(ref) - {'path', 'sha256', 'observation_id', 'receipt_id'}):
+            raise LessonDeltaError('invalid_reference')
+        if not isinstance(ref['path'], str) or len(ref['path']) > 1024:
+            raise LessonDeltaError('invalid_reference')
+        if not isinstance(ref['sha256'], str) or not HASH.fullmatch(ref['sha256']):
+            raise LessonDeltaError('invalid_reference_hash')
+        for name in ('observation_id', 'receipt_id'):
+            if name in ref and (not isinstance(ref[name], str) or not REF_ID.fullmatch(ref[name])):
+                raise LessonDeltaError('invalid_reference_id')
+        if ref not in result:
+            result.append(dict(ref))
+    return result
+
+
+def _cue_text(value, limit):
+    if (not isinstance(value, str) or not value.strip() or len(value) > limit
+            or any(unicodedata.category(c) in UNSAFE_CATEGORIES for c in value)
+            or '<!--' in value or '-->' in value):
+        raise LessonDeltaError('invalid_lesson_cues')
+    return value
+
+
+def _cues(value):
+    """Validate tool-call triggers: literal text and globs only, never a regex."""
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_CUES:
+        raise LessonDeltaError('invalid_lesson_cues')
+    result = []
+    for cue in value:
+        if (not isinstance(cue, dict) or not {'kind', 'text'} <= set(cue)
+                or set(cue) - {'kind', 'text', 'tools', *CUE_MATCHERS}
+                or cue['kind'] not in CUE_KINDS or not set(cue) & set(CUE_MATCHERS)):
+            raise LessonDeltaError('invalid_lesson_cues')
+        _cue_text(cue['text'], MAX_CUE_TEXT)
+        for name in (*CUE_MATCHERS, 'tools'):
+            if name not in cue:
+                continue
+            if not isinstance(cue[name], list) or not 1 <= len(cue[name]) <= MAX_CUE_VALUES:
+                raise LessonDeltaError('invalid_lesson_cues')
+            for item in cue[name]:
+                _cue_text(item, MAX_CUE_VALUE)
+                if name == 'tools' and not TOOL_NAME.fullmatch(item):
+                    raise LessonDeltaError('invalid_lesson_cues')
+                if name == 'path_glob' and not set(item) - set('*?/'):
+                    raise LessonDeltaError('invalid_lesson_cues')
+        result.append(dict(cue))
+    return result
+
+
+def _metadata(text):
+    match = MARKER.search(text)
+    if not match:
+        if META in text:
+            raise LessonDeltaError('malformed_lesson_metadata')
+        return text, None
+    data = evidence.decode(match[1].encode())
+    if (not isinstance(data, dict) or set(data) - {'cues'} != {'id', 'count', 'state', 'references'}
+            or not isinstance(data['id'], str) or not state.ITEM_ID_RE.fullmatch(data['id'])
+            or type(data['count']) is not int or not 1 <= data['count'] <= MAX_COUNT
+            or data['state'] not in ('active', 'retired')):
+        raise LessonDeltaError('invalid_lesson_metadata')
+    data['references'] = _references(data['references'])
+    if 'cues' in data:
+        data['cues'] = _cues(data['cues'])
+    return text[:match.start()], data
+
+
+def _marker(record):
+    data = {k: record[k] for k in ('id', 'count', 'state', 'references')}
+    if record.get('cues'):
+        data['cues'] = record['cues']
+    return '<!-- ' + META + ' ' + encode(data).decode('utf-8') + ' -->'
+
+
+def _lines(raw):
+    """Yield each line. visible is False in fenced code; comment is True in an HTML comment block.
+
+    A block opens with <!-- at the start of a line and ends on the line that holds -->
+    (the rule hooks/session_start.py uses). comment is a separate field: a row in a
+    block stays in the inventory, so counters, ids and proposals keep working on it.
+    """
+    offset, fence, in_comment = 0, '', False
+    for number, line in enumerate(raw.splitlines(keepends=True)):
+        start, offset = offset, offset + len(line)
+        text = line.decode('utf-8').rstrip('\r\n')
+        ending = line[len(text.encode('utf-8')):].decode('ascii')
+        match = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', text)
+        visible = not fence
+        if fence:
+            if match and match[1][0] == fence[0] and len(match[1]) >= len(fence) and not match[2].strip():
+                fence = ''
+            visible = False
+        elif match and (match[1][0] != '`' or '`' not in match[2]):
+            fence, visible = match[1], False
+        comment = in_comment
+        if visible and in_comment:
+            in_comment = '-->' not in text
+        elif visible and (opening := COMMENT_OPEN.match(text)):
+            comment, in_comment = True, '-->' not in text[opening.end():]
+        yield dict(number=number, start=start, end=offset - len(ending), text=text,
+                   ending=ending, visible=visible, comment=comment)
+
+
+def _inventory(raw, namespace):
+    rows, registry, entries, ignored = list(_lines(raw)), {}, [], []
+    for index, line in enumerate(rows):
+        if not line['visible']:
+            continue
+        text, metadata = _metadata(line['text']) if META in line['text'] and not line['text'].lstrip().startswith('<!--') else (line['text'], None)
+        heading = HEADING.fullmatch(text)
+        cells = text.split(' | ')
+        bullet = (len(cells) == 5 and re.fullmatch(r'- \d{4}-\d{2}-\d{2}', cells[0])
+                  and re.fullmatch(r'횟수 \d+', cells[1]) and cells[3].startswith('근거:')
+                  and cells[4].startswith('상태:'))
+        if not heading and not bullet:
+            # A row that opens like a ledger row but is not one must not vanish:
+            # its count and text would be invisible to every later operation.
+            if len(cells) > 1 and LEDGER_ROW.fullmatch(cells[0]) and LEDGER_COUNT.fullmatch(cells[1]):
+                ignored.append(dict(line, cells=cells))
+            continue
+        if heading:
+            identifier, lesson = heading[2], heading[4]
+            next_line = rows[index + 1] if index + 1 < len(rows) else None
+            meta_line = None
+            if next_line and next_line['visible'] and next_line['text'].startswith('<!-- ' + META):
+                _, metadata = _metadata(next_line['text'])
+                meta_line = next_line
+            record = dict(kind='heading', line=line, heading_prefix=''.join(heading.groups()[:3]),
+                          meta_line=meta_line, text=lesson, count=1, state='active', references=[])
+        else:
+            explicit = EXPLICIT.match(cells[2])
+            lesson = cells[2][explicit.end():] if explicit else cells[2]
+            identifier = explicit[1] if explicit else None
+            record = dict(kind='bullet', line=line, cells=cells, explicit=explicit[0] if explicit else '',
+                          text=lesson, count=int(cells[1][3:]), state='active', references=[])
+            if not 1 <= record['count'] <= MAX_COUNT:
+                raise LessonDeltaError('invalid_lesson_counter')
+        if metadata:
+            if identifier is not None and identifier != metadata['id']:
+                raise LessonDeltaError('lesson_id_mismatch')
+            if bullet and record['count'] != metadata['count']:
+                raise LessonDeltaError('lesson_counter_mismatch')
+            identifier = metadata['id']
+            record.update(metadata)
+        _text(record['text'])
+        if identifier is None:
+            identifier = state.stable_item_id(namespace, record['text'], registry=registry)
+        record['id'] = identifier
+        if any(existing['id'] == identifier for existing in entries):
+            raise LessonDeltaError('duplicate_lesson_id')
+        entries.append(record)
+        if len(entries) > 256:
+            raise LessonDeltaError('lesson_count_limit')
+    return entries, rows, registry, ignored
+
+
+def _cell_text(cell):
+    explicit = EXPLICIT.match(cell)
+    return ' '.join((cell[explicit.end():] if explicit else cell).split())
+
+
+def _operations(value):
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_OPERATIONS:
+        raise LessonDeltaError('invalid_operations')
+    if len(encode(value)) > MAX_INPUT_BYTES // 2:
+        raise LessonDeltaError('operations_too_large')
+    result = []
+    for op in value:
+        if not isinstance(op, dict) or op.get('op') not in ('ADD', 'INC', 'EDIT', 'RETIRE', 'CUES'):
+            raise LessonDeltaError('invalid_operation')
+        allowed = {'ADD': {'op', 'text', 'date', 'references', 'cues'},
+                   'INC': {'op', 'id', 'amount', 'references'},
+                   'EDIT': {'op', 'id', 'text', 'references'},
+                   'RETIRE': {'op', 'id', 'references', 'reason', 'date'},
+                   'CUES': {'op', 'id', 'cues', 'references'}}[op['op']]
+        if set(op) - allowed or (op['op'] == 'RETIRE' and 'date' in op and 'reason' not in op):
+            raise LessonDeltaError('invalid_operation_fields')
+        normalized = dict(op)
+        if op['op'] == 'ADD':
+            _date(op.get('date'))
+        else:
+            if not isinstance(op.get('id'), str) or not state.ITEM_ID_RE.fullmatch(op['id']):
+                raise LessonDeltaError('invalid_lesson_id')
+        if op['op'] == 'RETIRE' and 'reason' in op:
+            _reason(op['reason'])
+            _date(op.get('date'))
+        if op['op'] in ('ADD', 'EDIT'):
+            normalized['text'] = _text(op.get('text'))
+        if op['op'] == 'INC':
+            amount = op.get('amount', 1)
+            if type(amount) is not int or not 1 <= amount <= 1000:
+                raise LessonDeltaError('invalid_increment')
+            normalized['amount'] = amount
+        if op['op'] == 'CUES' and op.get('cues') != []:
+            normalized['cues'] = _cues(op.get('cues'))
+        elif op['op'] == 'ADD' and 'cues' in op:
+            normalized['cues'] = _cues(op['cues'])
+        normalized['references'] = _references(op.get('references', []))
+        result.append(normalized)
+    return result
+
+
+def _safe_note(policy, path):
+    result = policy.note(path)
+    relative = result.relative_to(policy.root).as_posix()
+    if relative.casefold().startswith(('00-meta/proposals/', '00-meta/evidence/')):
+        raise LessonDeltaError('reserved_store_path')
+    return relative
+
+
+def _prepare(vault, path, operations):
+    policy = state._Policy(vault)
+    path = _safe_note(policy, path)
+    info, _, original = policy.read_note(path)
+    namespace = 'lesson:' + path.casefold()
+    inventory, lines, registry, ignored = _inventory(original, namespace)
+    ignored_text = {_cell_text(row['cells'][2]) for row in ignored if len(row['cells']) > 2}
+    operations = _operations(operations)
+    records = {r['id']: dict(r) for r in inventory}
+    changed, added, changes, references = {}, [], [], []
+    for op in operations:
+        if op['op'] == 'ADD':
+            if (any(' '.join(op['text'].split()) == ' '.join(r['text'].split()) for r in records.values())
+                    or ' '.join(op['text'].split()) in ignored_text):
+                raise LessonDeltaError('duplicate_lesson_text')
+            identifier = state.stable_item_id(namespace, op['text'], registry=registry)
+            if identifier in records:
+                raise LessonDeltaError('id_collision')
+            record = dict(id=identifier, text=op['text'], date=op['date'], count=1, state='active',
+                          references=[], kind='new')
+            if 'cues' in op:
+                record['cues'] = op['cues']
+            records[identifier], added = record, added + [record]
+            if len(records) > 256:
+                raise LessonDeltaError('lesson_count_limit')
+        else:
+            identifier = op['id']
+            if identifier not in records:
+                raise LessonDeltaError('unknown_lesson_id')
+            record = records[identifier]
+            if record['state'] == 'retired' and op['op'] != 'RETIRE':
+                raise LessonDeltaError('retired_lesson')
+            if op['op'] == 'INC':
+                record['count'] += op['amount']
+                if record['count'] > MAX_COUNT:
+                    raise LessonDeltaError('lesson_counter_limit')
+            elif op['op'] == 'EDIT':
+                record['text'] = op['text']
+            elif op['op'] == 'CUES':
+                record.pop('cues', None)
+                if 'cues' in op:
+                    record['cues'] = op['cues']
+            else:
+                if 'reason' in op:
+                    if record['kind'] == 'heading':
+                        raise LessonDeltaError('retire_reason_unsupported')
+                    cell = RETIRED_CELL.fullmatch(record['cells'][4]) if record['kind'] == 'bullet' else None
+                    if 'retire_reason' in record or (cell and cell[1]):
+                        raise LessonDeltaError('retire_reason_exists')
+                    record['retire_reason'], record['retire_date'] = op['reason'], op['date']
+                record['state'] = 'retired'
+        record['references'] = _references(record['references'] + op['references'])
+        changed[identifier] = record
+        changes.append({'op': op['op'], 'id': identifier, 'count': record['count'], 'state': record['state']})
+        for ref in op['references']:
+            canonical = _safe_note(policy, ref['path'])
+            refinfo, _, _ = policy.read_note(canonical)
+            if refinfo['sha256'] != ref['sha256']:
+                raise LessonDeltaError('reference_changed')
+            bound = {**ref, 'path': canonical}
+            if bound not in references:
+                references.append(bound)
+    # Previously linked sources are preserved as history. Only newly submitted
+    # references are current inputs and bind this operation; no outcome is inferred.
+    edits = []
+    newline = next((line['ending'] for line in lines if line['ending']), '\n')
+    for record in changed.values():
+        if record['kind'] == 'new':
+            continue
+        line = record['line']
+        if record['kind'] == 'bullet':
+            cells = list(record['cells'])
+            cells[1] = '횟수 ' + str(record['count'])
+            cells[2] = record['explicit'] + record['text']
+            if record['state'] == 'retired':
+                cells[4] = _retired_cell(record, cells[4])
+            replacement = ' | '.join(cells) + ' ' + _marker(record)
+            edits.append(dict(start=line['start'], end=line['end'], replacement=replacement))
+        else:
+            title = record['heading_prefix'] + record['text']
+            if title != line['text']:
+                edits.append(dict(start=line['start'], end=line['end'], replacement=title))
+            meta = record['meta_line']
+            if meta:
+                edits.append(dict(start=meta['start'], end=meta['end'], replacement=_marker(record)))
+            else:
+                insert = line['end'] + len(line['ending'])
+                prefix = '' if line['ending'] else newline
+                edits.append(dict(start=insert, end=insert, replacement=prefix + _marker(record) + newline))
+    if added:
+        headers = [line for line in lines if line['visible'] and line['text'] in ('## 대장', '## Lessons')]
+        if len(headers) != 1:
+            raise LessonDeltaError('unique_lesson_ledger_required')
+        header = headers[0]
+        offset = header['end'] + len(header['ending'])
+        prefix = '' if header['ending'] else newline
+        text = ''.join('- ' + r['date'] + ' | 횟수 ' + str(r['count']) + ' | ' + r['text']
+                       + ' | 근거: host-provided references | '
+                       + (_retired_cell(r) if r['state'] == 'retired' else '상태: ' + r['state']) + ' '
+                       + _marker(r) + newline for r in added)
+        edits.append(dict(start=offset, end=offset, replacement=prefix + text))
+    edits.sort(key=lambda edit: (edit['start'], edit['end']))
+    # A new row can be inserted exactly where the first existing row is edited.
+    # Combine those edits at that byte offset instead of issuing overlap-prone
+    # edits or rewriting the ledger section.
+    merged = []
+    for edit in edits:
+        if merged and merged[-1]['start'] == edit['start']:
+            previous = merged[-1]
+            if previous['end'] != previous['start']:
+                raise LessonDeltaError('overlapping_record_edits')
+            previous['end'] = edit['end']
+            previous['replacement'] += edit['replacement']
+        else:
+            merged.append(dict(edit))
+    edits = merged
+    candidate, _ = state._edited(original, edits)
+    # Delta syntax does not grant ownership of engine-generated rules or blocks.
+    # Reuse the proposal engine's pure marker checks without normalizing or
+    # requiring a schema migration of otherwise untouched legacy frontmatter.
+    before, after = original.decode('utf-8'), candidate.decode('utf-8')
+    rule_dirs = {'.claude/rules', policy.config.get('rules_dir', '').casefold()}
+    target = policy.note(path)
+    if (proposals.ENGINE_RE.search(before) or proposals.ENGINE_RE.search(after)
+            or (target.name.casefold().startswith('vault-')
+                and any(directory and path.casefold().startswith(directory + '/') for directory in rule_dirs))):
+        raise LessonDeltaError('engine_owned')
+    if proposals.managed_blocks(before) != proposals.managed_blocks(after):
+        raise LessonDeltaError('managed_block_changed')
+    if candidate == original:
+        raise LessonDeltaError('no_change')
+    # Rehash all operation inputs and configuration after processing. P3 rechecks
+    # newly linked sources and the exact config again immediately before replace.
+    for ref in references:
+        current, _, _ = policy.read_note(ref['path'])
+        if current['sha256'] != ref['sha256']:
+            raise LessonDeltaError('reference_changed')
+    current, _, _ = policy.read_note(path)
+    if current['sha256'] != info['sha256']:
+        raise LessonDeltaError('stale_base')
+    policy.fresh()
+    result = dict(version=1, target=path, base_sha256=info['sha256'],
+                  config_sha256=policy.config_sha256, operations=operations, edits=edits,
+                  candidate_sha256=_sha(candidate), changes=changes, references=references,
+                  inventory=[{k: r[k] for k in ('id', 'text', 'count', 'state')} for r in inventory],
+                  authority=AUTHORITY,
+                  **({'ignored_rows': [dict(line=row['number'] + 1, cells=len(row['cells'])) for row in ignored]}
+                     if ignored else {}),
+                  diff=''.join(difflib.unified_diff(original.decode().splitlines(keepends=True),
+                                                   candidate.decode().splitlines(keepends=True),
+                                                   fromfile=path + ' (base)', tofile=path + ' (candidate)')))
+    result['id'] = _sha(encode(result))[:32]
+    result['proposal_sha256'] = _sha(encode(result))
+    if len(encode(result)) > MAX_INPUT_BYTES:
+        raise LessonDeltaError('proposal_too_large')
+    return result
+
+
+def _safe(callback):
+    try:
+        return callback()
+    except LessonDeltaError:
+        raise
+    except (state.StateError, proposals.ProposalError) as exc:
+        raise LessonDeltaError(str(exc)) from exc
+    except (evidence.EvidenceError, OSError, ValueError, TypeError, KeyError, UnicodeError,
+            RecursionError, OverflowError) as exc:
+        raise LessonDeltaError('invalid_or_unavailable_input') from exc
+
+
+def prepare_delta(vault, path, operations):
+    """Read-only dry run; return exact byte edits, hashes and a reviewable diff."""
+    return _safe(lambda: _prepare(vault, path, operations))
+
+
+def apply_delta(vault, proposal, *, approve=False):
+    """Recompute the exact host-selected operations, then apply an approved delta."""
+    if approve is not True:
+        raise LessonDeltaError('explicit_approval_required')
+    def apply():
+        if not isinstance(proposal, dict) or len(encode(proposal)) > MAX_INPUT_BYTES:
+            raise LessonDeltaError('invalid_proposal')
+        if proposal.get('proposal_sha256') != _sha(encode({k: v for k, v in proposal.items() if k != 'proposal_sha256'})):
+            raise LessonDeltaError('proposal_integrity_mismatch')
+        current = _prepare(vault, proposal.get('target'), proposal.get('operations'))
+        if current != proposal:
+            raise LessonDeltaError('proposal_changed_or_stale')
+        source_hashes = {}
+        for ref in current['references']:
+            if ref['path'] in source_hashes and source_hashes[ref['path']] != ref['sha256']:
+                raise LessonDeltaError('conflicting_reference_hash')
+            source_hashes[ref['path']] = ref['sha256']
+        result = state.patch_note(vault, current['target'], current['base_sha256'], current['edits'],
+                                  source_hashes=source_hashes,
+                                  expected_config_sha256=current['config_sha256'])
+        return dict(result, proposal_id=current['id'], proposal_sha256=current['proposal_sha256'],
+                    explicit_approval=True, changes=current['changes'], references=current['references'],
+                    authority=AUTHORITY,
+                    **({'ignored_rows': current['ignored_rows']} if 'ignored_rows' in current else {}))
+    return _safe(apply)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--vault', type=Path, required=True)
+    commands = parser.add_subparsers(dest='command', required=True)
+    prepare = commands.add_parser('prepare')
+    prepare.add_argument('--path', required=True)
+    apply = commands.add_parser('apply')
+    apply.add_argument('--approve', action='store_true')
+    args = parser.parse_args(argv)
+    try:
+        raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+        if len(raw) > MAX_INPUT_BYTES:
+            raise LessonDeltaError('input_too_large')
+        payload = evidence.decode(raw)
+        result = (prepare_delta(args.vault, args.path, payload) if args.command == 'prepare'
+                  else apply_delta(args.vault, payload, approve=args.approve))
+        print(json.dumps(result, ensure_ascii=True, sort_keys=True, allow_nan=False))
+        return 0
+    except (LessonDeltaError, evidence.EvidenceError, OSError, ValueError, RecursionError, UnicodeError) as exc:
+        code = str(exc) if isinstance(exc, LessonDeltaError) else 'invalid_or_unavailable_input'
+        print(encode({'ok': False, 'error': code}).decode('utf-8'))
+        return 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -765,8 +765,8 @@ class GitAttributesTests(unittest.TestCase):
 
 class CommittedPackageSyncTests(unittest.TestCase):
     def test_committed_package_matches_the_generator(self) -> None:
-        if not (ROOT / "antigravity").exists():
-            self.skipTest("generated package not committed yet")
+        # The committed antigravity/ folder is generated; this check is the only guard on its copies.
+        self.assertTrue((ROOT / "antigravity" / "plugin.json").is_file(), "generated package antigravity/ is missing")
         result = _run("check", "--repo", str(ROOT))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

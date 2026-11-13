@@ -1,0 +1,3126 @@
+#!/usr/bin/env python3
+# agentic-vault:healthcheck engine=0.48.0
+"""범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
+
+설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
+모든 볼트 고유 규칙(필수 키·Enum·제외 구역·로그 태그·SSOT 사실 패턴)은
+볼트 루트의 00-meta/vault-config.json 에서 읽는다. 이 파일이 없으면
+"볼트 아님" 한 줄을 출력하고 조용히 종료한다(exit 0 — 에러 스팸 금지;
+--require-vault 를 주면 exit 2). 명령줄에 준 --vault 경로가 없거나 폴더가 아니면
+exit 2로 끝난다.
+
+검사 섹션:
+  1   프런트매터 누락                          (치명)
+  2   필수 키 누락                             (치명)
+  3   Enum 위반                                (치명)
+  4   프런트매터 내 따옴표 없는 위키링크       (치명 — YAML 파싱 붕괴 위험)
+  4b  프런트매터 최대 줄수 초과                (관리성)
+  5   데드 링크 — 코드펜스·인라인코드 제외     (관리성)
+  6   고아 / 6b 준고아                         (관리성)
+  6c  인덱스 미등록                            (관리성)
+  7   노화 문서 — config에 stale_days > 0 설정 시만 (관리성, 선택)
+  8   SSOT 사실 모순 — config에 ssot_facts 설정 시만 (관리성, 선택)
+  9   로그 연산 태그 누락/형식오류 — log_tag_epoch 이후만 (치명)
+  10  rules 무결성 — .claude/rules/ 존재 시만 (관리성, v0.7):
+        10a 파일 크기 상한 초과 (절차성 장문 유입 경고)
+        10b 엔진 rules ↔ CLAUDE.md 규칙 제목 중복 (충돌 시 모델 임의선택 방지)
+  11  세션 주입 토큰 예산 초과 — 훅이 잘라 다음 세션이 못 보는 hot/handoff 초과분 감시 (관리성)
+  12  세션 종료 누락 의심 — handoff anchor와 git HEAD 커밋 거리 (관리성)
+  14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
+  14b 링크·정션 제외 — 따라가지 않은 링크 경로를 조용히 빼지 않고 보고 (관리성)
+      ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
+  15  확장 경고 — 경고 전용 (관리성). 선택 키 sync_conflict_check·checkpoint_drift_check를
+      켜면 동기화 충돌·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트도 여기에
+      더한다(full 모드만, 기본 꺼짐 — 키가 없으면 출력이 그대로다).
+
+종료 코드(fail-closed):
+  0 = 볼트 아님(설정 파일이 없는 폴더, 또는 --vault 없이 정한 경로 — 조용히 통과)
+      또는 치명 이슈 0건 (관리성 이슈는 리포트만)
+  1 = 치명 이슈 존재, 또는 설정/경로 오류(잘못된 config·검사 대상 소실)
+  2 = 명령줄에 준 --vault 경로가 없거나 폴더가 아님, --require-vault 인데 볼트 설정이 없음,
+      또는 인자 오류
+
+사용법:
+  python vault_healthcheck.py [--vault <볼트 루트>] [--output <리포트 경로>] [--require-vault]
+                              [--json-summary]
+  --vault  기본값: 환경변수 CLAUDE_PROJECT_DIR, 없으면 현재 디렉토리
+  --output 기본값: vault-config.json 의 health_report (비어 있으면 00-meta/health-report.md)
+  --require-vault  볼트 설정이 없으면 0 대신 2로 끝낸다
+  --json-summary   full 모드에서 stdout 마지막 줄에 JSON 요약 한 줄을 더한다(건수만, 경로·노트
+                   이름 없음; schema agentic-vault/healthcheck-summary/v1, status checked·
+                   not_vault·vault_not_found·error). --staged와 함께 쓰면 인자 오류(exit 2).
+"""
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+from dataclasses import dataclass
+import difflib
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import unicodedata
+from datetime import date, datetime
+from pathlib import Path, PurePosixPath
+
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+try:
+    from vault_lint_extensions import analyze_notes, make_warning
+    from vault_warning_policy import checker_sha256, corpus_sha256, validate_promotion
+    _EXTENSIONS_AVAILABLE = True
+except ModuleNotFoundError as _extension_import_error:
+    if _extension_import_error.name not in {"vault_lint_extensions", "vault_warning_policy"}:
+        raise
+    # Existing vault upgrades may still have only the single legacy engine.
+    # Keep original fatal gates usable and explicitly diagnose missing new checks.
+    _EXTENSIONS_AVAILABLE = False
+
+
+def _extension_unavailable_warning() -> dict:
+    return {"issue_id": "lint-extension-unavailable", "code": "lint-incomplete",
+            "severity": "warning", "path": "", "line": 0,
+            "message": "Warning extension modules are unavailable; legacy fatal checks remain active",
+            "details": {"reason": "missing installed extension module"}}
+
+# Windows 콘솔(cp949 등)에서 한국어 출력이 깨지지 않도록 UTF-8 재설정 (실패해도 무해)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
+
+ENGINE_VERSION = "0.48.0"
+HEALTHCHECK_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
+CONFIG_RELPATH = "00-meta/vault-config.json"
+ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
+DEFAULT_FRONTMATTER_ROOTS = (
+    "00-meta", "20-knowledge", "30-journal", "40-people", "50-projects",
+)
+DEFAULT_FRONTMATTER_EXEMPT_PATHS = (
+    "00-meta/scratch", "00-meta/scripts", "10-inbox",
+)
+
+
+class HealthcheckError(RuntimeError):
+    """A policy or Git-index error that must fail the commit gate closed."""
+
+
+@dataclass(frozen=True)
+class VaultPolicy:
+    """The staged-only path policy derived from a validated config mapping."""
+
+    frontmatter_roots: tuple[str, ...]
+    frontmatter_exempt_paths: tuple[str, ...]
+
+    @classmethod
+    def from_config(cls, config: dict) -> "VaultPolicy":
+        roots = config.get("frontmatter_roots")
+        if roots is None:
+            roots = DEFAULT_FRONTMATTER_ROOTS
+        exempt = config.get("frontmatter_exempt_paths")
+        if exempt is None:
+            exempt = config.get("fm_exempt_zones")
+        if exempt is None:
+            exempt = DEFAULT_FRONTMATTER_EXEMPT_PATHS
+        return cls(tuple(roots), tuple(exempt))
+
+
+@dataclass(frozen=True)
+class StagedChange:
+    status: str
+    path: str
+    old_path: str | None = None
+
+# 표준 스키마 기본값 — vault-config.json 에 없는 키는 이 값으로 동작한다.
+DEFAULT_CONFIG: dict = {
+    "vault_name": "Vault",
+    "language": "ko",
+    "deny_zones": ["10-inbox/_processed", "20-knowledge/_archive",
+                   "50-projects/_completed", "90-assets", ".obsidian"],
+    "exclude_dirs": ["node_modules", ".venv", "venv", "__pycache__",
+                     ".git", ".trash", "step_archive"],
+    "required_keys": ["title", "type", "status", "ai_priority", "tags", "created", "updated"],
+    "enums": {
+        "type": ["concept", "guide", "reference", "tool", "pattern", "journal",
+                 "person", "organization", "meeting", "decision", "project"],
+        "status": ["active", "draft", "archive"],
+        "ai_priority": ["high", "medium", "low", "archive"],
+    },
+    "frontmatter_max_lines": 16,
+    "index_note": "00-meta/index.md",
+    "log_note": "00-meta/log.md",
+    "log_tags": ["ingest", "query", "lint", "build", "ops", "decision"],
+    "log_tag_epoch": "2026-07-03",
+    "hot_note": "00-meta/hot.md",
+    "handoff_note": "",
+    "ssot_note": "",
+    "ssot_facts": [],
+    "health_report": "00-meta/health-report.md",
+    "backup_target": "",
+    # --- 표준 스키마 외 선택 확장 키 (없으면 해당 검사는 기본 동작/생략) ---
+    "stale_days": 0,      # >0 이면 updated 기준 노화 문서 검사를 켠다(관리성)
+    "index_scopes": [],   # 인덱스 등록 검사 대상 최상위 폴더 목록. 비면 메타 폴더·journal 타입 제외 전체
+    "rules_dir": ".claude/rules",   # 행동 계약 rules 디렉토리(v0.6+). 없으면 섹션 10 생략
+    "rules_max_lines": 120,         # rules 파일 1개 권장 상한. 초과 시 절차성 장문 유입 경고(관리성)
+    # --- 행동 게이트 (2026-09-20 신설) -------------------------------------
+    # 행동별 정책을 구조화해 선언한다. 여기서는 설정 형식만 검증한다.
+    # confirm/log/repeat/probation_days/deny의 실행 시 적용은 아직 연결되지 않았다.
+    # 비어 있으면(기본) 선언된 정책이 없다. 아래는 각 정책 값의 의미다.
+    #   confirm        : true 면 사용자 확인 없이 수행 금지
+    #   log            : true 면 log_note 에 1줄 기록 의무
+    #   repeat         : 이 횟수만큼 반복 관측되기 전에는 제안 금지 (예: 교훈 승격 3회)
+    #   probation_days : 적용 후 관찰 기간. 기간 내 롤백 가능해야 한다
+    #   deny           : true 면 금지 (설정으로 끄기 전까지 수행 불가)
+    "gates": {},
+    # 세션마다 주입되는 노트의 **토큰 예산** (2026-08-06 신설, 관리성).
+    # SessionStart 훅은 v0.9.0부터 handoff_note·hot_note를 이 예산 안의 앞부분만 주입하고
+    # 나머지는 자른다 — 초과분은 비용이 아니라 다음 세션이 보지 못하는 내용이다. 엔진 출력
+    # 상한(훅 출력 전체 9,500자, Claude Code 한계 10,000자 아래)은 이 예산과 별도로 더 자를 수 있다.
+    # 신설 당시 이 둘은 세션이 쌓일수록 커지는데 상한이 없었다 — 실측(NS): hot 1,785토큰 +
+    # handoff 3,991토큰 = 매 세션 약 5,800토큰이 예산 없이 들어갔다.
+    #
+    # ⚠️단위를 토큰으로 잡는 이유(단어·글자 예산이 둘 다 실패한다):
+    #   · 단어 수 — hot.md의 "500단어" 규약은 영어 기준 발상이다. 한국어 528단어가 1,785토큰이다.
+    #   · 글자 수 — 언어에 따라 5배 넘게 어긋난다. 한글 1자 ≈ 1.375토큰(Claude 실측),
+    #     영문은 대략 4자당 1토큰이라 1자 ≈ 0.25토큰. 같은 글자 수가 전혀 다른 비용이다.
+    #   · 바이트 — UTF-8에서 한글은 3바이트라 글자 수와도 어긋난다.
+    # 그래서 아래 estimate_tokens()로 문자 종류별 계수를 적용해 근사한다.
+    # 0이면 해당 검사를 끈다.
+    "hot_max_tokens": 2000,
+    "handoff_max_tokens": 4000,
+    # 세션 종료 누락 감지 (2026-08-14 신설, 관리성). handoff의 기준 커밋(anchor)은
+    # /session-end만 갱신하므로, git HEAD가 anchor보다 이 값 이상 앞서 있으면
+    # "세션이 닫혔는데 handoff·장기기억(remember)이 낡았다"는 신호다.
+    # 실사례(NS): remember 미실행 3주 공백을 어떤 계기판도 잡지 못했다.
+    # 1~2커밋은 활성 세션의 정상 누적이라 임계 기본 3. 0이면 검사를 끈다.
+    # handoff_note가 비어 있으면 자동 생략.
+    # anchor가 아직 템플릿 값 `(없음)`이면 계약 위반이 아니다 — git 미사용 볼트는 검사를
+    # 생략하고, git 볼트는 이 볼트 폴더를 바꾼 커밋이 이 값 이상일 때만 안내한다.
+    "anchor_drift_threshold": 3,
+}
+
+# Every top-level key the engine reads: DEFAULT_CONFIG plus the optional keys
+# read by the scripts, hooks, adapters and commands. Another top-level key is
+# not applied; the full check (section 0 and the console line) and Doctor name
+# it, never its value. validate_config, staged mode and SessionStart stay silent.
+KNOWN_CONFIG_KEYS = frozenset({
+    *DEFAULT_CONFIG,
+    "frontmatter_roots", "frontmatter_exempt_paths", "fm_exempt_zones", "warning_policy",
+    "sync_conflict_check", "checkpoint_drift_check", "sync_conflict_patterns",
+    "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
+    "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
+    "constraints_note", "lint_max_warnings", "promotion_review_sessions",
+})
+_CONFIG_KEY_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def unknown_config_keys(raw: object) -> list[tuple[str, str | None]]:
+    """Sorted top-level keys of `raw` outside KNOWN_CONFIG_KEYS, each with a suggestion.
+
+    The suggestion is the known key equal to the name after stripping, case
+    folding and `-` -> `_`, else the closest known key (difflib, cutoff 0.75),
+    else None. `raw` is never changed; anything but a dict has no unknown keys.
+    """
+    if not isinstance(raw, dict):
+        return []
+    known = sorted(KNOWN_CONFIG_KEYS)
+    found: list[tuple[str, str | None]] = []
+    for name in sorted(key for key in raw if key not in KNOWN_CONFIG_KEYS):
+        folded = name.strip().casefold().replace("-", "_")
+        if folded in KNOWN_CONFIG_KEYS:
+            found.append((name, folded))
+            continue
+        matches = difflib.get_close_matches(folded, known, n=1, cutoff=0.75)
+        found.append((name, matches[0] if matches else None))
+    return found
+
+
+def config_key_display(name: str) -> str:
+    """A configuration key name as one quoted line that always encodes as UTF-8.
+
+    Cut to 80 characters (then `…`); a double quote and a backslash get a
+    backslash in front, and every control, format, surrogate, private-use,
+    unassigned or line/paragraph separator character (categories Cc, Cf, Cs,
+    Co, Cn, Zl, Zp) is written as backslash-u and four lowercase hex digits
+    (backslash-U and eight above U+FFFF). Other characters, Hangul included,
+    stay readable, and the result holds no line break or bidirectional control.
+    """
+    text = name[:80] + "…" if len(name) > 80 else name
+    out: list[str] = []
+    for char in text:
+        if char in '"\\':
+            out.append("\\" + char)
+        elif unicodedata.category(char) in _CONFIG_KEY_ESCAPED_CATEGORIES:
+            code = ord(char)
+            out.append(f"\\u{code:04x}" if code <= 0xFFFF else f"\\U{code:08x}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
+
+
+_PATH_KEYS = {
+    "index_note", "log_note", "hot_note", "handoff_note", "ssot_note",
+    "health_report", "rules_dir",
+}
+_PATH_LIST_KEYS = {
+    "deny_zones", "exclude_dirs", "frontmatter_roots",
+    "frontmatter_exempt_paths", "fm_exempt_zones", "index_scopes",
+}
+_STRING_LIST_KEYS = {"required_keys", "log_tags"}
+_STRING_KEYS = {"vault_name", "language", "log_tag_epoch", "backup_target"}
+_INTEGER_KEYS = {
+    "frontmatter_max_lines", "stale_days", "rules_max_lines",
+    "hot_max_tokens", "handoff_max_tokens", "anchor_drift_threshold",
+}
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+# This file is copied into vaults and run alone by the pre-commit hook, so it
+# cannot import vault_paths.py. The block below is a verbatim copy of the rule
+# there; tests/test_rule_sources.py fails if the two copies drift apart.
+# --- BEGIN SHARED PATH RULE (verbatim copy of vault_paths.py) ---
+# Windows reserves device names in any letter case and with any extension
+# ("con", "Con.md"). The case-folded set and the IGNORECASE pattern are both
+# applied, so the merged rule is never looser than either earlier copy.
+RESERVED_DEVICE_NAMES = frozenset({
+    "con", "prn", "aux", "nul", "clock$", "conin$", "conout$",
+    *(f"com{i}" for i in (*range(1, 10), "¹", "²", "³")),
+    *(f"lpt{i}" for i in (*range(1, 10), "¹", "²", "³")),
+})
+_RESERVED_DEVICE_PATTERN = re.compile(
+    r"(?i)(?:con|prn|aux|nul|clock\$|conin\$|conout\$"
+    r"|com[1-9¹²³]|lpt[1-9¹²³])"
+)
+UNSAFE_SEGMENT_CHARACTERS = '<>:"|?*'
+
+
+def unsafe_path_segment(part: str) -> bool:
+    """Return True when one '/'-separated segment is not a portable vault name.
+
+    Rejected: empty, '.', '..', a trailing dot or space (Windows drops them),
+    control characters, any of <>:"|?* (':' also blocks NTFS alternate data
+    streams) and reserved device names with or without an extension.
+    """
+    stem = part.split(".", 1)[0]
+    return (
+        part in ("", ".", "..")
+        or part.endswith((".", " "))
+        or any(ord(char) < 32 or char in UNSAFE_SEGMENT_CHARACTERS for char in part)
+        or stem.casefold() in RESERVED_DEVICE_NAMES
+        or _RESERVED_DEVICE_PATTERN.fullmatch(stem) is not None
+    )
+
+
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: two segments fold to the same
+    text exactly when they are canonical caseless matches (NFD, casefold, NFD),
+    and the result is returned in NFC. ASCII text needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize(
+        "NFC", unicodedata.normalize("NFD", unicodedata.normalize("NFD", part).casefold())
+    )
+# --- END SHARED PATH RULE ---
+
+
+def _segment_problem(segment: str) -> str:
+    """Explain a segment rejected by unsafe_path_segment (message text only)."""
+    if segment == "":
+        return "contains an empty path segment"
+    if segment in (".", ".."):
+        return f"must stay inside the vault ({segment!r} rejected)"
+    if segment.endswith((" ", ".")):
+        return "contains a Windows-ambiguous trailing dot or space"
+    if ":" in segment:
+        return "must not contain ':' (ADS rejected)"
+    if any(ord(char) < 32 for char in segment):
+        return "contains a control character"
+    if any(char in UNSAFE_SEGMENT_CHARACTERS for char in segment):
+        return f"contains a character Windows cannot store in {segment!r}"
+    return f"contains reserved Windows device name {segment!r}"
+
+
+def _normalize_relative_path(value: object, label: str, *, allow_empty: bool) -> str:
+    """Normalize one config path and apply the shared segment rule.
+
+    Intended difference from vault_paths.relative_parts: config text is trimmed
+    first (surrounding whitespace is JSON formatting, not part of a name). Every
+    later reader receives this normalized value, so both give the same verdict
+    on it. vault_paths never trims because its inputs are already exact paths.
+    """
+    if not isinstance(value, str):
+        raise HealthcheckError(f"{label} must be a string path")
+    raw = value.strip()
+    if not raw:
+        if allow_empty:
+            return ""
+        raise HealthcheckError(f"{label} must not be empty")
+    if raw.startswith(("//", "\\\\")):
+        raise HealthcheckError(f"{label} must stay inside the vault (UNC path rejected)")
+    if re.match(r"^[A-Za-z]:", raw):
+        raise HealthcheckError(f"{label} must stay inside the vault (drive path rejected)")
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/"):
+        raise HealthcheckError(f"{label} must stay inside the vault (absolute path rejected)")
+    for segment in normalized.split("/"):
+        if unsafe_path_segment(segment):
+            raise HealthcheckError(f"{label} {_segment_problem(segment)}")
+    return normalized
+
+
+def _validate_string_list(value: object, label: str) -> list[str]:
+    if not isinstance(value, list):
+        raise HealthcheckError(f"{label} must be a list")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise HealthcheckError(f"{label}[{index}] must be a string")
+        if not item.strip():
+            raise HealthcheckError(f"{label}[{index}] must not be empty")
+        result.append(item)
+    return result
+
+
+_GATE_BOOL_FIELDS = ("confirm", "log", "deny")
+_GATE_INT_FIELDS = ("repeat", "probation_days")
+
+
+def _validate_gates(raw: object) -> dict:
+    """행동 게이트를 검증한다 — 알 수 없는 필드는 거부(fail-closed).
+
+    정책 필드의 형식과 행동 이름 충돌을 검사하며 행동 자체를 차단하지 않는다.
+    알 수 없는 필드는 잘못된 정책 선언을 숨기지 않도록 거부한다.
+    """
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise HealthcheckError("gates must be a JSON object")
+
+    out: dict = {}
+    for action, spec in raw.items():
+        if not isinstance(action, str) or not action.strip():
+            raise HealthcheckError("gates keys must be non-empty strings")
+        action = action.strip()
+        if action in out:
+            raise HealthcheckError(f"gates: duplicate action after normalization: {action!r}")
+        if not isinstance(spec, dict):
+            raise HealthcheckError(f"gates.{action} must be a JSON object")
+
+        clean: dict = {}
+        for field, value in spec.items():
+            if field in _GATE_BOOL_FIELDS:
+                if not isinstance(value, bool):
+                    raise HealthcheckError(f"gates.{action}.{field} must be true/false")
+                clean[field] = value
+            elif field in _GATE_INT_FIELDS:
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise HealthcheckError(
+                        f"gates.{action}.{field} must be a non-negative integer")
+                clean[field] = value
+            elif field == "note":
+                if not isinstance(value, str):
+                    raise HealthcheckError(f"gates.{action}.note must be a string")
+                clean[field] = value
+            else:
+                allowed = ", ".join(_GATE_BOOL_FIELDS + _GATE_INT_FIELDS + ("note",))
+                raise HealthcheckError(
+                    f"gates.{action}: unknown field {field!r} (allowed: {allowed})")
+
+        if not clean:
+            raise HealthcheckError(f"gates.{action} must define at least one field")
+        out[action] = clean
+    return out
+
+
+# Opt-in sync warnings. The keys are deliberately absent from DEFAULT_CONFIG:
+# an unconfigured vault gets the same validated mapping and the same healthcheck
+# output as before. Each key is validated only when present.
+_SYNC_BOOL_KEYS = ("sync_conflict_check", "checkpoint_drift_check")
+MAX_SYNC_CONFLICT_PATTERNS = 32
+MAX_SYNC_CONFLICT_PATTERN_CHARS = 128
+
+
+def _validate_sync_warning_keys(config: dict) -> None:
+    """Reject malformed opt-in sync warning settings (fail-closed like other keys)."""
+    for key in _SYNC_BOOL_KEYS:
+        if key in config and not isinstance(config[key], bool):
+            raise HealthcheckError(f"{key} must be true/false")
+    if "sync_conflict_patterns" not in config:
+        return
+    patterns = config["sync_conflict_patterns"]
+    if not isinstance(patterns, list):
+        raise HealthcheckError("sync_conflict_patterns must be a list")
+    if len(patterns) > MAX_SYNC_CONFLICT_PATTERNS:
+        raise HealthcheckError(
+            f"sync_conflict_patterns must have at most {MAX_SYNC_CONFLICT_PATTERNS} entries")
+    for index, pattern in enumerate(patterns):
+        label = f"sync_conflict_patterns[{index}]"
+        if not isinstance(pattern, str):
+            raise HealthcheckError(f"{label} must be a string")
+        if not pattern.strip():
+            raise HealthcheckError(f"{label} must not be empty")
+        if len(pattern) > MAX_SYNC_CONFLICT_PATTERN_CHARS:
+            raise HealthcheckError(
+                f"{label} must be at most {MAX_SYNC_CONFLICT_PATTERN_CHARS} characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in pattern):
+            raise HealthcheckError(f"{label} contains a control character")
+        if "/" in pattern or "\\" in pattern:
+            raise HealthcheckError(
+                f"{label} matches file names only; '/' and '\\' are not allowed")
+    config["sync_conflict_patterns"] = list(patterns)
+
+
+# Opt-in staged token growth check, also absent from DEFAULT_CONFIG. HEAD is the
+# baseline, so an existing over-budget note passes until it grows and no result
+# file exists to merge. staged_growth_max_tokens adds a per-commit growth limit.
+_STAGED_GROWTH_MODES = ("off", "warn", "block")
+_STAGED_GROWTH_NOTES = (("hot_note", "hot_max_tokens"), ("handoff_note", "handoff_max_tokens"))
+
+
+def _validate_staged_growth_keys(config: dict) -> None:
+    """Reject malformed opt-in staged growth settings."""
+    if "staged_growth_check" in config:
+        mode = config["staged_growth_check"]
+        if not isinstance(mode, str) or mode not in _STAGED_GROWTH_MODES:
+            raise HealthcheckError("staged_growth_check must be off, warn or block")
+    if "staged_growth_max_tokens" in config:
+        limit = config["staged_growth_max_tokens"]
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise HealthcheckError("staged_growth_max_tokens must be a non-negative integer")
+
+
+def validate_config(raw: object) -> dict:
+    """Validate untrusted JSON config and return a normalized independent mapping."""
+    if not isinstance(raw, dict):
+        raise HealthcheckError("vault config top level must be a JSON object")
+
+    config = {**deepcopy(DEFAULT_CONFIG), **deepcopy(raw)}
+    config["gates"] = _validate_gates(config.get("gates"))
+    _validated_warning_policy(config)
+    _validate_sync_warning_keys(config)
+    _validate_staged_growth_keys(config)
+
+    for key in _STRING_KEYS:
+        value = config.get(key)
+        if not isinstance(value, str):
+            raise HealthcheckError(f"{key} must be a string")
+
+    for key in _INTEGER_KEYS:
+        value = config.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise HealthcheckError(f"{key} must be an integer")
+
+    for key in _STRING_LIST_KEYS:
+        config[key] = _validate_string_list(config.get(key), key)
+
+    for key in _PATH_KEYS:
+        if key in config:
+            config[key] = _normalize_relative_path(config[key], key, allow_empty=True)
+
+    # SessionStart injects these two notes, so they must be Markdown notes
+    # (any letter case), as in vault_state.py. The message never shows the value.
+    for key in ("hot_note", "handoff_note"):
+        value = config.get(key)
+        if value and PurePosixPath(value).suffix.casefold() != ".md":
+            raise HealthcheckError(f"{key} must name a Markdown note (.md)")
+
+    for key in _PATH_LIST_KEYS:
+        if key not in config:
+            continue
+        values = config[key]
+        if not isinstance(values, list):
+            raise HealthcheckError(f"{key} must be a list")
+        config[key] = [
+            _normalize_relative_path(item, f"{key}[{index}]", allow_empty=False)
+            for index, item in enumerate(values)
+        ]
+
+    # deny zone은 읽기 금지 구역이다 — 검사기·훅이 되읽어야 하는 경로 필드(handoff·
+    # index·리포트 등)가 그 안을 가리키면 pre-commit --staged가 대상을 읽지 못한 채
+    # 조용히 통과하는 우회가 된다(2026-08-31 포크(NS) 교차 검증 프로브 실증, v0.8.4).
+    # 배치는 _PATH_LIST_KEYS 정규화 이후 — deny_zones가 정규화된 뒤에만 비교가 옳다.
+    deny_zones = config.get("deny_zones") or []
+    deny_prefixes, deny_names = build_deny_rules(deny_zones)
+    for key in sorted(_PATH_KEYS):
+        value = config.get(key)
+        if not value:
+            continue
+        if is_denied(value, deny_prefixes, deny_names):
+            raise HealthcheckError(f"{key} must not point inside a deny zone")
+
+    enums = config.get("enums")
+    if not isinstance(enums, dict):
+        raise HealthcheckError("enums must be an object")
+    normalized_enums: dict[str, list[str]] = {}
+    for field, allowed in enums.items():
+        if not isinstance(field, str) or not field.strip():
+            raise HealthcheckError("enums keys must be non-empty strings")
+        normalized_allowed = _validate_string_list(allowed, f"enums.{field}")
+        if not normalized_allowed:
+            raise HealthcheckError(f"enums.{field} must not be empty")
+        normalized_enums[field] = normalized_allowed
+    config["enums"] = normalized_enums
+
+    facts = config.get("ssot_facts")
+    if not isinstance(facts, list):
+        raise HealthcheckError("ssot_facts must be a list")
+    normalized_facts: list[dict] = []
+    for index, fact in enumerate(facts):
+        if not isinstance(fact, dict):
+            raise HealthcheckError(f"ssot_facts[{index}] must be an object")
+        label = fact.get("label")
+        pattern = fact.get("pattern")
+        if not isinstance(label, str) or not label.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].label must be a non-empty string")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise HealthcheckError(f"ssot_facts[{index}].pattern must be a non-empty string")
+        normalized_facts.append(deepcopy(fact))
+    config["ssot_facts"] = normalized_facts
+
+    if "jarvis" in config and not isinstance(config["jarvis"], dict):
+        raise HealthcheckError("jarvis must be an object")
+
+    if "frontmatter_exempt_paths" not in raw and "fm_exempt_zones" in raw:
+        config["frontmatter_exempt_paths"] = list(config["fm_exempt_zones"])
+
+    # Deliberately do not inject frontmatter_roots into legacy config mappings.
+    # Full mode uses absence as the compatibility marker for "all active notes";
+    # VaultPolicy supplies the five staged defaults without erasing that marker.
+    return config
+
+
+def _validated_warning_policy(config: dict) -> dict:
+    policy = config.get("warning_policy", {})
+    levels = policy.get("levels", {}) if isinstance(policy, dict) else {}
+    needs_evidence = isinstance(levels, dict) and "fatal" in levels.values()
+    if not _EXTENSIONS_AVAILABLE:
+        if not isinstance(policy, dict) or not isinstance(levels, dict):
+            raise HealthcheckError("warning promotion policy must be an object")
+        known = {"missing-anchor", "ambiguous-link", "missing-link-path", "invalid-date"}
+        if any(code not in known or severity != "warning" for code, severity in levels.items()):
+            raise HealthcheckError("warning promotion policy cannot be validated without installed extension modules")
+        return {"valid": True, "promoted_codes": [], "errors": []}
+    try:
+        result = validate_promotion(policy, checker_sha256() if needs_evidence else "",
+                                    corpus_sha256() if needs_evidence else "")
+    except (OSError, ValueError) as exc:
+        raise HealthcheckError(f"warning promotion evidence unavailable: {type(exc).__name__}") from exc
+    if not result["valid"]:
+        raise HealthcheckError("warning promotion rejected: " + "; ".join(result["errors"]))
+    return result
+
+
+def extension_warnings(notes: dict[str, str], config: dict, *, input_complete: bool = True,
+                       consumer_paths: set[str] | None = None) -> list[dict]:
+    """Reusable warning entry point; certified promotion is disabled on incomplete input."""
+    promotion = _validated_warning_policy(config)
+    if not _EXTENSIONS_AVAILABLE:
+        return [_extension_unavailable_warning()]
+    findings = analyze_notes(notes, config, consumer_paths=consumer_paths)
+    if not input_complete:
+        findings = [x for x in findings if x["code"] != "missing-link-path"]
+        findings.append(make_warning("lint-incomplete", "", 0,
+                        "Warning analysis omitted unreadable originals; absent paths are unknown"))
+    if not any(x["code"] == "lint-incomplete" for x in findings):
+        for finding in findings:
+            if finding["code"] in promotion["promoted_codes"]:
+                finding["severity"] = "fatal"
+    return findings
+
+
+def format_extension_warning(finding: dict) -> str:
+    location = f'{finding["path"]}:{finding["line"]}' if finding["path"] else "scan"
+    detail = json.dumps(finding.get("details", {}), ensure_ascii=False, sort_keys=True)
+    detail = detail[:1024] + ("..." if len(detail) > 1024 else "")
+    return f'{finding["severity"]}: {location} [{finding["code"]}] {finding["message"]} {detail} ({finding["issue_id"]})'
+
+
+def _ensure_vault_path(vault: Path, path: Path, label: str, deny_zones=()) -> Path:
+    """Require a path and each existing descendant component to be vault-local."""
+    try:
+        resolved_vault = vault.resolve()
+        absolute_path = Path(os.path.abspath(path))
+    except (OSError, RuntimeError) as exc:
+        raise HealthcheckError(f"{label} path check failed: {exc}") from exc
+    try:
+        relative = absolute_path.relative_to(resolved_vault)
+    except ValueError as exc:
+        raise HealthcheckError(f"{label} must stay inside the vault: {absolute_path}") from exc
+
+    if is_denied(relative.as_posix(), *build_deny_rules(deny_zones)):
+        raise HealthcheckError(f"{label} must not point inside a deny zone")
+
+    current = resolved_vault
+    for part in relative.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise HealthcheckError(f"{label} path check failed: {exc}") from exc
+        if current.is_symlink() or (
+            getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        ):
+            raise HealthcheckError(f"{label} must not traverse a symlink or reparse point")
+
+    try:
+        resolved_path = absolute_path.resolve()
+        resolved_path.relative_to(resolved_vault)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HealthcheckError(f"{label} must stay inside the vault: {absolute_path}") from exc
+    return absolute_path
+
+
+def _ensure_config_health_report_contained(vault: Path, output: Path) -> Path:
+    """Resolve a config-derived report path and require it to stay in the vault."""
+    return _ensure_vault_path(vault, output, "health_report")
+
+
+def _run_git_bytes(
+    vault: Path,
+    *args: str,
+    allowed_returncodes: tuple[int, ...] = (0,),
+) -> bytes:
+    command = ["git", "-c", "core.quotepath=false", *args]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=vault,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HealthcheckError(f"git command timed out: {' '.join(args)}") from exc
+    except OSError as exc:
+        raise HealthcheckError(f"git command could not run: {exc}") from exc
+    if result.returncode not in allowed_returncodes:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        detail = f": {stderr}" if stderr else ""
+        raise HealthcheckError(f"git {' '.join(args)} failed ({result.returncode}){detail}")
+    return result.stdout
+
+
+def _escape_git_glob(value: str) -> str:
+    """Escape config text embedded in a Git `glob` pathspec."""
+    return re.sub(r"([\\*?\[])", r"\\\1", value)
+
+
+def staged_markdown_pathspecs(
+    config: dict,
+    *,
+    exclude_generated_referrers: bool = False,
+) -> tuple[str, ...]:
+    """Return index-only Markdown pathspecs with policy zones pruned by Git."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    pathspecs = [":(top,glob,icase)**/*.md",
+                 f":(exclude,top,glob,icase){ENGINE_RUNTIME_RELPATH}/**"]
+    deny_zones = sorted(set(config.get("deny_zones") or ()))
+    exclude_dirs = sorted(set(config.get("exclude_dirs") or ()))
+    for path in deny_zones:
+        if "/" in path:
+            pathspecs.append(
+                f":(exclude,top,glob){_escape_git_glob(path)}/**"
+            )
+        else:
+            pathspecs.append(
+                f":(exclude,glob)**/{_escape_git_glob(path)}/**"
+            )
+    pathspecs.extend(
+        f":(exclude,glob)**/{_escape_git_glob(name)}/**"
+        for name in exclude_dirs
+    )
+
+    if exclude_generated_referrers:
+        effective_health_report = (
+            config.get("health_report") or DEFAULT_CONFIG["health_report"]
+        )
+        generated = {
+            config.get("log_note") or "",
+            effective_health_report,
+        }
+        pathspecs.extend(
+            f":(exclude,top,literal){path}"
+            for path in sorted(generated)
+            if path
+        )
+    return tuple(pathspecs)
+
+
+def _decode_git_path(value: bytes, label: str) -> str:
+    try:
+        decoded = value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"{label} is not valid UTF-8") from exc
+    if not decoded:
+        raise HealthcheckError(f"{label} must not be empty")
+    # Git already returns repository-relative paths. Do not run config-path
+    # normalization here: on POSIX a backslash is a valid literal filename byte.
+    return decoded
+
+
+def load_staged_config(vault: Path) -> dict:
+    data = _run_git_bytes(vault, "show", f":{CONFIG_RELPATH}")
+    try:
+        raw = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HealthcheckError(f"staged {CONFIG_RELPATH} is invalid: {exc}") from exc
+    return validate_config(raw)
+
+
+def list_staged_changes(vault: Path, config: dict) -> list[StagedChange]:
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+    data = _run_git_bytes(
+        vault,
+        "diff", "--cached", "--name-status", "-z", "--find-renames",
+        "--diff-filter=ACMRD", "--", *staged_markdown_pathspecs(config),
+    )
+    if not data:
+        return []
+    records = data.split(b"\0")
+    if records[-1] != b"":
+        raise HealthcheckError("git name-status output is not NUL terminated")
+    records.pop()
+
+    changes: list[StagedChange] = []
+    index = 0
+    while index < len(records):
+        try:
+            raw_status = records[index].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise HealthcheckError("git name-status record has a non-ASCII status") from exc
+        index += 1
+        if not raw_status:
+            raise HealthcheckError("git name-status record has an empty status")
+        status = raw_status[0]
+        if status not in "ACMRD":
+            raise HealthcheckError(f"unsupported git name-status record: {raw_status}")
+        needed = 2 if status in "CR" else 1
+        if index + needed > len(records):
+            raise HealthcheckError(f"truncated git name-status record: {raw_status}")
+        if status in "CR":
+            old_path = _decode_git_path(records[index], "old staged path")
+            new_path = _decode_git_path(records[index + 1], "staged path")
+            changes.append(StagedChange(status, new_path, old_path))
+            index += 2
+        else:
+            path = _decode_git_path(records[index], "staged path")
+            changes.append(StagedChange(status, path))
+            index += 1
+    return changes
+
+
+def read_index_text(vault: Path, path: str) -> str:
+    if not isinstance(path, str) or not path:
+        raise HealthcheckError("index path must be a non-empty string")
+    if "\0" in path:
+        raise HealthcheckError("index path must not contain NUL")
+    # `path` originates from Git's NUL-delimited index output. It is already
+    # repository-relative, so preserve every filename character exactly.
+    data = _run_git_bytes(vault, "show", f":{path}")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HealthcheckError(f"staged file is not valid UTF-8: {path}") from exc
+
+HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+# session-end 계약이 handoff 상단에 쓰는 앵커 줄 형식 (스킬 §anchor 참조).
+# 템플릿 자리값 `(없음)`도 받는다 — 그때 group(1)은 None이다.
+ANCHOR_RE = re.compile(r"\*\*기준 커밋\(anchor\):\*\*\s*`(?:([0-9a-fA-F]{7,40})|\(없음\))`")
+
+
+def _git(vault: Path, *args: str) -> str | None:
+    """git 명령 1회 실행. 실패(비리포·미설치·해석불가·타임아웃)면 None —
+    조용히 넘기지 않고 호출부가 리포트에 사유를 남긴다."""
+    try:
+        r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
+                           cwd=vault, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def scan_anchor_drift(vault: Path, handoff_rel: str,
+                      threshold: int, deny_zones=()) -> tuple[str | None, list[str]]:
+    """handoff anchor와 git HEAD의 커밋 거리로 /session-end 누락을 감지한다.
+    반환 (콘솔 요약 | None, 리포트 라인들). 요약이 있으면 이슈 1건으로 집계된다.
+    ⚠️한계: handoff만 손으로 갱신되고 remember만 빠진 경우는 못 잡는다."""
+    if threshold <= 0 or not handoff_rel:
+        return None, ["- 검사 생략 (anchor_drift_threshold=0 또는 handoff_note 미설정)"]
+    handoff = vault / handoff_rel
+    if not handoff.is_file():
+        return None, [f"- 판정 불가: handoff 없음 ({handoff_rel})"]
+    # A hex anchor line wins over a leftover placeholder line, wherever it stands (as in v0.45.1,
+    # whose pattern did not match the placeholder); the placeholder counts only without one.
+    matches = list(ANCHOR_RE.finditer(read_vault_text(vault, handoff, "handoff_note", deny_zones)))
+    m = next((match for match in matches if match.group(1)), matches[0] if matches else None)
+    if not m:
+        return ("handoff에 기준 커밋(anchor) 줄이 없음 — session-end 계약 위반",
+                ["- ⚠️ handoff에 `**기준 커밋(anchor):**` 줄이 없다. "
+                 "session-end가 갱신하는 줄이다."])
+    if m.group(1) is None:
+        # 템플릿 자리값 `(없음)` — 계약 위반이 아니다. git 볼트에서 이 볼트 폴더를 바꾼
+        # 커밋(cwd=볼트, `-- .`)이 임계 이상 쌓였을 때만 안내 1건으로 센다.
+        if _git(vault, "rev-parse", "--is-inside-work-tree") is None:
+            return None, ["- 검사 생략: git 미사용 볼트 — anchor `(없음)`"]
+        count_s = _git(vault, "rev-list", "--count", "HEAD", "--", ".")
+        commits = int(count_s) if count_s and count_s.isdigit() else 0
+        if commits >= threshold:
+            return (f"session-end 기록 없음 — anchor `(없음)`, 커밋 {commits}개",
+                    [f"- ⚠️ anchor가 아직 `(없음)`인데 HEAD까지 이 볼트 폴더를 바꾼 커밋이 "
+                     f"{commits}개다(임계 {threshold}). session-end가 한 번도 기록되지 않았을 수 있다.",
+                     "- 조치: /vault-session-end 실행(anchor를 커밋 해시로 갱신)."])
+        return None, [f"- 안내: 아직 session-end 기록이 없다(anchor `(없음)`, 커밋 {commits}개). "
+                      "첫 /vault-session-end가 이 줄을 커밋 해시로 바꾼다."]
+    anchor = m.group(1)
+    if _git(vault, "rev-parse", "--is-inside-work-tree") is None:
+        return None, ["- 판정 불가: git 리포가 아니거나 git 실행 실패"]
+    count_s = _git(vault, "rev-list", "--count", f"{anchor}..HEAD")
+    if count_s is None:
+        return (f"anchor `{anchor}`를 git이 해석하지 못함 — 이력 재작성/오타 의심",
+                [f"- ⚠️ anchor `{anchor}` 해석 불가. handoff가 가리키는 시점이 리포에 없다."])
+    drift = int(count_s)
+    anchor_date = _git(vault, "log", "-1", "--format=%cs", anchor) or "?"
+    if drift >= threshold:
+        return (f"anchor drift {drift}커밋 — session-end 누락 의심 "
+                f"(anchor `{anchor}` {anchor_date} 이후 미갱신)",
+                [f"- ⚠️ **HEAD가 anchor `{anchor}`({anchor_date})보다 {drift}커밋 앞선다** "
+                 f"(임계 {threshold}).",
+                 "- 의미: 세션이 session-end 없이 닫혔을 개연성 — "
+                 "handoff·장기기억(remember)이 그만큼 낡았다.",
+                 f"- 조치: session-end 실행(anchor 갱신 + 교훈 커밋). "
+                 f"중간 확인: `git log --oneline {anchor}..HEAD`"])
+    return None, [f"- 정상: anchor `{anchor}`({anchor_date}) 대비 HEAD {drift}커밋 "
+                  f"(임계 {threshold} 미만)"]
+
+
+def estimate_tokens(text: str) -> int:
+    """문자 종류별 계수로 토큰 수를 근사한다(정확한 토크나이저 대체 아님).
+
+    예산 경보용 근사치이므로 오차 10~20%는 허용된다. 계수 근거:
+      · 한글 1자 ≈ 1.375토큰 (Claude gen5 count_tokens 실측)
+      · 그 외(영문·숫자·공백·기호) ≈ 0.3토큰/자 (영어 약 4자/토큰 기준)
+    언어에 무관하게 동작하는 것이 목적이다 — 글자 수·단어 수 예산은
+    한국어와 영어에서 5배 넘게 어긋난다(DEFAULT_CONFIG 주석 참조).
+    """
+    hangul = len(HANGUL_RE.findall(text))
+    other = len(text) - hangul
+    return int(hangul * 1.375 + other * 0.3)
+
+
+# 프런트매터에서 따옴표 없이 시작하는 위키링크 값 (YAML 중첩 배열로 오파싱 → 붕괴)
+# The v0.45.1 line rule, still applied where a block node starts (and where the front matter
+# is a root scalar, or an open quote or flow reaches its end or a '...' line);
+# unquoted_frontmatter_link_lines() below.
+UNQUOTED_FM_LINK_RE = re.compile(r"^\s*(?:[\w_]+:|-)\s*\[\[")
+_FM_BLOCK_HEADER_RE = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?$")
+_FM_HEADER_DIGIT_RE = re.compile(r"[|>][+-]?([1-9])")
+_FM_DOC_END_RE = re.compile(r"\.\.\.(?:[ \t]|$)")
+# Indicators left over at a node start once the scanner has handled '-', '?', ':', flows,
+# quotes, block scalar headers, aliases, anchors, tags and comments: YAML stops there.
+_FM_NOT_PLAIN_START = frozenset(",]}%@`|>")
+
+
+def _fm_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _fm_blank(line: str) -> bool:
+    return not line.strip(" \t")
+
+
+def _fm_indicator(line: str, i: int, char: str) -> bool:
+    return line.startswith(char, i) and (i + 1 == len(line) or line[i + 1] in " \t")
+
+
+def _fm_comment_start(line: str, i: int) -> bool:
+    return line[i] == "#" and (i == 0 or line[i - 1] in " \t")
+
+
+def _fm_has_comment(line: str) -> bool:
+    return any(_fm_comment_start(line, k) for k in range(len(line)))
+
+
+def _fm_has_mapping_indicator(line: str) -> bool:
+    for k in range(len(line)):
+        if _fm_comment_start(line, k):
+            return False
+        if _fm_indicator(line, k, ":"):
+            return True
+    return False
+
+
+def _fm_close_quote(line: str, i: int, quote: str) -> int | None:
+    """Index after the closing quote at or after i; '"' skips escapes, "'" reads '' as text."""
+    n = len(line)
+    while i < n:
+        char = line[i]
+        if quote == '"' and char == "\\":
+            i += 2
+            continue
+        if char == quote:
+            if quote == "'" and i + 1 < n and line[i + 1] == "'":
+                i += 2
+                continue
+            return i + 1
+        i += 1
+    return None
+
+
+class _FrontmatterLinkScan:
+    """Line-by-line YAML context for unquoted_frontmatter_link_lines (iterative, linear).
+
+    mode is one of block, block_scalar, plain, quoted, flow. owner is the column a block or
+    plain scalar continuation must exceed, content the block scalar's content column, pending
+    the column of a key or dash whose value is empty on its line.
+    """
+
+    def __init__(self) -> None:
+        self.mode = "block"
+        self.owner = -1
+        self.content: int | None = None
+        self.pending = -1
+        self.collection = False
+        self.collection_before = False
+        self.quote = ""
+        self.depth = 0
+        self.prev = ""
+        self.node_col = -1
+        self.node_owner = -1
+        self.open_line: int | None = None
+        self.cut: list[tuple[int, int]] = []  # quotes or flows a '...' line cut (YAML errors)
+        self.flag = False
+
+    def line(self, line: str, number: int) -> bool:
+        self.flag = False
+        self.collection_before = self.collection
+        if _FM_DOC_END_RE.match(line):  # '...' ends every node
+            if self.mode in ("quoted", "flow") and self.open_line is not None:
+                self.cut.append((self.open_line + 1, number))  # rule (d) up to the '...' line
+            self.mode = "block"
+            self.quote = ""
+            self.depth = 0
+            self.pending = -1
+            self.content = None
+            self.open_line = None
+            return False
+        if UNQUOTED_FM_LINK_RE.match(line) and (
+                (self.mode in ("block_scalar", "plain") and self.owner == -1)
+                or (self.mode == "quoted" and self.node_owner == -1)):
+            self.flag = True  # rule (c): a scalar at the root of the front matter
+        if self.mode == "block_scalar":
+            if _fm_blank(line):
+                return self.flag
+            indent = _fm_indent(line)
+            if self.content is None and indent > self.owner:
+                self.content = indent
+                return self.flag
+            if self.content is not None and indent >= self.content:
+                return self.flag
+            self.mode = "block"
+            self.content = None
+        elif self.mode == "plain":
+            if _fm_blank(line):
+                return self.flag
+            if (_fm_indent(line) > self.owner and not line.lstrip(" \t").startswith("#")
+                    and not _fm_has_mapping_indicator(line)):
+                if _fm_has_comment(line):  # a comment ends the plain scalar
+                    self.mode = "block"
+                return self.flag
+            self.mode = "block"
+        if self.mode == "quoted":
+            j = _fm_close_quote(line, 0, self.quote)
+            if j is not None:
+                self.quote = ""
+                self._run(line, number, ("after", j, self.node_col, self.node_owner))
+        elif self.mode == "flow":
+            j = self._flow(line, 0)
+            if j is not None:
+                self._run(line, number, ("after", j, self.node_col, self.node_owner))
+        else:
+            stripped = line.lstrip(" \t")
+            if not stripped or stripped.startswith("#"):
+                return self.flag
+            if UNQUOTED_FM_LINK_RE.match(line):
+                self.flag = True  # rule (b): a block node starts on this line
+            col = _fm_indent(line)
+            owner = self.pending if col > self.pending else -1
+            self.pending = -1
+            self._run(line, number, ("node", col, owner))
+        return self.flag
+
+    def _run(self, line: str, number: int, item: tuple | None) -> None:
+        """NODE and AFTER_NODE steps as work items of one loop instead of mutual recursion."""
+        n = len(line)
+        while item is not None:
+            if item[0] == "after":
+                _kind, j, node_col, owner = item
+                item = None
+                self.mode = "block"
+                while j < n and line[j] in " \t":
+                    j += 1
+                if j >= n or line[j] == "#":  # '#' right after a node starts a comment
+                    break
+                if _fm_indicator(line, j, ":"):  # the node was a key
+                    item = ("node", j + 1, node_col)
+                    continue
+                rest = line[j:]
+                cut = [k for k in (rest.find(" #"), rest.find("\t#")) if k >= 0]
+                if "[[" in (rest[:min(cut)] if cut else rest):
+                    self.flag = True
+                break
+            _kind, i, owner = item
+            item = None
+            while True:
+                while i < n and line[i] in " \t":
+                    i += 1
+                if i >= n or _fm_comment_start(line, i):
+                    self.pending = owner
+                    return
+                if line.startswith("![[", i):  # Obsidian embed at a node start
+                    self.flag = True
+                    return
+                if line[i] in "&!":  # anchor or tag
+                    while i < n and line[i] not in " \t":
+                        i += 1
+                    continue
+                if (_fm_indicator(line, i, "-") or _fm_indicator(line, i, "?")
+                        or _fm_indicator(line, i, ":")):
+                    if i == 0:
+                        self.collection = True
+                    owner = i
+                    i += 1
+                    continue
+                break
+            char = line[i]
+            if char in "[{":
+                self.depth = 0
+                self.quote = ""
+                self.prev = ""
+                j = self._flow(line, i)
+                if j is None:
+                    self.mode = "flow"
+                    self.node_col, self.node_owner, self.open_line = i, owner, number
+                    return
+                item = ("after", j, i, owner)
+            elif char in "\"'":
+                j = _fm_close_quote(line, i + 1, char)
+                if j is None:
+                    self.mode = "quoted"
+                    self.quote = char
+                    self.node_col, self.node_owner, self.open_line = i, owner, number
+                    return
+                item = ("after", j, i, owner)
+            elif char in "|>" and _FM_BLOCK_HEADER_RE.match(line, i):
+                self.mode = "block_scalar"
+                self.owner = owner
+                digit = _FM_HEADER_DIGIT_RE.match(line, i)
+                self.content = owner + int(digit.group(1)) if digit else None
+                return
+            elif char == "*":  # alias
+                j = i
+                while j < n and line[j] not in " \t,[]{}":
+                    j += 1
+                item = ("after", j, i, owner)
+            elif char in _FM_NOT_PLAIN_START:  # cannot start a plain scalar (YAML error)
+                self.mode = "block"
+            else:  # plain scalar or implicit key
+                k = i
+                while k < n and not _fm_comment_start(line, k) and not _fm_indicator(line, k, ":"):
+                    k += 1
+                if k < n and line[k] != "#":
+                    if i == 0:
+                        self.collection = True
+                    item = ("node", k + 1, i)
+                elif k < n:  # a comment ends the plain scalar
+                    self.mode = "block"
+                elif owner == -1 and self.collection_before:  # a second root node (YAML error)
+                    self.mode = "block"
+                else:
+                    self.mode = "plain"
+                    self.owner = owner
+
+    def _flow(self, line: str, i: int) -> int | None:
+        """Scan a flow collection from i; the index after it closes, or None if it stays open."""
+        n = len(line)
+        if i == 0:
+            self.prev = ","
+        while i < n:
+            if self.quote:
+                j = _fm_close_quote(line, i, self.quote)
+                if j is None:
+                    return None
+                self.quote = ""
+                self.prev = "x"
+                i = j
+                if i < n and line[i] == "#":
+                    return None
+                continue
+            char = line[i]
+            if char in " \t":
+                i += 1
+                continue
+            if char == "#" and (i == 0 or line[i - 1] in " \t[{,"):
+                return None
+            if char in "&!" and self.prev in "[{,:?":  # anchor or tag before an item
+                while i < n and line[i] not in " \t,[]{}":
+                    i += 1
+                continue
+            if char in "\"'" and self.prev in "[{,:?":
+                self.quote = char
+                i += 1
+                continue
+            if char == "[" and line.startswith("[[", i):
+                self.flag = True
+            if char in "[{":
+                self.depth += 1
+            elif char in "]}":
+                self.depth -= 1
+                if self.depth == 0:
+                    self.prev = ""
+                    return i + 1
+            self.prev = char
+            i += 1
+        return None
+
+
+def unquoted_frontmatter_link_lines(fm: str) -> list[int]:
+    """0-based indices into fm.splitlines() of the lines to report.
+
+    A line is reported when YAML reads an unquoted `[[` on it as the start of a nested list
+    (or `![[` at a node start), or when the v0.45.1 line rule matches it outside the contexts
+    YAML itself makes a scalar: a block scalar's content, a quoted scalar, or a plain
+    continuation of a key's or list item's value.
+    """
+    lines = fm.splitlines()
+    scan = _FrontmatterLinkScan()
+    reported = [number for number, line in enumerate(lines) if scan.line(line, number)]
+    cut = list(scan.cut)
+    if scan.mode in ("quoted", "flow") and scan.open_line is not None:
+        cut.append((scan.open_line + 1, len(lines)))
+    if cut:
+        # rule (d): a quote or flow stays open to the end of the front matter or is cut by a
+        # '...' line (a YAML error either way); the v0.45.1 line rule applies inside it
+        later = (number for start, end in cut for number in range(start, end)
+                 if UNQUOTED_FM_LINK_RE.match(lines[number]))
+        reported = sorted(set(reported).union(later))
+    return reported
+
+
+# 코드펜스/인라인 코드 내부의 위키링크·사실 값은 렌더링/표기 대상이 아니므로 제외
+CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# 로그 엄격 형식: '- YYYY-MM-DD [HH:MM] | 행위자 | 본문'
+# ⚠️시각(HH:MM)은 **선택**이다. 2026-08-05 정정:
+#   기존 정규식이 시각을 필수로 요구해, 날짜만 쓴 항목이 전부
+#   '형식오류→태그 없음'으로 오탐되고 그대로 치명 등급에 합산됐다.
+#   실측(운영 볼트): 치명 46건 중 44건이 이 오탐이었고, 태그는 멀쩡히 붙어 있었다.
+#   그 결과 healthcheck가 매 실행마다 치명 44건을 외쳤고 리포트는 17일간 방치됐다
+#   — 이 파일 하단의 "매번 exit 1이면 신호가 무의미해진다"가 경고한 바로 그 상태다.
+#   소급 적용하려면 없는 시각을 지어내야 하므로 데이터 오염이기도 하다.
+#   태그 규약의 목적은 grep 가능성이지 시각 기록이 아니다.
+LOG_ENTRY_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2})(?:\s+[\d:]+)?\s*\|[^|]*\|\s*(.*)$")
+# 넓은 게이트: 불릿 + 어딘가에 날짜 → 로그형 라인 후보 (fail-closed의 핵심 —
+# 엄격 형식을 벗어난 로그형 라인이 조용히 감사를 회피하지 못하게 한다)
+LOG_LIKE_RE = re.compile(r"^\s*[-*]\s.*?(\d{4}-\d{2}-\d{2})")
+LOG_TAG_RE = re.compile(r"^\[([\w-]+)\]")  # 본문 맨 앞의 [op] 태그
+# 확장자가 붙은 링크 대상 판별 (자산 임베드 [[image.png]] 등)
+FILE_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+# 볼트 노트 스키마의 적용 대상이 아닌 도구/리포 문서 (위치 불문 이름으로 제외)
+SKIP_FILENAMES = {"claude.md", "agents.md", "readme.md"}
+
+
+def read_text(p: Path) -> str:
+    # utf-8-sig like read_index_text (staged mode) and the config readers: a
+    # UTF-8 BOM written by Windows tools must not turn a valid note into
+    # "frontmatter missing" in full mode while the commit gate passes it.
+    return p.read_text(encoding="utf-8-sig", errors="replace")
+
+
+def read_vault_text(vault: Path, p: Path, label: str, deny_zones=()) -> str:
+    """Recheck containment and deny policy before a full-mode filesystem read."""
+    _ensure_vault_path(vault, p, label, deny_zones)
+    return read_text(p)
+
+
+def read_note_text(p: Path, vault: Path | None = None, deny_zones=()) -> tuple[str | None, str | None]:
+    """(본문, 오류) 중 하나만 채워 반환한다 — 파일 단위 fail-soft (v0.8.4).
+    노트 하나를 못 읽는다고(클라우드 하이드레이션 실패·백신 잠금·동시 저장 레이스)
+    전체 검사가 traceback으로 죽으면 안 된다. 못 읽은 파일은 §14로 보고만 한다."""
+    try:
+        if vault is not None:
+            _ensure_vault_path(vault, p, f"note {p.name}", deny_zones)
+        return read_text(p), None
+    except OSError as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def rel_posix(p: Path, vault: Path) -> str:
+    return p.relative_to(vault).as_posix()
+
+
+# Reasons for evidence reads skipped only because the byte budget was spent;
+# the --json-summary counts them apart from read failures.
+EVIDENCE_BUDGET_REASONS = ("extension evidence total byte limit",
+                           "extension evidence note/total byte limit")
+
+
+def _read_extension_evidence(vault: Path, path: Path, deny_zones, remaining_bytes: int) -> tuple[str | None, str | None]:
+    """Read one allowed legacy-exempt target once within note/total byte caps."""
+    _ensure_vault_path(vault, path, "extension target evidence", deny_zones)
+    limit = min(1_000_000, max(remaining_bytes, 0))
+    if not limit:
+        return None, EVIDENCE_BUDGET_REASONS[0]
+    try:
+        with path.open("rb") as stream:
+            original = stream.read(limit + 1)
+        if len(original) > limit:
+            return None, EVIDENCE_BUDGET_REASONS[1]
+        return original.decode("utf-8-sig"), None
+    except (OSError, UnicodeError) as exc:
+        return None, f"{type(exc).__name__}: extension target unavailable"
+
+
+def _warning_inventory_allowed(rel: str, config: dict) -> bool:
+    """Intentional policy exclusions do not make the allowed inventory incomplete."""
+    rel = rel.replace("\\", "/").rstrip("/")
+    if is_denied(rel, *build_deny_rules(config.get("deny_zones"))):
+        return False
+    parts = rel.casefold().split("/")
+    if any(str(name).casefold() in parts for name in config.get("exclude_dirs", [])):
+        return False
+    runtime = ENGINE_RUNTIME_RELPATH.casefold()
+    return not (rel.casefold() == runtime or rel.casefold().startswith(runtime + "/"))
+
+
+def norm_cfg_path(value) -> str:
+    """config의 경로 값을 posix 상대경로로 정규화한다 (비면 '')."""
+    return str(value or "").replace("\\", "/").strip().strip("/")
+
+
+def build_deny_rules(deny_zones) -> tuple[list[str], set[str]]:
+    """deny_zones 항목을 (경로 접두 목록, 이름 집합)으로 분해한다.
+    '10-inbox/_processed' 처럼 /가 있으면 루트 기준 접두 매칭,
+    '.obsidian' 처럼 단일 세그먼트면 어느 깊이든 경로 구성 요소 매칭.
+    모든 비교는 세그먼트마다 fold_path_part로 대소문자와 NFC/NFD 표기 차이를 무시한다."""
+    prefixes: list[str] = []
+    names: set[str] = set()
+    for z in deny_zones or []:
+        z = "/".join(fold_path_part(p) for p in norm_cfg_path(z).split("/"))
+        if not z:
+            continue
+        if "/" in z:
+            prefixes.append(z)
+        else:
+            names.add(z)
+    return prefixes, names
+
+
+def is_denied(rel: str, prefixes: list[str], names: set[str]) -> bool:
+    rel = "/".join(fold_path_part(p) for p in rel.replace("\\", "/").split("/"))
+    if any(rel == pre or rel.startswith(pre + "/") for pre in prefixes):
+        return True
+    return any(part in names for part in rel.split("/"))
+
+
+# This file is copied into vaults and run alone by the pre-commit hook, so it
+# cannot import vault_worktrees.py. The block below is its verbatim copy;
+# tests/test_vault_worktrees.py fails if they drift.
+# --- BEGIN SHARED WORKTREE RULE (verbatim copy of vault_worktrees.py) ---
+GITFILE_LIMIT = 4096  # a .git file holds one path
+
+
+def _git_toplevel(start: str) -> str | None:
+    """The nearest folder at or above start that holds .git (a repository or worktree root), or None."""
+    current = start
+    for _ in range(256):
+        try:
+            if os.path.exists(os.path.join(current, ".git")):
+                return current
+        except (OSError, ValueError):
+            return None
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return None
+
+
+def _other_share(path: str, anchor: str) -> bool:
+    """True for a UNC path on another share than anchor, which is never looked up."""
+    drive = os.path.splitdrive(path)[0]
+    return drive.startswith("\\\\") and os.path.normcase(drive) != os.path.normcase(os.path.splitdrive(anchor)[0])
+
+
+def _canonical_path(path: str) -> str:
+    """The form two repository paths are compared in: links resolved, case folded as the file system does."""
+    try:
+        text = os.path.realpath(path)
+    except (OSError, ValueError):
+        text = path
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    text = os.path.normcase(text)
+    return text.casefold() if sys.platform == "darwin" else text
+
+
+def _small_text(path: str) -> str | None:
+    """The text of a small regular file, or None for anything else."""
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > GITFILE_LIMIT:
+            return None
+        with open(path, "rb") as handle:
+            return handle.read(GITFILE_LIMIT + 1).decode("utf-8")
+    except (OSError, ValueError):
+        return None
+
+
+def gitfile_target(directory: str) -> str | None:
+    """The path that a regular .git file in directory names, or None for anything else."""
+    text = _small_text(os.path.join(directory, ".git"))
+    if text is None or not text.startswith("gitdir:"):
+        return None
+    value = text[len("gitdir:"):].strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return None
+    return os.path.normpath(os.path.join(directory, value))
+
+
+def repository_common(directory: str) -> str | None:
+    """The common git directory of the working tree at directory, in _canonical_path form, or None."""
+    marker = os.path.join(directory, ".git")
+    try:
+        if stat.S_ISDIR(os.lstat(marker).st_mode):
+            return _canonical_path(marker)
+    except (OSError, ValueError):
+        return None
+    target = gitfile_target(directory)
+    if target is None or _other_share(target, directory):
+        return None
+    if os.path.basename(os.path.dirname(target)) == "worktrees" and os.path.isfile(os.path.join(target, "commondir")):
+        target = os.path.dirname(os.path.dirname(target))
+    return _canonical_path(target)
+
+
+def linked_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked working tree of the repository whose common git directory is common.
+
+    The gitdir value must be <common>/worktrees/<name>: not a submodule, whose
+    value is .../modules/<name>, and not a tree of another repository. The
+    admin folder itself may be gone: the copy of the vault is still there.
+    """
+    target = gitfile_target(directory)
+    if target is None or os.path.basename(os.path.dirname(target)) != "worktrees":
+        return False
+    owner = os.path.dirname(os.path.dirname(target))
+    return not _other_share(owner, common) and _canonical_path(owner) == common
+
+
+def registered_worktree(directory: str, common: str) -> bool:
+    """True when directory is a linked tree and git's admin folder names it back.
+
+    git keeps <common>/worktrees/<name>/gitdir, the path of the tree's .git file.
+    A .git file written by hand has no such record, and neither has a copy whose
+    admin folder is gone. Only a walk or a backup needs this answer, because it
+    leaves the folder out: a zone stays closed on linked_worktree alone.
+    """
+    if not linked_worktree(directory, common):
+        return False
+    admin = gitfile_target(directory)
+    text = None if admin is None else _small_text(os.path.join(admin, "gitdir"))
+    value = "" if text is None else text.strip()
+    if not value or any(ord(char) < 32 for char in value):
+        return False
+    named = os.path.normpath(os.path.join(admin, value))
+    return not _other_share(named, directory) and _canonical_path(named) == _canonical_path(
+        os.path.join(directory, ".git"))
+
+
+def vault_prefix(vault: str, top: str) -> tuple:
+    """The vault's folder inside a working tree whose top is top, case folded."""
+    relative = os.path.relpath(vault, top)
+    return () if relative == os.curdir else tuple(part.casefold() for part in relative.split(os.sep))
+
+
+def tree_tails(root: str, parts, common: str, counts=linked_worktree) -> list:
+    """What follows each tree on a path below root, outermost tree first."""
+    found: list = []
+    current = root
+    for index, part in enumerate(parts):
+        current = os.path.join(current, part)
+        if counts(current, common):
+            found.append(tuple(parts[index + 1:]))
+    return found
+
+
+def tree_views(root: str, parts, common: str, prefix: tuple) -> tuple:
+    """The path as the vault's own relative path in each linked tree it lies in."""
+    size = len(prefix)
+    return tuple(rest[size:] for rest in tree_tails(root, parts, common)
+                 if tuple(part.casefold() for part in rest[:size]) == prefix)
+# --- END SHARED WORKTREE RULE ---
+
+
+def denied_in_linked_tree(vault: Path, rel: str, deny_rules: tuple[list[str], set[str]]) -> bool:
+    """A zone covers rel as seen from a linked tree of this vault's repository."""
+    top = _git_toplevel(str(vault))
+    common = repository_common(top) if top is not None else None
+    if common is None:
+        return False
+    views = tree_views(str(vault), rel.split("/"), common, vault_prefix(str(vault), top))
+    return any(is_denied("/".join(view), *deny_rules) for view in views)
+
+
+def collect_md_files(vault: Path, exclude_names: set[str],
+                     skipped: list[str] | None = None, *,
+                     file_entries: list[Path] | None = None,
+                     linked_trees: list[str] | None = None,
+                     unregistered_trees: list[str] | None = None) -> list[Path]:
+    """exclude_dirs(이름 매칭)를 걷기 단계에서 가지치기하며 .md 를 수집한다.
+    deny_zones 는 여기서 제외하지 않는다 — 링크 해석 인덱스에는 포함돼야
+    아카이브로 이동한 노트를 가리키는 링크가 데드 링크로 오탐되지 않는다.
+    심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다.
+    건너뛴 디렉토리·.md 파일의 볼트 상대 경로는 skipped에 남긴다 — 조용히
+    빠지면 그 아래 노트의 치명 위반이 '이슈 0건'으로 보인다(§14b로 보고).
+    file_entries(선택, 기본 None)를 넘기면 같은 걷기에서 본 모든 파일 항목
+    (확장자 무관)의 경로를 덧붙인다 — 이름 검사용이며 열거나 따라가지 않는다.
+    이 볼트 저장소의 연결 작업 트리는 노트의 사본이라 내려가지 않고 linked_trees에
+    남긴다(없으면 skipped). 서브모듈과 다른 저장소의 작업 트리는 그대로 걷는다.
+    단 git 관리 폴더가 되가리키지 않는 폴더(손으로 쓴 .git, 관리 폴더가 없는 사본)는
+    실제 노트를 가릴 수 있어 그대로 걷고 unregistered_trees에 남긴다 — 호출자가 그
+    안의 금지 구역을 사본 기준으로 다시 거른다."""
+    results: list[Path] = []
+    top = _git_toplevel(str(vault))
+    common = repository_common(top) if top is not None else None
+    def scan_error(error: OSError) -> None:
+        if skipped is not None:
+            try:
+                rel = rel_posix(Path(error.filename), vault) if error.filename else "scan-unavailable"
+            except (TypeError, ValueError):
+                rel = "scan-unavailable"
+            skipped.append(rel.rstrip("/") + "/")
+    for root, dirs, files in os.walk(vault, onerror=scan_error):
+        root_path = Path(root)
+        safe_dirs: list[str] = []
+        for dirname in dirs:
+            child = root_path / dirname
+            if dirname in exclude_names or dirname == ".git":
+                continue
+            if rel_posix(child, vault).casefold() == ENGINE_RUNTIME_RELPATH.casefold():
+                continue
+            linked = common is not None and linked_worktree(str(child), common)
+            if linked and registered_worktree(str(child), common):
+                report = linked_trees if linked_trees is not None else skipped
+                if report is not None:
+                    report.append(rel_posix(child, vault) + "/")
+                continue
+            if linked and unregistered_trees is not None:
+                unregistered_trees.append(rel_posix(child, vault) + "/")
+            try:
+                _ensure_vault_path(vault, child, f"scan directory {child.name}")
+            except HealthcheckError:
+                if skipped is not None:
+                    skipped.append(rel_posix(child, vault) + "/")
+                continue
+            safe_dirs.append(dirname)
+        dirs[:] = safe_dirs
+        for f in files:
+            if file_entries is not None:
+                file_entries.append(root_path / f)
+            if f.lower().endswith(".md"):
+                candidate = root_path / f
+                try:
+                    _ensure_vault_path(vault, candidate, f"scan file {f}")
+                except HealthcheckError:
+                    if skipped is not None:
+                        skipped.append(rel_posix(candidate, vault))
+                    continue
+                results.append(candidate)
+    return results
+
+
+# --- Opt-in sync warnings: names only + checkpoint drift (warning-only) ------
+# Built-in names are limited to what official documentation states verbatim:
+#   Syncthing, "Understanding Synchronization" (SYNCTHING_SYNCING_DOC):
+#     conflict copy  "<filename>.sync-conflict-<date>-<time>-<modifiedBy>.<ext>"
+#     temporary file ".syncthing.original-filename.ext.tmp", on Windows
+#                    "~syncthing~original-filename.ext.tmp" (a hash replaces
+#                    names that would be too long; the prefix rule covers both)
+#   Obsidian Sync, "Troubleshoot Obsidian Sync" (OBSIDIAN_SYNC_TROUBLESHOOT_DOC),
+#     option "Create conflict file" (Obsidian 1.9.7+):
+#                    "original-note-name (Conflicted copy device-name YYYYMMDDHHMM).md"
+# Dropbox and OneDrive naming is not confirmed by official documentation, so
+# no default is shipped for them; users add sync_conflict_patterns globs.
+SYNCTHING_SYNCING_DOC = "https://docs.syncthing.net/users/syncing.html"
+OBSIDIAN_SYNC_TROUBLESHOOT_DOC = (
+    "https://github.com/obsidianmd/obsidian-help/blob/master/en/"
+    "Obsidian%20Sync/Troubleshoot%20Obsidian%20Sync.md"
+)
+_SYNC_NAME_RULES = (
+    # (pattern id, finding code, file-name regex used with search, source)
+    ("syncthing-temp", "sync-temp-file",
+     re.compile(r"^(?:\.syncthing\.|~syncthing~).+\.tmp\Z"), SYNCTHING_SYNCING_DOC),
+    ("syncthing-conflict", "sync-conflict-copy",
+     re.compile(r"\.sync-conflict-[^-]+-[^-]+-."), SYNCTHING_SYNCING_DOC),
+    ("obsidian-sync-conflict", "sync-conflict-copy",
+     re.compile(r"^.+ \(Conflicted copy .+ [0-9]{12}\)\.md\Z"), OBSIDIAN_SYNC_TROUBLESHOOT_DOC),
+)
+_SYNC_NAME_MESSAGES = {
+    "sync-temp-file": ("File name matches a sync-client temporary-file pattern; "
+                       "a transfer may be unfinished or may have failed"),
+    "sync-conflict-copy": ("File name matches a sync-client conflict-copy pattern; "
+                           "compare it with the original and merge or remove it manually"),
+    "sync-user-pattern": "File name matches a configured sync_conflict_patterns glob",
+}
+MAX_SYNC_NAME_WARNINGS = 200
+
+
+def _sync_name_match(name: str, globs: list[str]) -> tuple[str, dict] | None:
+    """Return (finding code, details) for the first matching rule, else None."""
+    for pattern_id, code, regex, source in _SYNC_NAME_RULES:
+        if regex.search(name):
+            return code, {"pattern": pattern_id, "source": source}
+    for glob in globs:
+        if fnmatch.fnmatchcase(name, glob):
+            return "sync-user-pattern", {"pattern": "user", "glob": glob}
+    return None
+
+
+def sync_name_warnings(vault: Path, entries: list[Path], config: dict) -> tuple[list[dict], int]:
+    """Opt-in names-only scan of walked file entries of any extension.
+
+    Matched entries are never opened, read or followed. Deny zones, exclude_dirs
+    and the engine runtime are skipped by the shared warning inventory rule.
+    Names and globs are NFC-normalized and compared case-sensitively.
+    Returns (findings, total match count); findings are capped like lint output.
+    """
+    globs = [unicodedata.normalize("NFC", glob)
+             for glob in config.get("sync_conflict_patterns") or []]
+    matches: list[tuple[str, str, dict]] = []
+    for entry in entries:
+        try:
+            rel = rel_posix(entry, vault)
+        except ValueError:
+            continue
+        if not _warning_inventory_allowed(rel, config):
+            continue
+        hit = _sync_name_match(unicodedata.normalize("NFC", entry.name), globs)
+        if hit is not None:
+            matches.append((rel, hit[0], hit[1]))
+    matches.sort(key=lambda item: (item[0], item[1]))
+    findings = [make_warning(code, rel, 0, _SYNC_NAME_MESSAGES[code], details=details)
+                for rel, code, details in matches[:MAX_SYNC_NAME_WARNINGS]]
+    if len(matches) > MAX_SYNC_NAME_WARNINGS:
+        findings.append(make_warning(
+            "lint-incomplete", "", 0,
+            "Sync file-name warnings exceeded the output limit; further matches are omitted",
+            details={"reasons": ["sync file-name output limit"],
+                     "omitted": len(matches) - MAX_SYNC_NAME_WARNINGS}))
+    return findings, len(matches)
+
+
+# vault_state.write_checkpoint names and shapes these runtime records.
+CHECKPOINT_NAME_RE = re.compile(r"checkpoint-[0-9a-f]{32}\.json")
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
+_CHECKPOINT_KEYS = frozenset({"version", "session_sha256", "config_sha256",
+                              "sources", "events", "pending_references"})
+_CHECKPOINT_EVENTS = frozenset({"PreCompact", "SessionEnd", "Stop"})
+MAX_CHECKPOINT_BYTES = 64 * 1024        # vault_state.MAX_RUNTIME_BYTES
+MAX_CHECKPOINT_CANDIDATES = 64          # newest files by mtime that are parsed
+MAX_CHECKPOINT_SOURCES = 16
+MAX_CHECKPOINT_SOURCE_BYTES = 1_000_000
+_CHECKPOINT_MESSAGES = {
+    "changed": ("Engine note changed after the most recent checkpoint; the writer is "
+                "unknown (external editor, sync client or another session)"),
+    "missing": ("Engine note recorded by the most recent checkpoint is missing now; "
+                "it may have been moved, renamed or deleted outside the engine"),
+}
+
+
+def _read_regular_bytes(path: Path, limit: int) -> bytes | None:
+    """Read one regular non-link file of at most `limit` bytes, else None.
+
+    The opened descriptor must be the same file the pre-open lstat saw, so a
+    path swapped for a link between the check and the open is skipped.
+    """
+    try:
+        before = path.lstat()
+        if (not stat.S_ISREG(before.st_mode)
+                or getattr(before, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+                or before.st_size > limit):
+            return None
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)):
+                return None
+            data = stream.read(limit + 1)
+    except OSError:
+        return None
+    return data if len(data) <= limit else None
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _checkpoint_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    offset = parsed.utcoffset()
+    if offset is None or offset.total_seconds() != 0:
+        return None
+    return parsed
+
+
+def _parse_checkpoint(raw: bytes) -> tuple[datetime, str, str, list[dict]] | None:
+    """Validate one checkpoint record; None for anything unexpected (fail-soft).
+
+    Returns (last event time, last event name, raw last event time, sources).
+    The sources were captured when the last event was written.
+    """
+    try:
+        record = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    if not isinstance(record, dict) or set(record) != _CHECKPOINT_KEYS:
+        return None
+    if type(record["version"]) is not int or record["version"] != 1:
+        return None
+    for key in ("session_sha256", "config_sha256"):
+        if not isinstance(record[key], str) or not _SHA256_HEX_RE.fullmatch(record[key]):
+            return None
+    if not isinstance(record["pending_references"], list):
+        return None
+    events = record["events"]
+    if not isinstance(events, list) or not 1 <= len(events) <= 16:
+        return None
+    for event in events:
+        if (not isinstance(event, dict) or set(event) != {"event", "at"}
+                or not isinstance(event["event"], str)
+                or event["event"] not in _CHECKPOINT_EVENTS
+                or _checkpoint_time(event["at"]) is None):
+            return None
+    sources = record["sources"]
+    if not isinstance(sources, list) or len(sources) > MAX_CHECKPOINT_SOURCES:
+        return None
+    seen: set[str] = set()
+    checked: list[dict] = []
+    for source in sources:
+        if not isinstance(source, dict) or set(source) != {"path", "sha256", "size"}:
+            return None
+        path, digest, size = source["path"], source["sha256"], source["size"]
+        if (not isinstance(path, str) or not path or len(path) > 1024 or "\\" in path
+                or not path.casefold().endswith(".md")
+                or any(unsafe_path_segment(part) for part in path.split("/"))
+                or not isinstance(digest, str) or not _SHA256_HEX_RE.fullmatch(digest)
+                or type(size) is not int or size < 0 or path.casefold() in seen):
+            return None
+        seen.add(path.casefold())
+        checked.append({"path": path, "sha256": digest, "size": size})
+    last = events[-1]
+    return _checkpoint_time(last["at"]), last["event"], last["at"], checked
+
+
+def _latest_checkpoint(vault: Path, config: dict) -> tuple[str, str, str, list[dict]] | None:
+    """Pick the valid record whose last event is newest among the newest files.
+
+    Returns (file name, event, raw event time, sources) or None. Only the
+    MAX_CHECKPOINT_CANDIDATES most recently modified checkpoint files are parsed.
+    """
+    deny_zones = config.get("deny_zones")
+    runtime = vault / ENGINE_RUNTIME_RELPATH
+    candidates: list[tuple[int, str]] = []
+    try:
+        _ensure_vault_path(vault, runtime, "engine runtime", deny_zones)
+        if not runtime.is_dir():
+            return None
+        with os.scandir(runtime) as listing:
+            for entry in listing:
+                if not CHECKPOINT_NAME_RE.fullmatch(entry.name):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if stat.S_ISREG(info.st_mode):
+                    candidates.append((info.st_mtime_ns, entry.name))
+    except (OSError, HealthcheckError):
+        return None
+    best: tuple[datetime, str, str, str, list[dict]] | None = None
+    for _mtime, name in sorted(candidates, reverse=True)[:MAX_CHECKPOINT_CANDIDATES]:
+        path = runtime / name
+        try:
+            _ensure_vault_path(vault, path, "engine checkpoint", deny_zones)
+        except HealthcheckError:
+            continue
+        raw = _read_regular_bytes(path, MAX_CHECKPOINT_BYTES)
+        parsed = _parse_checkpoint(raw) if raw is not None else None
+        if parsed is None:
+            continue
+        at, event, at_text, sources = parsed
+        if best is None or (at, name) > (best[0], best[1]):
+            best = (at, name, event, at_text, sources)
+    if best is None:
+        return None
+    return best[1], best[2], best[3], best[4]
+
+
+def checkpoint_drift_warnings(vault: Path, config: dict) -> list[dict]:
+    """Opt-in: report notes whose bytes differ from the newest valid checkpoint.
+
+    Compares the hot/handoff/log/tasks hashes that vault_state.write_checkpoint
+    recorded at PreCompact/SessionEnd with the current files. Fail-soft: a
+    missing runtime directory, no valid checkpoint, or an unsafe or unreadable
+    path yields no finding and no error. Reads only; never writes notes.
+    """
+    latest = _latest_checkpoint(vault, config)
+    if latest is None:
+        return []
+    name, event, at_text, sources = latest
+    findings: list[dict] = []
+    for source in sources:
+        rel = source["path"]
+        if not _warning_inventory_allowed(rel, config):
+            continue
+        path = vault / rel
+        try:
+            _ensure_vault_path(vault, path, "checkpoint source", config.get("deny_zones"))
+        except HealthcheckError:
+            continue
+        current: str | None = None
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            state = "missing"
+        except OSError:
+            continue
+        else:
+            if (not stat.S_ISREG(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT):
+                continue
+            if info.st_size <= MAX_CHECKPOINT_SOURCE_BYTES:
+                data = _read_regular_bytes(path, MAX_CHECKPOINT_SOURCE_BYTES)
+                if data is None:
+                    continue
+                current = hashlib.sha256(data).hexdigest()
+                if current == source["sha256"]:
+                    continue
+            state = "changed"
+        findings.append(make_warning(
+            "checkpoint-drift", rel, 0, _CHECKPOINT_MESSAGES[state],
+            details={"checkpoint": name, "event": event, "at": at_text, "state": state,
+                     "recorded_sha256": source["sha256"], "current_sha256": current}))
+    findings.sort(key=lambda finding: (finding["path"], finding["issue_id"]))
+    return findings
+
+
+# 프런트매터 경계는 선형 시간으로 찾는다. 예전 re.match(r"^---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)은
+# 여는 '---' 뒤 공백 런 안의 줄바꿈마다 게으른 (.*?)로 닫는 줄을 끝까지 다시 찾아, 닫는 줄 없이 빈 줄만
+# 이어지는 노트에서 이차 시간이었다. split_frontmatter는 줄바꿈·CR이 어디 있든 그 식과 같은 값을 내며, 예전
+# 식은 tests/test_linear_line_parsers.py에 대조용으로만 남는다. full 모드는 텍스트 모드로 읽어 CR이 '\n'으로
+# 바뀌고, --staged는 index blob을 그대로 디코드해 CR이 남는다. 어느 쪽이든 결과는 예전과 같다.
+_SPACE_RUN_RE = re.compile(r"\s*")
+
+
+def split_frontmatter(text: str) -> tuple[str | None, str]:
+    """(frontmatter 원문, 본문)을 반환. 프런트매터가 없으면 (None, 전체)."""
+    if not text.startswith("---"):
+        return None, text
+    head = _SPACE_RUN_RE.match(text, 3).end()  # 여는 '---' 뒤 공백 런의 끝
+    # 예전 식은 그 런의 마지막 줄바꿈부터 앞쪽으로 열기를 시도하고, 연 자리 뒤의 첫 '\n---'에서 닫았다.
+    opening = text.rfind("\n", 3, head)
+    if opening < 0:
+        return None, text
+    closing = text.find("\n---", opening + 1)
+    if closing < 0:
+        # 더 앞 줄바꿈에서 열면 런 끝의 줄바꿈과 바로 뒤의 '---'만 닫는 줄이 될 수 있다(공백뿐인
+        # 프런트매터). 런 안은 공백뿐이라 '---'가 없고, 런 뒤에는 '\n---'가 없음을 위에서 확인했다.
+        previous = text.rfind("\n", 3, opening)
+        if previous < 0 or opening != head - 1 or not text.startswith("---", head):
+            return None, text
+        opening, closing = previous, opening
+    return text[opening + 1:closing], text[_SPACE_RUN_RE.match(text, closing + 4).end():]
+
+
+def parse_simple_yaml_keys(fm: str) -> dict[str, str]:
+    """최상위 'key: value' 쌍만 단순 추출한다 (완전한 YAML 파서 아님)."""
+    keys: dict[str, str] = {}
+    for line in fm.splitlines():
+        m = re.match(r"^([\w_]+):\s*(.*)$", line)
+        if m:
+            keys[m.group(1)] = m.group(2).strip().strip('"').strip("'")
+    return keys
+
+
+# 위키링크도 선형 시간으로 찾는다. 예전 WIKILINK_RE(r"\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]")는 '[['마다
+# 대상 문자 클래스(줄바꿈과 '['도 받는다)를 멈출 자리까지 다시 훑고 한 글자씩 되돌아갔고, '#'·'|' 뒤 꼬리도 '[['마다
+# 첫 ']'까지 다시 훑었다. 그래서 '['만 이어진 줄이나 '[[a'만 있는 줄이 이어진 노트에서 이차 시간이었다.
+# _wikilink_matches는 줄바꿈·CR이 어디 있든 그 식의 finditer와 같은 매치를 내며, 예전 식은
+# tests/test_linear_line_parsers.py에 대조용으로만 남는다.
+_WIKILINK_STOP_RE = re.compile(r"[|#]|\]\]")
+
+
+def _wikilink_matches(text: str) -> list[tuple[int, int, str]]:
+    """예전 WIKILINK_RE.finditer(text)의 매치마다 (시작, 끝, group(1))을 순서대로 반환한다."""
+    # 대상은 '[[' 뒤에서 처음 나오는 '|'·'#'·']]' 앞까지다(바로 뒤에 ']'가 없는 ']'는 대상에 든다). 그 자리가
+    # ']]'이면 거기서 닫히고, '|'·'#'이면 꼬리가 그 뒤 첫 ']'까지 이어져 거기서 ']]'로 닫혀야 한다. 대상을 줄여
+    # 되돌아가도 다른 자리에서는 닫히지 않으므로, 실패한 '[['와 그 자리 앞의 다른 '[['는 모두 같은 자리에서 멈춰
+    # 실패하고, 그 자리 뒤에서 다시 찾는다.
+    found: list[tuple[int, int, str]] = []
+    search, close = 0, -1  # close: 마지막으로 찾은 꼬리 끝 ']'. 뒤로만 옮기므로 같은 구간을 다시 훑지 않는다.
+    while True:
+        start = text.find("[[", search)
+        if start < 0:
+            return found
+        stop = _WIKILINK_STOP_RE.search(text, start + 2)
+        if stop is None:
+            return found  # 대상이 끝까지 이어져 이 '[['도 뒤의 '[['도 닫히지 않는다
+        target_end = end = stop.start()
+        if text[end] != "]":  # '#'·'|': 꼬리 끝
+            if close <= end:
+                close = text.find("]", end + 1)
+                if close < 0:
+                    return found  # 뒤에 ']'가 없으면 어느 '[['도 닫히지 않는다
+            end = close
+        if target_end > start + 2 and text.startswith("]]", end):
+            found.append((start, end + 2, text[start + 2:target_end]))
+            search = end + 2
+        else:
+            search = target_end + 1
+
+
+def wikilink_targets(text: str) -> list[str]:
+    """예전 WIKILINK_RE.findall(text)와 같은 위키링크 대상(group(1)) 목록."""
+    return [target for _start, _end, target in _wikilink_matches(text)]
+
+
+def normalize_link_target(raw: str) -> str | None:
+    """위키링크 대상을 노트 이름(stem)으로 정규화한다.
+    - 경로형 [[folder/note]] → 'note'
+    - .md 확장자 명시 → 제거
+    - 그 외 확장자([[image.png]] 등 자산 임베드) → None (노트 링크 아님)"""
+    base = raw.split("/")[-1].strip()
+    if not base:
+        return None
+    if FILE_EXT_RE.search(base):
+        if base.lower().endswith(".md"):
+            return base[:-3].strip() or None
+        return None
+    return base
+
+
+def _decode_nul_paths(data: bytes, label: str) -> list[str]:
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise HealthcheckError(f"{label} output is not NUL terminated")
+    return [
+        _decode_git_path(raw_path, label)
+        for raw_path in data[:-1].split(b"\0")
+    ]
+
+
+def _index_markdown_paths(vault: Path, config: dict) -> list[str]:
+    data = _run_git_bytes(
+        vault,
+        "ls-files", "-z", "--cached", "--",
+        *staged_markdown_pathspecs(config),
+    )
+    return _decode_nul_paths(data, "staged Markdown path")
+
+
+def _posix_markdown_stem(path: str) -> str:
+    """Derive a stem without rewriting Git-originated path characters."""
+    filename = path.rsplit("/", 1)[-1]
+    if filename.lower().endswith(".md"):
+        return filename[:-3]
+    return filename
+
+
+def _is_at_or_below(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(prefix + "/")
+
+
+def _staged_schema_errors(path: str, text: str, config: dict) -> list[str]:
+    policy = VaultPolicy.from_config(config)
+    if not any(_is_at_or_below(path, root) for root in policy.frontmatter_roots):
+        return []
+    if any(_is_at_or_below(path, exempt) for exempt in policy.frontmatter_exempt_paths):
+        return []
+
+    fm, _body = split_frontmatter(text)
+    if fm is None:
+        return [f"스테이징 차단: {path} — 프런트매터 누락"]
+
+    errors: list[str] = []
+    keys = parse_simple_yaml_keys(fm)
+    absent = [key for key in config.get("required_keys", ()) if key not in keys]
+    if absent:
+        errors.append(
+            f"스테이징 차단: {path} — 필수 키 누락: {', '.join(sorted(absent))}"
+        )
+    for field, allowed in sorted((config.get("enums") or {}).items()):
+        value = keys.get(field)
+        if value is not None and value not in allowed:
+            errors.append(f"스테이징 차단: {path} — Enum 위반: {field}={value}")
+    lines = fm.splitlines()
+    for index in unquoted_frontmatter_link_lines(fm):
+        errors.append(
+            f"스테이징 차단: {path} — 프런트매터 내 따옴표 없는 위키링크: "
+            f"{lines[index].strip()}"
+        )
+    return errors
+
+
+def _grep_index_backlink_paths(vault: Path, config: dict) -> list[str]:
+    """Conservatively list index blobs containing any wikilink opener."""
+    data = _run_git_bytes(
+        vault,
+        "grep", "--cached", "-z", "-l", "-I", "-F", "-e", "[[",
+        "--", *staged_markdown_pathspecs(config, exclude_generated_referrers=True),
+        allowed_returncodes=(0, 1),
+    )
+    return _decode_nul_paths(data, "staged backlink path")
+
+
+def _index_blob_wikilink_targets(
+    vault: Path,
+    path: str,
+    note_stem_candidates: set[str],
+) -> set[str]:
+    """Return staged note targets from one index blob, excluding code contexts."""
+    text = read_index_text(vault, path)
+    clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
+    targets: set[str] = set()
+    for raw_target in wikilink_targets(clean_text):
+        raw_stem = raw_target.split("/")[-1].strip()
+        if raw_stem.lower().endswith(".md"):
+            raw_stem = raw_stem[:-3].strip()
+        target = (
+            raw_stem
+            if raw_stem in note_stem_candidates
+            else normalize_link_target(raw_target)
+        )
+        if target is not None:
+            targets.add(target)
+    return targets
+
+
+def staged_extension_warnings(vault: Path, config: dict, changes: list[StagedChange]) -> list[dict]:
+    """Analyze approved immutable Git-index blobs, never dirty working files.
+
+    Inventory metadata is filtered BEFORE blob size/content reads. SHA-selected
+    reads keep size checks and originals bound even if another writer restages.
+    At most 10,000 notes, 1 MB/note and 8 MB total are consumed. Incomplete scans
+    warn and do not escalate. Only staged consumers or changed anchor targets
+    are reported; unrelated old date warnings cannot block a new commit.
+    """
+    if not _EXTENSIONS_AVAILABLE:
+        return [_extension_unavailable_warning()]
+    data = _run_git_bytes(vault, "ls-files", "--stage", "-z", "--",
+                          *staged_markdown_pathspecs(config))
+    records = _decode_nul_paths(data, "staged warning inventory")
+    deny_rules = build_deny_rules(config.get("deny_zones"))
+    exclude = {str(x).casefold() for x in config.get("exclude_dirs", [])}
+    selected: dict[str, str] = {}
+    incomplete = False
+    for record in records:
+        metadata, separator, path = record.partition("\t")
+        if not separator:
+            raise HealthcheckError("malformed staged warning inventory")
+        if is_denied(path, *deny_rules) or any(part.casefold() in exclude for part in path.split("/")):
+            continue
+        fields = metadata.split()
+        if len(fields) != 3 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", fields[1]):
+            raise HealthcheckError("malformed staged warning blob identity")
+        if fields[2] != "0":
+            incomplete = True
+            continue
+        if len(selected) >= 10_000:
+            incomplete = True
+            continue
+        selected[path] = fields[1]
+    notes: dict[str, str] = {}
+    total = 0
+    for path, oid in sorted(selected.items()):
+        size_data = _run_git_bytes(vault, "cat-file", "-s", oid)
+        try:
+            size = int(size_data.strip())
+        except ValueError as exc:
+            raise HealthcheckError("invalid staged warning blob size") from exc
+        if size < 0 or size > 1_000_000 or total + size > 8_000_000:
+            incomplete = True
+            continue
+        original = _run_git_bytes(vault, "cat-file", "blob", oid)
+        if len(original) != size:
+            raise HealthcheckError("staged warning blob size changed")
+        total += size
+        try:
+            notes[path] = original.decode("utf-8-sig")
+        except UnicodeError:
+            incomplete = True
+    if incomplete:
+        # A skipped target is unknown, so absence of its path is not evidence.
+        # Other findings over the originals actually read remain warning-only.
+        findings = extension_warnings(notes, config, input_complete=False)
+    else:
+        findings = extension_warnings(notes, config)
+    changed_paths = {x.path for x in changes if x.status in "ACMR"}
+    return [x for x in findings if x["code"] == "lint-incomplete" or x["path"] in changed_paths
+            or x["details"].get("target") in changed_paths]
+
+
+def _staged_growth_budgets(config: dict, *, collecting_warnings: bool) -> dict[str, int]:
+    """Map each budgeted note to its token budget when the growth check has a use."""
+    mode = config.get("staged_growth_check", "off")
+    if mode == "off" or (mode == "warn" and not collecting_warnings):
+        return {}
+    budgets: dict[str, int] = {}
+    for path_key, budget_key in _STAGED_GROWTH_NOTES:
+        path, budget = config.get(path_key), config.get(budget_key, 0)
+        if path and budget > 0:
+            budgets[path] = min(budget, budgets.get(path, budget))
+    return budgets
+
+
+def _staged_growth_baseline(vault: Path, change: StagedChange) -> str | None:
+    """Return the HEAD text of a staged change, or None for a path new to HEAD."""
+    if change.status == "A":
+        return None
+    data = _run_git_bytes(vault, "show", f"HEAD:{change.old_path or change.path}")
+    return data.decode("utf-8-sig")
+
+
+def _staged_growth_finding(code: str, path: str, message: str, details: dict) -> dict:
+    # Built here because the copy installed in a vault has no extension modules.
+    digest = hashlib.sha256(f"{code}\0{path}".encode("utf-8")).hexdigest()
+    return {"issue_id": "lint-" + digest[:20], "code": code, "severity": "warning",
+            "path": path, "line": 0, "message": message, "details": details}
+
+
+def _check_staged_growth(vault: Path, change: StagedChange, text: str, budget: int, config: dict,
+                         errors: list[str], warning_diagnostics: list[dict] | None) -> None:
+    """Report a budgeted note that grew; the change itself is judged, not its size."""
+    block = config["staged_growth_check"] == "block"
+    try:
+        baseline = _staged_growth_baseline(vault, change)
+    except (HealthcheckError, UnicodeDecodeError):
+        # Fixed wording: a git failure message can quote repository paths.
+        code = "staged-token-growth-unverified"
+        if block:
+            errors.append(f"스테이징 차단: {change.path} — [{code}] HEAD 기준선을 읽지 못함")
+        else:
+            warning_diagnostics.append(_staged_growth_finding(
+                code, change.path, "The HEAD baseline of a budgeted note could not be read", {}))
+        return
+    if baseline is None:
+        return
+    before, after = estimate_tokens(baseline), estimate_tokens(text)
+    growth = after - before
+    limit = config.get("staged_growth_max_tokens", 0)
+    reason = "over_budget" if after > budget else "growth_limit" if limit and growth > limit else ""
+    if growth <= 0 or not reason:
+        return
+    code = "staged-token-growth"
+    if block:
+        errors.append(f"스테이징 차단: {change.path} — [{code}] {reason}: "
+                      f"추정 토큰 {before} → {after} (예산 {budget}, 증가 상한 {limit})")
+    else:
+        warning_diagnostics.append(_staged_growth_finding(
+            code, change.path, "A budgeted note grew in the staged change",
+            {"reason": reason, "before_tokens": before, "after_tokens": after,
+             "budget_tokens": budget, "max_growth_tokens": limit}))
+
+
+def validate_staged(vault: Path, config: dict, *, warning_diagnostics: list[dict] | None = None) -> list[str]:
+    """Validate only the staged Markdown change surface without writing a report."""
+    if not isinstance(config, dict):
+        raise HealthcheckError("validated config must be an object")
+
+    changes = list_staged_changes(vault, config)
+    errors: list[str] = []
+    deleted_stems: set[str] = set()
+    growth_budgets = _staged_growth_budgets(
+        config, collecting_warnings=warning_diagnostics is not None)
+
+    for change in changes:
+        if change.status in "ACMR":
+            text = read_index_text(vault, change.path)
+            errors.extend(_staged_schema_errors(change.path, text, config))
+            if change.path in growth_budgets:
+                _check_staged_growth(vault, change, text, growth_budgets[change.path], config,
+                                     errors, warning_diagnostics)
+
+        if change.status == "D":
+            deleted_stems.add(_posix_markdown_stem(change.path))
+        elif change.status == "R" and change.old_path is not None:
+            old_stem = _posix_markdown_stem(change.old_path)
+            if old_stem != _posix_markdown_stem(change.path):
+                deleted_stems.add(old_stem)
+
+    if deleted_stems:
+        result_stems = {
+            _posix_markdown_stem(path)
+            for path in _index_markdown_paths(vault, config)
+        }
+        note_stem_candidates = deleted_stems | result_stems
+        stems_to_check = sorted(
+            stem for stem in deleted_stems
+            if stem and stem not in result_stems
+        )
+        referrers_by_target: dict[str, set[str]] = {}
+        if stems_to_check:
+            for referrer in _grep_index_backlink_paths(vault, config):
+                for target in _index_blob_wikilink_targets(
+                    vault, referrer, note_stem_candidates
+                ):
+                    referrers_by_target.setdefault(target, set()).add(referrer)
+        for stem in stems_to_check:
+            for referrer in sorted(referrers_by_target.get(stem, ())):
+                errors.append(
+                    f"스테이징 차단: {referrer} — 삭제·개명된 노트 '{stem}' "
+                    "백링크가 남아 있음"
+                )
+
+    promotion = _validated_warning_policy(config)
+    if warning_diagnostics is not None or promotion["promoted_codes"]:
+        findings = staged_extension_warnings(vault, config, changes)
+        if warning_diagnostics is not None:
+            warning_diagnostics.extend(findings)
+        errors.extend(format_extension_warning(x) for x in findings if x["severity"] == "fatal")
+    return sorted(set(errors))
+
+
+def scan_log_tag_gaps(vault: Path, log_path: Path, valid_ops: set[str],
+                      epoch: date, deny_zones=()) -> tuple[list[str], list[str]]:
+    """log 노트에서 (태그 누락/형식오류 항목, 미승인 태그 항목)을 반환한다.
+    epoch(태그 도입일) 이후 항목만 검사한다 — 과거 로그는 소급 대상이 아니므로
+    '도입일 이후 로그는 100% 태그됨'이 결정론적으로 검증 가능한 사실이 된다.
+    fail-closed: 도입일 이후 로그형 라인이 엄격 형식을 벗어나면 조용히 넘기지 않고
+    'malformed'로 색출한다(무태그 항목이 형식 변형으로 감사를 회피하는 것 방지)."""
+    missing: list[str] = []
+    unknown: list[str] = []
+    # 헤더의 형식 예시 등 코드펜스 안의 라인은 실제 로그가 아니므로 제외
+    text = CODE_FENCE_RE.sub("", read_vault_text(vault, log_path, "log_note", deny_zones))
+    for raw in text.splitlines():
+        strict = LOG_ENTRY_RE.match(raw)
+        excerpt = raw[:80]
+        if strict:
+            try:
+                entry_d = datetime.strptime(strict.group(1), "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if entry_d < epoch:
+                continue  # 도입일 이전 = 소급 대상 아님
+            summary = strict.group(2).lstrip()
+            tag_m = LOG_TAG_RE.match(summary)
+            if not tag_m:
+                missing.append(excerpt)
+            elif tag_m.group(1) not in valid_ops:
+                unknown.append(f"{excerpt}  (태그: [{tag_m.group(1)}])")
+            continue
+        # 엄격 패턴에 안 맞음 — 로그형(불릿+날짜) 후보인지 넓은 게이트로 재검사
+        loose = LOG_LIKE_RE.match(raw)
+        if not loose:
+            continue  # 로그 항목이 아님(헤더·산문·표 등) → 검사 대상 아님
+        try:
+            entry_d = datetime.strptime(loose.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if entry_d < epoch:
+            continue
+        missing.append(f"{excerpt}  (형식오류: `- YYYY-MM-DD HH:MM | 행위자 |` 벗어남)")
+    return missing, unknown
+
+
+def compile_fact_patterns(ssot_facts, warnings: list[str]) -> list[tuple[str, re.Pattern]]:
+    """ssot_facts([{"label","pattern"}])를 컴파일한다. 잘못된 항목은 경고로 표면화."""
+    compiled: list[tuple[str, re.Pattern]] = []
+    for i, item in enumerate(ssot_facts or []):
+        if not isinstance(item, dict):
+            warnings.append(f"ssot_facts[{i}] 형식 오류 — {{\"label\", \"pattern\"}} 객체가 아님. 건너뜀.")
+            continue
+        label = str(item.get("label", "")).strip()
+        pat = str(item.get("pattern", "")).strip()
+        if not label or not pat:
+            warnings.append(f"ssot_facts[{i}] label/pattern 누락 — 건너뜀.")
+            continue
+        try:
+            compiled.append((label, re.compile(pat)))
+        except re.error as e:
+            warnings.append(f"ssot_facts '{label}' 정규식 컴파일 실패({e}) — 건너뜀.")
+    return compiled
+
+
+# 규칙 제목 줄(#~###)과 그 정규화는 선형 시간으로 처리한다. 예전 정규식은 게으른 (.+?)나
+# 자리마다 다시 시도하는 \s* 때문에 제목 글자 사이의 긴 공백('# a'+공백 N개+'b')에서
+# 이차 시간이었다. 아래 함수는 예전 정규식과 같은 값을 내며, 예전 식은
+# tests/test_linear_line_parsers.py에 대조용으로만 남는다. str 패턴의 \s는 str.isspace와
+# 같고 인자 없는 strip()·rstrip()도 같은 기준을 쓴다. 호출부는 str.splitlines()로 나눈
+# 줄만 넘기므로 줄 안에 '\n'이 없다.
+_RULE_HEADING_OPEN_RE = re.compile(r"#{1,3}(?=\s)")
+_DASH_TAIL_RE = re.compile(r"[—-](?=\s)")
+
+
+def _rule_heading(line: str) -> str | None:
+    """예전 re.match(r"^#{1,3}\\s+(.+?)\\s*$", line).group(1)과 같은 값, 제목이 아니면 None."""
+    m = _RULE_HEADING_OPEN_RE.match(line)
+    if not m:
+        return None
+    rest = line[m.end():]
+    title = rest.strip()
+    if title:
+        return title
+    return rest[-1] if len(rest) >= 2 else None
+
+
+def _drop_parenthesized(h: str) -> str:
+    """예전 re.sub(r"\\s*\\([^)]*\\)", "", h)와 같은 값('\\n'이 있어도 같다)."""
+    parts, pos = [], 0
+    while True:
+        opening = h.find("(", pos)
+        closing = h.find(")", opening + 1) if opening >= 0 else -1
+        if closing < 0:
+            break
+        start = opening
+        while start > pos and h[start - 1].isspace():
+            start -= 1
+        parts.append(h[pos:start])
+        pos = closing + 1
+    parts.append(h[pos:])
+    return "".join(parts)
+
+
+def _drop_dash_tail(h: str) -> str:
+    """예전 re.sub(r"\\s*[—-]\\s.*$", "", h)와 같은 값(h에 '\\n'이 없을 때)."""
+    # 공백이 뒤따르는 첫 대시부터 끝까지와 그 앞 공백을 지운다.
+    m = _DASH_TAIL_RE.search(h)
+    return h[:m.start()].rstrip() if m else h
+
+
+def _norm_heading(h: str) -> str:
+    """규칙 제목을 비교용으로 정규화 — 표기 차이(강조·번호·괄호주석)만 흡수하고
+    제목의 실질 내용은 보존한다(콜론 뒤 대상어를 함부로 버리지 않는다 — 한국어에서
+    콜론 뒤가 핵심인 경우가 많아 오판 위험)."""
+    h = re.sub(r"[*_`]", "", h)                       # 강조 기호 제거
+    h = re.sub(r"^\s*\d+(?:[.\-)]\d*)*[.\-)]?\s+", "", h)  # 선두 번호 접두사 제거 ("1. ", "2-3) " 등)
+    h = _drop_parenthesized(h)                        # 괄호 주석 제거 (예: "(위반 시 …)")
+    h = _drop_dash_tail(h)                            # 대시 이후 부연 제거 ("— 절대 규칙" 등)
+    return " ".join(h.split()).strip().lower()
+
+
+def scan_rules_integrity(vault: Path, rules_dir: Path, claude_md: Path, max_lines: int,
+                          deny_zones=(), skipped: list[str] | None = None
+                          ) -> tuple[list[tuple[str, int]], list[str]]:
+    """(크기 초과 rules 목록, CLAUDE.md와 제목이 겹치는 rules 목록)을 반환한다.
+    - 크기: rules 파일이 max_lines 초과 → 절차성 장문 유입 신호(rules는 상시 로드라 얇아야 함).
+    - 중복: 엔진 rules의 ## 제목이 CLAUDE.md 본문 제목과 겹치면, 같은 주제를 두 층이
+      다르게 서술할 위험 — 충돌 시 우선순위 규칙이 없어 모델이 임의 선택한다(v0.7 근거)."""
+    oversized: list[tuple[str, int]] = []
+    dup_headings: list[str] = []
+    rule_files: list[Path] = []
+    for rule_file in sorted(rules_dir.glob("*.md")):
+        try:
+            _ensure_vault_path(vault, rule_file, f"rule file {rule_file.name}", deny_zones)
+        except HealthcheckError:
+            rel = rel_posix(rule_file, vault)
+            if skipped is not None and not is_denied(rel, *build_deny_rules(deny_zones)):
+                skipped.append(rel)
+            continue
+        rule_files.append(rule_file)
+    # CLAUDE.md 본문(마커/주석 제외)의 규칙 제목 집합
+    claude_headings: set[str] = set()
+    if not is_denied(rel_posix(claude_md, vault), *build_deny_rules(deny_zones)) and claude_md.is_file():
+        ctext = CODE_FENCE_RE.sub("", read_vault_text(vault, claude_md, "CLAUDE.md", deny_zones))
+        for line in ctext.splitlines():
+            title = _rule_heading(line)
+            if title is not None:
+                claude_headings.add(_norm_heading(title))
+    for rf in rule_files:
+        rtext = read_vault_text(vault, rf, f"rule file {rf.name}", deny_zones)
+        # 코드펜스 내부는 예시 인용일 뿐 실제 규칙/제목이 아니므로 크기·제목 판정에서 제외
+        rclean = CODE_FENCE_RE.sub("", rtext)
+        body_lines = [ln for ln in rclean.splitlines()
+                      if not ln.strip().startswith("<!--")]  # 스탬프 주석 제외 실질 줄수
+        n = len([ln for ln in body_lines if ln.strip()])
+        if n > max_lines:
+            oversized.append((rf.name, n))
+        for line in rclean.splitlines():
+            title = _rule_heading(line)
+            if title is not None and _norm_heading(title) in claude_headings:
+                dup_headings.append(f"{rf.name} → `{title.strip()}` (CLAUDE.md와 중복)")
+    return oversized, dup_headings
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="볼트 무결성 검증 엔진 (agentic-vault)")
+    ap.add_argument("--vault",
+                    default=None,
+                    help="볼트 루트 경로 (기본: $CLAUDE_PROJECT_DIR, 없으면 cwd)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--staged", action="store_true",
+                      help="Git index의 커밋 대상만 검사하고 리포트는 쓰지 않음")
+    mode.add_argument("--output", default=None,
+                      help="full 모드 리포트 출력 경로 (기본: config의 health_report)")
+    ap.add_argument("--require-vault", action="store_true",
+                    help="볼트 설정이 없으면 0 대신 2로 끝낸다")
+    ap.add_argument("--json-summary", action="store_true",
+                    help="full 모드 stdout 마지막 줄에 건수만 담은 JSON 요약 한 줄을 더한다")
+    args = ap.parse_args()
+    if args.json_summary and args.staged:
+        ap.error("--json-summary는 --staged와 함께 쓸 수 없다(full 모드 전용)")
+
+    # The summary of a run that checks no notes; _main fills it as it returns.
+    summary: dict[str, object] = {
+        "schema": HEALTHCHECK_SUMMARY_SCHEMA, "status": "error", "exit_code": 1,
+        "notes_checked": 0, "issues": 0, "critical": 0, "evidence_skipped": 0,
+        "unreadable": 0, "skipped_links": 0, "linked_worktree_copies": 0,
+        "complete": False, "extension_input_complete": False,
+        "warning_promotion_active": False,
+    }
+    rc = _main(args, summary)
+    if args.json_summary:
+        summary["exit_code"] = rc
+        print(json.dumps(summary, ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+    return rc
+
+
+def _main(args: argparse.Namespace, summary: dict) -> int:
+    """Run the check; every controlled return leaves its status in summary."""
+    explicit_vault = args.vault is not None
+    vault = Path(args.vault if explicit_vault
+                 else (os.environ.get("CLAUDE_PROJECT_DIR") or ".")).resolve()
+    if explicit_vault and not vault.is_dir():
+        # A path given on the command line must be a folder; the implicit path
+        # (hook, cwd) keeps the quiet "not a vault" pass below.
+        print(f"[vault-healthcheck] 오류: --vault 경로가 없거나 폴더가 아님 — {vault}",
+              file=sys.stderr)
+        summary["status"] = "vault_not_found"
+        return 2
+
+    if args.staged:
+        try:
+            cfg = load_staged_config(vault)
+            extension_diagnostics: list[dict] = []
+            diagnostics = validate_staged(vault, cfg, warning_diagnostics=extension_diagnostics)
+        except (OSError, ValueError, HealthcheckError) as e:
+            print(f"[vault-healthcheck] staged 오류: {e}", file=sys.stderr)
+            return 1
+        for diagnostic in diagnostics:
+            print(diagnostic, file=sys.stderr)
+        for finding in extension_diagnostics:
+            if finding["severity"] != "fatal":
+                print(format_extension_warning(finding), file=sys.stderr)
+        return 1 if diagnostics else 0
+
+    # --- 볼트 감지: 00-meta/vault-config.json 이 없으면 조용히·정중히 무동작 ---
+    cfg_path = vault / CONFIG_RELPATH
+    try:
+        _ensure_vault_path(vault, cfg_path, "vault-config")
+    except HealthcheckError as e:
+        print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+        return 1
+    if not cfg_path.is_file():
+        summary["status"] = "not_vault"
+        if args.require_vault:
+            print(f"[vault-healthcheck] 오류: 볼트 아님 — {vault} 에 {CONFIG_RELPATH} 이 없음 "
+                  "(--require-vault)", file=sys.stderr)
+            return 2
+        # stderr로 출력 — SessionStart 훅이 exit 0의 stdout을 컨텍스트에 주입하므로
+        # 비볼트 프로젝트의 세션에 잡음이 들어가지 않게 한다(CLI 직접 실행 시에도 안내는 보임).
+        print(f"[vault-healthcheck] 볼트 아님 — {vault} 에 {CONFIG_RELPATH} 이 없어 검사를 건너뜁니다.",
+              file=sys.stderr)
+        return 0
+    try:
+        _ensure_vault_path(vault, cfg_path, "vault-config")
+        user_cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+        cfg = validate_config(user_cfg)
+    except (OSError, ValueError, HealthcheckError) as e:
+        print(f"[vault-healthcheck] 오류: {CONFIG_RELPATH} 파싱 실패 — {e}", file=sys.stderr)
+        return 1
+    warnings: list[str] = []
+    # Unknown top-level keys: named in section 0 and on the console line only;
+    # they never change the exit code and their values are never shown.
+    unknown_keys = unknown_config_keys(user_cfg)
+    for name, suggestion in unknown_keys[:20]:
+        hint = f"({config_key_display(suggestion)}의 오타일 수 있음)" if suggestion else ""
+        warnings.append(f"알 수 없는 설정 키 {config_key_display(name)} — 적용되지 않는다{hint}.")
+    if len(unknown_keys) > 20:
+        warnings.append(f"알 수 없는 설정 키 {len(unknown_keys) - 20}건 더 — 생략.")
+
+    # Config-derived readers are fail-closed. Missing paths remain optional, but
+    # an existing symlink/junction component must never redirect a full scan.
+    for key in ("index_note", "log_note", "hot_note", "handoff_note", "ssot_note", "rules_dir"):
+        rel = norm_cfg_path(cfg.get(key))
+        if not rel:
+            continue
+        try:
+            _ensure_vault_path(vault, vault / rel, key, cfg.get("deny_zones"))
+            if denied_in_linked_tree(vault, rel, build_deny_rules(cfg.get("deny_zones"))):
+                raise HealthcheckError(f"{key} must not point inside a deny zone")
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+
+    # --- 설정 해석 -----------------------------------------------------------
+    vault_name = str(cfg.get("vault_name") or "Vault")
+    deny_prefixes, deny_names = build_deny_rules(cfg.get("deny_zones"))
+    exclude_names = {str(d).strip() for d in (cfg.get("exclude_dirs") or []) if str(d).strip()}
+    required_keys = [str(k) for k in (cfg.get("required_keys") or [])]
+    enum_sets = {k: set(v) for k, v in (cfg.get("enums") or {}).items()
+                 if isinstance(v, list) and v}
+    try:
+        fm_max_lines = int(cfg.get("frontmatter_max_lines") or 16)
+    except (TypeError, ValueError):
+        fm_max_lines = 16
+        warnings.append("frontmatter_max_lines 값이 정수가 아님 — 기본값 16 사용.")
+    try:
+        stale_days = int(cfg.get("stale_days") or 0)
+    except (TypeError, ValueError):
+        stale_days = 0
+    try:
+        rules_max_lines = int(cfg.get("rules_max_lines") or 120)
+    except (TypeError, ValueError):
+        rules_max_lines = 120
+        warnings.append("rules_max_lines 값이 정수가 아님 — 기본값 120 사용.")
+    # 빈 문자열이면 섹션 10 끄기(다른 경로 옵션과 동일한 관례 — or 폴백 금지).
+    # 키 자체가 없을 때만 기본값 .claude/rules 적용.
+    rules_dir_rel = norm_cfg_path(
+        cfg.get("rules_dir") if "rules_dir" in user_cfg else ".claude/rules")
+    # 볼트 밖 스캔 방어: 절대경로·드라이브문자·상위참조는 무시(다른 경로 값과 달리
+    # rules_dir은 디렉토리를 통째 순회하므로 볼트 이탈 시 임의 위치 노출 위험).
+    if rules_dir_rel and (Path(rules_dir_rel).is_absolute()
+                          or re.match(r"^[A-Za-z]:", rules_dir_rel)
+                          or ".." in rules_dir_rel.split("/")):
+        warnings.append(f"rules_dir 값('{rules_dir_rel}')이 볼트 루트 밖을 가리킴 — 무시하고 섹션 10 생략.")
+        rules_dir_rel = ""
+
+    index_rel = norm_cfg_path(cfg.get("index_note"))
+    log_rel = norm_cfg_path(cfg.get("log_note"))
+    ssot_rel = norm_cfg_path(cfg.get("ssot_note"))
+    valid_ops = {str(t).strip() for t in (cfg.get("log_tags") or []) if str(t).strip()}
+
+    epoch: date | None = None
+    epoch_raw = str(cfg.get("log_tag_epoch") or "").strip()
+    if epoch_raw:
+        try:
+            epoch = datetime.strptime(epoch_raw, "%Y-%m-%d").date()
+        except ValueError:
+            warnings.append(f"log_tag_epoch 형식 오류('{epoch_raw}') — "
+                            f"전체 기간을 검사합니다(fail-closed).")
+    if epoch is None:
+        epoch = date.min  # 경계 미설정 = 전 기간 검사
+
+    fact_patterns = compile_fact_patterns(cfg.get("ssot_facts"), warnings)
+
+    # 선택형 동기화 경고(기본 꺼짐). 키가 없으면 아래 어느 줄도 출력을 바꾸지 않는다.
+    sync_name_check = cfg.get("sync_conflict_check") is True
+    if cfg.get("sync_conflict_patterns") and not sync_name_check:
+        warnings.append("sync_conflict_patterns는 sync_conflict_check가 true일 때만 쓰인다 — "
+                        "동기화 파일 이름 검사 생략.")
+
+    config_derived_output = not args.output
+    out_rel = args.output or norm_cfg_path(cfg.get("health_report")) or "00-meta/health-report.md"
+    out = vault / out_rel  # out_rel 이 절대경로면 pathlib 이 그대로 절대경로를 취한다
+    if config_derived_output:
+        try:
+            out_resolved = _ensure_config_health_report_contained(vault, out)
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+    else:
+        try:
+            out_resolved = out.resolve()
+        except OSError:
+            out_resolved = out
+
+    # 허브/구조 파일(설정이 가리키는 노트)은 지식 그래프 노드가 아니므로 고아 판정에서 제외
+    special_rels: set[str] = set()
+    for key in ("index_note", "log_note", "hot_note", "handoff_note", "ssot_note", "health_report"):
+        v = norm_cfg_path(cfg.get(key))
+        if v:
+            special_rels.add(v)
+    hub_stems = {Path(v).stem for v in special_rels}
+
+    # --- 파일 수집 ------------------------------------------------------------
+    link_skipped: list[str] = []
+    linked_trees: list[str] = []
+    unregistered_trees: list[str] = []
+    # 이름 검사가 켜졌을 때만 같은 걷기에서 모든 파일 항목(확장자 무관)을 모은다.
+    file_entries: list[Path] | None = [] if sync_name_check and _EXTENSIONS_AVAILABLE else None
+    all_md = collect_md_files(vault, exclude_names, link_skipped, file_entries=file_entries,
+                              linked_trees=linked_trees, unregistered_trees=unregistered_trees)
+    # 링크 해석용 인덱스는 deny zone 포함 전체(아카이브로 이동한 노트 링크는 유효),
+    # 린트 대상은 deny zone·도구 문서·리포트 자신을 제외한 활성 영역만.
+    # 주의: 옵시디언 frontmatter aliases 는 원시 위키링크를 해석하지 못한다 —
+    # 파일명(stem)만 해석 대상이다.
+    name_index = {p.stem for p in all_md}
+    targets: list[Path] = []
+    tree_zone_notes: set[str] = set()
+    for p in all_md:
+        rel = rel_posix(p, vault)
+        if is_denied(rel, deny_prefixes, deny_names):
+            continue
+        if (unregistered_trees and rel.startswith(tuple(unregistered_trees))
+                and denied_in_linked_tree(vault, rel, (deny_prefixes, deny_names))):
+            tree_zone_notes.add(rel)
+            continue
+        if p.name.lower() in SKIP_FILENAMES:
+            continue
+        try:
+            if p.resolve() == out_resolved:
+                continue  # 리포트 자신은 검사하지 않는다
+        except OSError:
+            pass
+        targets.append(p)
+
+    if not targets and name_index:
+        # 침묵 통과(silent green) 방지: 노트는 있는데 검사 대상이 0개면 제외 규칙 과잉
+        print("[vault-healthcheck] 오류: .md 파일은 있으나 검사 대상이 0개입니다 — "
+              "deny_zones/exclude_dirs 설정을 확인하세요.", file=sys.stderr)
+        return 1
+
+    # --- 본 검사 루프 ----------------------------------------------------------
+    missing_fm: list[str] = []
+    missing_keys: list[tuple[str, list[str]]] = []
+    enum_violations: list[tuple[str, str, str]] = []
+    unquoted_links: list[str] = []
+    oversized_fm: list[tuple[str, int]] = []
+    dead_links: list[tuple[str, str]] = []
+    stale: list[tuple[str, str]] = []
+    unreadable: list[tuple[str, str]] = []
+    outgoing: dict[str, set[str]] = {}
+    incoming: dict[str, int] = {p.stem: 0 for p in targets}
+    note_types: dict[str, str] = {}
+    fact_hits: dict[str, dict[str, list[str]]] = {label: {} for label, _ in fact_patterns}
+    approved_note_texts: dict[str, str] = {}
+
+    # 프런트매터 면제 구역 — 2026-08-05 신설.
+    # 구 버전이 하드코딩하던 면제('10-inbox/*', '00-meta/scratch/*' 등)가
+    # config 방식으로 전환되며 통째로 누락됐다. 그 결과 원시 캡처(수집 대기열)와
+    # 슬래시 명령 정의까지 '프런트매터 누락 — 치명'으로 잡혀 오탐이 쌓였다.
+    # 실측(운영 볼트): 이 누락만으로 치명 22건이 발생했고, 전부 노트가 아닌 파일이었다.
+    # config에 키가 없으면 아래 기본값을 쓴다(구 버전 동작과 호환).
+    if "frontmatter_exempt_paths" in cfg:
+        fm_exempt = cfg["frontmatter_exempt_paths"]
+    elif "fm_exempt_zones" in cfg:
+        fm_exempt = cfg["fm_exempt_zones"]
+    else:
+        fm_exempt = ["10-inbox", "00-meta/scratch", "00-meta/scripts", ".claude"]
+
+    full_fm_roots = tuple(cfg["frontmatter_roots"]) if "frontmatter_roots" in user_cfg else None
+
+    def is_fm_exempt(rel_path: str) -> bool:
+        if any(rel_path == z or rel_path.startswith(z.rstrip("/") + "/")
+               for z in fm_exempt):
+            return True
+        if full_fm_roots is not None:
+            return not any(_is_at_or_below(rel_path, root) for root in full_fm_roots)
+        return False
+
+    for p in targets:
+        rel = rel_posix(p, vault)
+        try:
+            text, read_err = read_note_text(p, vault, cfg.get("deny_zones"))
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+        if text is None:
+            # 파일 단위 fail-soft — 이 노트만 건너뛰고 검사를 계속한다(§14 보고).
+            unreadable.append((rel, read_err or "읽기 실패"))
+            continue
+        approved_note_texts[rel] = text
+        fm, _body = split_frontmatter(text)
+
+        exempt = is_fm_exempt(rel)
+
+        if fm is None:
+            if not exempt:
+                missing_fm.append(rel)
+        elif exempt:
+            # 면제 구역에 프런트매터가 있어도 볼트 노트 스키마를 강요하지 않는다.
+            # 예: .claude/commands/*.md 는 슬래시 명령 정의라 자체 스키마(description 등)를
+            # 쓴다. 노트 필수 키(title·type·tags…)를 요구하면 전량 오탐이 된다(실측 9건).
+            pass
+        else:
+            fm_lines = len(fm.splitlines())
+            if fm_lines > fm_max_lines:
+                oversized_fm.append((rel, fm_lines))
+            keys = parse_simple_yaml_keys(fm)
+            note_types[rel] = keys.get("type", "")
+            absent = [k for k in required_keys if k not in keys]
+            if absent:
+                missing_keys.append((rel, absent))
+            for field, allowed in enum_sets.items():
+                v = keys.get(field)
+                if v is not None and v not in allowed:
+                    enum_violations.append((rel, field, v))
+            fm_text_lines = fm.splitlines()
+            for index in unquoted_frontmatter_link_lines(fm):
+                unquoted_links.append(f"{rel} → `{fm_text_lines[index].strip()}`")
+            if stale_days > 0:
+                try:
+                    upd_d = datetime.strptime(keys.get("updated", ""), "%Y-%m-%d").date()
+                    if (date.today() - upd_d).days > stale_days:
+                        stale.append((rel, keys.get("updated", "")))
+                except ValueError:
+                    pass  # 날짜 미기재/형식 오류는 필수 키 검사 쪽에서 다룸
+
+        # 코드펜스·인라인코드 내부는 링크/사실 표기 분석에서 제외
+        clean_text = INLINE_CODE_RE.sub("", CODE_FENCE_RE.sub("", text))
+
+        links: set[str] = set()
+        for raw_target in wikilink_targets(clean_text):
+            base = normalize_link_target(raw_target)
+            if base is None:
+                continue  # 자산 임베드([[img.png]] 등) — 노트 그래프 밖
+            if base in incoming:
+                incoming[base] += 1
+            if base not in name_index and base not in links:
+                # 같은 파일 안의 동일 데드링크는 1건으로 집계 (occurrence 중복 방지)
+                dead_links.append((rel, raw_target.strip()))
+            links.add(base)
+        outgoing[p.stem] = links
+
+        for label, rx in fact_patterns:
+            vals = set()
+            for m in rx.finditer(clean_text):
+                vals.add(m.group(1) if m.groups() else m.group(0))
+            for v in vals:
+                fact_hits[label].setdefault(v, []).append(rel)
+
+    if targets and len(unreadable) == len(targets):
+        # 침묵 통과(silent green) 방지: 전 노트가 읽기 실패면 검사가 수행되지 않은 것이다.
+        print("[vault-healthcheck] 오류: 검사 대상 전부를 읽지 못했습니다 — "
+              "잠금·권한·클라우드 하이드레이션 상태를 확인하세요.", file=sys.stderr)
+        return 1
+
+    # Legacy schema/graph consumers exclude contract docs and the generated
+    # report, but their allowed originals may still be explicit anchor targets.
+    # Read each omitted original once as evidence without widening legacy gates.
+    consumer_paths = {rel_posix(p, vault) for p in targets}
+    evidence_bytes = 0
+    for text in approved_note_texts.values():
+        if len(text) > 1_000_000 or evidence_bytes >= 8_000_000:
+            evidence_bytes = 8_000_000
+            break
+        evidence_bytes += len(text.encode("utf-8"))
+    for p in all_md:
+        rel = rel_posix(p, vault)
+        if rel in consumer_paths or rel in tree_zone_notes or not _warning_inventory_allowed(rel, cfg):
+            continue
+        try:
+            text, read_err = _read_extension_evidence(vault, p, cfg.get("deny_zones"), 8_000_000 - evidence_bytes)
+        except HealthcheckError:
+            link_skipped.append(rel)
+            continue
+        if text is None:
+            unreadable.append((rel, read_err or "읽기 실패"))
+        else:
+            approved_note_texts[rel] = text
+            evidence_bytes += len(text.encode("utf-8"))
+
+    # --- 고아 / 준고아 ---------------------------------------------------------
+    # 못 읽은 노트는 본문(발신 링크)을 모르므로 고아·준고아 판정에서 제외한다 —
+    # 읽기 실패를 링크 부재로 오판하지 않는다.
+    unreadable_stems = {Path(rel).stem for rel, _ in unreadable}
+    orphans = [p for p in targets
+               if p.stem not in unreadable_stems
+               and not outgoing.get(p.stem) and incoming.get(p.stem, 0) == 0
+               and p.stem not in hub_stems]
+    semi_orphans = [p for p in targets
+                    if p.stem not in unreadable_stems
+                    and incoming.get(p.stem, 0) == 0 and p.stem not in hub_stems
+                    and p not in orphans]
+
+    # --- 인덱스 미등록 ----------------------------------------------------------
+    unindexed: list[str] = []
+    index_skip_note: str | None = None
+    index_path = (vault / index_rel) if index_rel else None
+    if index_path is not None and index_path.is_file():
+        try:
+            idx_text = CODE_FENCE_RE.sub(
+                "", read_vault_text(vault, index_path, "index_note", cfg.get("deny_zones"))
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+        idx_links = set()
+        for raw_target in wikilink_targets(idx_text):
+            base = normalize_link_target(raw_target)
+            if base:
+                idx_links.add(base)
+        scopes = [norm_cfg_path(s) for s in (cfg.get("index_scopes") or []) if norm_cfg_path(s)]
+        meta_top = index_rel.split("/")[0] if "/" in index_rel else ""
+        for p in targets:
+            rel = rel_posix(p, vault)
+            if rel in special_rels:
+                continue
+            if scopes:
+                if not any(rel == s or rel.startswith(s + "/") for s in scopes):
+                    continue
+            else:
+                # 기본 스코프: 메타 폴더(index가 사는 최상위 폴더)와 journal 타입 제외 전체
+                if meta_top and (rel == meta_top or rel.startswith(meta_top + "/")):
+                    continue
+                if note_types.get(rel) == "journal":
+                    continue
+            if p.stem not in idx_links:
+                unindexed.append(rel)
+    else:
+        index_skip_note = "- 검사 생략 (config의 index_note 미설정 또는 파일 없음)"
+
+    # --- SSOT 사실 모순: 같은 패턴에서 서로 다른 값이 2개 이상 = 결정론 누수 ------
+    fact_conflicts: list[tuple[str, dict[str, list[str]]]] = [
+        (label, vals) for label, vals in fact_hits.items() if len(vals) >= 2
+    ]
+
+    # --- 로그 연산 태그 --------------------------------------------------------
+    log_tag_missing: list[str] = []
+    log_tag_unknown: list[str] = []
+    log_skip_note: str | None = None
+    log_path = (vault / log_rel) if log_rel else None
+    if log_path is not None and log_path.is_file() and valid_ops:
+        try:
+            log_tag_missing, log_tag_unknown = scan_log_tag_gaps(
+                vault, log_path, valid_ops, epoch, cfg.get("deny_zones")
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+    else:
+        log_skip_note = "- 검사 생략 (config의 log_note/log_tags 미설정 또는 파일 없음)"
+
+    # --- rules 무결성 (v0.7) — .claude/rules/ 존재 시만 ------------------------
+    rules_oversized: list[tuple[str, int]] = []
+    rules_dup: list[str] = []
+    rules_skip_note: str | None = None
+    rules_path = vault / rules_dir_rel if rules_dir_rel else None
+    if rules_path is not None and rules_path.is_dir() and any(rules_path.glob("*.md")):
+        try:
+            rules_oversized, rules_dup = scan_rules_integrity(
+                vault, rules_path, vault / "CLAUDE.md", rules_max_lines, cfg.get("deny_zones"),
+                link_skipped,
+            )
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+    else:
+        rules_skip_note = f"- 검사 생략 ({rules_dir_rel}/ 없음 — v0.6+ 3층 계약 미설치 볼트)"
+
+    # --- 섹션 11: 세션 주입 예산 (2026-08-06 신설, 관리성) ------------------------
+    # SessionStart 훅은 노트를 예산 안의 앞부분만 주입하고 나머지는 자른다. 이 섹션은 그
+    # 초과분, 곧 다음 세션이 보지 못하는 내용을 감시한다. 글자 수가 아니라 토큰 추정
+    # 기준인 이유는 위 DEFAULT_CONFIG 주석 참조(한국어 토큰 비례).
+    injection_over: list[tuple[str, int, int]] = []
+    for cfg_key, budget_key in (("hot_note", "hot_max_tokens"),
+                                ("handoff_note", "handoff_max_tokens")):
+        rel = norm_cfg_path(cfg.get(cfg_key))
+        if not rel:
+            continue
+        try:
+            budget = int(cfg.get(budget_key) or 0)
+        except (TypeError, ValueError):
+            budget = 0
+            warnings.append(f"{budget_key} 값이 정수가 아님 — 검사 생략.")
+        if budget <= 0:
+            continue
+        note_path = vault / rel
+        if not note_path.is_file():
+            continue
+        try:
+            note_text = read_vault_text(vault, note_path, cfg_key, cfg.get("deny_zones"))
+        except HealthcheckError as e:
+            print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+            return 1
+        n_tokens = estimate_tokens(note_text)
+        if n_tokens > budget:
+            injection_over.append((rel, n_tokens, budget))
+
+    # --- 섹션 12: 세션 종료 누락 의심 (anchor drift, 2026-08-14 신설, 관리성) -----
+    try:
+        drift_threshold = int(cfg.get("anchor_drift_threshold") or 0)
+    except (TypeError, ValueError):
+        drift_threshold = 0
+        warnings.append("anchor_drift_threshold 값이 정수가 아님 — 검사 생략.")
+    try:
+        drift_summary, drift_lines = scan_anchor_drift(
+            vault, norm_cfg_path(cfg.get("handoff_note")) or "", drift_threshold, cfg.get("deny_zones")
+        )
+    except HealthcheckError as e:
+        print(f"[vault-healthcheck] 오류: {e}", file=sys.stderr)
+        return 1
+
+    # 링크·정션으로 건너뛴 경로 — deny zone 안은 원래 검사 대상이 아니므로 보고하지 않는다.
+    link_skipped = sorted({
+        rel for rel in link_skipped
+        if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names)
+    })
+    linked_trees = sorted(rel for rel in linked_trees
+                          if not is_denied(rel.rstrip("/"), deny_prefixes, deny_names))
+
+    extension_input_complete = (
+        not any(_warning_inventory_allowed(rel, cfg) for rel, _ in unreadable)
+        and not any(_warning_inventory_allowed(rel, cfg) for rel in link_skipped))
+    extension_diagnostics = extension_warnings(approved_note_texts, cfg,
+        input_complete=extension_input_complete,
+        consumer_paths=consumer_paths)
+    # 선택형 동기화 경고: 경고 전용이라 승격·치명 집계에 들어가지 않는다. 확장 모듈이
+    # 없으면 위 extension_warnings가 이미 lint-extension-unavailable을 보고한다.
+    sync_name_count = 0
+    checkpoint_change_count = 0
+    if _EXTENSIONS_AVAILABLE:
+        if file_entries is not None:
+            sync_findings, sync_name_count = sync_name_warnings(vault, file_entries, cfg)
+            extension_diagnostics.extend(sync_findings)
+        if cfg.get("checkpoint_drift_check") is True:
+            drift_findings = checkpoint_drift_warnings(vault, cfg)
+            checkpoint_change_count = len(drift_findings)
+            extension_diagnostics.extend(drift_findings)
+    promoted_count = sum(x["severity"] == "fatal" for x in extension_diagnostics)
+
+    # --- 집계 ------------------------------------------------------------------
+    total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
+                    + len(unquoted_links) + len(oversized_fm)
+                    + len(dead_links) + len(orphans) + len(semi_orphans)
+                    + len(unindexed) + len(stale) + len(fact_conflicts)
+                    + len(log_tag_missing) + len(log_tag_unknown)
+                    + len(rules_oversized) + len(rules_dup)
+                    + len(injection_over)
+                    + len(unreadable)
+                    + len(link_skipped) + len(linked_trees)
+                    + len(extension_diagnostics)
+                    + (1 if drift_summary else 0))
+    # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
+    #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
+    #   Enum 위반 → type/status 오염
+    #   로그 태그 누락·미승인·형식오류 → grep 데이터 계약 위반
+    # 관리성(과대 프런트매터·데드링크·고아·미등록·노화·SSOT 대기)은 리포트만 남기고 0 —
+    # 매번 exit 1 이면 신호가 무의미해진다.
+    critical = (len(missing_fm) + len(missing_keys) + len(enum_violations)
+                + len(unquoted_links) + len(log_tag_missing) + len(log_tag_unknown)
+                + promoted_count)
+
+    # --- 리포트 작성 -------------------------------------------------------------
+    today = date.today().isoformat()
+    ssot_ref = f"[[{Path(ssot_rel).stem}]]" if ssot_rel else "SSOT 노트(config의 ssot_note)"
+    lines = [
+        "---",
+        'title: "health-report — 볼트 무결성 리포트"',
+        "type: reference",
+        "status: active",
+        "ai_priority: low",
+        "tags: [healthcheck, report]",
+        f"created: {today}",
+        f"updated: {today}",
+        "---",
+        "",
+        f"# {vault_name} 무결성 리포트 ({today})",
+        "",
+        f"- 검사 노트 수: {len(targets)} / 총 이슈: **{total_issues}** "
+        f"(치명 {critical} / 관리성 {total_issues - critical})",
+        "",
+    ]
+    if warnings:
+        lines += [
+            f"## 0. 설정 경고 ({len(warnings)})",
+            *[f"- {w}" for w in warnings],
+            "",
+        ]
+    lines += [
+        f"## 1. 프런트매터 누락 — 치명 ({len(missing_fm)})",
+        *([f"- {x}" for x in missing_fm] or ["- 없음"]),
+        "",
+        f"## 2. 필수 키 누락 — 치명 ({len(missing_keys)})",
+        *([f"- {f} → 누락: {', '.join(ks)}" for f, ks in missing_keys] or ["- 없음"]),
+        "",
+        f"## 3. Enum 위반 — 치명 ({len(enum_violations)})",
+        *([f"- {f} → {k}: `{v}`" for f, k, v in enum_violations] or ["- 없음"]),
+        "",
+        f"## 4. 프런트매터 내 따옴표 없는 위키링크 — 치명·YAML 붕괴 위험 ({len(unquoted_links)})",
+        *([f"- {x}" for x in unquoted_links] or ["- 없음"]),
+        "",
+        f"## 4b. 프런트매터 과대 — {fm_max_lines}줄 초과 — 관리성 ({len(oversized_fm)})",
+        *([f"- {f} ({n}줄)" for f, n in oversized_fm] or ["- 없음"]),
+        "",
+        f"## 5. 데드 링크 — 관리성 ({len(dead_links)})",
+        *([f"- {f} → [[{t}]]" for f, t in dead_links] or ["- 없음"]),
+        "",
+        f"## 6. 고아 노드 — 관리성 ({len(orphans)})",
+        *([f"- {rel_posix(p, vault)}" for p in orphans] or ["- 없음"]),
+        "",
+        f"## 6b. 준고아 — 어디서도 참조되지 않음 — 관리성 ({len(semi_orphans)})",
+        *([f"- {rel_posix(p, vault)}" for p in semi_orphans] or ["- 없음"]),
+        "",
+        f"## 6c. 인덱스 미등록 — {index_rel or 'index'} 에 위키링크 없음 — 관리성 ({len(unindexed)})",
+        *(([index_skip_note] if index_skip_note else None)
+          or [f"- {x}" for x in unindexed] or ["- 없음"]),
+        "",
+        f"## 7. 노화 문서 — updated {stale_days}일 초과 — 관리성 ({len(stale)})",
+        *(([f"- {f} (updated: {u})" for f, u in stale] or ["- 없음"]) if stale_days > 0
+          else ["- 검사 생략 (config에 stale_days 미설정 — >0 으로 켤 수 있음)"]),
+        "",
+        f"## 8. SSOT 사실 모순 — 같은 식별자가 여러 값으로 표기 — 관리성 ({len(fact_conflicts)})",
+    ]
+    if fact_patterns:
+        lines += [
+            f"  (기준: {ssot_ref} — 결정론 누수. 충돌 값은 정합 후 SSOT 한 곳만 두고 "
+            f"나머지는 위키링크로 참조)",
+            *([line
+               for label, vals in fact_conflicts
+               for line in (
+                   [f"- **{label}**: {len(vals)}개 값 충돌"]
+                   + [f"    - `{val}` → {', '.join(notes)}" for val, notes in sorted(vals.items())]
+               )] or ["- 없음"]),
+        ]
+    else:
+        lines += ["- 검사 생략 (config에 ssot_facts 미설정)"]
+    lines += [
+        "",
+        f"## 9. 로그 연산 태그 — {epoch_raw or '전 기간'} 이후 항목 — 치명 "
+        f"(누락·형식오류 {len(log_tag_missing)} / 미승인태그 {len(log_tag_unknown)})",
+    ]
+    if log_skip_note:
+        lines += [log_skip_note]
+    else:
+        lines += [
+            f"  (규약: 요약 앞에 `[{'|'.join(sorted(valid_ops))}]` — grep 가능 데이터 유지. "
+            f"도입일 이전 로그는 소급 대상 아님)",
+            *([f"- 태그 없음: {x}" for x in log_tag_missing]
+              + [f"- 미승인 태그: {x}" for x in log_tag_unknown] or ["- 없음"]),
+        ]
+    lines += [
+        "",
+        f"## 10. 행동 계약 rules 무결성 — {rules_dir_rel}/ — 관리성 "
+        f"(크기초과 {len(rules_oversized)} / CLAUDE.md 중복 {len(rules_dup)})",
+    ]
+    if rules_skip_note:
+        lines += [rules_skip_note]
+    else:
+        lines += [
+            f"  (rules는 상시 로드되는 엔진 계약 — 얇게 유지({rules_max_lines}줄 이하). "
+            f"긴 절차는 스킬/명령으로. CLAUDE.md와 같은 규칙 제목이 겹치면 충돌 시 모델 임의선택 위험)",
+            f"### 10a. 크기 초과 ({len(rules_oversized)})",
+            *([f"- {f} ({n}줄 — 절차성 장문 유입 의심)" for f, n in rules_oversized] or ["- 없음"]),
+            f"### 10b. CLAUDE.md 제목 중복 ({len(rules_dup)})",
+            *([f"- {x}" for x in rules_dup] or ["- 없음"]),
+        ]
+    lines += [
+        "",
+        f"## 11. 세션 주입 토큰 예산 초과 — 관리성 ({len(injection_over)})",
+        "  (SessionStart 훅은 handoff·hot을 이 예산 안의 앞부분만 주입하고 나머지는 자른다 — "
+        "예산 안의 분량은 세션마다 드는 비용이고, 초과분은 다음 세션이 보지 못하는 내용이다. "
+        "엔진 출력 상한(훅 출력 전체 9,500자, Claude Code 한계 10,000자 아래)이 별도로 더 자를 수 있다. "
+        "상세는 원문 노트에 두고 이 둘은 얇게 유지하라. "
+        "⚠️단어·글자가 아니라 **토큰 추정** 기준 — 한글 1자 ≈ 1.375토큰이라 글자 예산은 언어에 따라 크게 어긋난다)",
+        *([f"- {f} (약 {n:,}토큰 / 예산 {b:,} — {n - b:,} 초과)"
+           for f, n, b in injection_over] or ["- 없음"]),
+        "",
+        f"## 12. 세션 종료 누락 의심 — anchor drift — 관리성 ({1 if drift_summary else 0})",
+        "  (handoff의 기준 커밋(anchor)은 session-end만 갱신한다. HEAD가 anchor보다 "
+        "임계 이상 앞서면 세션이 닫혔는데 handoff·장기기억이 낡았다는 신호. "
+        "활성 세션 중간엔 커밋 누적이 정상이라 exit 코드에는 반영하지 않고 콘솔 요약에만 띄운다)",
+        *drift_lines,
+        "",
+        f"## 14. 읽기 실패 — 파일 단위 fail-soft — 관리성 ({len(unreadable)})",
+        "  (읽지 못한 노트는 이번 검사에서 건너뛰었다 — 프런트매터·링크·고아 판정 대상 아님. "
+        "클라우드 하이드레이션 실패·백신 잠금·동시 저장 레이스가 흔한 원인. "
+        "13은 결번 — 포크 볼트의 루트 allowlist 검사 번호와 충돌 회피)",
+        *([f"- {rel} — {err}" for rel, err in unreadable] or ["- 없음"]),
+        "",
+        f"## 14b. 링크·정션 제외 — 따라가지 않고 건너뜀(경로 확인 실패 포함) — 관리성 "
+        f"({len(link_skipped) + len(linked_trees)})",
+        "  (심볼릭 링크·정션(재분석 지점)은 볼트 밖을 가리킬 수 있어 따라가지 않는다. "
+        "끝이 /인 항목은 폴더 전체다 — 그 아래 노트는 이번 검사에서 프런트매터·링크·고아 "
+        "판정을 받지 않았다. 검사하려면 볼트 안 실제 폴더로 옮기고, 의도한 제외라면 "
+        "config의 exclude_dirs에 이름을 적어라)",
+        *([*[f"- {rel}" for rel in link_skipped], *[f"- {rel} (연결 작업 트리 사본)" for rel in linked_trees]]
+          or ["- 없음"]),
+        "",
+    ]
+    if extension_diagnostics:
+        lines += [
+            f"## 15. Markdown warning extensions ({len(extension_diagnostics)})",
+            "  (New checks warn by default; fatal promotion requires current checker/corpus hashes and zero-FP replay.)",
+            *[f"- {format_extension_warning(x)}" for x in extension_diagnostics],
+            "",
+        ]
+
+    try:
+        if config_derived_output:
+            _ensure_config_health_report_contained(vault, out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if config_derived_output:
+            _ensure_config_health_report_contained(vault, out)
+        out.write_text("\n".join(lines), encoding="utf-8")
+    except (OSError, HealthcheckError) as e:
+        print(f"[vault-healthcheck] 오류: 리포트 쓰기 실패({out}) — {e}", file=sys.stderr)
+        return 1
+
+    drift_note = f" ⚠️{drift_summary}" if drift_summary else ""
+    read_note = f" ⚠️읽기 실패 {len(unreadable)}건(§14)" if unreadable else ""
+    link_total = len(link_skipped) + len(linked_trees)
+    link_note = f" ⚠️링크·정션 제외 {link_total}건(§14b)" if link_total else ""
+    sync_note = (f" ⚠️동기화 충돌·임시 파일 이름 {sync_name_count}건(§15)"
+                 if sync_name_count else "")
+    checkpoint_note = (f" ⚠️checkpoint 이후 바뀐 엔진 노트 {checkpoint_change_count}건(§15)"
+                       if checkpoint_change_count else "")
+    unknown_key_note = (f" ⚠️알 수 없는 설정 키 {len(unknown_keys)}건(§0)"
+                        if unknown_keys else "")
+    print(f"[vault-healthcheck] '{vault_name}' 노트 {len(targets)}개 검사, "
+          f"이슈 {total_issues}건(치명 {critical}건) → {out}{drift_note}{read_note}{link_note}"
+          f"{sync_note}{checkpoint_note}{unknown_key_note}")
+    # Counts only. Evidence reads skipped by the byte budget are not read
+    # failures; linked worktree copies are skipped on purpose.
+    evidence_skipped = sum(reason in EVIDENCE_BUDGET_REASONS for _rel, reason in unreadable)
+    # validate_config accepted the policy, so every "fatal" level is promoted.
+    policy_levels = (cfg.get("warning_policy") or {}).get("levels") or {}
+    summary.update({
+        "status": "checked",
+        "notes_checked": len(targets),
+        "issues": total_issues,
+        "critical": critical,
+        "evidence_skipped": evidence_skipped,
+        "unreadable": len(unreadable) - evidence_skipped,
+        "skipped_links": len(link_skipped),
+        "linked_worktree_copies": len(linked_trees),
+        "complete": len(unreadable) == evidence_skipped and not link_skipped,
+        "extension_input_complete": extension_input_complete,
+        "warning_promotion_active": any(level == "fatal" for level in policy_levels.values()),
+    })
+    return 1 if critical > 0 else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

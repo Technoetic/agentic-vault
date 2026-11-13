@@ -1,0 +1,472 @@
+#!/usr/bin/env python3
+"""Warning-only, bounded Markdown checks over caller-approved note originals.
+
+Public interface: analyze_notes(path_to_text, config) -> list of warning mappings.
+Every mapping has issue_id, code, severity, path, line (1-based), message, details.
+make_warning is also public for provenance/ledger/egress extensions. No function
+in this module reads files, resolves aliases, invents destinations or grants trust.
+Callers must apply source policy before reading; this module filters supplied
+denied/excluded paths again. Diagnostic strings and candidate lists are bounded.
+"""
+from __future__ import annotations
+
+from datetime import date
+import hashlib
+import json
+import posixpath
+import re
+import unicodedata
+
+WARNING_CODES = frozenset({'missing-anchor', 'ambiguous-link', 'missing-link-path',
+    'invalid-date', 'lint-incomplete', 'provenance-body-mismatch', 'provenance-invalid',
+    'provenance-unresolved', 'provenance-incomplete', 'egress-secret', 'egress-korean-id',
+    'egress-incomplete', 'ssot-legacy-schema', 'ssot-empty-fact', 'ssot-confirmed-source-missing',
+    'ssot-invalid-date', 'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-temporal-conflict',
+    'ssot-open-ended-conflict', 'ssot-duplicate-column', 'ssot-invalid-row'})
+PROMOTABLE_CODES = WARNING_CODES - {'lint-incomplete', 'provenance-unresolved',
+    'provenance-incomplete', 'egress-incomplete', 'ssot-legacy-schema',
+    'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-open-ended-conflict'}
+MAX_MESSAGE = 512
+MAX_DETAIL_STRING = 256
+MAX_DETAIL_ITEMS = 16
+MAX_NOTE_CHARS = 1_000_000
+MAX_TOTAL_CHARS = 8_000_000
+MAX_NOTES = 10_000
+MAX_WARNINGS = 200
+
+
+def _bounded(value, depth=0):
+    if isinstance(value, str):
+        return value[:MAX_DETAIL_STRING]
+    if depth >= 3:
+        return str(value)[:MAX_DETAIL_STRING]
+    if isinstance(value, dict):
+        return {str(k)[:80]: _bounded(v, depth + 1)
+                for k, v in list(value.items())[:MAX_DETAIL_ITEMS]}
+    if isinstance(value, (list, tuple)):
+        return [_bounded(v, depth + 1) for v in value[:MAX_DETAIL_ITEMS]]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:MAX_DETAIL_STRING]
+
+
+def make_warning(code: str, path: str, line: int, message: str, *, details=None) -> dict:
+    """Build a reusable bounded diagnostic; identity binds the full input facts."""
+    facts = {'code': code, 'path': path, 'line': line, 'details': details or {}}
+    digest = hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True,
+                                      separators=(',', ':')).encode('utf-8')).hexdigest()
+    return {'issue_id': 'lint-' + digest[:20], 'code': code, 'severity': 'warning',
+            'path': path[:MAX_DETAIL_STRING], 'line': line,
+            'message': message[:MAX_MESSAGE], 'details': _bounded(details or {})}
+
+
+def _limit(config, key, default):
+    value = config.get(key, default)
+    return min(value, default) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
+# Verbatim copy of vault_paths.fold_path_part: this module must not import
+# vault_paths (a vault copy set without it would stop the health check at
+# import); tests/test_rule_sources.py fails if the copies drift.
+def fold_path_part(part: str) -> str:
+    """Return one path segment in the form deny and exclude zones compare.
+
+    Case and Unicode normalization are ignored: two segments fold to the same
+    text exactly when they are canonical caseless matches (NFD, casefold, NFD),
+    and the result is returned in NFC. ASCII text needs casefold only.
+    """
+    if part.isascii():
+        return part.casefold()
+    return unicodedata.normalize(
+        "NFC", unicodedata.normalize("NFD", unicodedata.normalize("NFD", part).casefold())
+    )
+
+
+def _denied(path, config):
+    folded = "/".join(fold_path_part(p) for p in path.split("/"))
+    runtime = '00-meta/.agentic-vault/runtime'
+    if folded == runtime or folded.startswith(runtime + '/'):
+        return True
+    parts = folded.split('/')
+    for zone in config.get('deny_zones', []) or []:
+        zone = "/".join(fold_path_part(p) for p in str(zone).replace("\\", "/").strip("/").split("/"))
+        if zone and ((('/' in zone) and (folded == zone or folded.startswith(zone + '/')))
+                     or ('/' not in zone and zone in parts)):
+            return True
+    return any(fold_path_part(str(x)) in parts for x in config.get('exclude_dirs', []) or [])
+
+
+def _valid_path(path):
+    return isinstance(path, str) and path and not path.startswith(('/', '\\')) and ':' not in path and '\\' not in path and all(
+        p not in ('', '.', '..') for p in path.split('/'))
+
+
+def _clean_lines(text):
+    """Remove fenced/comments while retaining source line numbers and heading text."""
+    result = []
+    fence = None
+    comment = False
+    for raw in text.splitlines():
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', raw)
+        if fence:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= fence[1] and not marker[2].strip():
+                fence = None
+            result.append('')
+            continue
+        if marker and not (marker[1][0] == '`' and '`' in marker[2]):
+            fence = (marker[1][0], len(marker[1]))
+            result.append('')
+            continue
+        visible = ''
+        offset = 0
+        while offset < len(raw):
+            token = '-->' if comment else '<!--'
+            index = raw.find(token, offset)
+            if index < 0:
+                if not comment:
+                    visible += raw[offset:]
+                break
+            if not comment:
+                visible += raw[offset:index]
+            comment = not comment
+            offset = index + len(token)
+        result.append(visible)
+    return result
+
+
+def _heading_key(text):
+    text = re.sub(r'\\([\\|#*_`])', r'\1', text)
+    text = _without_link_targets(text)
+    text = text.replace('`', '')
+    text = re.sub(r'(\*\*|__|\*|_)(.*?)\1', r'\2', text)
+    return ' '.join(unicodedata.normalize('NFC', text).split()).casefold()
+
+
+def _frontmatter_end(lines):
+    if not lines or lines[0].lstrip('\ufeff').strip() != '---':
+        return 0
+    for i in range(1, len(lines)):
+        if lines[i].strip() in ('---', '...'):
+            return i + 1
+    return 0
+
+
+# Linear forms of four earlier regexes. Each lazy group or scanned \s+ run
+# retried its suffix at every position, which was quadratic on a long
+# whitespace run inside one line ('# a' + many spaces + 'b'). For str patterns
+# \s is str.isspace, the test argument-free strip()/rstrip() use. Lines come
+# from _clean_lines (str.splitlines), so no line feed reaches the two forms
+# that depended on '.' and '$'; tests/test_linear_line_parsers.py keeps the
+# old patterns as oracles.
+_HEADING_OPEN_RE = re.compile(r' {0,3}#{1,6}(?=\s)')
+_DATE_FIELD_RE = re.compile(r'(created|updated):')
+_COMMENT_MARK_RE = re.compile(r'\s#')
+
+
+def _heading_text(line):
+    """Former re.match(r'^ {0,3}#{1,6}\\s+(.+?)\\s*$', line)[1], or None."""
+    match = _HEADING_OPEN_RE.match(line)
+    if not match:
+        return None
+    rest = line[match.end():]
+    text = rest.strip()
+    if text:
+        return text
+    return rest[-1] if len(rest) >= 2 else None
+
+
+def _date_field(line):
+    """Former re.match(r'^(created|updated):\\s*(.*?)\\s*$', line) groups, or None."""
+    match = _DATE_FIELD_RE.match(line)
+    return (match[1], line[match.end():].strip()) if match else None
+
+
+def _without_closing_run(text):
+    """Former re.sub(r'\\s+#+\\s*$', '', text), line feeds included."""
+    trimmed = text.rstrip()
+    body = trimmed.rstrip('#')
+    if body == trimmed or body.rstrip() == body:
+        return text
+    return body.rstrip()
+
+
+def _before_comment(value):
+    """Former re.split(r'\\s+#', value, maxsplit=1)[0], line feeds included."""
+    # The first '#' after whitespace; the split dropped that whole whitespace run.
+    mark = _COMMENT_MARK_RE.search(value)
+    return value if mark is None else value[:mark.end() - 1].rstrip()
+
+
+# Linear forms of three more regexes. Each returns what the old one did, line
+# feeds included. The inline-code removal tried every opening length against
+# every later position (cubic on a line of backticks); the two link scans ran
+# their character class to the end of the line again from each '[' (quadratic
+# on a run of '['). The old patterns stay in tests/test_linear_line_parsers.py
+# as oracles.
+_BACKTICK_RUN_RE = re.compile(r'`+')
+_LINK_END_RE = re.compile(r'[]\n]')
+
+
+def _without_code_spans(line):
+    """Former re.sub(r'(`+).*?\\1', '', line), line feeds included."""
+    # From each backtick the regex tried the opening lengths from the rest of
+    # its run down to one, each with the nearest later run of exactly that many
+    # backticks ('.*?' stops at a line feed). An opening longer than half the
+    # rest can close only at the start of a later run on the same line that is
+    # at least that long; failing that, the rest closes on itself in two
+    # halves, and an odd last backtick starts the next try.
+    runs = [match.span() for match in _BACKTICK_RUN_RE.finditer(line)]
+    later, longest = [0] * len(runs), 0  # the longest later run before a line feed
+    for j in range(len(runs) - 1, -1, -1):
+        if j + 1 < len(runs) and line.find('\n', runs[j][1], runs[j + 1][0]) >= 0:
+            longest = 0
+        later[j], longest = longest, max(longest, runs[j][1] - runs[j][0])
+    kept, cursor, j = [], 0, 0
+    while j < len(runs):
+        start = max(cursor, runs[j][0])
+        size = runs[j][1] - start  # backticks left in this run
+        close = min(size, later[j])
+        if 2 * close > size:
+            j += 1
+            while runs[j][1] - runs[j][0] < close:
+                j += 1
+            end = runs[j][0] + close
+        elif size >= 2:
+            end = start + size // 2 * 2
+        else:
+            j += 1  # one backtick and no later run on its line: no match
+            continue
+        kept.append(line[cursor:start])
+        cursor = end
+        if cursor == runs[j][1]:
+            j += 1
+    kept.append(line[cursor:])
+    return ''.join(kept)
+
+
+def _wiki_link_texts(line):
+    """Former link texts of re.finditer(r'(?<!!)\\[\\[([^]\\n]+)\\]\\]|!\\[\\[([^]\\n]+)\\]\\]', line).
+
+    Each match captured, in group 1 or for an embed in group 2, the text from
+    one '[[' to the first ']' or line feed after it, and needed ']]' there. A
+    match ends with ']]', so the '!' of an embed is never inside the one before.
+    """
+    texts, search = [], 0
+    while True:
+        opening = line.find('[[', search)
+        if opening < 0:
+            return texts
+        stop = _LINK_END_RE.search(line, opening + 2)
+        end = stop.start() if stop else len(line)
+        if end > opening + 2 and line.startswith(']]', end):
+            texts.append(line[opening + 2:end])
+            search = end + 2
+        else:
+            search = end + 1  # every '[[' before this stop stops there too and fails
+
+
+def _without_link_targets(text):
+    """Former re.sub(r'\\[([^]]+)\\]\\([^)]*\\)', r'\\1', text)."""
+    kept, cursor, search = [], 0, 0
+    while True:
+        opening = text.find('[', search)
+        closing = text.find(']', opening + 1) if opening >= 0 else -1
+        if closing < 0:
+            break  # no '[' with a later ']' is left
+        if closing == opening + 1 or not text.startswith('(', closing + 1):
+            search = closing + 1  # every '[' before this ']' stops there too and fails
+            continue
+        end = text.find(')', closing + 2)
+        if end < 0:
+            break  # no ')' is left for this or any later '['
+        kept.append(text[cursor:opening])
+        kept.append(text[opening + 1:closing])
+        cursor = search = end + 1
+    kept.append(text[cursor:])
+    return ''.join(kept)
+
+
+def _anchors(lines, start):
+    headings, blocks = set(), set()
+    for i in range(start, len(lines)):
+        line = lines[i]
+        text = _heading_text(line)
+        if text is not None:
+            headings.add(_heading_key(_without_closing_run(text)))
+        elif i > start and re.match(r'^ {0,3}(?:=+|-+)\s*$', line) and lines[i - 1].strip():
+            headings.add(_heading_key(lines[i - 1].strip()))
+        block = re.search(r'(?:^|\s)\^([^\s^]+)\s*$', line)
+        if block:
+            blocks.add(unicodedata.normalize('NFC', block[1]))
+    return headings, blocks
+
+
+def _link_parts(raw, table_context=False):
+    # Split only unescaped display pipes, including table-escaped wiki links.
+    # In Markdown table rows the display separator itself must be escaped.
+    separator = r'\\?\|' if table_context else r'(?<!\\)\|'
+    raw = re.split(separator, raw, maxsplit=1)[0].replace('\\|', '|').strip()
+    target, separator, anchor = raw.partition('#')
+    return target.strip(), anchor.strip() if separator else None
+
+
+def _destination_path(target, source):
+    """Use one root/source-relative normalization for policy and identity lookup."""
+    if target.startswith(('./', '../')):
+        return posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+    return posixpath.normpath(target)
+
+
+def _resolve(target, source, notes, stems, qualified):
+    if not target:
+        return [source]
+    name = target[:-3] if target.lower().endswith('.md') else target
+    if '/' not in name and not name.startswith('.'):
+        return stems.get(name, [])
+    if name.startswith('/') or ':' in name or '\\' in name:
+        return []
+    path = _destination_path(target, source)
+    if not _valid_path(path):
+        return []
+    if path in notes:
+        return [path]  # Preserve exact existing extension identity when explicit.
+    base = path[:-3] if path.lower().endswith('.md') else path
+    return qualified.get(base, [])
+
+
+def _date_warnings(path, lines, end, config):
+    exemptions = config.get('frontmatter_exempt_paths', config.get('fm_exempt_zones', [])) or []
+    if any(path == zone or path.startswith(str(zone).rstrip('/') + '/') for zone in exemptions):
+        return []
+    roots = config.get('frontmatter_roots')
+    if roots is not None and not any(path == zone or path.startswith(zone.rstrip('/') + '/') for zone in roots):
+        return []
+    warnings = []
+    for i in range(1, end - 1):
+        parsed = _date_field(lines[i])
+        if not parsed:
+            continue
+        field, value = parsed
+        scalar = _before_comment(value).strip()
+        if len(scalar) >= 2 and scalar[0] in ('"', "'") and scalar[-1] == scalar[0]:
+            scalar = scalar[1:-1]
+        valid = bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', scalar))
+        if valid:
+            try:
+                date.fromisoformat(scalar)
+            except ValueError:
+                valid = False
+        if not valid:
+            warnings.append(make_warning('invalid-date', path, i + 1,
+                            f'{field} must be a nonempty calendar date (YYYY-MM-DD)',
+                            details={'field': field, 'value': scalar}))
+    return warnings
+
+
+def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[str] | None = None) -> list[dict]:
+    """Analyze bounded approved originals; all new findings remain warnings.
+
+    Bare duplicate stems abstain with candidates. Qualified paths match exactly;
+    ./ and ../ are relative to the referring note, never a basename fallback.
+    Missing bare names remain the responsibility of the legacy dead-link check.
+    Denied target paths are not resolved or described. Limits emit lint-incomplete
+    and incomplete analysis can never serve as promotion evidence.
+    """
+    if not isinstance(notes, dict) or not isinstance(config, dict):
+        raise ValueError('notes and config must be mappings')
+    approved = {}
+    incomplete = []
+    total = 0
+    for path in sorted(notes):
+        if not _valid_path(path) or _denied(path, config):
+            continue
+        text = notes[path]
+        if not isinstance(text, str):
+            incomplete.append('non-text note')
+            continue
+        if len(approved) >= MAX_NOTES or len(text) > MAX_NOTE_CHARS or total + len(text) > MAX_TOTAL_CHARS:
+            incomplete.append('note input limit')
+            continue
+        approved[path] = text
+        total += len(text)
+    stems, qualified = {}, {}
+    cleaned, anchors, fm_ends = {}, {}, {}
+    for path, text in approved.items():
+        stem = path.rsplit('/', 1)[-1]
+        stem = stem[:-3] if stem.lower().endswith('.md') else stem
+        stems.setdefault(stem, []).append(path)
+        qualified.setdefault(path[:-3] if path.lower().endswith('.md') else path, []).append(path)
+        lines = _clean_lines(text)
+        cleaned[path] = lines
+        fm_ends[path] = _frontmatter_end(lines)
+        anchors[path] = _anchors(lines, fm_ends[path])
+    results = []
+    cap = _limit(config, 'lint_max_warnings', MAX_WARNINGS)
+    for path, lines in cleaned.items():
+        if consumer_paths is not None and path not in consumer_paths:
+            continue
+        results.extend(_date_warnings(path, lines, fm_ends[path], config))
+        for line_number, line in enumerate(lines, 1):
+            line = _without_code_spans(line)
+            for raw in _wiki_link_texts(line):
+                target, anchor = _link_parts(raw, line.lstrip().startswith('|'))
+                if re.search(r'\.[^./]+$', target) and not target.lower().endswith('.md'):
+                    continue
+                policy_target = _destination_path(target, path)
+                if _denied(policy_target, config):
+                    continue
+                destinations = _resolve(target, path, approved, stems, qualified)
+                if len(destinations) > 1:
+                    results.append(make_warning('ambiguous-link', path, line_number,
+                                   'Unqualified wiki link has multiple allowed destinations; no destination selected',
+                                   details={'target': target, 'candidates': destinations,
+                                            'candidate_count': len(destinations)}))
+                elif not destinations:
+                    if '/' in target and not incomplete:
+                        results.append(make_warning('missing-link-path', path, line_number,
+                                       'Qualified wiki link does not name an allowed relative note path',
+                                       details={'target': target}))
+                elif anchor is not None:
+                    destination = destinations[0]
+                    headings, blocks = anchors[destination]
+                    valid = (unicodedata.normalize('NFC', anchor[1:]) in blocks) if anchor.startswith('^') else (_heading_key(anchor) in headings)
+                    if not valid:
+                        results.append(make_warning('missing-anchor', path, line_number,
+                                       'Wiki link heading or block anchor is absent from the resolved note',
+                                       details={'target': destination, 'anchor': anchor,
+                                                'anchor_kind': 'block' if anchor.startswith('^') else 'heading'}))
+            if len(results) > cap:
+                incomplete.append('warning output limit')
+                break
+        if len(results) > cap:
+            break
+    consumers = {path: text for path, text in approved.items()
+                 if consumer_paths is None or path in consumer_paths}
+    # Lazy imports avoid the healthcheck/state/evidence dependency cycle. All
+    # inputs are already approved originals; no extension opens a sidecar here.
+    try:
+        from vault_provenance import analyze_notes as provenance_warnings
+        from vault_egress import analyze_notes as egress_warnings
+        from vault_ssot import check_ledger, SSOTError
+        extra = provenance_warnings(approved, config) + egress_warnings(consumers, config)
+        for path, text in consumers.items():
+            try:
+                extra.extend(check_ledger(text, path=path))
+            except SSOTError:
+                incomplete.append('temporal ledger input incomplete')
+        for finding in extra:
+            if finding['code'].endswith('-incomplete'):
+                incomplete.append('extension input incomplete')
+            if not finding['path'] or consumer_paths is None or finding['path'] in consumer_paths:
+                results.append(finding)
+    except ImportError:
+        incomplete.append('provenance/egress/temporal extensions unavailable')
+    results.sort(key=lambda x: (x['path'], x['line'], x['code'], x['issue_id']))
+    if len(results) > cap:
+        incomplete.append('warning output limit')
+    results = results[:cap]
+    if incomplete:
+        results.append(make_warning('lint-incomplete', '', 0,
+                       'Warning analysis is incomplete; omitted input or diagnostics cannot support promotion',
+                       details={'reasons': sorted(set(incomplete))}))
+    return results

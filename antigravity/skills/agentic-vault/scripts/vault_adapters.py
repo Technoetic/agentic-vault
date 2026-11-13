@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+"""Report optional tool adapters for a vault without changing it.
+
+Three adapters exist: Aside (an AI browser with a CLI), the opt-in deny-zone
+guard (a Claude Code PreToolUse hook template, assets/adapters/deny-guard/) and
+opt-in lesson cues (an advisory PreToolUse hook template,
+assets/adapters/lesson-cues/). The Aside adapter also ships an opt-in
+procedure command (assets/adapters/aside/aside-repl-command.md, copied to
+.claude/commands/aside-repl.md); its aside_command entry appears only when the
+caller passes --offer-aside-command, which /vault-init and /vault-upgrade do
+and /vault-doctor does not, or when that file exists.
+The report tells /vault-init, /vault-upgrade and /vault-doctor what is
+installed and what may be offered; it never installs, copies, runs the helper
+or the hooks, or edits settings itself. The guard and the cues are offered only
+when the caller passes --offer-deny-guard or --offer-lesson-cues, which
+/vault-init does and /vault-doctor does not. A vault without lesson cues gets
+no lesson_cues entry at all, so its report stays as it was. Paths that pass
+through a symlink or a Windows reparse point (junction) are not read.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import sys
+from pathlib import Path
+
+from vault_paths import _is_link_or_reparse
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ASIDE_ASSETS = REPO_ROOT / "assets" / "adapters" / "aside"
+BUNDLED_HELPER = ASIDE_ASSETS / "aside-up.ps1"
+GUARD_ASSETS = REPO_ROOT / "assets" / "adapters" / "deny-guard"
+BUNDLED_GUARD = GUARD_ASSETS / "deny-guard.py"
+BUNDLED_PARSER = GUARD_ASSETS / "ps-parse.ps1"
+BUNDLED_CUES = REPO_ROOT / "assets" / "adapters" / "lesson-cues" / "lesson-cues.py"
+
+CONFIG_REL = "00-meta/vault-config.json"
+HELPER_REL = "00-meta/scripts/aside-up.ps1"
+GUARD_REL = "00-meta/scripts/deny-guard.py"
+PARSER_REL = "00-meta/scripts/ps-parse.ps1"
+CUES_REL = "00-meta/scripts/lesson-cues.py"
+CUES_FILE_REL = "00-meta/lesson-cues.json"
+GUIDE_REL = "20-knowledge/tools/Aside CLI 운영 가이드.md"
+SETTINGS_RELS = (".claude/settings.json", ".claude/settings.local.json")
+LOCAL_SETTINGS_REL = ".claude/settings.local.json"  # where /vault-init merges the guard hook
+CLAUSE_BEGIN = "agentic-vault:adapter aside begin"
+CLAUSE_END = "agentic-vault:adapter aside end"
+CLAUSE_BEGIN_RE = re.compile(r"^[ \t]*<!--[ \t]*agentic-vault:adapter aside begin\b", re.MULTILINE)
+CLAUSE_END_RE = re.compile(r"^[ \t]*<!--[ \t]*agentic-vault:adapter aside end[ \t]*-->", re.MULTILINE)
+HELPER_STAMP_RE = re.compile(r"agentic-vault:adapter aside-up engine=(\S+)")
+GUARD_STAMP_RE = re.compile(r"agentic-vault:adapter deny-guard engine=(\S+)")
+PARSER_STAMP_RE = re.compile(r"agentic-vault:adapter ps-parse engine=(\S+)")
+CUES_STAMP_RE = re.compile(r"agentic-vault:adapter lesson-cues engine=(\S+)")
+BUNDLED_COMMAND = ASIDE_ASSETS / "aside-repl-command.md"
+COMMAND_REL = ".claude/commands/aside-repl.md"
+COMMAND_STAMP_RE = re.compile(r"agentic-vault:adapter aside-repl engine=(\S+)")
+VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
+HOOK_FILTERS = {"Bash(aside *)", "PowerShell(aside *)"}
+# `$CLAUDE_PROJECT_DIR` written for one shell: empty under a PowerShell hook
+# shell, which makes `-File "$CLAUDE_PROJECT_DIR/..."` point at the drive root.
+SHELL_BOUND_VAR_RE = re.compile(r"(?<!env:)\$CLAUDE_PROJECT_DIR(?!\})")
+# The tools the guard reads (its PATH_TOOLS and SHELL_TOOLS); its hook group must match them all.
+GUARD_TOOLS = ("Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Monitor")
+# A matcher of only these characters is an exact tool name or a |- or ,-separated
+# list of names (Claude Code hooks docs); anything else is a regular expression.
+EXACT_MATCHER_RE = re.compile(r"[A-Za-z0-9_\- ,|]*")
+# Script states that need a person: local edits, an unknown or newer source, or a path not read.
+SCRIPT_REVIEW_STATES = {"modified", "unstamped", "newer", "unreadable", "unsafe_path"}
+
+
+def _utf8_streams() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+def _platform() -> str:
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux" if sys.platform.startswith("linux") else sys.platform
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+def _compare(left: str, right: str) -> int:
+    a, b = _version(left), _version(right)
+    width = max(len(a), len(b))
+    a, b = a + (0,) * (width - len(a)), b + (0,) * (width - len(b))
+    return (a > b) - (a < b)
+
+
+def _inside(vault: Path, rel: str) -> Path | None:
+    """Return the path when no component is a link or reparse point, else None."""
+    current = vault
+    try:
+        if _is_link_or_reparse(vault):
+            return None
+    except OSError:
+        return None
+    for part in Path(rel).parts:
+        current = current / part
+        try:
+            if _is_link_or_reparse(current):
+                return None
+        except FileNotFoundError:
+            break
+        except OSError:
+            return None
+    try:
+        (vault / rel).resolve().relative_to(vault.resolve())
+    except (OSError, ValueError):
+        return None
+    return vault / rel
+
+
+def _read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _stamp(text: str, pattern: re.Pattern[str] = HELPER_STAMP_RE) -> str | None:
+    match = pattern.search(text[:400])
+    return match.group(1) if match else None
+
+
+def _normalized(text: str) -> str:
+    return text.replace("\r\n", "\n").rstrip("\n")
+
+
+def helper_status(vault: Path, rel: str = HELPER_REL, bundled_path: Path = BUNDLED_HELPER,
+                  pattern: re.Pattern[str] = HELPER_STAMP_RE) -> dict:
+    """Compare a script that an adapter copies into the vault with the bundled copy.
+
+    The defaults describe the Aside helper; the deny-zone guard passes its two
+    scripts. The state comes from the first-line `engine=` stamps and, for equal
+    stamps, from the text with line ends and a byte order mark folded.
+    """
+    bundled_text = _read(bundled_path) or ""
+    bundled = _stamp(bundled_text, pattern)
+    report = {"path": rel, "bundled_stamp": bundled, "installed_stamp": None}
+    path = _inside(vault, rel)
+    if path is None:
+        return {**report, "state": "unsafe_path"}
+    if not path.exists():
+        return {**report, "state": "missing"}
+    text = _read(path) if path.is_file() else None
+    if text is None:
+        return {**report, "state": "unreadable"}
+    installed = _stamp(text, pattern)
+    report["installed_stamp"] = installed
+    if installed is None or bundled is None or not VERSION_RE.match(installed) or not VERSION_RE.match(bundled):
+        return {**report, "state": "unstamped"}
+    order = _compare(installed, bundled)
+    if order < 0:
+        state = "outdated"
+    elif order > 0:
+        state = "newer"
+    else:
+        state = "current" if _normalized(text) == _normalized(bundled_text) else "modified"
+    return {**report, "state": state}
+
+
+def clause_status(vault: Path) -> dict:
+    path = _inside(vault, "CLAUDE.md")
+    if path is None:
+        return {"path": "CLAUDE.md", "state": "unsafe_path"}
+    if not path.exists():
+        return {"path": "CLAUDE.md", "state": "missing"}
+    text = _read(path) if path.is_file() else None
+    if text is None:
+        return {"path": "CLAUDE.md", "state": "unreadable"}
+    begins = list(CLAUSE_BEGIN_RE.finditer(text))
+    ends = list(CLAUSE_END_RE.finditer(text))
+    if not begins and not ends:
+        state = "absent"
+    elif len(begins) == 1 and len(ends) == 1 and begins[0].start() < ends[0].start():
+        state = "present"
+    else:
+        state = "broken_markers"
+    return {"path": "CLAUDE.md", "state": state}
+
+
+def _hook_entries(data: object) -> list[tuple[dict, dict]]:
+    """(group, handler) for each PreToolUse handler that has a command string."""
+    entries: list[tuple[dict, dict]] = []
+    if not isinstance(data, dict) or not isinstance(data.get("hooks"), dict):
+        return entries
+    groups = data["hooks"].get("PreToolUse", [])
+    for group in groups if isinstance(groups, list) else []:
+        items = group.get("hooks", []) if isinstance(group, dict) else []
+        for handler in items if isinstance(items, list) else []:
+            if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                entries.append((group, handler))
+    return entries
+
+
+def _hook_handlers(data: object) -> list[dict]:
+    return [handler for _, handler in _hook_entries(data)]
+
+
+def _hook_commands(data: object) -> list[str]:
+    return [handler["command"] for handler in _hook_handlers(data)]
+
+
+def _handler_text(handler: dict) -> str:
+    """The command and, in the exec form, its args: where a hook names its script."""
+    args = handler.get("args")
+    words = [arg for arg in args if isinstance(arg, str)] if isinstance(args, list) else []
+    return " ".join([handler["command"], *words])
+
+
+def _is_aside_handler(handler: dict) -> bool:
+    return "aside-up.ps1" in handler["command"]
+
+
+def _aside_problems(group: dict, handler: dict) -> list[str]:
+    problems: list[str] = []
+    if_filter = handler.get("if")
+    if not isinstance(if_filter, str) or if_filter not in HOOK_FILTERS:
+        problems.append("handler without an aside `if` filter")
+    command = handler["command"]
+    if SHELL_BOUND_VAR_RE.search(command) or "$env:CLAUDE_PROJECT_DIR" not in command:
+        problems.append("command does not resolve the vault through $env:CLAUDE_PROJECT_DIR "
+                        "inside PowerShell, so the path depends on the hook shell or working directory")
+    return problems
+
+
+def _is_guard_handler(handler: dict) -> bool:
+    return "deny-guard.py" in _handler_text(handler).casefold()
+
+
+def _matcher_misses(matcher: object) -> list[str] | None:
+    """The guarded tools an exact-name matcher leaves out; None for a regular expression.
+
+    A missing, empty or "*" matcher matches every tool.
+    """
+    if matcher is None or (isinstance(matcher, str) and matcher.strip() in ("", "*")):
+        return []
+    if not isinstance(matcher, str) or not EXACT_MATCHER_RE.fullmatch(matcher):
+        return None
+    names = {name.strip() for name in re.split(r"[|,]", matcher)}
+    return [tool for tool in GUARD_TOOLS if tool not in names]
+
+
+def _guard_problems(group: dict, handler: dict) -> list[str]:
+    """Settings that weaken the deny-zone guard without any error to show for it."""
+    problems: list[str] = []
+    if handler.get("onFailure") != "block":
+        problems.append('deny-guard handler without "onFailure": "block", so a crash, a timeout or a '
+                        "missing python lets the tool call run")
+    if handler.get("if") is not None:
+        problems.append("deny-guard handler with an `if` filter, which is best-effort and can skip the guard")
+    if SHELL_BOUND_VAR_RE.search(_handler_text(handler)):
+        problems.append("deny-guard handler names the vault as a bare $CLAUDE_PROJECT_DIR, which depends on "
+                        "the hook shell (PowerShell reads it as an empty variable); write "
+                        "${CLAUDE_PROJECT_DIR} as settings-hooks.json does")
+    missing = _matcher_misses(group.get("matcher"))
+    if missing:
+        problems.append(f"deny-guard group matcher leaves out {', '.join(missing)}, so the guard does not "
+                        "check those tools")
+    return problems
+
+
+def _is_cues_handler(handler: dict) -> bool:
+    return "lesson-cues.py" in _handler_text(handler).casefold()
+
+
+def _cues_problems(group: dict, handler: dict) -> list[str]:
+    """Settings that turn the advisory cue hook into something else."""
+    problems: list[str] = []
+    if handler.get("onFailure") == "block":
+        problems.append('lesson-cues handler with "onFailure": "block", so a crash or a timeout of an '
+                        "advisory hook stops every matched tool call")
+    if SHELL_BOUND_VAR_RE.search(_handler_text(handler)):
+        problems.append("lesson-cues handler names the vault as a bare $CLAUDE_PROJECT_DIR, which depends on "
+                        "the hook shell (PowerShell reads it as an empty variable); write "
+                        "${CLAUDE_PROJECT_DIR} as settings-hooks.json does")
+    return problems
+
+
+# adapter -> (which PreToolUse handlers belong to it, what to flag in each one)
+HOOK_RULES = {
+    "aside": (_is_aside_handler, _aside_problems),
+    "deny_guard": (_is_guard_handler, _guard_problems),
+    "lesson_cues": (_is_cues_handler, _cues_problems),
+}
+
+
+def _settings_data(vault: Path) -> tuple[list[tuple[str, object]], list[str]]:
+    """(rel, parsed JSON) for each settings file that exists, and the ones that cannot be read."""
+    found: list[tuple[str, object]] = []
+    unreadable: list[str] = []
+    for rel in SETTINGS_RELS:
+        path = _inside(vault, rel)
+        if path is None:
+            unreadable.append(rel)
+            continue
+        if not path.exists():
+            continue
+        text = _read(path)
+        try:
+            data = json.loads(text) if text is not None else None
+        except json.JSONDecodeError:
+            data = None
+        if data is None:
+            unreadable.append(rel)
+            continue
+        found.append((rel, data))
+    return found, unreadable
+
+
+def hook_status(vault: Path, adapter: str = "aside") -> dict:
+    belongs, check = HOOK_RULES[adapter]
+    configured: list[str] = []
+    problems: list[str] = []
+    found, unreadable = _settings_data(vault)
+    for rel, data in found:
+        entries = [(group, handler) for group, handler in _hook_entries(data) if belongs(handler)]
+        if not entries:
+            continue
+        configured.append(rel)
+        for group, handler in entries:
+            problems.extend(f"{rel}: {problem}" for problem in check(group, handler))
+    if problems:
+        state = "needs_review"
+    elif configured:
+        state = "configured"
+    elif unreadable:
+        state = "unreadable"
+    else:
+        state = "absent"
+    return {"state": state, "configured_in": configured, "unreadable": unreadable, "problems": problems}
+
+
+def guide_status(vault: Path) -> dict:
+    path = _inside(vault, GUIDE_REL)
+    return {"path": GUIDE_REL, "present": bool(path is not None and path.is_file()),
+            "unsafe_path": path is None}
+
+
+def _actions(platform: str, cli: bool, helper: dict, clause: dict, hook: dict, guide: dict) -> list[str]:
+    actions: list[str] = []
+    if helper["state"] == "outdated":
+        actions.append("offer_helper_update")
+    elif helper["state"] in {"modified", "unstamped", "newer", "unreadable", "unsafe_path"}:
+        actions.append("review_helper")
+    if clause["state"] in {"broken_markers", "unreadable", "unsafe_path"}:
+        actions.append("review_clause")
+    if hook["unreadable"] or hook["problems"]:
+        actions.append("review_settings")
+    installed_any = clause["state"] not in {"missing", "absent"} or helper["state"] != "missing"
+    if cli and not installed_any:
+        actions.append("offer_install")
+    elif clause["state"] == "present":
+        if platform == "windows" and helper["state"] == "missing":
+            actions.append("offer_helper")
+        if not guide["present"] and not guide["unsafe_path"]:
+            actions.append("offer_guide_note")
+        if platform == "windows" and helper["state"] == "current" and hook["state"] == "absent":
+            actions.append("hook_optional")
+    return actions
+
+
+def deny_guard_status(vault: Path, offer: bool = False) -> dict:
+    """State of the opt-in deny-zone guard: its two scripts and its PreToolUse hook.
+
+    state is "absent" (neither script nor a guard hook), "installed" (both
+    scripts and a hook without problems), "incomplete" (some of these are
+    missing) or "needs_review" (hook problems, settings that cannot be read
+    while scripts exist, or a script that cannot be read or sits behind a link).
+    "offer_deny_guard" is listed only when offer is set (/vault-init passes
+    --offer-deny-guard) and nothing of the guard is there yet.
+    """
+    guard = helper_status(vault, GUARD_REL, BUNDLED_GUARD, GUARD_STAMP_RE)
+    parser = helper_status(vault, PARSER_REL, BUNDLED_PARSER, PARSER_STAMP_RE)
+    hook = hook_status(vault, "deny_guard")
+    scripts = (guard["state"], parser["state"])
+    incomplete = "missing" in scripts or not hook["configured_in"]
+    if all(script == "missing" for script in scripts) and not hook["configured_in"]:
+        state = "absent"
+    elif hook["problems"] or hook["state"] == "unreadable" or any(
+            script in {"unreadable", "unsafe_path"} for script in scripts):
+        state = "needs_review"
+    elif incomplete:
+        state = "incomplete"
+    else:
+        state = "installed"
+    actions: list[str] = []
+    if "outdated" in scripts:
+        actions.append("offer_guard_update")
+    if any(script in SCRIPT_REVIEW_STATES for script in scripts) or (state != "absent" and incomplete):
+        actions.append("review_guard")
+    if state != "absent" and (hook["unreadable"] or hook["problems"]):
+        actions.append("review_settings")
+    if offer and state == "absent" and LOCAL_SETTINGS_REL not in hook["unreadable"]:
+        actions.append("offer_deny_guard")
+    return {"state": state, "guard": guard, "parser": parser, "hook": hook, "actions": actions}
+
+
+def lesson_cues_status(vault: Path, offer: bool = False) -> dict:
+    """State of the opt-in cue hook: its script, its PreToolUse hook and the compiled list.
+
+    The states read as in deny_guard_status. compiled_present says whether
+    00-meta/lesson-cues.json exists; the report does not read or judge it.
+    "offer_lesson_cues" is listed only when offer is set (/vault-init passes
+    --offer-lesson-cues) and nothing of the hook is there yet.
+    """
+    script = helper_status(vault, CUES_REL, BUNDLED_CUES, CUES_STAMP_RE)
+    hook = hook_status(vault, "lesson_cues")
+    compiled = _inside(vault, CUES_FILE_REL)
+    compiled_present = bool(compiled is not None and compiled.is_file())
+    incomplete = script["state"] == "missing" or not hook["configured_in"]
+    if script["state"] == "missing" and not hook["configured_in"]:
+        state = "absent"
+    elif hook["problems"] or hook["state"] == "unreadable" or script["state"] in {"unreadable", "unsafe_path"}:
+        state = "needs_review"
+    elif incomplete:
+        state = "incomplete"
+    else:
+        state = "installed"
+    actions: list[str] = []
+    if script["state"] == "outdated":
+        actions.append("offer_cues_update")
+    if script["state"] in SCRIPT_REVIEW_STATES or (state != "absent" and incomplete):
+        actions.append("review_lesson_cues")
+    if state != "absent" and (hook["unreadable"] or hook["problems"]):
+        actions.append("review_settings")
+    if state == "installed" and not compiled_present:
+        actions.append("build_lesson_cues")
+    if offer and state == "absent" and LOCAL_SETTINGS_REL not in hook["unreadable"]:
+        actions.append("offer_lesson_cues")
+    return {"state": state, "script": script, "hook": hook, "compiled_path": CUES_FILE_REL,
+            "compiled_present": compiled_present, "actions": actions}
+
+
+def aside_command_status(vault: Path, clause: dict, offer: bool = False) -> dict:
+    """State of the opt-in /aside-repl procedure command copied into .claude/commands/.
+
+    The states are those of helper_status. "offer_command" is listed only when
+    offer is set (/vault-init and /vault-upgrade pass --offer-aside-command), the
+    Aside clause is present and no file is at the command path.
+    """
+    command = helper_status(vault, COMMAND_REL, BUNDLED_COMMAND, COMMAND_STAMP_RE)
+    actions: list[str] = []
+    if command["state"] == "outdated":
+        actions.append("offer_command_update")
+    elif command["state"] in SCRIPT_REVIEW_STATES:
+        actions.append("review_command")
+    if offer and command["state"] == "missing" and clause["state"] == "present":
+        actions.append("offer_command")
+    return {**command, "actions": actions}
+
+
+def diagnose(vault: Path, offer_deny_guard: bool = False, offer_lesson_cues: bool = False,
+             offer_aside_command: bool = False) -> tuple[dict, int]:
+    vault = vault.expanduser()
+    if not (vault / CONFIG_REL).is_file():
+        return {"schema_version": 1, "status": "not_vault", "reason_code": "config_not_found",
+                "adapters": {}}, 2
+    platform = _platform()
+    cli = shutil.which("aside") is not None
+    helper = helper_status(vault)
+    clause = clause_status(vault)
+    hook = hook_status(vault)
+    guide = guide_status(vault)
+    aside = {
+        "cli_on_path": cli,
+        "helper_supported": platform == "windows",
+        "helper": helper,
+        "clause": clause,
+        "hook": hook,
+        "guide_note": guide,
+        "actions": _actions(platform, cli, helper, clause, hook, guide),
+    }
+    adapters = {"aside": aside, "deny_guard": deny_guard_status(vault, offer_deny_guard)}
+    cues = lesson_cues_status(vault, offer_lesson_cues)
+    if offer_lesson_cues or cues["state"] != "absent":
+        adapters["lesson_cues"] = cues
+    command = aside_command_status(vault, clause, offer_aside_command)
+    if offer_aside_command or command["state"] != "missing":
+        adapters["aside_command"] = command
+    return {"schema_version": 1, "status": "ok", "platform": platform, "adapters": adapters}, 0
+
+
+def _format_text(report: dict) -> str:
+    if report["status"] != "ok":
+        return f"agentic-vault adapters: {report['status']} ({report['reason_code']})"
+    aside = report["adapters"]["aside"]
+    lines = [
+        f"agentic-vault adapters: ok (platform={report['platform']})",
+        f"aside.cli_on_path: {str(aside['cli_on_path']).lower()}",
+        f"aside.helper: {aside['helper']['state']} "
+        f"(installed={aside['helper']['installed_stamp']}, bundled={aside['helper']['bundled_stamp']})",
+        f"aside.clause: {aside['clause']['state']}",
+        f"aside.hook: {aside['hook']['state']}",
+        f"aside.guide_note: {str(aside['guide_note']['present']).lower()}",
+        f"aside.actions: {', '.join(aside['actions']) or 'none'}",
+    ]
+    lines.extend(f"aside.hook.problem: {problem}" for problem in aside["hook"]["problems"])
+    guard = report["adapters"]["deny_guard"]
+    lines.append(f"deny_guard.state: {guard['state']}")
+    for name in ("guard", "parser"):
+        script = guard[name]
+        lines.append(f"deny_guard.{name}: {script['state']} "
+                     f"(installed={script['installed_stamp']}, bundled={script['bundled_stamp']})")
+    lines.append(f"deny_guard.hook: {guard['hook']['state']}")
+    lines.append(f"deny_guard.actions: {', '.join(guard['actions']) or 'none'}")
+    lines.extend(f"deny_guard.hook.problem: {problem}" for problem in guard["hook"]["problems"])
+    cues = report["adapters"].get("lesson_cues")
+    if cues is not None:
+        lines.append(f"lesson_cues.state: {cues['state']}")
+        lines.append(f"lesson_cues.script: {cues['script']['state']} "
+                     f"(installed={cues['script']['installed_stamp']}, bundled={cues['script']['bundled_stamp']})")
+        lines.append(f"lesson_cues.hook: {cues['hook']['state']}")
+        lines.append(f"lesson_cues.compiled: {str(cues['compiled_present']).lower()}")
+        lines.append(f"lesson_cues.actions: {', '.join(cues['actions']) or 'none'}")
+        lines.extend(f"lesson_cues.hook.problem: {problem}" for problem in cues["hook"]["problems"])
+    command = report["adapters"].get("aside_command")
+    if command is not None:
+        lines.append(f"aside_command: {command['state']} "
+                     f"(installed={command['installed_stamp']}, bundled={command['bundled_stamp']})")
+        lines.append(f"aside_command.actions: {', '.join(command['actions']) or 'none'}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--vault", required=True, type=Path, help="Vault directory to inspect.")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--offer-deny-guard", action="store_true",
+                        help="List offer_deny_guard when the opt-in deny-zone guard is absent "
+                             "(/vault-init only; /vault-doctor never passes it).")
+    parser.add_argument("--offer-lesson-cues", action="store_true",
+                        help="Add a lesson_cues entry that lists offer_lesson_cues when the opt-in cue hook "
+                             "is absent (/vault-init only; /vault-doctor never passes it).")
+    parser.add_argument("--offer-aside-command", action="store_true",
+                        help="Add an aside_command entry that lists offer_command when the Aside clause is present "
+                             "and .claude/commands/aside-repl.md is missing (/vault-init and /vault-upgrade; "
+                             "/vault-doctor never passes it).")
+    args = parser.parse_args(argv)
+    report, exit_code = diagnose(args.vault, offer_deny_guard=args.offer_deny_guard,
+                                 offer_lesson_cues=args.offer_lesson_cues,
+                                 offer_aside_command=args.offer_aside_command)
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    else:
+        print(_format_text(report))
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

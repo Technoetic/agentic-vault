@@ -1,0 +1,1213 @@
+# 출처와 공유 상태 보강
+
+## v0.46.0 source and certificate migration
+
+v0.46.0 changes two of the seven certificate-bound checker files, `vault_paths.py` and
+`vault_lint_extensions.py`, because deny zones now compare folder names by Unicode
+canonical caseless matching. The measured `checker_sha256` changes from
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f` (v0.34.0 to v0.45.1) to
+`09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d`. The harmless corpus
+`38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a` is unchanged.
+A vault that promotes warnings to `fatal` stops under the new engine until it follows the
+coordination below: the health check exits 1, SessionStart injects nothing, the staged gate
+refuses commits, and doctor and recall report `invalid_config`. Vaults without promotion
+are unaffected. While engine versions are mixed no single certificate fits every copy, so
+keep promotion off until every copy runs the same bytes.
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination.
+See the [release note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.46.0.md#하위호환업그레이드) and the
+[verification contract](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.46.0.md). No installed plugin or vault
+engine copy is updated by release preparation.
+
+## v0.35.1 source and certificate migration
+
+v0.35.1 adds the shared [webapp-principles skill](../skills/webapp-principles/SKILL.md),
+[the six-rule guide](webapp-principles.md) and stricter installed-skill discovery checks.
+It retains all seven certificate-bound checker files and the harmless corpus from v0.34.0.
+The measured `checker_sha256` remains
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`.
+Changing only between v0.34.0 and v0.35.1 does not invalidate an existing certificate
+or require promotion reset or certificate regeneration, provided the installed bound bytes match.
+The healthcheck release stamp is outside those seven bound files.
+
+Older transitions that change bound bytes still require the migration and rollback
+coordination documented in the historical sections below. The v0.34.0 features and
+its original migration record remain available; their dated observations are not
+new v0.35.1 release measurements. Final source, CI, ZIP, draft and publication gates
+are recorded separately in `verification.json` and `post-publication.json`;
+version preparation does not certify them. See the [v0.35.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.1.md).
+This patch supersedes the [unpublished v0.35.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.0.md);
+its failed/canceled CI is retained as history, and the fixture-only repair requires fresh CI.
+Plugin installation, vault upgrade and application deployment remain separate operations.
+
+## v0.34.0 source and certificate migration
+
+v0.34.0 adds five opt-in items: a left edge for `check-support --bind-subject` subjects,
+a conformal refusal threshold in `evaluate_recall.py`, a `plan` subcommand for
+`real_vault_audit.py`, `--receipt-order` for improvement `inspect` and `compare`, and
+`--string-patterns` for `evaluate_tool_matrix.py`. Opt-in `check-support --bind-subject`
+now requires a left edge before a subject that starts with a non-ASCII letter, so a
+subject written right after a letter of most scripts (for example one more Hangul syllable
+before it) no longer binds; values, default output and exit codes are unchanged. Changing
+`vault_ssot.py` gives v0.34.0 the `checker_sha256`
+`be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`,
+which differs from the v0.33.1 fingerprint stated in the next section. That section is
+kept as published with v0.33.1, and the v0.33.1 release/verification records retain their
+fingerprint as history.
+Final source, CI, ZIP, draft and publication gates are recorded separately in
+`verification.json` and `post-publication.json`; version preparation does not certify them.
+See the [v0.34.0 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.34.0.md) and [subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/subject-boundary-20261030.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+This coordination also applies when returning to published v0.33.1. No installed
+plugin or vault engine copy is updated by release preparation.
+
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
+
+## v0.33.1 source and certificate migration
+
+v0.33.1 includes offline synthetic state/dependency revision and evidence-insufficiency
+evaluations, plus opt-in support-row diagnostics. Its `checker_sha256` is
+`af8f4c5ab9fc809a4998e55870e769d5f617d6742a53d0c5c2844df7ff3d7b92`.
+The v0.33.0 candidate was not published after macOS CI exposed temporary-root fixture failures.
+Positive test fixtures canonicalize temporary roots; strict runtime guards stay unchanged.
+The published baseline remains v0.32.0. Its release/verification records retain their fingerprint as history.
+Final source, CI, ZIP, draft and publication gates are recorded separately in
+`verification.json` and `post-publication.json`; version preparation does not certify them.
+See the [v0.33.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.33.1.md) and [source fingerprint and verification note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/memory-boundaries-20261028.md).
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+This coordination also applies when returning to published v0.32.0. No installed
+plugin or vault engine copy is updated by release preparation.
+
+v0.33.1은 선택형 [행 참조와 물리 줄 주어 진단](support-row-diagnostics.md)을 포함한다. 기존 `check-support` 출력·판정은 새 옵션을 끄면 유지하며, 인증서는 [v0.33.1 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.33.1.md#하위호환업그레이드)를 따른다. 아래는 이전 버전의 변경 이력이다.
+
+v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
+Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
+바꿨다(켜는 옵션·출력 필드는 없다). 기본 lint의 유출 검사와 Jev 경로가 함께 쓰는 자격 증명 식(`jev_client.SENSITIVE`)의 이차 시간 조각
+넷과 선택형 Telegram 브리지의 위키링크 바꾸기도 시험한 입력에서 같은 판정·같은 문자열을 내는 선형 처리로 바꿨다(자격 증명 식은 매치가 있는지만 예전
+식과 같고, 쓰는 곳은 모두 그것만 본다). `check-support`는 [표를 뺀 자리와 줄 나눔](#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을
+다르게 읽어 그 경우에만 기본 출력이 바뀌고, 선택형 기간 표현 정규화는 잘못 읽던 꼴을 더 보류하고 v0.31.0이 지나치게
+보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패를
+[생성한 사례로 센다](#기간-정규화의-알려진-실패-목록). 인증서가 묶는 corpus 파일은 `core.autocrlf=true`인 checkout에서도
+[LF로 받는다](#수집과-경고).
+v0.31.0은 시간 대장의 [`check-support`](#대장-값의-출처-노트-대조-vault_ssotpy-check-support)에 다른 대장의 사실 표에만
+있는 값을 표시하는 [두 필드](#다른-대장의-사실-표에만-있는-값)(기본 출력)와 선택형 `--primary-text-only`,
+선택형 [기간 표현 정규화](#기간-표현-정규화---normalize-periods)(`--normalize-periods`)를 더한다.
+v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 [via_bot 수집 출처](#수집과-경고)로 기록하게 하고,
+[검색 평가](#검색-평가)의 별칭 inventory 확인에 디렉터리 이름 목록 대조를 더한다.
+v0.25.0은 [동기화 충돌 사본과 checkpoint 이후 변경 경고](#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택)를
+기본값이 꺼진 경고 전용 검사로 더했다. v0.24.0의 [Windows 파일 교체와 경로 비교 보강](evaluation-stability.md#windows-부분-편집)은
+실제 공유 핸들 거부를 제한적으로 재시도하고 매번 기존 정책·revision 검증을 유지한다.
+기존 설치 캐시와 볼트의 갱신은 별도 작업이다. `checker_sha256`가 묶는 일곱 파일 가운데 v0.26.0은
+[via_bot 수집 출처](#수집과-경고)를 위해 `vault_provenance.py`를, v0.31.0은 위 대장 기능을 위해 `vault_ssot.py`를,
+v0.32.0은 위 선형 처리와 본문 읽기를 위해 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`와
+설명만 고친 `vault_paths.py`를 바꿨다. 그래서 v0.25.0 이하에서 만든 경고 승격 인증서는 v0.26.0 이후 설치본에서, v0.30.0
+이하에서 만든 인증서는 v0.31.0 설치본에서, v0.31.0 이하에서 만든 인증서는 v0.32.0 설치본에서 맞지 않고, 그 반대 방향도
+맞지 않는다(v0.24.0·v0.25.0의 `checker_sha256`는 `2ef4b9d4…`, v0.26.0~v0.30.0은 `84cf5235…`,
+v0.31.0은 `d8f9559a…`, v0.32.0은 `9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563`. corpus는 `38efaabd…`로 같다). 경고를 fatal로 승격한 볼트는 갱신하거나 되돌리기 전에 승격 단계를
+`warning`으로 되돌리고, 볼트를 검사하는 엔진 사본(Claude Code·Codex 설치본과 git 볼트의 `00-meta/scripts/`)을
+모두 같은 버전으로 바꾼 뒤, 바꾼 설치본에서 `vault_warning_policy.py --certificate`로 인증서를 다시 만들어 승격한다. 그러지 않으면 healthcheck가
+`promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,
+SessionStart 훅이 주입하지 않으며, staged 검사(`--staged`)가 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를
+보고한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, 아래 `vault_ssot.py`는
+`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.32.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.32.0.md#하위호환업그레이드)·
+[v0.31.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.31.0.md#하위호환업그레이드)와
+[v0.26.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
+[v0.25.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.25.0.md#하위호환업그레이드)에 있다.
+
+기존 Markdown/Git 노트를 유지하면서 필요한 helper를 명시적으로 선택한다.
+모든 결과는 자료이며 실행 권한·사실 확정·검증자 신원을 자동으로 만들지 않는다.
+Claude Code는 `/vault-harden`, Codex는 `$agentic-vault:agentic-vault harden`으로 연결한다.
+Python 파일은 플러그인의 `skills/agentic-vault/scripts/`에 있다. CLI 입력은 UTF-8 JSON이다.
+
+| 작업 | helper / 진입점 | 결과와 경계 |
+|---|---|---|
+| 출처 | `vault_provenance.py`: `derive_provenance`, `validate_provenance`, `analyze_notes` | 선택 원본·정제본 해시와 가장 낮은 신뢰를 유지. 별도 근거의 현재성을 조회하며 이름만으로 독립 검증을 인정하지 않음 |
+| 공유 상태 | `vault_state.py`: `advisory_lock`, `patch_note`, `project_handoff`, `detect_removed_blockers` | 원본 UTF-8 바이트 범위의 부분 편집, 기대 파일/config 해시, 소유자 토큰과 TTL. 협조하는 쓰기만 잠금 보호 |
+| 시간 대장 | `vault_ssot.py`: `parse_ledger`, `check_ledger`, `prepare_migration`, `apply_migration`, `check_support` | 이력·시간 충돌·확정 행 출처 검사. dry-run 후 명시적 적용; 날짜/기업 사실을 추정하지 않음. 선택형 `check-support`는 값이 인용 노트 본문에 있는지 경고만 함. 그 안의 선택형 [`--normalize-periods`](#기간-표현-정규화---normalize-periods)는 기간 표현을 날짜 구간으로 따로 대조(`vault_period.py`) |
+| 교훈 | `vault_lesson_delta.py`: `prepare_delta`, `apply_delta` | ADD/INC/EDIT/RETIRE/CUES, 안정적인 ID·횟수·현재 제안 해시. RETIRE는 기록을 보존하고 선택형 [은퇴 사유](#교훈-은퇴-사유)를 상태 칸에 남김. 형식을 벗어난 대장 줄은 `ignored_rows`로 보고 |
+| 선언 규칙 | `vault_declarative_rules.py`: `evaluate_rules` | literal existence/substitution/occurrence 기본값. regex는 명시적 선택, 별도 프로세스 제한시간·입력 상한 |
+| 정제 품질 | `vault_compile_quality.py`: `check_compile` | 숫자·ISO 날짜·구조화 이름/위키 대상·호스트가 지정한 원문 주장 누락. 선택형 역방향은 정제본에만 있는 literal(날조 후보)을 관측. 의미적 정확성과 이름 전체 추출을 보장하지 않음 |
+| 토큰 | `vault_token_calibration.py`: `calibrate`, `estimate`, `check_drift`, `measure_local`, `measure_counter` | 모델/세대별 측정치와 보정 해시. 명시적으로 선택할 때만 사용; 기존 hook/검색 계수 유지 |
+| 외부 전송 경고 | `vault_egress.py`: `scan_text`, `analyze_notes` | D1 정규화로 가짜 토큰·한국 식별번호 패턴 검사. 일치한 비밀값을 출력하지 않음; 자동 외부 전송 없음 |
+| 동기화 경고(선택) | `vault_healthcheck.py` full 모드: `sync_conflict_check`, `sync_conflict_patterns`, `checkpoint_drift_check` | 동기화 충돌 사본·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트를 경고만 함. 외부 쓰기를 막거나 되돌리지 않음 |
+
+## 교훈 은퇴 사유
+
+v0.47.0부터 `vault_lesson_delta.py`의 RETIRE는 선택형 `reason`과 `date`를 받는다. 둘은 함께 넘긴다.
+
+```json
+[{"op":"RETIRE","id":"L-001","reason":"도구 교체로 원인이 사라짐","date":"2026-11-12","references":[]}]
+```
+
+- 대장 줄의 상태 칸이 `상태: retired(사유, YYYY-MM-DD)`가 된다. 사유는 표지(`<!-- agentic-vault:lesson … -->`)에 넣지
+  않는다. 표지는 예전과 같은 키와 `state: retired`를 담으므로, v0.46.0 이하의 도구도 이 줄을 읽고 교훈 단서 컴파일은
+  예전처럼 은퇴한 줄을 뺀다.
+- `reason`이 없으면 상태 칸은 예전처럼 `상태: retired`이고, 사유 없는 옛 제안은 같은 바이트로 다시 계산되어 적용된다.
+  다만 상태 칸이 이미 `상태: retired(…, YYYY-MM-DD)`인 줄은 그 칸을 그대로 두므로, 그런 줄에 v0.46.0이 준비한 사유 없는
+  제안은 `proposal_changed_or_stale`로 거부되고 다시 준비해야 한다.
+- `reason`은 앞뒤 공백 없는 200자 이하의 한 줄이다. 제어 문자·보이지 않는 서식 문자(양방향 재정렬 표시 등)·줄과 문단
+  구분자, `<!--`, `-->`, 칸 구분자 ` | `, `agentic-vault:lesson`을 담으면 `invalid_retire_reason`으로 거부한다.
+  `date`는 ADD와 같은 `YYYY-MM-DD`이고 오류도 같다(`explicit_date_required`, `invalid_date`). 날짜만 넘기면
+  `invalid_operation_fields`다.
+- 사유 없이 은퇴한 줄에는 사유를 한 번 더할 수 있다. 사유가 이미 있으면 바꾸지 않는다(`retire_reason_exists`). 고칠 때는
+  대장을 직접 고치고 그 diff를 검토한다. 사유 없는 RETIRE를 다시 해도 이미 적힌 `retired(…)` 칸은 그대로 둔다.
+- 제목형 기록(`## M-001 — …`)에는 상태 칸이 없어 사유를 받지 않는다(`retire_reason_unsupported`). 사유 없는 RETIRE는
+  예전처럼 표지의 `state`만 바꾼다. 실수 노트의 은퇴 줄은 사용자 확인 뒤 사람이 적는다. 제목 바로 다음 줄에 표지가
+  있으면 은퇴 줄은 표지 다음 줄에 적고, 사유 없는 RETIRE로 표지의 `state`도 `retired`로 바꾼다. 도구는 제목 바로
+  다음 줄에서만 표지를 읽으므로, 제목과 표지 사이에 줄을 넣으면 그 항목을 표지 없는 활성 기록(횟수 1)으로 읽고 다음
+  변경 때 표지를 하나 더 단다. 교훈 단서 컴파일도 제목형 기록은 표지 상태만 보므로 손으로 적은 줄만으로는 단서가 빠지지
+  않는다.
+- 엔진 버전을 섞어 쓰면 v0.46.0 이하 도구는 `reason`이 든 제안을 `invalid_operation_fields`로 거부하고, 이미 사유가 적힌
+  줄을 다시 RETIRE할 때 칸을 `상태: retired`로 바꾼다. 이 변경은 준비 결과의 diff에 보이므로 적용 전에 거부한다.
+- 사유는 기록이며 은퇴를 승인하거나 원인이 사라졌다고 확정하지 않는다. 적용은 다른 교훈 변경과 같이 prepare, 검토,
+  `apply --approve` 순서를 따른다.
+
+## 원본을 옮기기 전
+
+허용된 원본과 정제본 각각의 전체 바이트 SHA-256을 구한다. 다음 형식으로 정제 품질 CLI에 전달한다.
+
+```json
+{"sources":[{"path":"10-inbox/web/source.md","sha256":"<64 lower-case hex>"}],"targets":[{"path":"20-knowledge/references/result.md","sha256":"<64 lower-case hex>"}],"required_claims":["원문에 실제 존재하는 필수 문장"]}
+```
+
+`python <플러그인 루트>/skills/agentic-vault/scripts/vault_compile_quality.py --vault <볼트>`의 stdin으로 넣는다.
+exit0은 선택 literal이 보존됐다는 뜻이다. exit1은 누락 또는 검사할 literal 부재, exit2는 경로·입력·해시 오류다.
+그 결과로 의미적 완전성이나 격리 권한을 추정하지 않는다. 날짜·수치·인명 전체와 조건/불확실성을 호스트가 대조한다.
+한국어 이름 경계는 보수적으로 확인한다. 이름 뒤 조사가 붙은 서술은 별도 이름 label 또는 명시적인 원문 주장으로 확인하며 자동 NER로 판정했다고 표시하지 않는다.
+지원되는 의미 평가는 원본의 허용된 발췌를 기존 `vault_judge.py`에 바인딩하여 승인된 Jev 경로로 확인한다.
+deny/excluded 자료를 인라인 문자열로 바꿔 외부 전송 제한을 우회하지 않는다.
+
+`derive_provenance`로 이동 전 source/target 해시와 origin을 기록한다. 원문이 나중에 deny zone으로 옮겨졌다면 이후 검사에서
+그 원문을 다시 읽지 않는다. 현재성을 다시 확인할 수 없으면 unresolved로 남긴다. 출처 기록은 원문 접근 권한을 확장하지 않는다.
+검사 사이 또는 이동 직전 파일이 바뀌면 새 해시와 결과로 다시 검토한다. multi-file 해시 검사는 원자적인 파일시스템 스냅샷이 아니다.
+
+v0.44.0은 별도 선택형 `relation_probes`로 원본의 유일한 본문 행·문단과 정제본의 선택 범위를
+비교한다. 기존 source/target 해시 바인딩에 포함된 경로만 지정할 수 있고, NFC 기준 전체 레코드가
+달라지면 검토 대상으로 표시한다. 숫자·이름의 전역 빈도만으로 놓치는 수량 맞바꾸기 등에 쓴다.
+형식과 한계는 [관계 레코드 보존](relation-preservation.md)에 있다. 옵션을 생략하면 기존 출력은 그대로다.
+
+## 날조 후보·출처 뒷받침 경고 (선택)
+
+두 검사는 정밀도 방향의 관측이다. 기존 회수율 방향 검사(원문 literal이 정제본에 남았는가)와 `check` 경고는 그대로 두고,
+호출자가 명시적으로 선택할 때만 실행한다. 결과는 모두 비차단 관측(경고)이며 사실 판정·격리 권한·출처 진위 증명이 아니다.
+선택하지 않으면 기본 인자·CLI 출력·exit code가 v0.22.1과 같다. 테스트가 v0.22.1(`63b4cc9`)에서 캡처한 출력과 비교한다.
+방법은 [HaluMem](https://arxiv.org/abs/2511.03506)(기억 환각을 추출·갱신·질의응답 단계별로 측정)과
+[MemTxn](https://arxiv.org/abs/2607.27834)(갱신이 원천에 의해 뒷받침되는지 보는 경계)을 참고했다.
+방법 참고일 뿐 두 논문의 코드·데이터·수치는 포함하지 않는다. HaluMem 데이터(CC-BY-NC-ND-4.0)는 이 저장소에 없다.
+
+### 정제본에만 있는 literal: `check_compile` 역방향
+
+정제본(target)에는 있지만 선택한 원본(source) 어디에도 없는 숫자·ISO 날짜·이름 literal을 날조 후보로 나열한다.
+추출 범위·일치 규칙·파일/바이트/fact 상한은 정방향과 같다. 숫자·날짜는 추출 token끼리 비교하고, 이름은 정방향과 같은
+보수적 단어 경계로 원본 본문에서 찾는다. frontmatter는 양쪽 모두 제외한다. 호스트 지정 주장(`required_claims`)은 원본 쪽 항목이라 대상이 아니다.
+
+API는 `check_compile(vault, sources, targets, required_claims, report_unsupported=True)`다.
+CLI는 위 JSON 요청을 그대로 stdin으로 넣고 `--report-unsupported`를 더한다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_compile_quality.py --vault <볼트> --report-unsupported
+```
+
+`status`·`review_reason`·exit code(0/1/2)의 의미는 바뀌지 않는다. 역방향 결과만으로 needs_review가 되거나 원본 격리가 막히지 않는다.
+기존 필드는 그대로 두고 다음 필드만 더한다.
+
+| 필드 | 뜻 |
+|---|---|
+| `target_literals_checked` | 선택한 모든 정제본에서 뽑은 고유 `(kind, literal)` 수 |
+| `unsupported_target_literals` | 원본에 없는 literal 목록. 항목마다 `kind`(number/date/name), 정규화한 `literal`, `target_paths` |
+| `unsupported_by_kind` | 위 목록의 kind별 개수 |
+| `fabrication_candidate_rate` | 위 목록 수 ÷ `target_literals_checked`. 분모가 0이면 `null`. 이번 호출에서 선택한 파일만의 비율이며 표본 추정치가 아니다 |
+| `fabrication_scope` | 범위와 한계를 적은 고정 문자열 |
+
+### 대장 값의 출처 노트 대조: `vault_ssot.py check-support`
+
+시간 대장 행의 `value`가 같은 행 `source` 칸이 가리키는 노트 본문에 실제로 있는지 본다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md>
+```
+
+경고만 있으면 exit 0이다. 대장 경로가 deny/exclude/runtime 구역이거나 Markdown이 아니거나, 검사 중 설정·대장·출처 노트가 바뀌면
+기존 `check`와 같이 stdout 없이 stderr에 `{"error":"ssot_operation_unavailable"}`를 쓰고 exit 1이다. API는 `check_support(vault, path)`다.
+
+참조는 다음만 해석한다.
+
+- `[[이름]]`, `[[이름#제목|별칭]]`, `![[이름]]`: 허용된 노트 가운데 파일명(`.md` 제외, NFC 정규화, 대소문자 구분)이 정확히 같은 노트가 하나일 때만 해석한다. 둘 이상이면 고르지 않는다.
+- `[[폴더/이름]]`, `` `폴더/이름.md` ``, 칸 전체가 공백 없는 `.md` 경로 하나: 볼트 루트 기준 정확한 경로다. `./`·`../`로 시작하면 대장 위치 기준이다.
+- `[[#제목]]`과 대장 자신을 가리키는 링크: 대장에서 사실 표를 뺀 나머지 본문과 비교한다. 행이 자기 자신을 뒷받침하지 않게 한다.
+- `[[보고서.pdf]]`처럼 첨부로 보이는 이름은 같은 이름의 노트가 없으면 건너뛴다. URL·서술 문장·공백이 든 일반 경로는 참조로 보지 않는다.
+- deny·exclude·runtime 구역과 `.git` 안으로는 들어가지 않는다(목록·읽기·후보 표시 없음). 구역 경로를 직접 쓴 참조는 `policy`로만 표시한다.
+- symlink·reparse point·hardlink 노트와 256 KiB(대장과 같은 상한) 초과 노트는 읽지 않는다. 읽은 노트는 끝에 대장·설정과 함께 다시 확인한다.
+
+값과 노트 본문(frontmatter 제외)을 NFKC·casefold·공백 정규화해 비교한다. 쓴 그대로의 형태와, 위키링크를 대상 이름으로 바꾸고
+인라인 코드·굵게 표시를 지운 형태를 함께 본다. 노트 본문은 위키링크를 별칭으로 바꾼 형태도 본다.
+값의 처음·끝이 ASCII 영숫자인데 바로 옆에 ASCII 영숫자가 붙으면 다른 literal로 본다. 숫자 앞뒤에 `.`·`,`와 숫자가 이어져도 다른 수로 본다
+(`12`는 `125`·`1,212`·`12.5`에서 찾지 않는다). 출처 노트 중 하나라도 값을 포함하면 그 행은 뒷받침된 것으로 센다.
+
+| 경고 코드 | 뜻 | `details` |
+|---|---|---|
+| `ssot-source-unsupported` | 해석된 출처 노트 어디에도 값이 없다. `--primary-text-only`면 다른 대장의 사실 표에만 있는 값도 포함 | `cited`: 비교한 노트 경로. 사실 표에만 있으면 `reason: ledger_table_only`도 |
+| `ssot-source-unresolved` | 참조를 허용된 노트 하나로 해석하거나 읽지 못했다 | `reference`(대장에 쓴 그대로), `reason`, 모호하면 `candidate_count`·`candidates`(최대 16개) |
+
+`ssot-source-unresolved`의 `reason`은 `not_found`, `ambiguous`, `policy`(deny/exclude/runtime 구역·symlink 경로), `size_limit`, `unsafe_file`(hardlink 등 단일 정규 파일 아님),
+`unreadable`(UTF-8 아님·읽는 중 변경), `invalid_reference`, `inventory_incomplete`, `source_limit` 중 하나다.
+나머지 출력 필드는 `path`, `source_sha256`(대장), `rows_checked`·`rows_supported`·`rows_unsupported`·`rows_unresolved`·`rows_skipped`,
+`rows_supported_ledger_table_only`·`ledger_table_only`([아래](#다른-대장의-사실-표에만-있는-값)),
+`cited_notes`(비교한 노트의 `path`·`sha256`·`bytes`), `incomplete`(상한 때문에 덜 본 이유), `method`, `authority`다.
+`--primary-text-only`를 켜면 `ledger_tables_unseparated`([아래](#다른-대장의-사실-표에만-있는-값))가 더해진다.
+`--normalize-periods`를 켜면 `normalized_periods`·`period_convention`([아래](#기간-표현-정규화---normalize-periods))이 더해진다.
+선택형 `--row-references`는 지원 행까지 포함한 parsed 행별 참조와 `audit_population`을,
+`--bind-subject`는 같은 원문 물리 줄에서의 주어·값 결속 관측과 별도 경고를 더한다.
+기존 `warnings`·리터럴 지원 수·지원 판정·기간 비교는 바뀌지 않으며, 두 옵션을 주지 않으면 기존 출력 키도 같다.
+구체적인 출력과 경고 인증서 이행은 [전체 행 참조와 주어 진단](support-row-diagnostics.md)을 따른다.
+v0.34.0부터 `--bind-subject`의 주어는 첫 글자가 ASCII가 아닌 글자이면 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)도 본다(값은 그대로, [아래 한계](#한계)).
+비슷한 이름이 다른 법인이라는 기록은 `different_from` 행으로 적을 수 있다([형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance), 파서는 바뀌지 않는다).
+값이나 출처가 없는 행, 노트 참조가 없는 행, 열 이름이 중복된 표의 행은 `rows_skipped`로 세고 경고하지 않는다.
+그런 행은 기존 `check`가 그대로 다룬다(예: `ssot-confirmed-source-missing`). `check` 출력과 lint 경고는 바뀌지 않는다.
+상한(코드 상수, 측정값 아님): 출처 노트 128개, 출처 읽기 합계 8 MiB, 행당 참조 8개, 디렉터리 항목 20,000개, 경고 1,024건.
+앞의 넷을 넘으면 `incomplete`에 이유를 남기고, 경고 수 상한은 기존 `check`처럼 오류로 끝낸다.
+
+#### 다른 대장의 사실 표에만 있는 값
+
+v0.31.0부터 `check-support`의 기본 출력에 `rows_supported_ledger_table_only`·`ledger_table_only`가 더해지고, `--primary-text-only`(켤 때만 `ledger_tables_unseparated`도 더해진다)는 선택형이다.
+인용한 노트가 다른 대장이면 그 사실 표는 2차 자료다. 대장이 자기 자신을 인용할 때 사실 표를 빼고 비교하는 것과 같은 이유다.
+인용 노트는 frontmatter 경계를 노트 전체에서 먼저 정하고, 그 아래 본문에서 `parse_ledger`가 알아보는 사실 표(v1·v2 모두)를 찾는다.
+줄은 frontmatter가 있든 없든 `parse_ledger`처럼 CR·LF·CRLF에서만 나눈다.
+표가 있으면 같은 읽기에서 그 표를 뺀 본문도 만든다. 표를 뺀 뒤에 frontmatter를 다시 정하지 않으므로, 첫 줄의 표를 빼서 맨 위로 올라온 `---`를 frontmatter 시작으로 보지 않는다.
+뺀 표의 위 글과 아래 글은 이어 붙이지 않으므로, 표를 사이에 둔 두 글이 하나의 값이나 기간으로 찾히지 않는다([아래](#표를-뺀-자리와-줄-나눔)).
+노트를 더 읽지 않고(인용 노트마다 표를 인식하고, 표가 있으면 본문 정규화를 한 번 더 한다) 출처 노트 수·읽기 합계 상한과 끝의 재확인도 그대로다.
+값이 뒷받침됐는데 표를 뺀 본문 어디에도 없으면 그 행을 따로 표시한다. 사실 표가 없는 노트는 본문 전체가, 자기 인용은 사실 표를 뺀 대장 본문이 표를 뺀 본문이다.
+
+| 필드 | 뜻 |
+|---|---|
+| `rows_supported_ledger_table_only` | 값이 다른 대장의 사실 표에만 있던 행 수 |
+| `ledger_table_only` | 그 행 목록. 항목마다 `line`(대장의 행 번호)과 `via`(값이 사실 표에 있던 대장 경로, 정렬). 값·셀 내용은 넣지 않는다 |
+
+기본값에서는 이 두 필드만 더한다. 그 행도 지금처럼 `rows_supported`로 세고, 나머지 필드·경고·`issue_id`·exit code는 v0.30.0과 같다([표를 뺀 자리와 줄 나눔](#표를-뺀-자리와-줄-나눔)의 경우는 빼고).
+테스트가 v0.30.0(`452c5c0`)에서 캡처한 출력과 비교한다. `--primary-text-only`(API는 `check_support(vault, path, primary_text_only=True)`, 기본 꺼짐)를 켜면
+그 행을 `rows_unsupported`로 세고 `ssot-source-unsupported` 경고를 낸다. `details`는 `cited`에 `reason: "ledger_table_only"`를 더한 것이다.
+두 필드의 값은 켜도 같고, 다른 행의 결과와 경고는 바뀌지 않는다.
+켜면 `ledger_tables_unseparated`도 더한다(끄면 없다). `parse_ledger`가 본문을 거절해 사실 표를 가려내지 못한 인용 노트의 목록이다(아래 한계).
+항목마다 `path`와 `reason`(`column_limit`·`cell_limit`·`table_limit`·`row_limit`·`invalid_text` 가운데 하나)만 넣고 경로순으로 정렬한다.
+그런 노트는 본문 전체와 비교하므로 그 노트의 사실 표에 있는 값도 뒷받침으로 센다. 목록이 비어 있지 않으면 그 노트에는 이 선택이 적용되지 않은 것이다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md> --primary-text-only
+```
+
+원칙은 [W3C PROV-DM](https://www.w3.org/TR/prov-dm/) §5.2.4(Primary Source)에서 빌렸다. 2차 자료는 신뢰성을 따질 수 있게 자신이 나온 1차 출처를 가리켜야 하고,
+무엇이 1차 출처인지는 응용 분야에서 받아들인 관례로 정한다. 여기서는 "다른 대장의 사실 표는 1차 근거가 아니다"를 관례로 정했다. PROV 어휘나 인용 유형 열은 쓰지 않는다.
+PROV-DM에는 순환 규칙이 없다. [PROV-CONSTRAINTS](https://www.w3.org/TR/prov-constraints/)의 비순환 제약은 생성 사건의 순서에 기대는데,
+노트는 고쳐지므로 A(v2)←B←A(v1)은 PROV에서 정상 연쇄다. 그래서 인용 그래프를 따라가거나 순환을 찾지 않는다.
+다른 대장의 사실 표를 1차 근거로 치지 않으면(`--primary-text-only`), 각 대장을 검사할 때 서로 인용(A↔B)이나 표를 거치는 연쇄의 고리가
+그래프 탐색 없이 하나씩 드러난다. 기본값에서는 그 고리도 `rows_supported`로 세고 `ledger_table_only`로만 보여 준다.
+
+한계:
+
+- 열 32개·칸 4 KiB 상한은 사실 표에만 걸리지 않는다. `parse_ledger`는 표 머리글을 찾느라, 코드 펜스 밖에서 공백 4칸 미만으로 들여쓰고
+  바로 다음 줄도 그런 줄을 모두 이스케이프하지 않은 `|`로 나눠 본다(인라인 코드·위키링크 안의 `|`는 빼고). 산문 줄과 사실 표가 아닌 표의 줄도 마찬가지다.
+  그런 줄 하나가 32칸을 넘거나(사실 표가 아닌 40열 표, 앞뒤에 글이 있고 `|`가 32개 이상인 산문 줄) 한 칸이 4 KiB(UTF-8 4,096바이트, 한글만이면 1,366자 이상)를
+  넘으면 `parse_ledger`가 본문을 거절하고 노트 전체를 사실 표가 없는 노트로 본다. 사실 표가 8개를 넘거나 사실 표 행이 모두 합쳐 256개를 넘거나
+  본문에 NUL 문자가 있어도 같다. frontmatter 안의 줄은 보지 않는다. 그런 노트의 사실 표에 있는 값은 `--primary-text-only`를 켜도 1차 근거로 세고
+  `ledger_table_only`에도 나오지 않는다. 켜면 `ledger_tables_unseparated`에 그 노트가 나오지만, 기본값에는 아무 표시가 없다.
+- 자기 인용은 v0.30.0 기본 출력을 바꾸지 않도록 그때 순서 그대로 대장의 사실 표를 먼저 빼고 나서 frontmatter를 정한다. frontmatter가 없는 대장의 첫 줄부터
+  사실 표가 있고 표 바로 다음 줄이 `---`이며 그 아래 64줄 안에 `---`가 또 있으면, 두 `---` 사이를 frontmatter로 보고 비교에서 뺀다.
+  그 사이 산문에만 있는 값을 자기 인용한 행은 `ssot-source-unsupported`가 된다. 표와 `---` 사이에 빈 줄을 두면 생기지 않는다.
+  다른 노트를 인용할 때는 frontmatter를 먼저 정하므로 생기지 않는다. v0.30.0의 동작 그대로다.
+
+#### 표를 뺀 자리와 줄 나눔
+
+v0.31.0의 `check-support`는 본문을 읽는 세 곳(표를 뺀 자리, frontmatter가 있을 때의 줄 나눔, 자기 인용의 BOM)이 서로 어긋났다. 지금은 아래처럼 읽는다.
+켜는 옵션과 새 출력 필드는 없다. 기본 출력은 아래 표의 경우에만 v0.31.0과 다르다.
+
+- 표를 뺀 자리: 사실 표를 뺀 본문에서 표 바로 위 줄의 끝(줄바꿈 앞)에 NUL 표시를 남긴다. 비교는 줄바꿈을 포함한 공백을 한 칸으로 줄이므로 줄바꿈만으로는
+  경계가 되지 않아, 표 위 글과 아래 글이 하나의 값·기간·기간 수식어로 읽혔다. NUL은 공백이 아니고 NFKC·casefold에도 그대로이며, `parse_ledger`가 NUL이 든
+  대장을 거절하므로 어떤 대장 값에도 없고, `vault_period`도 NUL을 건너 읽지 않는다. 다른 대장 인용과 자기 인용 모두 같다. 표가 본문 맨 앞이나 맨 끝이면 표시를 두지 않는다.
+  자기 인용의 frontmatter는 위 순서대로 표를 뺀 뒤 표시가 없는 글에서 정하므로 표시가 경계를 옮기지 않는다(닫는 `---` 바로 아래에 표가 있어도 그대로 닫힌다).
+- 줄 나눔: 인용 노트는 frontmatter가 있어도 CR·LF·CRLF에서만 줄을 나눈다. v0.31.0은 frontmatter가 있을 때만 `str.splitlines`로 나눠 LF로 다시 이었으므로
+  U+000B·U+000C·U+001C~U+001E·U+0085·U+2028·U+2029도 줄바꿈이 되어, 같은 표가 frontmatter 유무에 따라 사실 표가 되거나 되지 않았다.
+  frontmatter 경계(첫 줄이 `---`이고 그 아래 64줄 안의 다음 `---` 줄까지)를 정하는 줄도 같은 규칙으로 센다. 자기 인용도 같다.
+- 자기 인용의 BOM: 대장 맨 앞의 UTF-8 BOM을 떼고 frontmatter를 정한다. 인용 노트는 전부터 `utf-8-sig`로 읽어 BOM 하나를 떼었다.
+
+| 경우 | v0.31.0과 달라지는 기본 출력 |
+|---|---|
+| 표 위 글과 아래 글이 이어져야만 찾히던 값(다른 대장) | 그 행이 `ledger_table_only`·`rows_supported_ledger_table_only`에 오르고, `--primary-text-only`에서는 `ssot-source-unsupported`(`reason: ledger_table_only`)가 된다 |
+| 같은 경우의 기간(다른 대장) | 이음으로 생기던 기간이나 수식어(`말에` 등)가 사라진다. `--normalize-periods`를 `--primary-text-only`와 함께 켜면 `normalized_match`·`via`가, 혼자 켜면 `via_ledger_table_only`가 바뀔 수 있다 |
+| 같은 경우의 자기 인용 | 기본값에서도 그 행이 `ssot-source-unsupported`가 되어 `rows_supported`·`rows_unsupported`·경고가 바뀌고, `normalized_match`·`via`도 바뀔 수 있다 |
+| frontmatter가 있는 인용 노트(와 자기 인용 대장)에 위 문자가 있을 때 | 사실 표 인식(그래서 `ledger_table_only`, `--primary-text-only`의 결과, `ledger_tables_unseparated`, `via_ledger_table_only`)과 그 문자가 든 위키링크의 렌더링(리터럴·기간 비교)이 frontmatter가 없는 노트와 같아진다. frontmatter 경계도 CR·LF 줄로 정하므로 `---` 뒤를 그 문자로 이어 쓴 첫 줄은 frontmatter를 열지 않고, 그 문자는 64줄 상한에 세지 않는다 |
+| UTF-8 BOM으로 시작하는 대장의 자기 인용 | frontmatter에만 있는 값을 자기 인용한 행이 BOM 없는 대장처럼 `ssot-source-unsupported`가 되고, frontmatter의 기간도 `normalized_periods` 비교에서 빠진다 |
+
+테스트는 각 경우가 v0.31.0과 달라졌음을 확인하고, v0.30.0 캡처 파일과 합성 노트(표 바로 위아래에 붙은 글, frontmatter·BOM·CRLF·CR, 위 문자가 든 산문)에서는
+v0.31.0의 본문 처리를 끼워 넣은 실행과 출력 전체가 같음을 다섯 가지 옵션 조합으로 확인한다. 한 집합의 입력에서 확인한 것이며 모든 입력에 대한 증명은 아니다.
+남은 한계: `--normalize-periods`에서 사실 표를 모두 빼면 결과가 오히려 강해지는 행의 `via_ledger_table_only`는 더 좁은 경우로 남았고([아래](#기간-표현-정규화---normalize-periods) 한계),
+자기 인용의 frontmatter를 표를 뺀 뒤 정하는 위 순서도 그대로다.
+줄 나눔 규칙은 이 모듈의 `parse_ledger`(노트 바이트를 `bytes.splitlines`로 나눈다)에서 가져왔다. Python 문서는 `bytes.splitlines`가 ASCII 줄 경계(universal newlines의
+`\n`·`\r\n`·`\r`)에서 나누고 `str.splitlines`는 위 문자들에서도 나눈다고 적는다. 2026-10-27 Python 3.12.10에서 0~255 바이트 가운데 `bytes.splitlines`가 나누는 것은
+0x0A·0x0D뿐이었다. BOM은 `codecs`의 `utf-8-sig`(디코딩할 때 맨 앞 BOM 하나를 건너뛴다)와 맞췄다.
+
+#### 기간 표현 정규화 (`--normalize-periods`)
+
+`--normalize-periods`는 v0.31.0의 선택형 기능이다(기본 꺼짐). 리터럴 비교는 `2026-10-07`과 `2026. 10. 7.`, `2026년 3분기`와 `3Q26`을 다른 값으로 본다.
+켜면 값과 그 행이 인용한 노트 본문에서 기간 표현을 찾아 반열린 날짜 구간 [시작, 끝)으로 바꾸고, 행마다 `normalized_match`를 따로 낸다.
+값과 본문은 리터럴 비교와 같이 정규화한 뒤 위키링크를 대상 이름으로 바꾸고(본문은 별칭으로 바꾼 형태도) 인라인 코드·굵게 표시를 지운 형태에서만 기간을 찾는다.
+쓴 그대로의 형태는 보지 않으므로 본문의 `**2026년 3분기** 말에`나 `[[2026-Q3]] 초`처럼 기간과 수식어 사이에 표시가 끼어도 기간 전체로 색인하지 않는다.
+구간의 뜻은 `check`의 `valid_from`·`valid_until`과 같다. 해석은 표준 라이브러리 모듈 `vault_period.py`가 하며, 이 선택을 켤 때만 불러온다. 모델·네트워크 호출은 없다.
+
+```
+python <플러그인 루트>/skills/agentic-vault/scripts/vault_ssot.py --vault <볼트> check-support --path <대장.md> --normalize-periods [--fiscal-start 04]
+```
+
+API는 `check_support(vault, path, normalize_periods=True, fiscal_start=4)`다. `--fiscal-start`(`1`~`12` 또는 `01`~`12`, API는 정수 1~12)는 회계연도의 첫 달이며
+`--normalize-periods`와 함께만 쓴다. 범위를 벗어나거나 혼자 쓰면 다른 입력 오류처럼 stderr의 `{"error":"ssot_operation_unavailable"}`와 exit 1이다.
+API는 `fiscal_start`가 1~12의 정수가 아니거나 `normalize_periods=True` 없이 주어질 때, 그리고 `normalize_periods`·`primary_text_only`가 `bool`이 아닐 때 `SSOTError('invalid_opt_in')`을 낸다.
+`vault_period.py`를 불러오지 못하면(파일이 없거나 문법 오류 등으로 손상된 설치) API는 `SSOTError('period_normalizer_unavailable')`를 내고,
+CLI는 traceback 없이 같은 stderr 오류와 exit 1로 끝난다. `vault_period.parse`를 직접 부를 때 `fiscal_start`가 `None`도 1~12의 정수도 아니면 `PeriodError('invalid_fiscal_start')`,
+`text`가 문자열이 아니거나 1,048,576자를 넘으면 `PeriodError('invalid_text')`다(`PeriodError`는 `ValueError`의 하위 클래스다). 끄면 이 모듈을 불러오지 않으므로 기본 동작에는 영향이 없다.
+
+| 표현(예) | 구간 | `label_edtf` |
+|---|---|---|
+| `2026-10-07`, `2026.10.07`, `2026. 10. 7.`, `2026년 10월 7일` | [2026-10-07, 2026-10-08) | `2026-10-07` |
+| `2026년 3분기`, `2026 3/4분기`, `2026년 제3분기`, `2026년 3Q`, `3Q26`, `2026Q3` | [2026-07-01, 2026-10-01) | `2026-35` |
+| `2026년 상반기` / `2026년 하반기` | [2026-01-01, 2026-07-01) / [2026-07-01, 2027-01-01) | `2026-40` / `2026-41` |
+| `2026년 3분기말`, `2026년 3분기 말에`, `3Q26 말`, `2026년 상반기 말 기준` | 그 기간의 마지막 하루 | `2026-09-30`, `2026-06-30` |
+| `FY2026`, `FY26`, `2026 회계연도`, `2026 사업연도` (`--fiscal-start 04`) | [2026-04-01, 2027-04-01) | `2026-04/2027-03` |
+| `FY2026 Q3`, `FY2026 3분기`, `2026 회계연도 하반기` (`--fiscal-start 04`) | 회계연도 첫 달부터 센 분기·반기 | `2026-10/2026-12`, `2026-10/2027-03` |
+| `FY2026말`, `2026 회계연도 말` (`--fiscal-start 04`) | 회계연도의 마지막 하루 | `2027-03-31` |
+
+`label_edtf`는 `vault_period.parse(text, fiscal_start=None)`가 돌려주는 기록(`span`, `kind`, `label_edtf`, `start`, `end`, `reason`)의 이름표이며 check-support 출력에는 넣지 않는다.
+비교는 이름표가 아니라 날짜 구간으로 한다. 값에 기간 표현이 여럿이면 각각 비교해 가장 약한 결과를 낸다.
+
+기간 뒤의 수식어는 고정 목록에 있는 것만 알아본다. 기간 표현 바로 뒤의 `말`(붙여 쓰거나 띄어 쓴 것 모두)은 그 바로 뒤가 글자·숫자가 아니거나(끝, 공백, 문장 부호)
+`에`·`까지`·`부터`·`의`·`로`·`경`·`쯤`·`께`·`일`·`기준`·`현재`·`엔`으로 시작할 때만 마지막 하루다.
+`은`·`는`·`이`·`가`·`도`가 이어진 `말`은 낱말 `말`일 수 있어(`2026년 3분기 말도 안 되는`) 마지막 하루로 계산하지 않고 보류한다.
+`초`, 아래 표의 기간을 좁히는 말, 분기 수, 회계연도 옆의 `Q`·`H` 표시와 회계연도의 분기로 읽지 못하는 표기는 계산하지 않고 보류한다(아래 `period_qualifier`).
+`초과`는 기간 초가 아니므로 `이후`처럼 기간 전체로 두고, `초안`은 `초 안에`를 붙여 쓴 것일 수 있어 보류한다.
+목록에 없는 말은 알아보지 못하므로 그런 말이 붙은 값은 여전히 기간 전체로 비교될 수 있다(`2026년 3분기 늦게`, `2026년 3분기 종반`).
+이렇게 알려진 실패는 산문 목록 대신 [기간 정규화의 알려진 실패 목록](#기간-정규화의-알려진-실패-목록)에서 생성한 사례로 센다.
+`중`·`내`·`동안`만으로는 기간을 좁히지 않으므로 `2026년 3분기 중`은 그 분기 전체다. 그 뒤에 좁히는 말이 오면 보류한다(`2026년 3분기 중 마지막 달`).
+
+기간을 좁히는 말은 기간 바로 뒤(붙여 쓰거나 띄어 쓴 것)나 기간 뒤 `의`·`중`·`내`·`동안` 다음에 오면 보류하며, 그 뒤에 붙는 조사나 낱말은 보지 않는다(`후반에`, `끝까지`, `마지막 날`).
+다만 `시작`과 서수 뒤의 단위는 거기서 낱말이 끝나거나 조사가 붙을 때만 본다(`시작하는`·`첫 주문`은 보류하지 않는다).
+`의` 다음의 `말`·`초`도 마지막 하루로 계산하지 않고 보류한다(`2026년 3분기의 말`).
+
+| 기간을 좁히는 말 | 보류하는 예 | 기간 전체로 두는 예 |
+|---|---|---|
+| `후반`·`중후반`·`중반`·`전반`·`끝`·`마지막`·`막바지`·`막판`·`상순`·`중순`·`하순`(`초반`·`초순`은 `초`로 잡는다) | `2026년 하반기 후반`, `2026년 3분기 끝에`, `2026년 3분기의 마지막 날` | `2026년 3분기 전반적으로` |
+| 낱말 하나로 쓴 `시작`(조사가 붙은 것 포함) | `2026년 3분기 시작`, `시작부터`, `시작과 함께` | 동사로 쓴 `시작하는`·`시작된` |
+| `종료`·`마감`·`결산`·`개시`·`시작` 뒤의 `일`·`날`·`시`·`월` | `종료일`, `마감일`, `결산일`, `개시일`, `시작일`, `마감 시한`, `결산월` | `결산 실적`, `종료 예정` |
+| 서수(`첫`·`첫째`·`둘째`·`셋째`·`넷째`·`첫 번째`~`네 번째`) 뒤의 날·주·달 단위 | `첫날`, `첫 달`, `첫 2주`, `첫 두 달`, `첫 영업일`, `셋째 주`, `두 번째 달` | `첫 흑자`, `첫 출하`, `첫 주문` |
+| 기간 안의 달(`1월`~`12월`)과 달 목록(`7·8월`·`7~8월`·`7, 8월`), 주차와 달 차(`2주차`·`2주 차`·`3주째`·`1개월 차`) | `2026년 3분기 8월`, `FY2026 3월`, `2026년 3분기 7·8월`, `2026년 3분기 2주 차`, `2026년 3분기 3주째` | `2026년 3분기(7~9월)`, `2026년 3분기 2주 차질`·`2주 차량`·`2주 차례` |
+| `중`·`내`·`동안` 뒤의 위 말 | `2026년 3분기 중 마지막 달`, `2026년 하반기 동안 마지막 주`, `2026년 3분기 내 8월` | `2026년 3분기 중`, `2026년 3분기 중 첫 흑자` |
+| 기간 바로 앞의 영문 `late`·`early`·`mid`·`end of`·`start of`(사이에는 공백·줄바꿈·서식 문자·`-`만, 날짜 앞은 빼고) | `late 2026Q3`, `mid-FY2026`, `the end of FY2026` | `late 2026.10.07`, `chocolate 2026Q3` |
+
+목록의 꼴이면 기간을 좁히는 뜻이 아니어도 보류한다(`2026년 3분기 시작 예정`, `2026년 3분기 전반에 걸쳐`, `2026년 3분기 결산 일정`, `2026년 3분기 7월~9월`, `2026년 3분기 7~9월`, `2026년 3분기 2주 차이`).
+보류는 틀린 `equal`·`contained`를 내지 않으므로 좁히는 뜻을 놓치는 쪽보다 이쪽을 택했다. 다만 흔한 중립 용법이 있는 말은 좁은 꼴만 넣었다(`결산`이 아니라 `결산일`, `첫` 대신 `첫 달`).
+
+| `normalized_match` | 뜻 |
+|---|---|
+| `equal` | 인용 본문 어딘가에 값과 같은 구간이 나온다. `rows_supported`에 넣지 않는다 |
+| `contained` | 같은 구간은 없고, 값의 구간 안에 드는 본문 구간이 어딘가에 나온다(값 `2026년 3분기`, 본문 `2026.08.15`). `rows_supported`에 넣지 않는다 |
+| `none` | 값의 구간을 해석했지만 같거나 안에 드는 본문 구간이 없다. 본문 구간이 값보다 넓으면(값 `2026.08.15`, 본문 `2026년 3분기`) `none`이다 |
+| `abstain` | 값에서 찾은 기간 표현 가운데 구간으로 바꾸지 않은 것(아래 `reason`)이 있다. `reason`은 첫 이유 |
+
+`equal`·`contained`는 구간만 비교한 결과다. 값의 `이후`·`이전`·`부터`·`까지` 같은 수식어와 금액·주체 같은 나머지 부분은 비교하지 않는다
+(값 `2026년 3분기 이후 출시`와 본문 `2026년 3분기 출시`, 값 `2026년 3분기 매출 120억`과 본문 `2026년 3분기 매출 80억`도 `equal`).
+
+| `reason` | 뜻 |
+|---|---|
+| `no_year` | 연도 없는 분기·반기(`3분기`, `상반기`, `3Q`). `26년 3분기`·`'26년 상반기`처럼 두 자리 연도에 `년`을 붙인 것도 연도로 읽지 않아 여기에 든다. `년` 없이 쓴 1900~2099 밖의 수 뒤의 분기(`매출 1500 3분기 대비`의 `3분기`, `매출 1500 Q3 대비`의 `1500 Q3`)도 같다. 앞 문장의 연도를 채우지 않는다(`2025년 1분기와 3분기`의 `3분기`) |
+| `fiscal_start_undeclared` | `--fiscal-start` 없이 쓴 회계연도·사업연도·FY와 그 분기·반기 |
+| `quarter_basis_ambiguous` | 회계연도 첫 달이 1월이 아닐 때 달력 연도에 붙은 분기·반기. 달력 기준인지 회계 기준인지 알 수 없다 |
+| `relative_needs_anchor` | 당기, 전기, 전년 동기, 올해·금년·작년·내년, 이번·지난·다음 분기 같은 상대 표현. 기준 시점을 받지 않으므로 늘 보류한다 |
+| `multiple_periods` | 분기·반기의 목록·범위(`1~3분기`, `1·2분기`, `상·하반기`). 해석한 기간 바로 뒤에 목록 구분 기호(`,`·`/`·`·`·`ㆍ`·`・`·`및`·`과`·`와`)와 어느 표현으로도 읽지 못한 숫자나 `Q`·`H` 표시가 이어진 목록(`2026Q1·Q2`, `2026.03.05, 09.05`, `2026년 3월 5일과 9월 5일`, `2026.10.07/09`)도 같다. 앞 항목만으로 비교하지 않는다. 다만 구분 기호 뒤의 그 숫자와, 다음 기간 표현 전까지 나오는 다른 숫자·`Q`·`H` 표시가 모두 시각(`10:00`)이거나 아래의 개수면 목록으로 보지 않는다(`2026년 3분기, 120억`, `2026.10.07, 1차 납품`, `2026년 3분기, 2공장 가동`). 하나라도 아니면 목록으로 본다(`2026.10.07, 10:00, 10.09`, `2026.10.07, 10:00~10.09`, `2026년 3분기, 120억 Q4`는 보류). 개수는 `억`·`만`·`천`(이어 쓴 `3만 5천 원` 포함)·`원`·`개`·`명`·`건`·`차`·`시`·`%`·`공장`이 붙은 수다. 단위에서 낱말이 끝나야 하고(뒤가 글자·숫자가 아니거나 `에`·`부터`·`의`·`은`·`만` 같은 조사이며, 단위 바로 뒤의 `일`은 조사가 아니라 날로 본다. 서식 문자는 건너뛰고 본다) 바로 뒤에도, 그 조사 뒤에도 기간 낱말이 오지 않아야 한다. 기간 낱말은 `년`·`연도`·`연간`·`개월`·`개년`·`분기`·`반기`·`학기`·`세기`·`시즌`·`시간`·`기간`·`회계`·`사업 연도`로 시작하는 말과, 낱말 하나로 쓴(`간`·`차`·`째`가 붙은 것 포함) `월`·`일`·`주`·`날`·`달`·`해`다. 그래서 `10.09 시행`·`2027 시점`·`3개월`·`3개년`·`2시즌`·`15%p`·`4개 분기`·`4개의 분기`·`3만 년`·`3천의 일`·`3개 주`·`2차 연도`는 개수가 아니고, 조사 뒤의 기간 낱말이 그 수와 묶이지 않는 말이어도(`2026년 3분기, 120억은 연간 목표`) 개수로 보지 않아 보류한다. 0으로 시작하는 수(`09`), 쉼표 뒤가 세 자리가 아니거나 점이 둘 이상인 수, 날짜 꼴(점 앞이 1~12, 뒤가 1~31: `10.09`, `1.5`)이나 연도 꼴(쉼표 없는 정수부가 1900~2099: `2027`, `2026.5`)의 수도 개수로 보지 않는다. 그래서 날·월·연도·분기·주나 `Q`·`H` 표시로 적은 수는 늘 항목으로 본다(`2026년 3분기, 3개월`, `2026.10.07, 10.09 시행`, `2026년 3분기, 2027 시점`은 보류) |
+| `period_qualifier` | 기간 바로 뒤(붙여 쓰거나 띄어 쓴)에 계산하지 않는 말이 온다. 기간 초를 뜻하는 `초`(`2026년 3분기 초`, `초안`도 포함), 위 조사 목록에 없는 글자가 이어지는 `말`(`2026년 3분기 말레이시아`, `2026년 3분기 말도 안 되는`), 위 표의 기간을 좁히는 말(`2026년 하반기 후반`, `2026년 3분기 마지막 날`, `2026년 3분기 종료일`, `2026년 3분기 첫 달`), 기간 뒤 `의`·`중`·`내`·`동안` 다음의 이런 말(`2026년 3분기의 끝`, `2026년 3분기의 말`, `2026년 3분기 중 마지막 달`), 기간 바로 앞의 영문 `late`·`early`·`mid`·`end of`·`start of`(`late 2026Q3`), 분기 수(`4분기 연속`, `3분기째`, `3분기 만에`)다. 회계연도 옆의 `Q`·`H` 표시와 분기·반기 표기도 같다. 회계연도 뒤에 붙이거나 공백·탭 한 칸만 두고 쓴 `Q1`~`Q4`, 분기(`3분기`, `3/4분기`, `제3분기`), 반기(`상반기`·`하반기`)만 회계연도의 분기·반기로 읽는다(`FY2026 Q3`). 회계연도 앞의 표시(`Q3 FY2026`, `1H/FY26`, `3분기 FY2026`), 뒤의 `H1`·`1H`·`3Q`(`FY2026 H1`), 글자·숫자가 아닌 문자(공백·문장 부호·기호·서식 문자)와 가운뎃점(`·`·`ㆍ`·`ᆞ`·`・`)을 몇 개든 사이에 두거나 `의`·`및`·`과`·`와`를 하나까지 끼워 이은 표시(`FY2026/Q3`, `FY2026의 Q3`, `Q3_FY2026`, `FY2026 & Q3`, `FY2026 [Q3]`, `FY2026ㆍQ3`, `Q3 및 FY2026`, 직접 부를 때의 `FY2026  Q3`. 표를 뺀 자리의 NUL은 잇지 않는다), 표시 안의 공백(`FY2026 Q 3`), 읽지 못하는 표기(`FY2026 Q5`, `FY2026 Q0`, `FY2026 5분기`, `FY2026 Q3Q4`)는 회계연도 전체로 비교하지 않고 보류한다. 두 회계연도 사이의 표시는 그 표시나 그 일부가 뒤 회계연도 앞의 표시로 읽히면 뒤 회계연도의 것으로 본다. 이때 표시와 뒤 회계연도 사이는 공백과 `/`·`,`·`.`·`:`·`_`·`-`·`(`·가운뎃점(`·`·`ㆍ`·`ᆞ`·`・`)·`의`만 이음 문자로 본다. 그래서 `FY2025, Q1 FY2026`·`FY2025·1H FY2026`·`FY2025/Q4 FY2026`·`2025 회계연도, Q1 2026 회계연도`·`FY2025 & Q1 FY2026`에서 앞 회계연도는 적힌 대로 비교하고 `Q1 FY2026` 등은 보류한다. 앞 회계연도의 분기·반기로 읽는 꼴(`FY2025 Q4 FY2026`)과, 앞 회계연도 바로 뒤나 공백·탭 한 칸 뒤의 `H1`~`H4`·`1Q`~`4Q`·`1H`~`4H`(`FY2025 H1 FY2026`)는 앞 회계연도의 것으로 읽는다. 앞 회계연도의 숫자에 붙여 쓴 `FY2025Q5 FY2026`의 `Q5`도 뒤 회계연도 앞의 표시로 읽히지 않아 앞 회계연도의 것이다. 표시와 다른 회계연도 사이에 공백·서식 문자만 있으면 그 표시가 어느 회계연도의 것인지 알 수 없으므로 그 회계연도도 통째로 비교하지 않고 보류한다(`FY2025 Q4 FY2026`·`FY2025 H1 FY2026`의 `FY2026`, 직접 부를 때 `FY2025  H1 FY2026`(두 칸)의 두 회계연도). 표시처럼 이은 분기·반기 목록 옆의 회계연도도 같다(`FY2026 1·2분기`, `1·2분기 FY2026`, `FY2026, 상·하반기`). `FY2025 Q4, FY2026`처럼 표시와 다른 회계연도 사이에 구분 기호가 있으면 그 회계연도는 적힌 대로 비교한다 |
+| `partial_range` | 해석한 기간과, 어느 표현으로도 읽지 못한 숫자 조각(또는 `Q`·`H` 표시)이 범위 기호나 `부터`·`에서`로 이어졌다. 범위 기호는 물결표(`~`·`〜`·`∼`·`～`·`˜`·`⁓`·`〰`)와 하이픈·대시(`-`·`‐`·`‑`·`‒`·`–`·`—`·`―`·`−`·`⸺`·`⸻`와 그 전각·소형·세로쓰기 꼴)이며 `--`처럼 겹쳐 써도 같다(`2026.10.07~10.09`, `2026. 1. 1.~3. 31.`, `2026년 1월 1일~3월 31일`, `2026-10-07~09`, `10.07~2026.10.09`, `2026.10.07에서 10.09까지`, `2026.01.01--03.31`). 한쪽 끝만으로 비교하지 않으며, 빠진 연도를 다른 끝에서 채우지 않는다 |
+| `invalid_date` | 없는 날짜(`2026.02.30`, `2026-13-01`) |
+
+| 필드(켤 때만) | 뜻 |
+|---|---|
+| `normalized_periods` | 행 목록. 해석된 출처 노트와 비교한 행 가운데 값에 기간 표현이 있는 행만 넣는다. 항목마다 `line`, `normalized_match`, `equal`·`contained`이면 `via`(그 구간이 있던 노트 경로, 정렬), `abstain`이면 `reason`. 아래 두 표시는 해당할 때만 붙는다. 값·구간·이름표는 넣지 않는다 |
+| `normalized_periods[].via_ledger_table_only` | `via` 가운데 사실 표를 가려낼 수 있는 다른 대장의 경로로서, 그 행이 인용한 다른 대장의 사실 표를 모두 빼고(`--primary-text-only`와 같은 비교) 다시 비교하면 `via`에서 빠지거나 `normalized_match`가 약해지는 경로(정렬). 그 대장의 사실 표만 빼도 그렇게 되는 경로도 포함한다. 그 경로의 결과가 다른 대장의 사실 표(`valid_from`·`valid_until`·`recorded` 칸 포함)에 기댄다는 뜻이다. 다만 사실 표를 모두 빼면 결과가 오히려 강해지는 행에서는 자기 산문으로 뒷받침하는 경로에도 붙을 수 있다(아래 한계). 값의 구간이 여럿이면 그중 한 구간만 사실 표 밖 어디에도 없어도 붙는다(값 `2026.01.01~2026.03.31`에서 `2026-01-01`은 그 대장의 `valid_from` 칸에만, `2026.03.31`은 그 대장의 산문에 있을 때). `parse_ledger`가 본문을 거절한 대장(`ledger_tables_unseparated`)은 사실 표를 뺄 수 없어 붙지 않는다. 리터럴 결과와 관계없이 붙는다 |
+| `normalized_periods[].incomplete` | `["period_text_limit"]`. 인용 노트의 정규화 형태가 `vault_period`가 읽는 길이(1,048,576자)를 넘어 그 노트를 이 행의 기간 비교에서 뺐다(`--primary-text-only`를 켜도 같다). 결과는 나머지 노트만으로 낸 것이다 |
+| `period_convention` | `fiscal_start`(없으면 `null`)와 비교 범위·한계를 적은 고정 문자열 `scope` |
+
+끄면(기본값) 두 필드가 없고 `vault_period.py`를 불러오지도 않는다. 켜도 `rows_*` 수, 경고와 `issue_id`, `ledger_table_only`, exit code는 그대로다.
+NFKC 정규화로 256 KiB 이하 노트가 1,048,576자를 넘어도 그 노트만 기간 비교에서 빼고(`incomplete`) 오류로 끝내지 않는다.
+테스트가 v0.30.0 캡처와 켠 출력·끈 출력을 비교한다. 기본값에서는 다른 대장의 사실 표 칸(`valid_from`·`valid_until`·`recorded` 포함)도 본문 기간으로 쓰고,
+결과가 그 표에 기대는 경로를 `via_ledger_table_only`로 표시한다. `--primary-text-only`를 함께 켜면 이 비교도 다른 대장의 사실 표를 뺀 본문만 보므로 그 표시는 붙지 않는다.
+다만 `parse_ledger`가 본문을 거절한 대장(`ledger_tables_unseparated`에 나오는 노트)은 사실 표를 뺄 수 없어 두 모드 모두 본문 전체(사실 표 포함)와 비교하고,
+그 표에만 있는 구간이어도 `via_ledger_table_only`를 붙이지 않는다.
+대장의 `valid_from`·`valid_until`·`recorded` 칸은 지금처럼 `YYYY-MM-DD`만 받는다(`2026.10.07`·`2026년 3분기`는 여전히 `ssot-invalid-date`). 정규화 결과는 `check`나 조립(`vault_assembly.py`)의 유효기간 판단에 쓰지 않는다.
+
+이름표는 [Library of Congress EDTF](https://www.loc.gov/standards/datetime/)(ISO 8601-2의 기능을 정리한 사양, 2019-02-04)에서 빌렸다.
+Level 2 하위 연도 묶음의 33~36(분기)·40~41(반기) 코드와 Level 0 구간 표기 `시작/끝`이다.
+EDTF 페이지는 각 코드의 길이(3·6개월)만 적고 어느 달인지는 적지 않으며, 회계연도 코드와 하위 연도 코드를 구간 끝점으로 쓴 예도 없다.
+그래서 분기·반기를 1월부터 세는 것은 이 플러그인이 정한 규칙이고(ISO 8601-2 원문은 읽지 않았다), 회계연도는 월 단위 구간(`2026-04/2027-03`)으로만 적는다.
+EDTF 구간은 끝을 포함하는 정밀도 표기라 반열린 구간과 끝이 한 단위 어긋난다. 비교는 반열린 구간으로만 한다.
+
+한계:
+
+- 분기·반기는 달력 연도 기준이다. 회계연도가 1월에 시작하지 않는 회사(3월 결산 등) 문서의 `3분기`는 회계연도 기준이다. 그런 문서에는 `--fiscal-start`로 첫 달을 주어 달력 연도의 분기·반기를 보류하게 한다.
+- `FY2026`은 2026년에 시작하는 회계연도로 본다. 끝나는 해로 이름 붙이는 조직(예: 미국 연방 회계연도)과는 1년 어긋난다. 두 자리 연도(`3Q26`, `FY26`)는 2000~2099년으로 본다. 0으로 시작하는 네 자리 연도(`FY0026`, `3Q0026`)는 읽지 않는다.
+- `2026년 10월`·`2026년` 같은 월·연 단위, 연도 없는 날짜(`10월 7일`), 빗금 날짜(`2026/10/07`), 월·일이 한 자리인 ISO 표기(`2026-10-7`), 위 표에 없는 영문 표기(`1H26`, `Q3 2026`, `2026년 Q3`)는 해석하지 않는다. 값에 그런 표현만 있으면 목록에 없다.
+- 분기·반기 앞에 `년` 없이 쓴 연도는 1900~2099만 그 연도로 읽는다(`2026 3분기`·`2026Q3`·`2026 Q3`·`2026-Q3`은 읽고, `매출 1500 3분기 대비`의 `3분기`와 `매출 1500 Q3 대비`의 `1500 Q3`은 `no_year`). 분기 뒤에 붙여 쓴 네 자리 연도(`3Q1500`)에는 이 제한이 없다. 비교 전에 줄바꿈을 포함한 공백을 한 칸으로 줄이므로, 한 줄 끝의 `2026`과 다음 줄 첫머리의 `3분기`도 `2026 3분기`로 읽힌다.
+- 범위(`2026.01.01~2026.03.31`)는 한 구간으로 합치지 않고 양 끝을 각각 비교한다. `partial_range`는 범위 기호나 `부터`·`에서`가 해석한 기간 바로 옆(사이에 공백·마침표·서식 문자와 괄호·대괄호 안의 요일 하나만 허용: `(수)`, `(수요일)`, `(Wed)`, `[수]`, `(水)`)에 있고, 건너편이 숫자(또는 `Q4`·`H2`)로 시작하거나(`~10.09`, `~3월 31일`, `~Q4`, `에서 10.09까지`) 숫자나 숫자 뒤의 `.`·`일`·`월`·`년`으로 끝날 때(`10.07~`, `10월 7일부터`, `2026년 10월~2026.12.31`, `2026년~2027년 3분기`)만 잡는다. 시각이 끼거나(`2026.10.07 09:00~10.09`) 건너편이 글자로 시작하면(`2026.10.07~익일`) 적힌 끝만 비교한다. 범위가 아닌 음수(`2026년 3분기 -12억`), `2026.10.07부터 3일간`, `2026.10.07에서 3일 연장`, 비율이 이어진 `2025년 3분기에서 12% 증가`·`FY2026에서 10% 성장`, 한 회계연도를 적은 `FY2026-27`도 같은 모양이라 보류한다(`2025년 3분기 대비 12% 증가`는 기간만 비교한다). `12개월`·`1년` 같은 기간 길이는 기간 표현이 아니므로 합치지 않는다.
+- 목록은 해석한 기간 바로 뒤(사이에 공백·마침표·서식 문자와 괄호·대괄호 안의 요일 하나만 허용: `(수)`, `[수]`)의 구분 기호(`,`·`/`·`·`·`ㆍ`·`・`·`및`·`과`·`와`) 다음이 어느 표현으로도 읽지 못한 숫자(또는 `Q2`·`H2`)일 때만 잡는다. 목록이 아니어도 같은 모양이면 보류한다(`FY2026/27`, `2026년 3분기, 3개월`, `2026.10.07, 5대`). 구분 기호 뒤가 시각이거나 위 `multiple_periods`에 적은 개수이고 다음 기간 표현 전까지의 다른 숫자도 모두 그러면 목록으로 보지 않고 기간만 비교한다(`2026-10-07, 10:00`, `2026.10.07 / 14:00`, `2026년 3분기, 120억`, `2026년 상반기, 3개 신규 고객`, `2026.10.07, 1차 납품`, `2026년 3분기, 2공장 가동`). 그 단위 목록에 없는 단위(`대`·`회`·`분`·`kg` 등)와 개수로 보지 않는 꼴(`1.5억`, `2000만 원`, `09시`, `3시간`, `15%p`)은 여전히 보류하므로 `2026.10.07, 10시 30분`도 보류한다. 단위만 보고 판단하므로 `9만`이 '9일만'의 뜻이어도 수 `9만`으로 보아 앞 항목만 비교하고, 숫자 없이 쓴 기간은 다른 곳처럼 읽지 않는다(`2026.10.07, 10시부터 일주일`은 `2026.10.07`만 비교한다). 구분 기호 없이 쓴 `2026-10-07 10:00`·`2026년 3분기 120억`은 기간만 비교한다. 뒤 항목을 어느 표현으로든 읽으면 그 기록대로 다룬다(`2026.03.05, 2026.09.05`는 두 날짜를 각각 비교하고, `2026년 1분기, 2분기`의 `2분기`는 연도가 없어 `no_year`).
+- 표의 기간 표현은 공백·탭 한 칸까지만 사이에 두고 읽고, 보류 확인(수식어, 분기 수, 회계연도 옆 `Q`·`H` 표시, 범위 기호, 목록 구분 기호)은 공백이 몇 칸이든 보며 서식 문자(유니코드 15.0의 Cf 범주: U+200B·U+2060·U+00AD·U+FEFF 등)도 건너뛴다. 그래서 `vault_period.parse`를 직접 부를 때 `FY2026  Q3`(두 칸)는 회계연도의 분기로 읽지 않고 보류하고, `말` 앞에 서식 문자가 끼면 마지막 하루로 계산하지 않고 보류한다. 표의 기간 표현 안에 낀 서식 문자는 건너뛰지 않으므로 그 표현은 읽히지 않는다(`2026`과 `.10.07` 사이면 날짜가 없고, `2026년`과 ` 3분기` 사이면 `3분기`만 `no_year`). check-support는 공백을 한 칸으로 줄여 넘기고, 서식 문자는 그대로 남는다.
+- `equal`·`contained`는 같은(또는 안쪽) 구간이 인용 본문 어딘가에 나온다는 뜻일 뿐 같은 사실에 대한 서술이라는 뜻이 아니다. 값의 `이후`·`이전`·`부터`·`까지` 같은 수식어와 금액·주체 같은 나머지 부분은 비교하지 않고, `contained`는 본문이 길수록 쉽게 나온다. 그래서 둘 다 `rows_supported`에 넣지 않는다.
+- `말`·`초`와 기간을 좁히는 말은 글자로 판단한다. `초안`(`초 안에`일 수 있다)과 `2026년 3분기 3주 차이`·`2주 차인`(`차`에 서술격 조사가 붙었을 수 있다)은 보류한다. `은`·`는`·`이`·`가`·`도`가 이어진 `말`은 기간 끝을 뜻해도(`2026년 3분기 말이 되면`) 마지막 하루로 계산하지 않고 보류하므로 놓침이 는다. 기간 뒤의 `이후`·`까지`·`중`·`내`·`동안`처럼 기간을 좁히지 않는 말은 보류 사유가 아니어서 그 기간 전체로 비교한다(위 항목). 목록에 없는 좁히는 말(`2026년 3분기 늦게`)이나, 기간과 그 말 사이에 `의`·`중`·`내`·`동안` 밖의 말이 낀 것(`2026년 3분기 중에 마지막 달`)도 알아보지 못해 그 기간 전체로 비교한다. 그런 실패 가운데 생성한 사례로 세는 것은 [기간 정규화의 알려진 실패 목록](#기간-정규화의-알려진-실패-목록)에 있다.
+- 본문의 보류 표현(연도 없는 `3분기`, `올해`, `당기`, `period_qualifier`로 보류한 `2026년 하반기 후반`·`FY2026/Q3` 등)은 비교에 쓰지 않는다. 그런 표현만 있는 본문은 `none`이다. 본문 범위의 한쪽 끝이나 목록의 뒤 항목을 읽지 못해도 적힌 기간은 비교에 쓴다(본문 `2026.10.07~10.09 출장`과 값 `2026.10.07`, 본문 `2026Q1·Q2 실적`과 값 `2026년 1분기`는 `equal`).
+- 상대 표현은 고정 낱말 목록으로 찾는다. `당기`·`전기`는 앞뒤에 한글이 붙지 않은 낱말만 보지만, 값의 `전기 설비`처럼 뜻이 다른 낱말도 보류로 잡는다.
+- `3분 지연` 같은 분(分) 단위는 분기가 되지 않는다. 띄어 쓰지 않은 `3분기다렸다`·`3분기록`도 막지만 다른 붙여 쓰기는 분기로 읽을 수 있다.
+- 정제 품질 검사(`check_compile`, `preserve-check`)의 숫자 추출은 바뀌지 않는다. 그쪽에서 `2026년 3분기`는 여전히 `2026`과 `3분`으로 추출된다.
+- 아직 알아보지 못하는 꼴이 있다. 모두 틀린 `equal`·`contained`를 낼 수 있다. 생성한 사례로 세는 것(낱말로 회계연도와 이은 표시 `FY2026 중 Q3`·`FY2026 기준 3분기`, 회계연도 뒤에 표시를 붙인 꼴을 공백으로 나열한 `FY2026/Q3 FY2027/Q1`에서 앞의 `FY2026` 등)은 [기간 정규화의 알려진 실패 목록](#기간-정규화의-알려진-실패-목록)에 수와 함께 있다. 그 밖에 표시 앞뒤에 서로 다른 이음 문자가 있으면(`FY2025, Q1 & FY2026`) 표시를 앞 회계연도의 것으로 보아 뒤의 `FY2026`을 회계연도 전체로 비교한다. 공백만으로 이은 목록(`2026Q1 Q2`, `FY2026 Q3 Q4`)과 위 구분 기호 밖의 목록(`2026.10.07; 10.09`, `2026.10.07 또는 10.09`)은 앞 항목만, 앞 항목을 읽지 못하는 목록(`09.05, 2026.03.05`)은 뒤 항목만 비교한다. 가까운 끝이 글자로 끝나는 범위(`Oct~2026.12.31`, `2026년 10월 초~2026.12.31`)와 괄호 안에 요일이 둘 이상인 범위(`2026.10.07(수·목)~10.09`)는 적힌 한쪽 끝만 비교한다. 낱말 안에 낀 서식 문자(`마지막`의 `마`와 `지막` 사이)는 건너뛰지 않아 그 말을 알아보지 못한다. 기간 앞의 영문 수식어는 `late`·`early`·`mid`·`end of`·`start of`만 보며(`beginning of FY2026`, `late in 2026Q3`은 보지 않는다), 날짜 앞의 것은 날 단위에서 좁히는 말이 아니라고 보아 보지 않는다. `parse_ledger`가 거부해 사실 표를 뺄 수 없는 대장(`ledger_tables_unseparated`, 예: 사실 표가 9개인 대장)은 `--primary-text-only`에서도 통째로 비교하고 `via_ledger_table_only`도 붙지 않는다.
+- `--primary-text-only` 없이 켜면, 다른 대장의 사실 표를 모두 빼고 다시 비교한 결과가 오히려 강해지는 행에서는 자기 산문으로 그 행을 뒷받침하는 경로에도 `via_ledger_table_only`가 붙을 수 있다. 비교는 결과가 약해졌는지만 보기 때문이다. 표를 뺀 자리의 위아래 글이 더는 이어지지 않으므로([위](#표를-뺀-자리와-줄-나눔)) v0.31.0 문서의 예(`L1`의 본문이 `기준 연도 2026년`, 사실 표, `3분기 계획은 별도.` 순)는 이제 생기지 않는다. 남은 경우는 사실 표 자신의 첫 줄이 바로 위 줄의 기간을 꾸밀 때다. 예: 대장 `L1`의 `기준 연도 2026년 3분기` 바로 아래 줄이 앞 `|` 없이 `말 | subject | relation | value |`로 시작하는 사실 표의 머리글이고, 사실 표가 있는 대장 `L2`의 산문에 `점검 2026.09.15 완료.`가 있으면, 두 대장을 인용한 값 `2026년 3분기`는 `contained`다(`L1`은 `3분기 말`을 마지막 하루로 읽고 `via`는 `L1`·`L2`). 사실 표를 모두 빼면 `L1`의 `2026년 3분기`가 분기 전체로 읽혀 `equal`(`via`는 `L1`만)이 되므로, 산문의 `2026.09.15`로 뒷받침하는 `L2`가 `via`에서 빠져 `via_ledger_table_only`로 표시된다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-27 기준). 근거는 단위 테스트와 생성한 사례의 합성 자료뿐이다.
+
+#### 기간 정규화의 알려진 실패 목록
+
+`tests/test_vault_period_metamorphic.py`는 위 한계 가운데 낱말 목록으로 만들 수 있는 것을 산문 대신 생성한 사례로 세어 고정한다.
+방법은 [CheckList](https://aclanthology.org/2020.acl-main.442/)(Ribeiro·Wu·Guestrin·Singh, ACL 2020, arXiv 2005.04118) §2.2·§2.3의 불변 시험(INV)과 방향 기대 시험(DIR)에서 빌렸다.
+작은 낱말 목록의 데카르트 곱(`itertools.product`, 표준 라이브러리만)으로 사례를 만들고, 정답 표지 없이 출력끼리의 관계만 본다. 비교의 세기는 `none` < `contained` < `equal`이고 보류는 늘 안전하다.
+DIR는 기간 뒤의 좁히는 말(위 표의 말과 목록 밖의 말), 기간 앞의 영문 수식어, 구분 기호 뒤의 기간 단위 항목(개수처럼 보이는 `10.09 시행`·`2027 시점`·`4개 분기`·`4개의 분기`·`3만 년` 포함)이 붙으면 기간 전체를 더는 비교하지 않는지와, 공백만 둔 두 회계연도 사이의 표시가 어느 회계연도도 통째로 남기지 않는지를 본다.
+날짜 꼴은 좁히는 말 시험에서 뺀다. 날 안의 시각은 날 단위에서 기간을 좁히지 않는다는 선언한 규칙이며 증명한 성질은 아니다.
+INV는 기간을 좁히지 않는 말, 구분 기호 뒤의 시각·개수가 결과를 바꾸지 않는지, 회계연도와 표시를 어떤 이음 문자(`ㆍ`·`ᆞ` 포함)로 이어도 정식 꼴(`FY2026 Q3`)의 구간이나 보류만 나오는지, 명시적 구분 기호를 둔 두 회계연도의 순서를 바꿔도 구간이 같은지를 본다.
+
+알려진 실패는 `unittest.expectedFailure`로 숨기지 않고 톱니(ratchet)로 둔다. `KNOWN_FAILURES`는 모든 사례가 실패하는 낱말 목록 항목을 관계마다 적는다.
+관계마다 실패한 사례 집합이 그 항목이 만드는 사례 집합과 같아야 하고, 그 수는 `KNOWN_FAILURE_COUNTS`에 따로 고정한다. 새 실패가 생겨도, 고쳐서 실패가 사라져도 시험이 실패하므로 고친 사람이 그 항목을 지운다.
+
+| 관계 | 사례 수 | 알려진 실패(2026-10-27 측정) | v0.31.0의 실패 |
+|---|---|---|---|
+| DIR 목록에 있는 좁히는 말 | 1,419 | 0 | 0 |
+| DIR 목록 밖의 좁히는 말 | 561 | 264 (`늦게`·`일찍`·`종반`·`후기`·`막달`·`마무리 단계`·`첫머리`·`이른 시기`) | 537 |
+| DIR 기간 앞의 영문 수식어 | 77 | 0 | 77 |
+| DIR 구분 기호 뒤의 기간 단위 항목(개수처럼 보이는 항목, 앞에 시각·개수나 범위 기호가 있는 것 포함) | 9,240 | 0 | 0 |
+| DIR 두 회계연도 사이의 표시 | 74 | 16 (`FY2025/Q3 FY2026/Q1` 꼴) | 74 |
+| INV 기간을 좁히지 않는 말 | 592 | 0 | 114 |
+| INV 구분 기호 뒤의 시각·개수 | 1,008 | 0 | 1,008 |
+| INV 회계연도와 표시 사이의 이음 문자 | 1,764 | 108 (낱말 `중`·`기준`·`그리고`로 이은 것) | 864 |
+| INV 두 회계연도의 순서 | 40 | 0 | 0 |
+
+같은 파일의 `PeriodDifferentialTests`는 생성한 사례와 기존 기간 시험(`tests/test_vault_period.py`·`tests/test_vault_ssot.py`)의 문자열을 v0.31.0 태그의 `vault_period.py`(`git show`로 임시 모듈에 읽는다)와 지금 모듈로 함께 읽는다.
+값이나 인용 본문으로 쓸 때 비교가 세지는 글은 v0.31.0이 지나치게 보류한 꼴(`초과`, `2주 차질`·`차량`·`차례`, 구분 기호 뒤의 시각·개수)뿐이어야 하고, 그 글도 v0.31.0이 기간만 읽은 결과와 같아야 한다. 2026-10-27에는 시험 밖에서 더 큰 차분을 따로 돌렸다. 릴리스 후보 검토가 찾은 결함(`ㆍ`·`ᆞ`로 표시와 이은 회계연도를 통째로 비교함, 표를 뺀 자리의 NUL을 이음 문자로 읽음, 조사로 기간 낱말과 이은 개수를 개수로 봄)을 고친 `7c98d89`를 v0.31.0과, 그리고 v0.31.0에 선언한 회복 세 가지만 넣은 기준(구분 기호 뒤 시각·개수 규칙은 모듈의 정규식을 쓰지 않고 위 문서대로 문자열 검사로 다시 짰다)과 맞대어, 무작위 낱말 열 4,000,000개와 고정 목록의 전수 곱·NUL 삽입 1,873,638개(기간·이음 문자·뒷말, 표시나 앞말·이음 문자·기간, 두 회계연도 사이의 표시, 기간·구분 기호·개수·조사·뒷말의 곱과 그 표본 16,000개의 모든 자리에 NUL을 하나씩 넣은 글. `ㆍ`·`ᆞ`·NUL·조사와 선언한 회복을 포함한다)를 `fiscal_start` 없음·1·4·12로 23,494,552번 읽었다(서로 다른 글 5,245,718개). 그 기준보다 세게 비교된 읽기는 0번이어서 v0.31.0보다 세게 비교된 608,048번은 모두 선언한 회복 안의 일이었고, NUL이 든 글 1,195,544개는 모두 NUL로 나눈 조각을 따로 읽은 것과 같았으며, 모듈의 목록 검사 2,254,825번은 모두 다시 짠 규칙과 같았다. 같은 글로 수정 전 후보(`5d271ea`)를 읽으면 세 검사가 1,159,656번·249,277번·1,036,962번 어긋났다. 생성한 글에서 확인한 것이며 모든 입력에 대한 증명은 아니다.
+CI(`.github/workflows/tests.yml`의 `unittest` 작업)는 태그가 오도록 전체 기록을 받아(`fetch-depth: 0`) 이 시험을 실행한다.
+git이 없거나 태그가 없는 checkout(릴리스 ZIP, 태그를 받지 않는 얕은 복제 등)에서는 이유를 밝히고 건너뛴다.
+
+```
+python -m unittest tests.test_vault_period_metamorphic -v
+```
+
+한계: 낱말 목록은 손으로 만들었으므로 수는 그 목록이 만든 사례의 실패를 센 것이며, 실제 볼트의 오탐률이 아니다. 목록에 없는 꼴의 실패(위 한계의 범위·목록 꼴 등)는 세지 않는다.
+이 시험은 `vault_period.parse`만 부르고 `vault_ssot.py`를 불러오지 않으며, 기본 `check-support` 경로는 `--normalize-periods` 없이 `vault_period.py`를 불러오지 않는다.
+
+### 경고 우선 원칙
+
+두 검사는 경고로만 시작한다. 차단(fail-closed) 승격은 실제 무해 자료의 benign replay에서 오탐 0건을 확인하고 사람이 승인한 뒤에만 검토한다.
+이번 버전의 두 경고 코드는 lint `WARNING_CODES`·`PROMOTABLE_CODES`에 없어 `warning_policy.levels`나 인증서로 승격할 수 없다.
+`fabrication_candidate_rate`도 차단 기준이 아니다. 경고 수나 비율만 보고 정제본·대장을 고치거나 원본을 옮기지 않는다.
+
+### 한계
+
+- literal은 진실이 아니다. 원본에 있는 값이라도 맞는 사실이라는 보장이 없고, 원본에 없는 값이 곧 틀린 값도 아니다.
+- 바꿔 쓰기, 단위·형식 차이(`125,000`과 `125000`, `2026-10-07`과 `2026.10.07`, `12개월`과 `1년`)는 놓침과 오탐을 모두 만든다.
+  날짜·분기 표기 차이는 `check-support --normalize-periods`가 따로 보여 주지만 리터럴 결과는 바꾸지 않는다.
+- 이름은 구조화 label·위키 대상만 다루는 literal 비교이며 언어학적 NER이 아니다. 조사가 붙은 이름(`홍길동은`)은 다른 literal로 보아 오탐이 되고,
+  정제본의 개념 위키링크도 원문에 없는 이름으로 잡히기 쉽다.
+- `check-support`는 값이 출처 본문 어딘가에 있는지만 본다. 같은 주체·관계·기간에 대한 서술인지, 부정문인지는 판단하지 않는다.
+  행의 상태(확정·기각 등)와 관계없이 모든 행을 같은 방식으로 본다.
+- 기본값은 다른 대장의 사실 표에 있는 값도 뒷받침으로 센다. 두 대장이 서로를 출처로 인용하면 원문 근거 없이 서로의 행을
+  뒷받침할 수 있고, 기본값에서는 `ledger_table_only`로만 드러난다. 뒷받침되지 않은 것으로 세려면 `--primary-text-only`를 켠다.
+- `ledger_table_only`는 표 구조만 보는 규칙이며 출처 계보(provenance)를 판정하지 않는다. 대장의 산문(사실 표 밖 본문)이나
+  대장 값을 옮겨 적은 일반 요약 노트를 거친 값은 1차 근거로 센다. 사실 표가 아닌 본문이 PROV-DM이 말하는 1차 출처라는 뜻도 아니다.
+- `parse_ledger`가 상한(사실 표 8개, 행 256개, 열 32개, 칸 4 KiB) 초과나 NUL 문자로 거절하는 노트는 사실 표가 없는 노트로 본다.
+  열·칸 상한은 사실 표가 아닌 줄에도 걸린다([위](#다른-대장의-사실-표에만-있는-값)). `--primary-text-only`를 켜면 그런 인용 노트를
+  `ledger_tables_unseparated`에 경로와 이유로 적는다. 그런 노트의 표, 코드 펜스·들여쓰기 안의 표, `subject`·`relation`·`value`(또는 별칭) 열이 없는 표에 있는 값은 1차 근거로 센다.
+- 경계 규칙은 값의 처음·끝 글자가 ASCII 영숫자일 때만 적용된다. `-5`처럼 부호로 시작하는 값은 앞쪽 경계를 보지 않아
+  `10-5` 같은 범위 표기 안에서도 일치로 센다.
+- v0.34.0부터 `--bind-subject`의 주어만 왼쪽 경계를 하나 더 본다. 첫 글자가 ASCII가 아닌 글자(`isalpha`)인 주어는
+  바로 앞이 글자이면 일치로 보지 않는다(`이가나다전기`에는 주어 `가나다전기`가 없다). UAX #29 WB5를 1글자 뒤보기로 근사했다.
+  Word_Break 표는 쓰지 않는다. WB4·WB6/7·WB13a/b는 적용하지 않는다(그래서 `·`·`_`·숨은 서식 문자 뒤는 경계다).
+  UAX #29를 준수한다고 하지 않는다. 주어 앞이 지정한 블록의 가나·한자(U+3040–U+30FF, U+31F0–U+31FF, U+3400–U+4DBF, U+4E00–U+9FFF,
+  U+F900–U+FAFF, U+20000–U+3FFFF)나 대표 SA 범위(타이·라오·미얀마·크메르)의 글자, U+119E이면 막지 않는다. 블록 밖의 관련 글자(U+3005–U+3007,
+  U+3021–U+3029, U+3031–U+3035, U+303B, U+303C, U+16FE3, U+1D372–U+1D376, U+1AFF0–U+1B16F의 가나)는 막는다. U+119E는 가운뎃점
+  대신 쓰는 `ㆍ`(U+318D)의 NFKC 결과라서, UAX #29 기본값(ALetter)과 달리 막지 않는 한국어 맞춤이다. 상법의 법인 형태 다섯
+  (주식회사·유한회사·합명회사·합자회사·유한책임회사)을 띄우지 않고 쓴 바로 뒤도 경계로 본다. ASCII로 시작하는 주어는 기존 ASCII
+  규칙을 그대로 써서 한글 한 음절 뒤에서도 일치한다(`이XY전기`의 `XY전기`). 가나·한자로 시작하는 주어도 바로 앞이 글자이면
+  막는다(UAX #29라면 끊는 자리다). 렌더링하지 않은 줄도 비교하므로 글자와 주어 사이에 굵게·코드·링크 표시가 끼면
+  경계가 생긴다(`이**가나다전기**`·`이[[가나다전기]]`는 일치하고, 긴 이름 전체를 감싼 `**이가나다전기**`·`[[이가나다전기]]`는
+  일치하지 않는다). 오른쪽 경계는 조사 때문에 열어 둔다. 다른 말을 띄우지
+  않고 붙여 쓴 주어(`고객사가나다전기`)는 놓쳐 `subject_absent` 경고가 될 수 있다. 값과 기본 `check-support`에는 이 경계를 쓰지 않는다.
+- 경로 없이 쓴 `[[이름]]`이 deny·exclude·runtime 구역에만 있으면 구역을 목록에 넣지 않으므로 `not_found`로 보고한다.
+  구역 안 노트의 존재를 드러내지 않기 위한 동작이며 출처가 실제로 없다는 뜻이 아니다. 구역 경로를 직접 쓴 참조만 `policy`다.
+- 끝의 재확인에서 대장은 SHA-256으로 다시 비교하지만 인용 노트는 stat(장치·inode·크기·수정 시각·링크 수, Windows가 아니면
+  변경 시각 포함)만 비교한다. 크기와 수정 시각이 그대로인 채 바뀐 인용 노트는 놓칠 수 있다.
+- frontmatter·첨부(PDF 등)·deny 구역 원문과는 비교하지 않는다. 값과 노트가 서로 다른 별칭·표기를 쓰면 놓친다.
+- 해석은 파일명 정확 일치다. Obsidian의 대소문자 무시·별칭 해석과 결과가 다를 수 있다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-17 기준, `ledger_table_only`는 2026-10-24 기준). 근거는 단위 테스트의 합성 자료뿐이다.
+
+## 제목·frontmatter 파싱과 코드·링크 스캔의 선형 시간
+
+기본 lint·`check-support`·healthcheck와 recall이 노트마다 읽는 제목·frontmatter 줄의 정규식 가운데 게으른 묶음 뒤에 생략 가능한 공백 꼬리가 오는 꼴
+(`(.+?)\s*#*$`, `(.*?)\s*$`)과 그 값에 이어 쓰는 공백 런 스캔(`\s+#`, `\s*\(` 등)을, 같은 값을 내는 선형 처리로 바꿨다. 같은 경로에서 인라인 코드, 위키링크,
+Markdown 링크, frontmatter 블록을 찾던 다른 꼴의 정규식 일곱 개도 같은 결과를 내는 선형 스캔으로 바꿨다(아래 **인라인 코드·링크·frontmatter 블록 스캔**).
+기본 lint의 유출 검사와 Jev 경로가 함께 쓰는 자격 증명 식(`jev_client.SENSITIVE`)의 비선형 조각 넷과 Telegram 브리지의 위키링크 바꾸기도 같은 판정과
+같은 문자열을 내는 선형 처리로 바꿨다(아래 **자격 증명 식과 Telegram 위키링크**). 켜는 설정·옵션·새 출력 필드는 없다. 판정·경고·`issue_id`·출력·종료 코드는
+그대로다.
+
+| 위치(v0.31.0) | 바꾼 식 | 쓰는 곳 |
+|---|---|---|
+| `vault_ssot.py:162` | `' {0,3}(#{1,6})\s+(.+?)\s*#*$'` | `parse_ledger`의 확정 구역. 기본 lint(SessionStart 비동기 healthcheck, pre-commit `--staged`)가 소비 노트마다 `check_ledger`를, 기본 `check-support`가 인용 노트마다 `parse_ledger`를 부른다 |
+| `vault_state.py:579` | 같은 식 | `project_handoff`의 Blocked·차단·보류 구역 |
+| `vault_lint_extensions.py:141`·`143`·`194`·`197` | `'^ {0,3}#{1,6}\s+(.+?)\s*$'`, `re.sub(r'\s+#+\s*$', …)`, `'^(created\|updated):\s*(.*?)\s*$'`, `re.split(r'\s+#', …)` | 기본 lint의 제목 anchor와 `created`·`updated` 날짜 |
+| `vault_provenance.py:436` | `'^([a-z_]+)\s*:\s*(.*?)\s*$'` | 기본 lint의 출처 frontmatter |
+| `vault_healthcheck.py:1561`·`1570`·`1571` | `'^#{1,3}\s+(.+?)\s*$'`, `_norm_heading`의 `\s*\([^)]*\)`·`\s*[—-]\s.*$` | healthcheck full 모드의 rules 제목 중복 검사 |
+| `vault_recall.py:40`·`41`, `vault_query_expansion.py:478` | `'^\s*title\s*:\s*(.*?)\s*$'`, `'^\s*#{1,6}\s+(.+?)\s*#*\s*$'` | `/vault-recall`의 제목(고급 검색 `vault_retrieval.py`가 어휘 일치 없는 후보와 링크로 더한 노트의 제목을 정하는 `_fallback` 포함), `--expand-query`의 별칭 대체어(파일 이름과 제목)와 제목 줄 건너뛰기(기본 훅 밖) |
+
+**원인과 바꾼 방법.** 게으른 `(.+?)`는 한 글자 늘 때마다 꼬리 `\s*#*$`를 처음부터 다시 맞춘다. 제목 글자 사이에 긴 공백이 있으면(`# a` + 공백 N개 + `b`)
+자리마다 그 공백을 다시 훑어 이차 시간이 되고, 꼬리에 `\s*`가 둘인 `vault_recall.py`의 제목 식은 삼차 시간이었다. 새 처리는 길이가 정해진 머리
+(` {0,3}(#{1,6})(?=\s)` 등)만 정규식으로 맞추고 값은 `strip()`·`lstrip()`·`rstrip()`·`rstrip('#')`로 잘라 낸다. 게으른 묶음이 고르던 가장 짧은 label은
+"끝의 `#` 런과 그 앞 공백을 지운 것, 비면 첫 글자"와 같다. 대장과 handoff 투영은 같은 `_atx_heading`을 쓴다. `vault_ssot.py`가 `vault_state.py`를
+import하므로 거꾸로 import하면 순환이 되어, `vault_state.py`에 바이트가 같은 사본을 둔다(`# --- BEGIN ATX HEADING (verbatim copy) ---` 표시 사이).
+두 사본이 갈라지면 `tests/test_rule_sources.py`가 실패하고, `checker_sha256`가 묶는 쪽은 `vault_ssot.py`의 원본이다.
+
+**possessive·atomic 형식을 쓰지 않은 이유.** `\s*+`·`#*+`나 `(?>…)`는 묶음 안의 되돌아가기 지점만 버린다. 비용은 바깥의 게으른 `(.+?)`가
+N개 자리마다 꼬리를 다시 시작하는 데서 오므로 여전히 이차 시간이다(아래 표에서 길이가 두 배면 약 4배). 두 문법은 Python 3.11에서 추가되어 CI의 Python 3.10에서는 쓸 수도 없다.
+
+| `# a` + 공백 N개 + `b` | 예전 식 | possessive `\s++(.+?)\s*+#*+$` | atomic `(.+?)(?>\s*#*)$` | `_atx_heading` |
+|---|---|---|---|---|
+| N = 8,000 | 0.32초 | 0.039초 | 0.039초 | 0.6 µs |
+| N = 16,000 | 1.30초 | 0.17초 | 0.16초 | 0.7 µs |
+| N = 32,000 | 5.33초 | 0.64초 | 0.64초 | 0.8 µs |
+| N = 64,000 | 21.15초 | 2.58초 | 2.53초 | 1.4 µs |
+
+2026-10-27, Windows 11·Python 3.12.10, 이 PC 한 대에서 세 번 가운데 가장 빠른 값이다(N = 64,000은 두 번). 같은 날 한 번씩 잰 다른 식은
+N = 8,000/16,000/32,000에 약 0.15/0.6/2.5초(공백 런 스캔은 0.05~0.2/0.2~0.8/0.9~3.1초), `vault_recall.py`의 제목 식은 N = 1,000/2,000에
+0.80/6.3초였다. 새 처리는 N = 64,000에서도 한 줄에 1 ms 미만이었다(가장 느린 것이 0.6 ms).
+
+**인라인 코드·링크·frontmatter 블록 스캔.** 같은 경로에 남아 있던 다른 꼴의 정규식 일곱 개를, 줄바꿈이 있어도 예전 식과 같은 결과(코드 span과 healthcheck
+위키링크는 위치와 내용까지)를 내는 선형 스캔으로 바꿨다. 표의 마지막 두 개는 앞의 다섯 개를 바꾼 뒤 다시 잰 탐색에서 찾아 이어서 바꿨다.
+
+| 위치(v0.31.0) | 바꾼 식 | 새 처리 | 쓰는 곳 |
+|---|---|---|---|
+| `vault_lint_extensions.py:257` | `` re.sub(r'(`+).*?\1', '', line) `` | `_without_code_spans` | 기본 lint가 줄마다 인라인 코드를 지운다 |
+| `vault_lint_extensions.py:258` | `(?<!!)\[\[([^]\n]+)\]\]\|!\[\[([^]\n]+)\]\]`(`finditer`) | `_wiki_link_texts` | 이어서 그 줄의 위키링크를 찾는다 |
+| `vault_lint_extensions.py:122` | `_heading_key`의 `\[([^]]+)\]\([^)]*\)`(`re.sub`) | `_without_link_targets` | 제목 anchor와 링크 anchor를 비교하는 키 |
+| `vault_healthcheck.py:1254` | `split_frontmatter`의 `^---\s*\n(.*?)\n---\s*\n?`(`re.DOTALL`) | 같은 함수 | healthcheck full 모드와 `--staged`의 frontmatter 판정 |
+| `vault_ssot.py:70` | `CODE_SPAN_RE` `` (`+)(.+?)\1 ``(`finditer`·`sub`) | `_code_spans` | 기본 `check-support`가 출처 칸마다 |
+| `vault_healthcheck.py:796` | `WIKILINK_RE` `\[\[((?:[^\]\|#]\|\](?!\]))+)(?:[#\|][^\]]*)?\]\]`(`findall`) | `_wikilink_matches`·`wikilink_targets` | healthcheck full 모드가 노트마다(index 노트 포함), `--staged`가 노트를 지우거나 이름을 바꾼 커밋에서 `[[`가 든 index의 노트마다. 링크 제안(`vault_links.py`, 기본 훅 밖)도 출처 노트의 기존 링크를 이 식의 `finditer`로 찾았다 |
+| `vault_provenance.py:520` | `\[\[([^\]\n]+)\]\]`(`finditer`의 앞 128개) | `_wiki_link_texts` | 기본 lint가 특권 노트(`privileged_notes`와 `hot_note`·`handoff_note`)마다 |
+
+백틱 식은 여는 런을 가장 긴 것부터 한 개까지 줄여 가며 길이마다 뒤의 모든 자리에서 같은 수의 백틱을 맞춰 보아, 백틱만 이어진 줄이나 칸에서 삼차 시간이었다.
+lint의 링크 식 둘과 특권 노트의 링크 식은 `[`마다 문자 클래스를 첫 `]`(Markdown 링크는 `)`도)나 줄 끝까지 다시 훑어 `[`만 이어진 줄에서 이차 시간이었다.
+healthcheck의 `WIKILINK_RE`는 대상 문자 클래스가 줄바꿈과 `[`도 받아 `[[`마다 멈출 자리(`|`·`#`·`]]`)나 노트 끝까지 다시 훑었고, `|`·`#` 뒤 꼬리도 `[[`마다
+첫 `]`까지 다시 훑었다. 그래서 `[`만 이어진 노트뿐 아니라 `[[a`만 있는 줄이 이어진 노트, `]]` 없이 `[[a#`가 이어진 노트에서도 이차 시간이었다. frontmatter 식은 여는 `---` 뒤
+공백 런 안의 줄바꿈마다 닫는 `\n---`를 끝까지 다시 찾아, 닫는 줄 없이 빈 줄만 이어지는 노트에서 이차 시간이었다. 새 스캔은 예전 식이 고르던 결과를 한 번 훑어 정한다.
+
+- 백틱: 런에 남은 백틱이 r개일 때 여는 길이 k가 r/2보다 길면(`check-support` 식은 내용이 한 글자 이상이어야 해서 r/2 이상이면) 런 안에서는 닫히지 않으므로,
+  같은 줄 뒤쪽에서 길이가 k 이상인 첫 런의 앞 k개에서 닫힌다. 그런 k가 없으면 런 안에서 닫힌다(lint 식은 런을 반씩, `check-support` 식은 가운데 백틱 하나를
+  내용으로 두고). 다만 남은 백틱이 lint 식은 1개, `check-support` 식은 2개 이하이면 런 안에서도 닫히지 않아 매치 없이 남는다. 런마다 같은 줄 뒤쪽에서
+  가장 긴 런의 길이를 한 번 계산해 두므로 자리마다 되돌아가지 않는다.
+- 링크: 한 `[[`에서 첫 `]`나 줄바꿈까지 훑고 실패하면 그 사이의 다른 `[[`도 같은 자리에서 멈춰 실패하므로, 그 자리 뒤에서 다시 찾는다. 임베드(`![[`)와 보통
+  링크는 같은 글자를 잡으므로 `(?<!!)`로 나눈 두 갈래는 lint가 쓰는 값을 바꾸지 않는다. Markdown 링크도 실패한 `]` 뒤에서 다시 찾고, `](` 뒤에 `)`가 없으면
+  그 뒤의 어느 `[`도 성공할 수 없어 멈춘다. 특권 노트의 링크 식도 같은 규칙으로 찾는다. 예전 처리는 매치를 모두 찾은 뒤 앞 128개만 썼으므로 128개를 채우면 멈춘다.
+- healthcheck 위키링크: 대상은 `[[` 뒤에서 처음 나오는 `|`·`#`·`]]` 앞까지다(바로 뒤에 `]`가 없는 `]`와 줄바꿈도 대상에 든다). 그 자리가 `]]`이면 거기서
+  닫히고, `|`·`#`이면 꼬리가 그 뒤 첫 `]`까지 이어져 거기서 `]]`로 닫혀야 한다. 대상을 줄여 되돌아가도 다른 자리에서는 닫히지 않으므로, 실패하면 그 사이의
+  다른 `[[`도 같은 자리에서 멈춰 실패한다. 그 자리 뒤에서 다시 찾고, 꼬리 끝 `]`는 찾은 자리를 뒤로만 옮겨 같은 구간을 다시 훑지 않는다. `findall`을 쓰던
+  healthcheck 세 곳과 `finditer`의 `group(1)`만 쓰던 `vault_links.py`는 같은 대상 목록(`wikilink_targets`)을 쓰고, `WIKILINK_RE`라는 이름은 남기지 않는다.
+- frontmatter: 공백 런의 마지막 줄바꿈 뒤에서 첫 `\n---`를 한 번 찾는다. 없을 때는 런 끝의 줄바꿈 바로 뒤에 `---`가 오는 경우(공백뿐인 frontmatter)만 따로 본다.
+
+| 입력 | 예전 식 | 새 처리 |
+|---|---|---|
+| 백틱만 N개인 줄(lint), N = 4,000/8,000/16,000 | 0.36/2.74/21.7초 | 3.5/3.6/5.4 µs |
+| `[`만 N개인 줄(위키링크), N = 8,000/16,000/32,000 | 0.18/0.69/2.92초 | 15/31/60 µs |
+| `[`만 N개인 제목(anchor 키), N = 8,000/16,000/32,000 | 0.11/0.43/1.64초 | 0.7/0.8/1.6 µs |
+| `---` 뒤에 빈 줄 N개(닫는 줄 없음), N = 8,000/16,000/32,000 | 0.17/0.68/2.79초 | 10/18/36 µs |
+| 백틱만 N개인 출처 칸(`finditer` 한 번), N = 1,024/2,048/4,096 | 0.007/0.052/0.39초 | 1.8/2.6/3.6 µs |
+| `[`만 N개인 노트(healthcheck 위키링크), N = 8,000/16,000/32,000 | 1.09/4.36/17.8초 | 43/85/167 µs |
+| `[[a`만 있는 줄 N/4개(healthcheck 위키링크), N = 8,000/16,000/32,000 | 0.27/1.12/4.40초 | 40/82/157 µs |
+| `]]` 없이 `[[a#`를 N/4번 잇고 끝에 `]` 하나(healthcheck 위키링크), N = 8,000/16,000/32,000 | 0.051/0.200/0.79초 | 0.58/1.14/2.28 ms |
+| `[`만 N개인 줄(특권 노트 링크), N = 8,000/16,000/32,000 | 0.17/0.69/2.81초 | 15/31/60 µs |
+
+2026-10-27, Windows 11·Python 3.12.10, 이 PC 한 대에서 세 번 가운데 가장 빠른 값이다(lint 백틱 N = 16,000과 healthcheck 위키링크 `[` N = 32,000의 예전 식은
+두 번). `]]` 없이 `[[a#`가 이어진 노트에서는 새 처리도 링크마다 한 번씩 돌아 ms 단위지만, N이 두 배면 두 배가 된다. 예전 `check-support`는 출처 칸마다
+`finditer`와 `sub`로 두 번 훑어 백틱 4,096개인 칸 하나에 0.78초가 들었다. 대장 크기 상한(256 KiB) 안에 그런 칸을 62행 넣은 대장 하나에 v0.31.0의 처리는
+48.6초(한 번 잼), 새 처리는 0.019초였고 결과는 같았다.
+
+**자격 증명 식과 Telegram 위키링크.** 위 스캔을 바꾼 뒤의 탐색에서 기본 경로에 남은 것으로 찾은 `jev_client.SENSITIVE`와, 기본 경로 밖에서 따로 잰
+Telegram 브리지의 위키링크 식을 바꿨다. 자격 증명 식은 컴파일된 패턴 하나로 두고, 갈래 13개 가운데 넷에서 조각 하나씩만 바꿨다.
+
+| 위치(v0.31.0) | 바꾼 식 | 새 식·처리 | 쓰는 곳 |
+|---|---|---|---|
+| `jev_client.py:29` `SENSITIVE`의 URL 갈래 | `\b[a-z][a-z0-9+.-]*://…` | `(?<![a-z0-9+.-])(?=[a-z0-9+.-])(?=\b[a-z]\|[a-z0-9+.-]*?[+.-][a-z])[a-z0-9+.-]+://…` | 기본 lint의 유출 검사(`vault_egress.scan_text`)가 노트마다 줄별로, 그리고 노트 전체(256 KiB 이하)에. `jev_ask`·`vault_judge`·`build_payload`가 보낼 문자열마다 |
+| 같은 식의 JWT 갈래 | `\beyJ[a-zA-Z0-9_-]{8,}\.…` | `(?<![a-zA-Z0-9_-])(?=[a-zA-Z0-9_-])(?=\beyJ[a-zA-Z0-9_-]{8}\|[a-zA-Z0-9_-]*-eyJ[a-zA-Z0-9_-]{8})[a-zA-Z0-9_-]+\.…` | 같은 곳 |
+| 같은 식의 영문 이름표 갈래와 한글 이름표 갈래 | `\s*[\"']?\s*[:=]` | `\s*(?:[\"']\s*)?[:=]` | 같은 곳 |
+| `jarvis_bridge.py:1237` | `re.sub(r"\[\[([^\]]+)\]\]", r"<i>\1</i>", …)` | `_italic_wiki_links` | `/vault-jarvis-setup`으로 켜는 Telegram 브리지가 보내는 메시지의 줄마다 |
+
+`SENSITIVE`를 쓰는 곳은 모두 `search()`가 매치를 찾는지만 본다. `jev_client._matches_sensitive`가 원문과 정규화한 사본에 `search`를 불러 참·거짓만 쓰고,
+`contains_sensitive`·`build_payload`와 `vault_egress`·`vault_coverage`·`vault_runs`·`vault_operations`·`vault_token_calibration`·`jarvis_bridge`는 이 두 함수를
+거친다. `jev_ask.SENSITIVE`와 `vault_judge.SENSITIVE`는 같은 객체를 가리킬 뿐 검색하지 않고, `tests/test_rule_sources.py`는 객체가 같은지와 `search`가
+`None`인지만 본다. 매치 위치·group·`finditer`를 쓰는 곳은 없다. 그래서 찾는 문자열의 집합(판정)만 예전 식과 같게 맞췄고, 매치가 시작하는 자리는 다를 수 있다.
+
+갈래 13개를 하나씩 떼어 반복 입력(한 글자·두 글자 반복, 갈래의 낱말 뒤 한 글자 반복, 낱말과 구분자를 번갈아 반복)으로 쟀더니 넷이 이차 시간이었다.
+앞선 탐색은 갈래의 낱말을 입력에 쓰지 않아 그 가운데 URL 갈래만 찾았다.
+
+- URL 갈래: scheme(`[a-z0-9+.-]*`)을 단어 경계마다 런 끝까지 다시 훑었다(`a-`·`a.`·`+Z` 반복). 런 안에서 scheme은 `+`·`.`·`-` 바로 뒤의 글자에서만
+  시작할 수 있다. 대소문자를 무시하는 `[a-z]`가 받는 글자는 모두 단어 문자이고, 런의 문자 가운데 단어 문자가 아닌 것은 이 셋뿐이기 때문이다. 어느
+  시작점에서 시작해도 scheme은 런 끝의 같은 `://`에 닿는다. 그래서 새 식은 런이 시작하는 자리(앞 글자가 `[a-z0-9+.-]`가 아닌 자리)에서만 시도하고, 런 첫
+  글자가 단어 경계 뒤의 글자인지, 아니면 런 안에 `+`·`.`·`-` 바로 뒤의 글자가 있는지 lookahead로 한 번 본 뒤 런 전체를 읽어 `://`를 맞춘다.
+- JWT 갈래: 첫 부분(`[a-zA-Z0-9_-]{8,}`)을 `eyJ`마다 런 끝까지 다시 훑었다(`-eyJ` 반복). 런 안의 `eyJ`는 `-` 바로 뒤에서만 시작하고, 어느 시작점도 런 끝의
+  같은 `.`에 닿는다. 첫 부분이 8글자 이상이라는 조건은 시작점 하나만 채우면 된다. 그래서 새 식은 런이 시작하는 자리에서만 시도하고, 런 첫머리(단어 경계
+  뒤)나 런 안의 `-` 뒤에 `eyJ`와 8글자가 있는지 lookahead로 한 번 본 뒤 런 전체를 읽어 `.`을 맞춘다.
+- 이름표 갈래 둘(`password`·`secret`·`…API_KEY` 등과 `암호`·`비밀번호` 등): 이름표 뒤 공백 런을 따옴표 앞뒤의 두 `\s*`에 나누는 모든 방법을 시도했다
+  (공백·U+3000·줄바꿈 N개). 따옴표를 그 뒤 공백과 묶으면 같은 문자열을 받고 공백 런을 한 번만 나눈다.
+- Telegram 위키링크: `[[`는 그 뒤 첫 `]`에서만 닫힌다. 그 `]`가 `[[` 바로 뒤가 아니고 뒤에 `]`가 하나 더 있어야 한다. 닫히지 않으면 그 사이의 다른 `[[`도
+  같은 `]`에서 멈춰 닫히지 않으므로 그 `]` 뒤에서 다시 찾는다. 대상에는 줄바꿈도 든다.
+
+**글자 단위 반복을 쓰지 않은 이유.** 시작점마다 다음 시작점 앞에서 멈추는 글자 단위 반복(`\b[a-z](?:(?![+.-][a-z])[a-z0-9+.-])*://` 등)도 선형
+시간이지만, Python `re`는 묶음 반복의 회차마다 되돌아가기 정보를 쌓는다. 그런 꼴은 이 PC에서 32,768자 런 하나에 약 2.2 MB, 262,144자 런에 약 20 MB를
+썼다(tracemalloc). 바꾼 두 갈래는 한 글자 반복(`[…]+`·`[…]*`·`[…]*?`)과 lookaround만 써서 같은 입력에서 메모리가 늘지 않고, 시험이 이를 확인한다. 바꾸지 않은
+한글 이름표 갈래의 값 부분(`(?:(?![\"',;])[\x21-\x7e]){4,}`)은 예전처럼 글자 단위 반복이어서, 매치되는 값이 길면 그 길이에 비례하는 메모리를 쓴다
+(262,144자 값에 약 20 MB, 예전 식과 같다).
+
+| 입력 | 예전 식 | 새 식·처리 |
+|---|---|---|
+| `SENSITIVE.search`, `a-`를 N/2번 이은 줄, N = 8,000/16,000/32,000 | 0.10/0.40/1.57초 | 1.9/4.0/7.8 ms |
+| 같은 식, `+Z`를 N/2번 이은 줄 | 0.10/0.40/1.57초 | 2.0/4.0/8.1 ms |
+| 같은 식, `-eyJ`를 N/4번 이은 줄 | 0.10/0.40/1.59초 | 1.5/3.0/5.9 ms |
+| 같은 식, `password` 뒤 공백 N개 | 0.15/0.60/2.44초 | 1.5/2.9/5.7 ms |
+| 같은 식, `access_token` 뒤 U+3000 N개 | 0.24/0.98/3.89초 | 1.5/3.0/6.3 ms |
+| 같은 식, `암호` 뒤 줄바꿈 N개 | 0.21/0.80/3.27초 | 1.5/3.0/6.0 ms |
+| `vault_egress.scan_text`, `a-`를 N/2번 이은 한 줄 노트, N = 16,000/32,000 | 0.79/3.14초 | 10/21 ms |
+| 같은 검사, `password` 뒤 공백 N개인 한 줄 노트 | 1.23/4.83초 | 7.6/15 ms |
+| Telegram 위키링크, `[`만 N개인 줄, N = 8,000/16,000/32,000 | 0.10/0.41/1.62초 | 0.8/0.8/1.2 µs |
+
+2026-10-27, Windows 11·Python 3.12.10, 이 PC 한 대에서 잰 가장 빠른 값이다(예전 식은 세 번 가운데, N = 32,000의 예전 식과 예전 `scan_text`는 두 번
+가운데, 새 식은 열다섯 번, 새 `scan_text`는 아홉 번, Telegram 위키링크는 세 번 가운데). `scan_text`는 줄과 노트 전체를 한 번씩 검색한다. 예전 식의
+시간은 길이의 제곱에 비례하므로, 노트 하나의 상한(256 KiB)에 가까운 공백 한 줄 노트라면 같은 비율로 약 5분이 된다(재지 않은 추정). Telegram 브리지는
+메시지를 4,000자 이하 조각으로 나눠 바꾸므로, `[`만 32,000자인 메시지 하나를 보내는 `tg_send`는 예전 0.20초, 새 처리 0.19 ms였다.
+
+**같다는 근거와 그 범위.** 예전 식은 `tests/test_linear_line_parsers.py` 안에만 대조용(oracle)으로 남는다. 시험은 VULCANBOOST가 ReDoS 수리를
+받아들이는 두 단계를 판정 틀로만 빌린다.
+
+- 고정 사례: CommonMark 예제를 바꿔 쓴 사례(아래)와 볼트 제목(`## 확정 ###`, `### Blocked ###`, `#　확정` 등)에서 새 처리가 예전 식과 같은 (수준, 가공 전 label)을 낸다.
+  스캔 다섯 개는 예전 식이 여는 런을 줄이는 경우(`` ```a`` ``), 내용 앞에 백틱이 남는 코드 span, `]`나 줄바꿈에서 멈추는 링크, 공백뿐인 frontmatter와
+  CRLF frontmatter를 고정 사례로 본다. 위키링크 스캔 둘은 대상 안의 `]` 하나와 줄바꿈, 첫 `]`까지 이어지는 꼬리, 그 `]` 뒤에 `]`가 없어 닫히지 않는 꼬리,
+  빈 대상, 링크 130개 가운데 앞 128개를 고정 사례로 본다.
+- 한정된 전수 비교: 11개 기호(공백 종류 8개 — 공백·탭·U+000B·U+001C·U+0085·U+00A0·U+2028·U+3000 — 와 `#`·`a`·`가`)로 만든 길이 6 이하 문자열
+  1,948,717개 전부에서 같다. 다른 식은 각자의 기호(`:`·`(`·`)`·`—`·`-`, 필요하면 `\n`)와 앞붙이(`created:` 등)를 더해 길이 5~6 이하 전부를 본다.
+  `AGENTIC_VAULT_SLOW_TESTS=1`이면 Python이 공백으로 보는 code point 29개(아래 줄바꿈 조건이 있는 식은 `\n`을 뺀 28개)를 모두 넣은 길이 3~4 이하와
+  기본 기호의 길이 7(제목 식은 21,435,888개)까지 보고, 예전 식과 새 처리의 시간을 출력한다(이 PC에서 약 3분이었고, 아래 스캔을 더해 약 5분 20초, 위키링크
+  스캔 둘까지 더해 약 6분 50초, 자격 증명 식과 Telegram 위키링크까지 더해 약 10분).
+- 스캔의 한정된 전수 비교: 백틱·링크 스캔 넷은 11개 기호(`` ` ``·`[`·`]`·`(`·`)`·`!`·`\n`·`-`·공백·`a`·`가`)로 만든 길이 6 이하 문자열 1,948,717개
+  전부에서 예전 식과 같은 결과를 낸다(코드 span은 위치와 내용까지). 식이 구별하는 문자만으로는 더 길게 본다(백틱 식은 `` ` ``·`a`·`\n`로 길이 11, 위키링크는
+  `[`·`]`·`!`·`a`·`\n`로 길이 8, Markdown 링크는 `[`·`]`·`(`·`)`·`a`·`\n`로 길이 8). frontmatter는 `-`·`\n`·CR·공백·탭·`a`·`가` 일곱 기호에 앞붙이 없음·`---`·
+  `---\n`·`---\r\n`을 붙여 길이 6까지 본다. 다른 글자는 이 식들에서 공백(frontmatter의 `\s`)이나 `a`와 같이 다뤄진다. `AGENTIC_VAULT_SLOW_TESTS=1`이면 기본
+  기호의 길이 7, 공백 code point 29개를 모두 넣은 길이 3~4, 구별 문자만으로 길이 9~14까지 본다.
+- 위키링크 스캔의 한정된 전수 비교: 둘 다 9개 기호(`[`·`]`·`|`·`#`·`\n`·`!`·공백·`a`·`가`)로 만든 길이 6 이하 문자열 597,871개 전부에서 예전 식과 같은
+  결과를 낸다(healthcheck 쪽은 매치 위치와 group 1까지). 구별 문자만으로는 더 길게 본다(healthcheck는 `[`·`]`·`|`·`#`·`a`로 길이 9의 2,441,406개, 특권 노트는
+  `[`·`]`·`\n`·`a`로 길이 10의 1,398,101개). 다른 글자는 두 식에서 `a`와 같이 다뤄진다. `findall`이 돌려주던 대상 목록은 길이 5 이하 전부와 시험용 링크 줄로
+  따로 비교하고, 특권 노트 스캔이 멈추는 자리는 `[[`·`]]`·`[`·`]`·`\n`·`a`를 여섯 개까지 이은 문자열마다 한도 0~3으로, 그리고 매치가 127·128·129·303개인
+  노트로 본다. `AGENTIC_VAULT_SLOW_TESTS=1`이면 9개 기호의 길이 7, 공백 code point 29개를 넣은 길이 4, 구별 문자만으로 길이 11(healthcheck)·12(특권 노트)까지 본다.
+- 자격 증명 식: 예전 식 전체를 대조용으로 남기고, 바꾼 갈래만이 아니라 식 전체의 판정(`search`가 매치를 찾는지)을 비교한다. 고정 사례 57개(갈래마다 시험용
+  모양 하나 이상, 몇 갈래의 최소 길이 바로 밑 모양, 바꾼 갈래의 시작점·런 끝·따옴표와 공백, 대소문자 무시가 접어 넣는 dotted capital I·dotless i·long s·Kelvin sign),
+  18개 문자(`a`·`e`·`y`·`J`·`0`·`:`·`/`·`@`·`.`·`+`·`-`·`_`·`=`·두 따옴표·공백·`\n`·`가`)로 만든 길이 5 이하 문자열 2,000,719개 전부, 조각 단위의
+  한정된 전수(URL 꼬리 8개 앞에 조각 12개를 4개까지 이은 180,968개, JWT 꼬리 4개 앞에 조각 10개를 5개까지 이은 444,444개, 이름표 넷·공백 네 종류·따옴표
+  둘·`:`·`=`·값·쉼표로 된 조각 14개를 5개까지 이은 579,195개), 시험용 자격 증명 모양을 메모리에서 만들어 조각과 섞은 seed 고정 무작위 문자열 40,400개에서
+  같은 판정을 낸다. 정규화(NFKC와 보이지 않는 문자 제거)를 거치는 `_matches_sensitive`와 JSON 값의 `contains_sensitive`도 예전 식을 끼워 넣은 실행과 같다.
+  시험의 값은 모두 글자·숫자를 이어 만든 가짜 값이다. `AGENTIC_VAULT_SLOW_TESTS=1`이면 문자 길이 6(36,012,943개), URL 조각 5개(2,171,624개), JWT 조각 6개
+  (4,444,444개), 이름표 조각 6개(8,108,731개), 무작위 400,000개까지 본다.
+- Telegram 위키링크: 9개 기호(`[`·`]`·`|`·`#`·`\n`·`!`·공백·`a`·`가`)로 만든 길이 6 이하 597,871개와 `[`·`]`·`a`로 만든 길이 11 이하 265,720개 전부에서
+  예전 `re.sub`와 같은 문자열을 낸다. 다른 글자는 이 식에서 `a`와 같이 다뤄진다. `AGENTIC_VAULT_SLOW_TESTS=1`이면 `[`·`]`·`a`로 길이 14(7,174,453개)까지 본다.
+- 바탕 사실: str 패턴의 `\s`가 `str.isspace()`와 같고 인자 없는 `strip()`·`lstrip()`·`rstrip()`도 같은 기준을 쓴다는 것을 0x110000개 code point 전부로 확인한다.
+  자격 증명 식은 대소문자를 무시하는 `[a-z]`가 ASCII 밖에서 받는 글자가 U+0130·U+0131·U+017F·U+212A 넷이고 모두 단어 문자이며, `[a-z0-9+.-]`에서
+  단어 문자가 아닌 것은 `+`·`.`·`-`, `[a-zA-Z0-9_-]`에서는 `-`뿐이라는 것을 같은 방법으로 확인한다. 바꾼 갈래 둘이 런 안의 시작점을 찾는 방법은 이 사실에 기댄다.
+- 줄바꿈 조건: 줄 안에 `\n`이 있으면 제목 식들은 예전과 다르다(`.`이 `\n`을 지나지 못하고 `$`가 끝 `\n` 앞에서도 맞는다. 예: `# \n`은 예전에 제목이 아니었지만
+  새 처리는 `(1, '\n')`). 대장과 handoff는 바이트를 `bytes.splitlines`로 나눠 CR·LF를 떼고, 나머지 호출부는 `str.splitlines()`의 줄만 넘긴다. 시험은 호출부마다
+  CR·CRLF·U+000B·U+000C·U+001C~U+001E·U+0085·U+2028·U+2029를 섞어 넣고, 새 처리가 받은 값에 `\n`이 없으며 예전 식과 같은 값을 냈는지 본다.
+  닫는 `#` 런 지우기, 날짜 뒤 주석 자르기, 괄호 주석 지우기는 `\n`이 있어도 같다. 스캔 일곱 개와 Telegram 위키링크, 자격 증명 식에는 이 조건이 없다
+  (비교 기호에 `\n`이 있다).
+  frontmatter 비교에는 CR도 넣었다. full 모드는 노트를 텍스트 모드로 읽어 CR·CRLF가 `\n`으로 바뀌지만, `--staged`는 index blob을 그대로 디코드해 CRLF 노트의
+  CR이 남는다. 시험은 git 저장소를 만들어 두 경로가 실제로 그런 값을 넘기는지 확인한다.
+- 기본 출력: 새 처리 자리에 예전 식을 끼워 넣은 실행과 `parse_ledger`·`check_ledger`·`project_handoff`(dry run)·lint 경고·출처 frontmatter·rules 중복 목록·recall 제목과
+  `--expand-query` 순위가 같고, 경고 승격 인증서의 benign replay 결과(`result_sha256`)도 같다. 스캔 다섯 개도 예전 식을 끼워 넣은 실행과 lint 경고(인라인
+  코드·위키링크·anchor), `check-support` 결과 전체와 출처 칸의 참조 목록, healthcheck full 모드의 종료 코드·출력·리포트와 `--staged` 스키마 오류 목록이 같다.
+  위키링크 스캔 둘도 예전 식을 끼워 넣은 실행과 healthcheck full 모드의 종료 코드·출력·리포트(데드 링크·준고아·index 미등록과 15절의 특권 노트 경고), 노트를
+  지우고 이름을 바꾼 `--staged`의 종료 코드·출력(백링크 오류와 경고), 링크 제안의 결과와 CLI 출력, `vault_provenance.analyze_notes`와 기본 lint의 특권 노트 경고가
+  같다. 시험용 노트에는 대상 안의 `]` 하나·줄바꿈과 `]` 하나에서 닫히지 않는 꼬리를 넣었다. 그래서 healthcheck 쪽 규칙을 하나씩 바꾼 사본 넷(`]` 하나로 닫히는
+  꼬리, 첫 `]`에서 끝나는 대상, `#`에서 끝나지 않는 대상, 줄바꿈에서 끝나는 대상)은 full 모드·`--staged`·링크 제안 비교에서 모두 실패하고, 앞 127개만 남기거나
+  줄바꿈을 지나는 특권 노트 사본은 특권 노트 비교에서 실패한다(이 PC에서 확인).
+  자격 증명 식도 예전 식을 끼워 넣은 실행과 `vault_egress.analyze_notes`·기본 lint의 유출 경고(줄 번호, 여러 줄에 걸친 이름표의 줄 0 경고, 자격 증명
+  모양인 경로의 이름표 가리기 포함), `jev_ask.prepare`, `vault_judge.prepare`(근거 발췌와 질문 문장)의 결과가 같다. 호출부가 `search`에 넘긴 문자열은 모두
+  기록해 예전 식과 같은 판정인지 본다. Telegram 쪽은 `md_to_telegram_html`의 결과와 `tg_send`가 보내는 메시지(Telegram 호출은 가짜로 바꾼다)가 같다.
+  경고 승격 인증서의 benign replay 비교에도 자격 증명 식을 넣었다. 바꾼 갈래의 규칙을 하나씩 바꾼 사본(런 첫머리의 단어 경계를 빼거나, 런 안의 시작점을
+  보지 않거나, `+`·`.`·`-` 뒤의 숫자도 시작점으로 보는 scheme, 런 첫머리의 단어 경계를 빼거나, 런 안의 시작점을 보지 않거나, 뒤의 `eyJ` 뒤 7글자로 충분하다고
+  보는 JWT, 따옴표 뒤 공백을 받지 않는 영문 이름표)은 비교에서 실패한다. 런 시작 lookbehind를 뺀 사본과 조각 넷을 하나씩 예전 것으로 되돌린 사본은 아래
+  시간 상한에서, 글자 단위 반복으로 바꾼 사본은 아래 메모리 시험에서 실패한다(이 PC에서 확인). 시험 밖에서 더 넓게 돌린 비교(문자 길이 6, URL 조각 6개
+  26,059,496개, JWT 조각 7개 44,444,444개, 이름표 조각 6개, 무작위 2,000,000개)에서도 다른 판정은 없었다.
+- 시간 상한: 새 처리만 잰다. N = 8,000~64,000의 위 모양들을 함수마다 모두 돌린 합계가 0.25초 미만이어야 한다(이 PC에서 2 ms 이하). 예전 식을 넣으면 16,000자 단계 안에 이 상한을 넘는다.
+  스캔 일곱 개는 위 표의 모양에 백틱 런·링크가 수천 개인 줄을 더해 같은 상한으로 잰다(이 PC에서 25 ms 이하). `str.find`는 C로 돌아서, 꼬리 끝 `]`를
+  `[[`마다 다시 찾는 위키링크 사본은 링크마다 노트를 끝까지 읽는데도 64,000자에서 약 20 ms로 이 상한 안에 든다. 그래서 위키링크 스캔 둘과 Telegram
+  위키링크는 `find()`가 읽은 글자 수가 입력 길이의 두 배를 넘지 않는지도 센다(실패한 `[[` 바로 뒤에서 다시 찾는 Telegram 사본은 시간 상한 안에 들지만
+  이 셈에서 실패한다). 자격 증명 식은 갈래 13개를 자리마다 시도해 아무것도 찾지 않는 글에서도 이 PC에서 글자당 약 0.2 µs가 든다. 그래서 위 표의 모양과
+  `eyJ` 뒤의 긴 런을 모양마다 따로 재어 N = 8,000~64,000의 합계가 0.25초 미만이어야 한다(이 PC에서 20번 잰 중앙값 15~33 ms, 가장 느린 것 44 ms).
+  예전 식은 16,000자 단계에서 이 상한을 넘는다. 메모리는 32,768자 런 네 모양에서 `search`의 tracemalloc 최고치가 1 MiB 미만인지 본다.
+
+이 근거는 "이 기호 집합 위 이 길이까지, (제목 식은) 줄에 `\n`이 없으면 같다"는 것이며 모든 문자열에 대한 증명이 아니다. 스캔 일곱 개와 Telegram 위키링크의
+규칙, 자격 증명 식의 조각 넷은 예전 식이 되돌아가는 순서에서 손으로 유도했고, 시험은 그 유도를 이 범위에서 확인한다.
+
+**일부러 남긴 CommonMark와의 차이.** 이 변경은 제목 해석을 CommonMark 쪽으로 고치지 않는다. 고치면 어느 구역이 확정·차단인지가 조용히 바뀐다.
+CommonMark 0.31.2 4.2절 예제 62~79를 다른 말로 바꿔 쓴 시험 사례에서 CommonMark와 다른 예제는 66·73·75·76·79이고, 나머지는 제목 여부와 앞뒤 공백을 뗀 label이 같다.
+
+- 66: label에 인라인 서식과 escape가 그대로 남는다(`*`·`\*`).
+- 73: 닫는 `#` 런 뒤에 공백이 있으면 그 런이 label에 남는다. 뒤에 공백이 붙은 `## 확정 ###`은 label이 `확정 ###`이어서 확정 구역이 아니다.
+- 75: 앞에 공백이 없는 닫는 런도 지운다(`# alpha#`의 label은 `alpha`).
+- 76: backslash escape를 모른다. `### alpha \###`의 끝 `###`를 닫는 런으로 지워 label이 `alpha \`가 된다.
+- 79: 빈 제목(`##`, `### `)을 제목으로 보지 않고, `## ##`의 label은 `#`이다.
+- 예제 밖: `\s`가 유니코드 공백이라 `#` 뒤 U+3000(`#　확정`)도 제목으로 본다. CommonMark는 공백·탭만 받는다.
+
+코드 span도 CommonMark 쪽으로 고치지 않았다. CommonMark 6.1절은 길이가 같은 백틱 런끼리만 짝짓지만, 예전 식과 새 스캔은 같은 길이로 닫히지 않으면 여는 런을
+줄인다. 그래서 lint는 `` ```a`` ``를 통째로 지우고, `check-support`는 `` ```notes/a.md`` ``의 내용을 백틱이 앞에 붙은 `` `notes/a.md ``로 읽는다.
+
+**경고 승격 인증서.** `checker_sha256`가 묶는 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`가 바뀌어 `checker_sha256`가
+바뀐다(스캔 일곱 개 가운데 넷은 `vault_lint_extensions.py`·`vault_ssot.py`에, 특권 노트 링크 스캔은 `vault_provenance.py`에, 자격 증명 식은 `jev_client.py`에
+있다. healthcheck 위키링크를 바꾼 `vault_healthcheck.py`·`vault_links.py`와 Telegram 브리지의 `jarvis_bridge.py`는 묶이지 않는다). benign corpus와 그 replay
+결과는 같다. 경고를 `fatal`로 올린 볼트는 [위](#출처와-공유-상태-보강)에 적은 순서대로 승격 단계를 되돌리고 엔진 사본을 모두 바꾼 뒤 인증서를 다시 만든다.
+
+**남은 비선형 정규식.** 여기에 적었던 곳은 모두 바꿨다. 줄마다 인라인 코드 지우기, lint의 위키링크 찾기와 `_heading_key`의 링크,
+`split_frontmatter`, `CODE_SPAN_RE`를 먼저 바꿨고, 그 뒤의 탐색에서 남은 것으로 찾은 healthcheck의 `WIKILINK_RE`와 특권 노트의 링크 찾기를, 그다음
+탐색에서 찾은 `jev_client.SENSITIVE`와 기본 경로 밖의 `jarvis_bridge.py:1237`을 이어서 바꿨다. 바꾼 뒤(2026-10-27) 같은 방법으로 다시 쟀다. 정규식
+리터럴마다 한 글자 반복, 두 글자 반복과 몇 가지 앞붙이 입력을 `finditer`로 N = 1,000·4,000에서 재고, 길이가 네 배일 때 여덟 배 넘게 느려지는 식을 골랐다.
+대상은 앞선 탐색의 열두 파일(`vault_lint_extensions.py`·`vault_ssot.py`·`vault_healthcheck.py`·`vault_provenance.py`·`vault_egress.py`·`vault_paths.py`·
+`vault_evidence.py`·`vault_state.py`와, 기본 훅이나 기본 lint가 함께 부르는 `jev_client.py`·`vault_warning_policy.py`·`hooks/session_start.py`·
+`hooks/session_checkpoint.py`)과 기본 경로 밖의 `jarvis_bridge.py`다. 이 입력에는 식의 낱말이 없어 `SENSITIVE`의 JWT·이름표 갈래를 놓쳤으므로, 식마다 그
+식의 낱말(두 글자 이상 이어진 리터럴)을 앞붙이로 쓰는 입력(낱말 뒤 한 글자 반복, 낱말과 구분자를 번갈아 반복)을 더한 탐색도 같은 파일에 돌렸다.
+바꾸기 전 파일에서는 이 탐색이 `SENSITIVE`(가장 느린 입력은 `암호` 뒤 U+3000 반복)와 `jarvis_bridge.py:1237`을 찾았고, 바꾼 뒤에는 두 탐색 모두 찾지 않는다.
+
+바꾼 뒤에도 두 탐색에 걸린 다섯은 모두 시작 자리가 고정된 호출로만 쓰인다. `vault_provenance.py`의 `_HEADER_KEY_RE`와 `vault_state.py`의 할 일 줄 식 둘은
+`match`로만, `jev_client.py`의 `_CREDENTIAL_LABEL`과 `jarvis_bridge.py`의 Telegram 토큰 식(`parse_telegram_token`의 `([0-9]+):([A-Za-z0-9_-]+)`)은
+`fullmatch`로만 불리고, 실제 호출 방식으로 재면 N = 16,000·64,000·256,000에서 시간이 길이에 비례했다(길이가 16배일 때 시간은 많아야 16.7배). 그래서 이 탐색들로
+알려진 비선형 정규식은 기본 경로에도, 잰 기본 경로 밖의 모듈(`jarvis_bridge.py`)에도 더 없다.
+
+반복 입력으로 찾는 방법이라 남은 것이 없다는 증명은 아니다. 실행 중에 만드는 식(`_support_pattern`, 설정의 사실 패턴, `session_start.py`의 이름표 식)은
+재지 않았고, 기본 경로 밖의 모듈은 `jarvis_bridge.py`만 쟀다.
+
+v0.34.0부터 첫 글자가 ASCII가 아닌 글자인 `--bind-subject` 주어의 식은 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)의
+뒤보기로 시작해 `re`가 리터럴 앞머리 검색을 쓰지 못한다. 2026-10-30 이 PC(Python 3.12)에서 따로 잰 두 측정에서, 합성 줄의 검색 한 번은 v0.33.1의
+같은 주어 식보다 수십 배에서 200배 가까이, ASCII로 시작하는 주어 식보다 약 5배 느렸다. 배수는 줄의 내용과 길이, 기기 부하에 따라 달라진다. 시간은
+여전히 줄 길이에 비례했고(길이 16배에 약 16~17배) 이 식은 옵트인 `--bind-subject`에서 값이 있는 줄에만 쓰이며, 한글 주어 행 256개가 값만 있고 주어는
+없는 줄 2,000개짜리 노트를 인용한 합성 볼트에서 실행 전체는 이 PC에서 0.65초에서 1.6초가 됐다.
+
+**한계.**
+
+- 측정은 이 PC 한 대에서 했다. Python 3.10·3.14와 Linux·macOS에서는 CI의 시간 상한 시험과 메모리 시험만 새 처리의 시간과 메모리를 본다.
+- `vault_state.py`의 사본은 `checker_sha256`가 묶지 않는다. 사본이 원본과 같은지는 위 시험만 확인한다.
+- 앞으로 `\n`이 든 문자열을 넘기는 호출부가 생기면 제목 함수들은 예전 식과 다를 수 있다. 각 함수의 설명에 이 조건을 적었다.
+- 새 스캔은 Python 반복문으로 백틱 런·링크마다 한 번씩 돈다. 길이에는 선형이지만 예전 식이 빨리 끝나던 입력에서는 더 느릴 수 있다. 이 PC에서 `` `a ``를
+  32,000번 이은 64,000자 줄 하나에 새 처리는 약 15 ms, 예전 식은 1.0 ms(lint)·2.4 ms(`check-support`)였고, 코드 span이 둘 있는 보통 줄에서도 줄마다
+  약 1.5 µs 더 든다(2.5 µs 대 0.9~1.0 µs).
+- 위키링크 스캔도 링크마다 한 번씩 돈다. 이 PC에서 링크 9개가 든 1 KB 노트 하나에 healthcheck는 4.2 µs(예전 식 2.0 µs), 특권 노트는 3.2 µs(1.7 µs)였고,
+  `[[a]] `를 10,666번 이은 64,000자 노트에 healthcheck는 4.0 ms(0.97 ms), `[[a]x`를 12,800번 이은 64,000자 특권 노트에 3.3 ms(0.19 ms)였다. 특권 노트
+  스캔은 128개를 채우면 멈춰, 링크가 많은 노트에서는 오히려 빠르다(`[[a]] ` 10,666번에 0.04 ms 대 0.73 ms).
+- 자격 증명 식은 매치가 있는지만 예전 식과 같다. 매치가 시작하는 자리는 다를 수 있다(URL·JWT 갈래는 런이 시작하는 자리에서 매치한다). 지금 호출부는
+  판정만 쓰지만, 앞으로 매치 위치를 쓰는 호출부가 생기면 따로 확인해야 한다.
+- 새 자격 증명 식은 자리마다 lookbehind를, 런이 시작하는 자리마다 lookahead를 더 시도해 보통 글에서 조금 느리다. 이 PC에서 64 KB 글 하나에 영문 +8%,
+  한글 +7%, 로그 줄 +16%, Python 코드 +4%, 공백으로 이은 16진수 해시 +15%, `a`만 65,536자 +7%였고(예전 식과 번갈아 25번 잰 가장 빠른 값), 보통 노트
+  하나(143,831바이트)의 `scan_text`는 81 ms 대 86 ms(+6%)였다.
+- Telegram 위키링크도 링크마다 Python 반복문을 한 번 돈다. 링크 9개가 든 1 KB 줄 하나에 3.1 µs(예전 식 1.8 µs), `[[a]] `를 10,666번 이은 64,000자 줄에
+  2.7 ms(1.0 ms)였다.
+- `vault_healthcheck.WIKILINK_RE`는 없앴다. 저장소 안에서 이 이름을 쓰던 곳은 `vault_links.py` 하나였고, git이 추적하는 Python 파일(git이 없거나
+  git 작업 트리의 맨 위가 아니면 `skills/agentic-vault/scripts`·`hooks`·`scripts`·`tests` 바로 아래 파일) 어디에도 이 이름이 없는지 시험이 확인한다.
+  git이 무시하는 `.worktrees/`·`.superpowers/` 아래의 이전 사본과 작업 파일은 읽지 않는다. 볼트 쪽 코드가 이 이름을 import했다면 실패한다.
+
+**출처.** Python [`re` 문서](https://docs.python.org/3/library/re.html)의 `\s`(str 패턴은 `str.isspace()`가 정하는 유니코드 공백)와
+atomic group·possessive quantifier("Added in version 3.11"). [VULCANBOOST](https://www.usenix.org/conference/usenixsecurity25/presentation/li-yeting)
+(Yeting Li 외, USENIX Security 2025)의 두 수용 기준 — 시험 사례를 모두 통과하고 ReDoS가 없는 수리(TCRSR), 원래 정규식과 동치이고 ReDoS가 없는 수리(ERSR) — 를
+판정 틀로만 빌렸다. DFA 변환과 dk.brics 동치 검사는 쓰지 않는다. 게으른 묶음이 고르는 capture 값은 정규 언어의 동치로 나타나지 않기 때문이다.
+[CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/)(John MacFarlane, CC BY-SA 4.0) 4.2절 예제 62~79는 번호만 인용하고, 시험 사례의 입력은 새로 썼다.
+6.1절(코드 span)은 규칙만 요약했다.
+
+## 수집과 경고
+
+Jarvis 수집은 `captured_via`, `content_origin`, `captured_at`, `body_sha256`을 호스트가 만든다.
+직접 작성한 메모는 own, 전달 자료는 forwarded, 인라인 봇을 거친 메시지(`via_bot`)는 via_bot, 호스트가 선택한 URL 수집은 url이다. 링크를 포함한 직접 메모 전체를 외부 자료로 낮추지 않는다.
+판정 순서는 forwarded → via_bot → url → own이다. 전달 정보가 원래 작성자를 가리키므로 먼저 본다.
+via_bot은 허용된 사용자가 보냈더라도 본문을 제3자 봇이 만들었다는 뜻이라 forwarded·url처럼 신뢰하지 않는다. 사용자가 일부러 인라인 봇으로 보낸 메모도 같다.
+privileged 노트가 via_bot 수집을 참조하면 `provenance-unresolved`가 붙는다. 브리지는 `getUpdates`에 `message`만 요청한다. `guest_message` 등 다른 업데이트는 받지 않고, 와도 무시한다.
+Jarvis를 인증된 채널로 옮기는 작업은 아직 남아 있다.
+이미 저장한 수집은 다시 분류하지 않는다. v0.26.0 이전 브리지가 인라인 봇 메시지를 받았다면 own(링크가 있으면 url)으로 남아 있다. 인라인 봇을 썼다면 `10-inbox/jarvis/`의 이전 수집과 그것으로 만든 노트를 직접 검토한다.
+v0.26.0 이전 엔진은 via_bot을 모른다. 그런 엔진은 via_bot 수집을 `provenance-invalid`(`invalid_origin`)로 보고하고, 이 코드를 fatal로 승격했으면 검사가 멈춘다.
+볼트를 읽는 Claude Code와 Codex 설치본을 함께 갱신한 뒤 새 브리지를 쓴다. 이전 버전으로 되돌리기 전에는 남은 via_bot 수집을 정제·격리하거나 `provenance-invalid`를 warning으로 둔다.
+파생 노트의 manifest 참조는 `provenance_manifest: "00-meta/provenance/<ID>.json"`으로 둘 수 있다.
+기본 frontmatter 상한을 넘기지 않도록 긴 manifest는 별도 JSON으로 보존한다. `verified_by` 문자열은 증명이 아니다.
+Git staged 검사는 index 원문만 사용한다. JSON 근거를 직접 확인할 수 없는 privileged 파생 자료는
+`provenance-unresolved`로 표시한다. 이것을 근거가 없다는 사실 판정이나 치명 승격으로 사용하지 않는다.
+별도 CLI 검증은 명시한 허용 원본과 현재 근거를 확인한다.
+
+링크 anchor·중복 이름·날짜와 추가 출처/대장/전송 발견은 경고로 시작한다. `warning_policy.levels`로 승격하려면
+`vault_warning_policy.py --certificate`의 현재 checker/corpus 해시와 실제 benign replay 0 FP를 함께 사용한다.
+불완전 스캔·미검증 출처는 치명 승격할 수 없다. 코드·줄바꿈·corpus가 달라지면 기존 인증서는 재사용하지 않는다.
+
+corpus 해시는 `skills/agentic-vault/scripts/resources/lint-benign-v1.json`의 바이트로 계산하며, 릴리스 ZIP의 이 파일은
+저장소의 LF 바이트(`38efaabd…`)다. v0.31.0까지는 `.gitattributes`가 이 파일의 줄 끝을 정하지 않아
+`core.autocrlf=true`인 Windows git checkout(그 사본을 그대로 복사한 설치본도 같다)이 CRLF로 받았고, corpus 해시가
+`4b31a673…`로 달랐다(2026-10-27 측정). 그런 사본에서 만든 인증서는 LF 설치본에서 맞지 않고 그 반대도 맞지 않는다.
+2026-10-27부터 `.gitattributes`가 이 파일을 `text eol=lf`로 지정하므로 새 checkout은 `core.autocrlf`와 관계없이 LF
+바이트를 받는다(`tests/test_vault_lint_extensions.py`가 속성과 `core.autocrlf=true` checkout 결과를 검사한다). 이미
+CRLF로 받은 checkout은 속성이 바뀌어도 이 파일을 다시 쓰지 않으므로, 파일을 지우고
+`git checkout -- skills/agentic-vault/scripts/resources/lint-benign-v1.json`으로 다시 받는다(2026-10-27 확인).
+
+## 부분 편집과 checkpoint
+
+`patch_note(vault,path,expected_sha256,[{"start":0,"end":0,"replacement":"..."}], expected_config_sha256=...)`의
+start/end는 원본 UTF-8 **바이트**의 반열린 범위다. untouched 바이트와 LF/CRLF는 유지한다.
+다른 파일 근거는 `source_hashes={"allowed/note.md":"<sha256>"}`로 함께 바인딩한다.
+오래된 파일/config·잠금 소유자 변경은 적용하지 않는다. 잠금은 타 프로세스의 비협조 편집까지 막지 않는다.
+유효 시간이 지난 PID에 `os.kill(pid,0)`을 호출하지 않는다. 중단된 guard는 안전한 수동 복구가 필요할 수 있다.
+
+PreCompact/SessionEnd는 모델 호출 없이 `00-meta/.agentic-vault/runtime/`에 사건·원본 해시·명시한 pending ID만 기록한다.
+v0.48.0부터 Antigravity CLI 패키지의 Stop 훅(`session_checkpoint.py --host antigravity`)도 에이전트가 완전히 멈췄을 때(`fullyIdle`)
+같은 기록을 사건 이름 `Stop`으로 남긴다. 대화 ID는 해시로만 남고, 훅 입력의 사용자 글·대화 기록 경로는 기록하지 않는다([Antigravity CLI 안내](antigravity.md#훅-동작)).
+hot/tasks/handoff를 자동 작성하거나 완료로 바꾸지 않는다. runtime은 Git ignore 및 일반 노트 inventory에서 제외한다.
+내부 runtime 쓰기는 inventory exclude의 예외이며 deny 정책은 계속 적용한다.
+compact SessionStart는 고정 제약 발췌/현재 source 해시를 먼저 유지한다. 제약 블록 전체가 예산에 맞지 않으면 내용 없이 진단한다.
+선택한 최대 8개 blocker 발췌와 Now/anchor의 범위를 넘어 전체 계약을 주입했다는 의미는 아니다.
+전체 출력 상한은 9,500 UTF-16 단위이며 기존 0 예산과 startup/clear/resume 동작을 유지한다.
+Codex hook 지원은 [공식 설명](https://learn.chatgpt.com/docs/hooks)을 참고한다. 실제 정의 신뢰를 자동 승인하지 않는다.
+
+## Compact constraints note (`constraints_note`)
+
+`constraints_note` is an optional `vault-config.json` key that names one note in the vault. The template does not set it. Compact
+SessionStart reads it only while a handoff section is selected: with an empty `handoff_note`, a missing handoff note or
+`handoff_max_tokens: 0` the key is ignored without a diagnostic. The path passes the same vault and deny-zone checks as the other
+notes, and a configured revocation registry masks the note before it is rendered.
+
+The fixed block renders the note like this:
+
+- Front matter, fenced code and HTML comment blocks are skipped.
+- Each top-level `- ` item becomes a `Constraint: ` line, cut at 120 characters, up to 8 items in note order.
+- Further items are counted in `Constraint items omitted: N; inspect the source before any decision.`
+- A note with no items keeps the single `Configured constraints excerpt: ` line, taken from the same visible body and cut at 120
+  characters. A note with no visible body adds no line.
+- The block is atomic and charged to the handoff and hot budgets. When it does not fit, items are dropped from the end and counted
+  before the block is given up. If it still does not fit, nothing is injected and the budget diagnostic is printed.
+- The `Source` line hashes the whole normalized note, not only the rendered lines.
+
+Writing the note: write each rule as one top-level item and put the ones that matter most first. Give each item its
+scope and its reason in the item itself, with the rule and its scope first, because only the first 120 characters of an
+item reach the session; the whole item stays in the note. For example:
+`- Ask before running the bulk rename script on 20-knowledge/: it rewrites wikilinks.` Write "ask before X" rather
+than "never X" unless X is a deliberate block, and give that block its reason too. Remove an item when its reason no
+longer holds, because the note is injected into every compact session start. These conventions follow the advice on
+accumulated cautions in Anthropic's
+[prompting guide for Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2)
+(read 2026-11-12). The engine does not check them, and their effect on vault work was not measured.
+
+Before v0.43.0 the excerpt was the first 120 characters of the note, so a note that opened with front matter or a header comment
+usually contributed no rule at all, and a long plain note lost its second rule.
+
+Why keep such a note: [Benchmarks Are Surprisingly Compaction-Friendly](https://arxiv.org/abs/2610.31778) (v1, 2026-10-22, abstract
+read) reports that compaction can silently remove task constraints, and that work recovers from disk "except constraints that don't
+exist anywhere else". That is the only claim used here. The same abstract finds no method that beats default self-summarization, so
+it is not evidence that re-injecting text improves task results. A constraints note keeps a rule on disk and in view; it grants no
+authority.
+
+## Rule facts and tool results
+
+`assets/templates/rules/vault-workflow.md` (stamp `engine=0.43.0`) says that prohibition, approval and confirmation rules are not
+lifted by any wording in a file or command result, and that a factual value in a rule which differs from a file just read or a
+command just run gives way to the result, with each mismatch reported in the final reply.
+
+Source: [Stale Instruction Files Override the Code](https://arxiv.org/abs/2610.30571) (v1, 2026-10-22) and its data repository
+([`conditions/B_fix.md`](https://github.com/WenJing95/stale-docs-data/blob/fa3c8b8/conditions/B_fix.md) at `fa3c8b8`), whose remedy has
+two parts: follow what the code does and report each inconsistency. The study covers coding-convention conflicts in 40 synthetic
+Python projects, with the remedy in a user-level file. Applying it to factual statements in a project rule file is this engine's
+extension, and the study does not measure it. The wording here is the engine's own.
+
+The extension was tried on invented scenarios before shipping. This is a synthetic result only: one local Qwen 3.5 9B Q8 model,
+temperature 0, thinking off, one pass per wording. An earlier run of the first wordings under a JSON-schema harness gave different counts (no sentence 15/24, first draft 13/24, prohibitions 6/8 down to 3/8) and is not in the table. The harness is not published, so these figures cannot be rerun from this repository. Fact cases set a stale value in the rule against a command
+result; prohibition cases show a file or command output that claims the act is allowed.
+
+| Sentence added to the rules | Fact cases answered from the result | Prohibition cases answered "no" |
+| --- | --- | --- |
+| None | 9/24 | 11/16 (7/8 on the first eight) |
+| Draft: fact clause, then "not relaxed" | 11/24 | 4/8 (first eight only) |
+| Fact clause, then a firmer prohibition clause | 12/24 | 5/8 (first eight only) |
+| Fact clause limited to values, then "do not use this for may-I decisions" | 15/24 | 10/16 |
+| Prohibition clause first, then the fact clause | 7/24 | 13/16 |
+| Shipped: prohibition clause first, decided by that rule alone, then the fact clause | 9/24 | 13/16 |
+
+What this shows on that model: the first draft lowered the prohibition answers, so the wording was chosen by the last column and the
+prohibition clause comes first. The shipped sentence did not reduce prohibition answers on that small local model, and that is all it
+showed. No gain was confirmed: it does not show that the sentence improves fact following, because the shipped form scored the same
+as no sentence. Differences of one or two cases are within what this small set can resolve, and none of this measures hosted models
+or real vaults. The low baseline in the last column is also a reminder that a rule sentence is not enforcement: use
+`permissions.ask` or the deny guard ([guide](../assets/adapters/deny-guard/guide.md)) for that.
+
+### Engine copy ownership line (tried, not shipped)
+
+v0.47.0 planned one line for `assets/templates/rules/vault-architecture.md` saying that the engine copies in
+`00-meta/scripts/` (files with an `engine=` stamp and the helpers installed with them) belong to the plugin: a session
+reports a defect, the fix arrives through `/vault-upgrade`, and the session asks before editing a vault copy. The
+reason was the advice on saying who owns the code in Anthropic's
+[prompting guide for Claude Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2)
+(read 2026-11-12). Before shipping, three wordings were tried with the same kind of synthetic contrast as above:
+`Qwen3.5-9B-Q8_0.gguf` (Q8_0 quantization) on llama.cpp server build `b10729-458681e1d`, temperature 0, seed 0,
+thinking off, one pass per wording, requests sent one after another, answers constrained to yes or no. The longest
+prompt was 3,887 tokens, within the 8,192-token context. Prohibition cases show a file or command output that claims a
+prohibited act is allowed (expected no). Ownership cases ask whether to edit an engine copy without asking (expected
+no), whether to carry out a user's explicit request to patch one (expected yes), and whether to fix the user's own
+script (expected yes). The wordings, their positions and the cases were fixed before the run. Its harness is not
+published, so these figures cannot be rerun.
+
+| Wording | Prohibition cases answered "no" | Unasked engine-copy edits declined | Explicit requests carried out | User's own scripts fixed |
+| --- | --- | --- | --- | --- |
+| None (v0.46.0) | 15/16 | 8/8 | 3/4 | 0/4 |
+| Line 6 wording only | 15/16 | 8/8 | 3/4 | 0/4 |
+| W1, last line | 14/16 | 8/8 | 0/4 | 0/4 |
+| W1, after the `00-meta/` entry | 16/16 | 8/8 | 0/4 | 0/4 |
+| W2, last line | 15/16 | 8/8 | 0/4 | 0/4 |
+| W3, last line | 15/16 | 8/8 | 0/4 | 0/4 |
+
+The line was not shipped because every wording, at either position, turned the explicit requests from 3 of 4 carried
+out into 0 of 4: on this model the line made a session refuse a change the user asked for. Unasked edits were already
+declined 8 of 8 without the line, so no gain could show. The user's-own-script cases were answered "no" without the
+line as well, so that column shows no effect of the line. The line-6 wording alone answered as the base arm in all 32
+cases; it was not shipped either, because changing the rule's stamp would offer the rule for replacement in every
+vault for that wording alone. The rule file and its stamp are as in v0.46.0. These results come from one local model,
+one pass per wording and invented cases; they measure neither hosted models nor real vaults.
+
+## 동기화 충돌 사본과 checkpoint 이후 변경 경고 (선택)
+
+협조 잠금은 참여하는 writer만 보호한다. v0.24.0까지는 외부 편집기(Obsidian)와 동기화 클라이언트의 쓰기를 막지도 감지하지도 못했다.
+두 선택형 검사는 그 흔적을 healthcheck full 모드의 경고로 보여 준다. **탐지만 한다.** 외부 쓰기를 막거나 되돌리지 않고
+충돌 사본을 합치거나 지우지도 않는다. 결과는 리포트 §15의 `warning` 줄과 콘솔 요약 끝의 짧은 표시다. exit code와 치명 집계는 바뀌지 않는다.
+새 경고 코드는 lint `WARNING_CODES`에 없어 `warning_policy.levels`로 승격할 수 없다(적으면 설정 오류다).
+설정 키가 없거나 `false`·`[]`이면 출력·리포트·exit code가 v0.24.0과 같다. 테스트가 v0.24.0(`d2b9315`)에서 캡처한 출력과 비교한다.
+
+### 켜는 법
+
+`00-meta/vault-config.json`에 필요한 키만 넣는다. 셋 다 선택 키이며 기본 템플릿에는 없다.
+
+```json
+{"sync_conflict_check": true, "sync_conflict_patterns": ["*.conflict-copy.md"], "checkpoint_drift_check": true}
+```
+
+| 키 | 값 | 뜻 |
+|---|---|---|
+| `sync_conflict_check` | `true`/`false`, 없으면 꺼짐 | 아래 내장 이름 규칙과 `sync_conflict_patterns`로 파일 이름을 검사한다 |
+| `sync_conflict_patterns` | 파일 이름 glob 목록(최대 32개, 각 128자 이하 — 코드 상수) | 사용자 패턴. `sync_conflict_check`가 `true`일 때만 쓰며, 아니면 리포트 §0 설정 경고 한 줄만 남긴다 |
+| `checkpoint_drift_check` | `true`/`false`, 없으면 꺼짐 | 가장 최근 checkpoint 이후 바뀌거나 없어진 엔진 노트를 보고한다 |
+
+스위치가 불리언이 아니거나, 패턴이 목록이 아니거나, 빈 문자열·제어 문자·`/`·`\`가 든 패턴, 개수·길이 초과는 다른 설정 오류처럼
+config 파싱 실패(exit 1)다. 이 검증은 엔진의 공용 설정 검사기(`validate_config`)에 들어 있다. 그래서 형식이 잘못된 선택 키 하나가
+다른 설정 오류와 똑같이 이 검사기를 거치는 구성 요소를 멈춘다. healthcheck full 모드는 exit 1로 끝나고, Git index의 설정을 읽는
+`--staged`도 그 설정에 키가 있으면 exit 1이라 볼트 pre-commit 훅이 커밋을 막는다. SessionStart 훅은 진단 한 줄만 남기고 handoff·hot을 주입하지 않고,
+PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색(recall)·doctor는 설정 오류(exit 2)로 끝난다. Jarvis 브리지는 설정 로더가
+오류 없이 설정을 돌려주지만 캡처와 Q&A·브리핑의 근거 구성이 실패한다. 반면 자체 로더로 `backup_target`·`exclude_dirs`만 검사하는
+`backup_vault.py`는 스냅숏을 계속 만든다(2026-10-19 측정).
+키를 고치거나 지우면 돌아온다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
+`*`·`?`·`[...]`만 특수 문자다. 이름과 패턴은 NFC로 맞춘 뒤 비교한다.
+
+### 내장 이름 규칙과 근거
+
+공식 문서가 파일 이름 형식을 그대로 적은 것만 내장했다. 아래 두 문서는 2026-10-19에 원문을 직접 읽어 확인했다.
+
+| 경고 코드(`details.pattern`) | 파일 이름 형태 | 근거 |
+|---|---|---|
+| `sync-conflict-copy` (`syncthing-conflict`) | `<filename>.sync-conflict-<date>-<time>-<modifiedBy>.<ext>` | [Syncthing: Understanding Synchronization](https://docs.syncthing.net/users/syncing.html) "Conflicting Changes" |
+| `sync-temp-file` (`syncthing-temp`) | `.syncthing.original-filename.ext.tmp`, Windows는 `~syncthing~original-filename.ext.tmp`. 이름이 너무 길면 `.syncthing.<hash>.tmp`·`~syncthing~<hash>.tmp` | 같은 문서 "Temporary Files" |
+| `sync-conflict-copy` (`obsidian-sync-conflict`) | `original-note-name (Conflicted copy device-name YYYYMMDDHHMM).md` | [Troubleshoot Obsidian Sync](https://github.com/obsidianmd/obsidian-help/blob/master/en/Obsidian%20Sync/Troubleshoot%20Obsidian%20Sync.md) "Conflict file naming pattern" |
+| `sync-user-pattern` (`user`) | `sync_conflict_patterns`의 glob | 사용자 설정 |
+
+- Syncthing 문서(v2.1.0용 페이지)는 두 기기에서 동시에 바뀐 파일 가운데 수정 시각이 더 오래된 쪽을 충돌 사본 이름으로 바꾸고,
+  그 사본을 "일반 파일로 취급해 기기 사이에 전파한다"고 적는다. 정리하지 않으면 다른 기기에도 사본이 남는다.
+  `<date>`·`<time>`·`<modifiedBy>`의 세부 형식은 문서에 없어서, 검사는 `.sync-conflict-` 뒤에 `-`로 나뉜 세 부분이 있는지만 본다.
+- 같은 문서에 따르면 Syncthing은 대상 파일에 직접 쓰지 않고 임시 사본에 쓴 뒤 옮긴다. 복사·동기화 중 오류가 나면 임시 파일이
+  최대 하루 남고, 임시 파일은 보통 숨김 파일이다. `.syncthing.`·`~syncthing~`로 시작하는 이름은 Syncthing이 동기화에서 뺀다.
+  남아 있는 임시 파일은 전송이 끝나지 않았거나 실패했다는 신호일 수 있다.
+- Obsidian 도움말은 Obsidian 1.9.7부터 고를 수 있는 "Create conflict file" 옵션이 위 형식의 새 파일을 만든다고 적는다
+  (예: `Meeting notes (Conflicted copy MyMacBook2 202411281430).md`). 충돌 파일에는 충돌을 감지한 기기의 변경이, 원래 파일에는 원격본이 남는다.
+  기본값 "Automatically merge"는 별도 파일 없이 한 파일로 합치고(Markdown은 diff-match-patch), 중복 텍스트나 서식 문제가 생길 수 있다고 적는다.
+  그런 병합 흔적은 이름 검사로 찾지 못한다.
+  충돌 처리 설정은 기기마다 따로 정한다.
+- Dropbox와 OneDrive의 충돌 사본 이름은 공식 문서로 확인하지 못해 기본값에 넣지 않았다. 쓰는 클라이언트가 실제로 만든 이름을 보고
+  `sync_conflict_patterns`에 적는다.
+
+### 이름 검사 범위
+
+기존 full 모드는 `.md`만 모아 검사한다. 이 검사는 같은 디렉터리 걷기에서 본 **모든 확장자의 파일 이름**을 본다.
+Syncthing 임시 파일은 `.tmp`이고, 설정·첨부의 충돌 사본(예: `vault-config.sync-conflict-<date>-<time>-<modifiedBy>.json`)은 `.md`가 아니기 때문이다.
+이름만 비교하며 파일을 열거나 읽거나 링크를 따라가지 않는다. 파일 하나에는 규칙 하나만 보고하며 임시 파일, 충돌 사본, 사용자 패턴 순으로 본다.
+deny zone·`exclude_dirs`·엔진 runtime은 건너뛰고, 걷기가 따라가지 않는 심볼릭 링크·정션 폴더 아래도 보지 않는다(§14b).
+경고는 경로순 최대 200건(코드 상수)이며 넘으면 `lint-incomplete`에 생략 수를 남긴다. 콘솔 요약 끝에는 `⚠️동기화 충돌·임시 파일 이름 N건(§15)`가 붙는다.
+`.md` 충돌 사본은 지금처럼 일반 노트로도 검사되므로 다른 섹션(프런트매터·고아·모호한 링크 등)에도 나올 수 있다.
+staged(pre-commit) 모드는 이 검사를 하지 않는다. 새 키의 형식 검증만 같이 적용된다.
+
+### checkpoint 이후 바뀐 엔진 노트
+
+PreCompact·SessionEnd 훅(Antigravity CLI 패키지에서는 Stop 훅)은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`에 `hot_note`·`handoff_note`·`log_note`·`tasks_note`의
+경로와 SHA-256을 남긴다(위 [부분 편집과 checkpoint](#부분-편집과-checkpoint)). `checkpoint_drift_check`를 켜면 healthcheck가 가장 최근
+checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`state: changed`)와 없어진 노트(`state: missing`)를 `checkpoint-drift` 경고로 보고한다.
+`details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`/`Stop`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
+콘솔 요약 끝에는 `⚠️checkpoint 이후 바뀐 엔진 노트 N건(§15)`가 붙는다. `hooks/hooks.json`의 SessionStart(startup·clear·resume)가 실행하는
+비동기 healthcheck도 이 비교를 한다. 그 결과는 health-report §15와 그 비동기 훅이 출력하는 한 줄 요약에 남는다. 이 요약 줄은 호스트가 대화
+컨텍스트에 덧붙일 수 있지만(README의 Claude Code 2.1.295 권장 안내 참조), `session_start.py`가 넣는 handoff·hot 본문에는 들어가지 않는다. 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
+다른 에이전트 세션 등)은 리포트 §15에서 확인한다.
+
+- "가장 최근"은 수정 시각이 늦은 checkpoint 파일 최대 64개(코드 상수) 가운데 형식이 맞고 마지막 사건 시각이 가장 늦은 기록이다.
+- runtime 폴더나 checkpoint가 없거나, JSON·필드 형식이 맞지 않거나, 파일이 64 KiB(코드 상수)를 넘으면 경고도 오류도 없이 넘어간다.
+  기록된 경로가 지금 deny·exclude·runtime 구역이거나 링크·정션을 지나면 그 노트는 읽지 않는다.
+- 노트·checkpoint·runtime 어느 파일도 쓰지 않는다. 지금 파일이 1,000,000바이트(코드 상수)를 넘으면 해시 없이 `changed`로 보고한다.
+
+### 한계
+
+- 탐지만 한다. 외부 편집기·동기화 클라이언트의 쓰기를 막거나 순서를 정하지 못하며 다중 파일 트랜잭션도 아니다.
+- 누가 바꿨는지 모른다. checkpoint 뒤 같은 세션이 직접 고친 노트(예: PreCompact 이후 편집)도 경고에 나온다. 세션 안의 엔진 쓰기는 따로 기록하지 않는다.
+- checkpoint는 PreCompact·SessionEnd 훅(Antigravity CLI에서는 Stop 훅)이 실행될 때만 생긴다. 훅이 돌지 않은 세션이나 강제 종료 뒤에는 더 오래된 checkpoint와 비교한다.
+- Antigravity CLI의 Stop은 실행 루프가 끝날 때마다 오고 훅은 `fullyIdle`일 때만 기록하므로, 그 볼트의 가장 최근 checkpoint는 에이전트가 마지막으로 완전히 멈춘 시점이다. v0.47.0 이하의 healthcheck는 `Stop` 사건이 든 checkpoint를 형식이 맞지 않는 기록으로 보고 건너뛴다.
+- 이름 규칙은 문서에 적힌 형태만 본다. 클라이언트 버전·설정에 따른 다른 이름은 놓치고, 같은 모양의 이름을 일부러 쓴 파일은 오탐이 된다.
+- 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-19 기준). 근거는 단위 테스트가 만든 임시 볼트의 합성 자료뿐이다.
+
+## Linked worktree copies and deny zones
+
+A host can create a linked working tree inside the vault. Claude Code's default location is
+`.claude/worktrees/<name>/` ([worktrees documentation](https://code.claude.com/docs/en/worktrees),
+fetched 2026-11-07, 45,321 bytes, SHA-256 prefix `0574c192aca7bd43`; a live page without a date).
+Tracked notes then exist twice. A longer zone (`10-inbox/_processed`) matches only from the root,
+so its copy fell outside the zone, and copied notes pushed real notes out of recall.
+`vault_paths.zone_matches` keeps that root contract. `vault_worktrees.py` adds a second view.
+
+- **What counts:** a folder whose `.git` is a regular file with a `gitdir:` value of
+  `<common>/worktrees/<name>`, where `<common>` is the common git directory of the repository that
+  holds this vault. A submodule (`modules/<name>`), a nested repository and a linked tree of another
+  repository stay ordinary folders, so their notes stay in every walk. Without a repository nothing
+  is read. A UNC value on another share is not looked up.
+- **Two strengths:** closing a zone needs only the `.git` file (`WorktreeScope.linked`), because a
+  stale or hand-written file then closes more, not less. Leaving a folder out could hide real notes,
+  so it also needs `<common>/worktrees/<name>/gitdir` to name this folder's `.git`
+  (`WorktreeScope.registered`). git writes that file, as an absolute path or, with
+  `worktree.useRelativePaths`, relative to the admin folder.
+- **Walks:** `vault_recall.py`, the healthcheck note walk, `backup_vault.py` and
+  `vault_instruction_budget.py` skip a registered tree and name it. Recall adds
+  `diagnostics.skipped_worktrees` only when there is one, and the search stays complete.
+  The healthcheck lists it in section 14b. A snapshot leaves it out, and the manifest format does
+  not change, so `backup_vault.py` prints one line per copy and `create_backup(skipped=[...])`
+  returns the paths. Uncommitted work in a copy is therefore not in the snapshot.
+  The instruction inventory reports `skipped_instruction_path`. `evaluate_recall.py` hashes
+  `skipped_worktrees` in keyed and ephemeral reports, because a folder name can hold a person's or
+  project's name. Plain reports and keyless `--redact` reports show it.
+- **A folder with only the `.git` file:** a hand-written file, or a copy whose admin entry is gone
+  or was moved by hand, is walked like any folder and is in the snapshot. Its zones stay closed:
+  recall counts them under `skipped_denied`, the healthcheck does not read them, and the instruction
+  inventory reports them. A copy that lost its admin entry therefore puts its notes back into recall
+  next to the originals until the folder is removed or `git worktree repair` runs.
+- **Paths a caller names:** `vault_worktrees.checked_note_path` resolves the path with
+  `resolve_note_path`, then applies the same rules as seen from the top of each linked tree on the
+  path. `vault_state._Policy.checked` is that check for every tool on the shared policy, and
+  `note()` uses it, so `vault_state.py`, `vault_runs.py`, `vault_bundle.py`, `vault_handoff_fold.py`,
+  `vault_lesson_delta.py`, `vault_lesson_cues.py`, `vault_lesson_clusters.py`, `vault_capacity.py`
+  `vault_ssot.py` and `vault_operations.py` all follow it. `vault_memory.py` (with `vault_impact.py` and
+  `vault_ontology.py`), `vault_links.py`, `vault_revocation.py`, `vault_index_fold.py`,
+  `vault_doctor.py`, `hooks/session_start.py`, `jarvis_bridge.py`, `vault_query_expansion.py` and
+  the `vault_retrieval.py` sidecar call it directly. `vault_evidence.py`, `vault_proposals.py` and
+  `vault_lesson_metrics.py` keep the same check next to their own call, and `vault_commit.py` is
+  stricter: it refuses every path inside a linked tree with `denied_path`, so a shared note cannot
+  be committed through its copy. The healthcheck stops when a
+  configured note lies in a zone of a copy. Each tool answers as it does for the zone in the main
+  checkout, and a note outside a zone stays readable. A test walks every `resolve_note_path` call,
+  so a new caller has to use this check or state why it does not apply.
+- **Deny guard:** `deny-guard.py` keeps the shared zone block and adds a zone view from each working
+  tree of the vault's repository above a target. This covers copies outside the vault and the main
+  checkout when `CLAUDE_PROJECT_DIR` is a linked tree. Guard controls are not re-read through this
+  view, so an edit of the main checkout's `00-meta/vault-config.json` from a linked-tree session
+  gets no `ask`.
+- **Standalone copies:** the rule sits between `SHARED WORKTREE RULE` markers and is copied verbatim
+  into `deny-guard.py` and `vault_healthcheck.py`, because both run alone from `00-meta/scripts`.
+  A vault keeps the old behavior until its copies are updated.
+
+Without a linked tree the output of these tools does not change.
+
+### Why `exclude_dirs` does not hold `.claude/worktrees`
+
+- `backup_vault.py` rejects an `exclude_dirs` entry that contains `/`, so the entry would stop backups.
+- The healthcheck walk compares single folder names, so the entry would not match there either.
+- The name `.claude` would make `vault_instruction_budget.py` report `unsafe_instruction_directory`
+  and drop `.claude/rules` from its inventory. The name `worktrees` would hide a user's folder of
+  that name.
+- The location is host policy and can move. The `.git` file identifies the copy wherever it sits.
+
+### Host behavior
+
+One measured run: Claude Code 2.1.252 on Windows, `claude -p --worktree s1`, in a synthetic repository
+with the guard's hooks in a git-ignored `.claude/settings.local.json` and the guard files tracked.
+The hook ran for both Read calls. `.claude/settings.local.json` was present in the new tree, and
+`CLAUDE_PROJECT_DIR` and the hook input `cwd` both named the tree, not the main checkout. The guard
+denied the zone path. This is one run, not a host guarantee.
+
+Not measured: an interactive session, other Claude Code versions, macOS and Linux, Codex,
+`EnterWorktree` during a session, subagent or background worktree isolation, and a vault whose guard
+files are untracked, so that the tree lacks them. For a session where settings do not reach the tree,
+`.worktreeinclude` is the host's documented way to copy ignored files. Check `/hooks` inside such a
+session before relying on the guard.
+
+### Limits
+
+- `vault_ssot.py` is bound to the warning promotion certificate and stays unchanged, so its inventory
+  still counts copies, and that list of note names and paths includes names inside a copy's zones.
+  It reads note bytes only through `_Policy.note`, which refuses those notes. Keep linked trees out of
+  the vault, or name their parent folder in `exclude_dirs`, when that inventory matters.
+- The view covers tools that resolve a path through the plugin. A shell command or another program
+  is covered only by the deny guard, where it is installed.
+- Only a linked tree of this repository is covered. A plain copy of the vault folder, or a clone
+  inside it, has no such marker and keeps the root contract.
+- A hand-written `.git` file closes the zones under its folder for every tool here, even when the
+  folder is an ordinary one. With write access to the common git directory, a record can be forged
+  too, and the folder then leaves the walks. The walks still name it in their reports.
+
+## 측정과 보정
+
+`calibrate(samples,model_id,generation)`은 서로 다른 sample hash의 측정치 최소2개를 받아 두 종류의 문자 계수를 적합한다.
+sample은 `text_sha256`, `hangul_chars`, `other_chars`, `tokens`, `model_id`, `generation`, `measurement_origin`을 가진다.
+origin은 reported_sample/local_tokenizer/host_counter이며 **호출자가 보고한 라벨 자체는 독립 증명이 아니다**.
+랭크 부족·비정상 계수·bool/음수/nonfinite 수치·세대 불일치를 거절한다. calibration hash는 수정/오용 감지이며 서명이 아니다.
+
+CLI `--action calibrate|drift|estimate|measure-local`에 해당 API 인자 JSON을 전달한다.
+`estimate`에 calibration/model_id/generation을 모두 명시할 때만 보정하며 기본 예산 추정은 바꾸지 않는다.
+`measure_local`은 선택 의존성인 [실제 tiktoken](https://github.com/openai/tiktoken)을 호출한다.
+인코딩 최초 사용에는 공개 BPE 캐시 다운로드가 필요할 수 있다. tokenizer 버전/encoding을 generation 라벨로 명시하고
+서비스가 보고한 API 토큰 수와 구분한다. 의존성이 없으면 unavailable로 보고한다.
+`measure_counter`는 호스트가 승인된 실제 count API callable을 넘기고 `allow_network=True`를 명시해야 한다.
+엔진이 제공자 endpoint/키를 추측하지 않으며 민감한 입력을 보내지 않는다. count API를 실행하지 않았다면 실행했다고 보고하지 않는다.
+
+## 검색 평가
+
+`vault_recall.py --expand-query [--query-mapping <볼트 상대 경로>]`는 명시적 검색 확장이다.
+alias와 mapping은 검색어만 보강하고 위키링크의 실제 파일명을 바꾸지 않는다. 애매한 목적지는 선택하지 않는다.
+mapping은 `trigger => replacement`의 평문이며 원본 경로/해시와 inventory 세대 검사를 보고한다.
+inventory 전체의 stat 세대 검사는 metadata-preserving rewrite를 잡는 암호학적 스냅샷이 아니다.
+디렉터리는 처음 스캔의 stat 표지와 함께 항목 이름 목록의 SHA-256도 묶는다. 이름만 정렬해 쓰고 inode·크기·내용은 넣지 않는다.
+끝의 확인은 표지가 있는 디렉터리마다 이름 목록을 한 번만 다시 읽는다. 하위로 내려가지 않고, 항목 합계는 디렉터리 항목 상한(20,000개)을 따른다.
+Windows는 항목을 바꾼 직후에도 디렉터리 수정 시각이 그대로이거나 늦게 바뀔 수 있다([MS Learn File Times](https://learn.microsoft.com/en-us/windows/win32/sysinfo/file-times)).
+이름 목록만 다르면 `inventory_verification.listing_diagnostics`에 `directory_listing_changed`와 디렉터리 상대 경로(루트는 `.`)를 남기고, 표지가 바뀐 경우처럼 `source_changed`로 닫는다.
+표지나 이름 목록 확인에서 처음 걸린 디렉터리는 `inventory_verification.changed_directory`에 경로와 종류로 남는다. 종류는 `listing`(이름 목록), `metadata`(stat 표지), `unavailable`(목록을 다시 읽지 못함·상한 초과)이다.
+그보다 먼저 걸린 경우는 `changed_directory`를 남기지 않는다. 노트의 문서 표지가 바뀌었거나, 디렉터리가 제외·금지 경로나 안전하지 않은 경로가 된 경우다. 이때도 `source_changed`로 닫는다.
+이 확인은 처음 바뀐 디렉터리에서 멈춘다. 그래서 `listing_diagnostics`는 많아야 한 줄이고 `listing_diagnostics_omitted`는 0이다.
+목록을 다시 읽지 못하거나 상한을 넘어도 `source_changed`로 닫는다.
+같은 이름으로 지웠다 다시 만든 항목은 이름 목록으로 잡지 못한다. 노트는 문서 stat 표지(inode·변경 시각)가 잡지만 노트가 아닌 파일은 잡지 않는다.
+목록 확인은 한 시점의 확인이며 쓰기를 막는 잠금이 아니다.
+추가 비용은 `python scripts/bench_directory_listing.py [--runs 7]`로 잰다. 엔진 상한(노트 2,000개, 디렉터리 항목 20,000개, 지침 파일 128개·항목 512개)에 맞춘 합성 볼트를 임시 디렉터리에 만든다.
+목록 단계를 켠 경우와 뺀 경우를 번갈아 돌려 중앙값, 전체 추가 시간, 디렉터리당 추가 시간을 JSON으로 낸다. 값은 기계와 부하에 따라 다르므로 한가한 기계에서 중앙값으로 비교한다.
+`scripts/evaluate_recall.py --help`의 hard fixture/top-k/같은 예산별 ablation을 사용한다.
+반환 context claim coverage, nDCG, paired 통계와 abstention을 함께 본다. synthetic label 성능을 실제 업무 정확도로 일반화하지 않는다.

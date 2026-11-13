@@ -1,0 +1,96 @@
+---
+name: vault-doctor
+description: "기억 주입의 설정·경로·예산 상태와 도구 어댑터 상태를 읽기 전용으로 진단"
+disable-model-invocation: true
+---
+
+> **Antigravity CLI용 생성 문서.** 원본은 저장소의 `commands/vault-doctor.md`이고 `scripts/build_antigravity_package.py`가 만든다. 이 파일을 직접 고치지 않는다.
+> - `<PLUGIN_ROOT>`: 이 플러그인 설치 폴더의 절대 경로다. 이 SKILL.md가 있는 폴더의 두 단계 위 폴더다(보통 `~/.gemini/config/plugins/agentic-vault`). 셸 명령에는 펼친 절대 경로를 따옴표로 감싸 넣는다.
+> - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다.
+> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 `--vault <볼트 루트>`로 넘긴다.
+> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계(설정 파일 `.claude/…`, PreToolUse 훅)는 Antigravity 세션에서 실행하지 않는다.
+
+현재 볼트의 기억 주입 상태를 진단하라. 스크립트 경로는 실제 설치된 플러그인에서
+구한다. Codex는 공유 스킬 `references/codex.md`의 플러그인 경로 규칙을 따른다.
+
+```text
+python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_doctor.py" --vault "<현재 볼트 절대 경로>" --format json
+```
+
+1. stdout의 JSON과 종료 코드를 함께 확인한다. 진단은 읽기 전용이며 설정 변경,
+   건강 보고서 작성, 기억 원문 출력, 훅 신뢰 변경을 수행하지 않는다.
+2. 전체 상태와 handoff/hot별 원인, 주입 예정량, 다음 조치를 간결히 설명한다.
+   예산 0은 사용자가 비활성화한 상태다. 누락·빈 파일·읽기 실패·경로 차단·예산 부족을
+   구별하고, 차단된 파일을 다른 도구로 열어 진단을 우회하지 않는다.
+3. 한 섹션 오류로 실제 훅의 전체 출력이 중단되면 다른 섹션이 개별적으로 읽히더라도
+   "기억 주입 정상"이라고 보고하지 않는다. 잘린 출력은 완전한 기억이 아니다.
+   사유 `host_char_cap`은 두 섹션을 합친 훅 출력이 엔진 상한(`host_char_cap`, 9,500자 —
+   Claude Code 한계 10,000자 아래)을 넘어 더 잘렸다는 뜻이다. 상한은 설정이 아니므로 예산을
+   올리라고 안내하지 말고, 노트를 줄이는 것(`shorten_the_notes_below_the_host_cap`)을 안내한다.
+   노트가 읽기 한도도 넘었으면 `source_byte_limit`이 먼저 보고된다.
+4. 이 진단은 파일과 설정에서 예상되는 주입 결과다. Claude/Codex가 훅을 신뢰했는지,
+   실제로 실행했는지, 모델이 기억을 올바르게 사용했는지는 증명하지 않는다.
+5. 진단 요청만으로 수리를 시작하지 않는다. 사용자가 이미 수정을 요청했다면 해당
+   범위에서 원인에 맞는 수정을 진행하고 같은 진단으로 결과를 확인한다.
+6. 도구 어댑터 상태도 함께 본다:
+   `python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_adapters.py" --vault "<현재 볼트 절대 경로>" --format json`.
+   이 진단도 읽기 전용이다. `adapters.aside`의 `actions`는 제안으로만 보고하고 설치·교체는
+   `/vault-upgrade`(Codex `$agentic-vault:agentic-vault upgrade`)로 안내한다.
+   `adapters.deny_guard`는 선택형 deny zone 가드(Claude Code 전용 PreToolUse 훅 템플릿)의 설치 상태다:
+   `state`(`absent`·`installed`·`incomplete`·`needs_review`), 볼트에 복사한 두 스크립트(`guard`·`parser`)의
+   스탬프 상태, 훅의 `problems`(`"onFailure": "block"` 없음, `if` 필터, 중괄호 없는 `$CLAUDE_PROJECT_DIR`,
+   대상 도구를 빠뜨린 `matcher`). Doctor는 가드를 제안하지 않는다. `--offer-deny-guard`를 붙이지 않으므로
+   `offer_deny_guard`는 나오지 않고, 설치 제안은 `/vault-init`만 한다. `incomplete`·`needs_review`와 다른
+   `actions`(`offer_guard_update`·`review_guard`·`review_settings`)는 그대로 보고하고 교체·수정은
+   `/vault-upgrade`(Claude Code)로 안내한다. `cli_on_path`가 false이고 Aside로 설치된 것이 없으며
+   `deny_guard.state`가 `absent`이고 `adapters.lesson_cues`와 `adapters.aside_command`가 없으면 "도구 어댑터 없음" 한 줄로 끝낸다. 이 결과는 기억 주입 판정과 섞지 않는다.
+   `adapters.lesson_cues`는 선택형 교훈 단서 훅(Claude Code 전용 PreToolUse 훅 템플릿)의 설치 흔적이 있을 때만 나온다:
+   `state`, 볼트에 복사한 스크립트(`script`)의 스탬프 상태, 훅의 `problems`(`"onFailure": "block"`, 중괄호 없는
+   `$CLAUDE_PROJECT_DIR`), 컴파일 목록의 존재(`compiled_present`). Doctor는 이 훅도 제안하지 않는다.
+   `--offer-lesson-cues`를 붙이지 않으므로 `offer_lesson_cues`는 나오지 않는다. `actions`(`offer_cues_update`·
+   `review_lesson_cues`·`review_settings`·`build_lesson_cues`)는 그대로 보고하고 교체·수정은 `/vault-upgrade`로 안내한다.
+   `adapters.aside_command`는 선택형 `/aside-repl` 절차 명령(`.claude/commands/aside-repl.md`)이 있을 때만 나온다: 볼트 사본의 스탬프 상태(`state`)와 `actions`(`offer_command_update`·`review_command`). `state`가 `unstamped`이면 볼트가 직접 만든 같은 이름 명령일 수 있다고 말한다. Doctor는 `--offer-aside-command`를 붙이지 않으므로 `offer_command`는 나오지 않는다. 교체는 `/vault-upgrade`로 안내한다.
+7. 사용자가 Jev/Jarvis 연결 준비 상태도 요청하면 [단계별 연결 진단](../../docs/tower-reliability.md)의
+   `vault_connectors.py --vault PATH --format json`을 추가로 사용한다. 기본은 오프라인이며
+   키 존재를 인증 성공으로 해석하지 않는다. live probe는 명시한 지원 연결과 기존 승인
+   범위에서만 수행하며, 진단 요청만으로 Jarvis를 시작하거나 메시지를 보내지 않는다.
+8. 전체 지침 분량도 요청하면 같은 Doctor에 `--instructions`를 추가한다.
+   [지침 진단 안내](../../docs/moai-diagnostics.md)에 따라 루트 지침·참조·중첩 규칙의 정적 분량과
+   조건·누락을 보고한다. 본문을 출력하지 않으며 실제 호스트 로드나 제공자 비용으로 해석하지 않는다.
+9. 사용자가 Claude Code 버전 확인을 요청할 때만 같은 Doctor에 `--host-version`을 추가한다.
+   PATH의 `claude --version`을 고정 인자·셸 없이 한 번 실행하고(최대 약 5초) `host_version`의
+   `status`(`ok`·`below_recommended`·`unavailable`·`unparsed`)와 권장 최소 버전 2.1.295를 보고한다.
+   종료 코드는 바뀌지 않는다. PATH 실행 파일의 버전이므로 지금 훅을 실행하는 호스트와 같다고
+   단정하지 않는다. 낮은 버전이면 갱신을 권하되 설치·갱신을 직접 실행하지 않는다.
+   [권장 사유와 실측 절차](../../docs/reliability.md#호스트-버전과-sessionstart-실측)
+10. 사용자가 SessionStart 훅이 실제로 실행됐는지·잘렸는지·실패했는지 확인을 요청하고 Claude Code 세션 기록 파일
+   하나를 지정하거나 승인했을 때만 같은 Doctor에 `--session-evidence "<세션 기록 .jsonl>"`을 추가한다. 기록은 보통
+   `~/.claude/projects/<프로젝트 경로로 만든 폴더 이름>/<세션 ID>.jsonl`에 있다(폴더 이름은 전체 경로에서
+   영문자·숫자가 아닌 글자를 `-`로 바꾼 것이다. 예: `C:\work\vault` → `C--work-vault`. 바꾼 이름이 200자를 넘으면
+   앞 200자 뒤에 `-`와 해시가 붙으므로 `~/.claude/projects`에서 그 앞 200자와 `-`로 시작하는 폴더를 고른다. 맨
+   앞의 `~`는 Doctor가 홈 폴더로 바꿔 읽는다). 기록 파일을 다른 도구로
+   열어 읽지 않는다(입력·답변·훅 출력이 모두 들어 있다). `session_evidence`의 `status`(`observed_ran`·
+   `observed_truncated`·`observed_error`·`not_recorded`·`unsupported_host_version`·`unparsed`), 훅별
+   `emitted_chars`·`injected_chars`·`truncated`, 실패한 훅의 `outcome`·`exit_code`·
+   `command_mentions_session_start_py`, 판 범위를 보고한다.
+   `observed_error`는 훅이 실행되지 않았다거나 기록이 없다는 뜻이 아니라 성공하지 못한 훅 기록이 있다는 뜻이므로
+   그 훅을 확인하도록 안내한다. `command_mentions_session_start_py`는 기록된 명령이 `session_start.py`를 가리키거나
+   이 플러그인의 SessionStart 상태 문구 가운데 하나일 때 `true`다(Claude Code 2.1.309는 `statusMessage`가 있는 훅의
+   기록에 명령 대신 그 문구를 남기고, 이 플러그인의 SessionStart 훅에는 모두 문구가 있다). 실패한 훅의 이 값이
+   `true`이면 보통 이 플러그인의 훅이라고(같은 이름의 파일이나 같은 문구를 쓰는 다른 훅일 수도 있다), `false`이면 이
+   플러그인의 훅으로 알아보지 못했다고만 말하고 다른 훅이라고 단정하지 않으며, `none`이면 기록에 명령이 없어 어느
+   훅인지 알 수 없다고 말한다. `not_recorded`를 "실행되지 않음"으로, 첫 응답
+   토큰을 훅의 몫으로, 기록을 "모델이 기억을 사용함"으로 해석하지 않는다. 지침 파일 경로는 사용자가 요청할 때만
+   `--session-instruction-paths`로 보인다. 종료 코드는 바뀌지 않는다.
+   [읽는 값과 한계](../../docs/reliability.md#세션-기록으로-sessionstart-실행-확인-선택)
+11. 사용자가 노트 용량이나 상한 도달 시점을 물을 때만 같은 Doctor에 `--capacity`를 추가한다. 설정의 handoff·hot·log·tasks·index를
+    상태 읽기 상한과 recall 파일 상한에 대조하고, 로컬 Git 이력이 있으면 상한 도달 일수를 낸다. 진단은 읽기 전용이고 종료 코드는 바뀌지
+    않는다. `estimated_days_to_limit`는 최근 커밋의 직선 외삽이므로 반드시 추정이라고 말하고 날짜로 단정하지 않는다. `git_unavailable` 등이면
+    사용률만 보고한다. 상태와 사유, 표본 수, 창 길이는 [용량 안내](../../docs/capacity.md)를 따른다.
+12. 사용자가 이 플러그인이 어느 설정에서 켜졌는지, 훅이 두 번 주입되는지 물을 때만 같은 Doctor에 `--plugin-scope`를 추가한다.
+    사용자·프로젝트·로컬 설정 파일의 `enabledPlugins` 값과 그중 이긴 파일을 보고하고, managed·flag·`--add-dir`은 `unknown`으로 둔다.
+    `findings`의 `plugin_and_vault_session_hooks`는 주입이 일어났다는 뜻이 아니라 두 경로가 있다는 뜻이다. 실제 이중 주입은
+    `--session-evidence`의 `session_start_hooks.double_context_observed`(하한값)로 확인한다. `healthcheck_copy_unstamped`·
+    `healthcheck_copy_outdated`는 `/vault-upgrade`로 안내한다. 호스트가 합친 값이 필요하다고 할 때만 `--plugin-scope-host`를 더하며, 이때만
+    `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 설정 변경과 훅 실행은 하지 않고 종료 코드도 바뀌지 않는다.
+    [값과 한계](../../docs/reliability.md#double-injection-broken-output-and-plugin-scope-optional)

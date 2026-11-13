@@ -1,0 +1,771 @@
+#!/usr/bin/env python3
+"""Bounded, deterministic lexical recall for an agentic-vault Markdown vault."""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import stat
+import sys
+import unicodedata
+from pathlib import Path
+from typing import Sequence
+
+from vault_healthcheck import HealthcheckError, estimate_tokens, validate_config
+from vault_paths import relative_parts, resolve_note_path, zone_matches
+from vault_revocation import RevocationError, RevocationPolicy
+from vault_worktrees import WorktreeScope
+
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
+CONFIG_RELPATH = "00-meta/vault-config.json"
+MAX_CONFIG_BYTES = 256 * 1024
+MAX_DIRECTORY_ENTRIES = 20_000
+MAX_FILES = 2_000
+MAX_FILE_BYTES = 512 * 1024
+MAX_TOTAL_READ_BYTES = 16 * 1024 * 1024
+MAX_QUERY_CHARS = 1_000
+MAX_QUERY_TERMS = 32
+MAX_RESULTS = 50
+MAX_SNIPPET_CHARS = 500
+MAX_TITLE_CHARS = 512
+# Optional vault-config.json "recall" block. MAX_TOTAL_READ_BYTES stays the
+# default. 2,000 notes of 512 KiB fit under the ceiling, so a larger value could
+# not buy more notes and can only be a mistake.
+RECALL_SETTING_KEYS = frozenset({"max_total_read_bytes", "priority_paths"})
+MAX_CONFIGURED_TOTAL_READ_BYTES = 1024 * 1024 * 1024
+MAX_PRIORITY_PATHS = 32
+MAX_PRIORITY_PATH_CHARS = 1024
+MAX_OMITTED_SAMPLE = 10
+
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+# Only the bounded line prefixes stay regexes; _title_value and _heading_label
+# give the values in linear time (see below).
+_TITLE_KEY_RE = re.compile(r"\s*title\s*:", re.IGNORECASE)
+_HEADING_OPEN_RE = re.compile(r"\s*#{1,6}(?=\s)")
+
+
+def _diagnostics() -> dict:
+    return {
+        "status": "ok",
+        "search_complete": True,
+        "entries_scanned": 0,
+        "files_considered": 0,
+        "files_read": 0,
+        "bytes_read": 0,
+        "skipped_denied": 0,
+        "skipped_excluded": 0,
+        "skipped_unsafe": 0,
+        "skipped_oversized": 0,
+        "skipped_unreadable": 0,
+        "omitted_entry_limit": 0,
+        "omitted_file_limit": 0,
+        "omitted_total_byte_limit": 0,
+        "context_matches": 0,
+        "context_truncated": 0,
+        "context_omitted": 0,
+        "query_terms_used": 0,
+        "query_truncated": 0,
+        "omissions": [],
+        "oversized_files": [],
+        "limits": {
+            "directory_entries": MAX_DIRECTORY_ENTRIES,
+            "files": MAX_FILES,
+            "file_bytes": MAX_FILE_BYTES,
+            "total_read_bytes": MAX_TOTAL_READ_BYTES,
+        },
+    }
+
+
+def _record_scope(diagnostics: dict, match_count: int) -> None:
+    """Add the labels derived from search_complete and the result count.
+
+    Both labels restate existing facts for the reader and filter nothing:
+    no_match_in_scope is exactly search_complete=true with zero matches.
+    """
+    complete = diagnostics["search_complete"]
+    diagnostics.setdefault("omitted_paths_sample", [])
+    diagnostics["scope_state"] = "complete" if complete else "partial"
+    if match_count:
+        diagnostics["answer_state"] = "matches" if complete else "partial_matches"
+    else:
+        diagnostics["answer_state"] = "no_match_in_scope" if complete else "not_enough_scope"
+
+
+def _sample_omitted(diagnostics: dict, paths) -> None:
+    """Name an evenly spaced path-ordered sample, so the end of the list shows too."""
+    ordered = sorted(set(paths), key=lambda path: (path.casefold(), path))
+    if len(ordered) > MAX_OMITTED_SAMPLE:
+        last = len(ordered) - 1
+        ordered = [ordered[index * last // (MAX_OMITTED_SAMPLE - 1)] for index in range(MAX_OMITTED_SAMPLE)]
+    diagnostics["omitted_paths_sample"] = ordered
+
+
+def _empty_result(diagnostics: dict) -> dict:
+    _record_scope(diagnostics, 0)
+    return {"context": "", "matches": [], "diagnostics": diagnostics}
+
+
+def _omit(diagnostics: dict, reason: str) -> None:
+    diagnostics["search_complete"] = False
+    if reason not in diagnostics["omissions"]:
+        diagnostics["omissions"].append(reason)
+
+
+def _normalize(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def _terms(text: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(_WORD_RE.findall(_normalize(text))))
+
+
+def _path_matches_rule(parts: Sequence[str], rule: str) -> bool:
+    # One zone-matching rule for recall, vault_judge and resolve_note_path.
+    return zone_matches(parts, rule)
+
+
+def _classified_skip(rel_parts: Sequence[str], deny_zones: Sequence[str], exclude_dirs: Sequence[str]) -> str | None:
+    # Reserved engine runtime is never knowledge, even when optional exclusions
+    # are cleared. Keep this exact root path; a business folder named runtime
+    # elsewhere remains eligible.
+    if tuple(part.casefold() for part in rel_parts[:3]) == ("00-meta", ".agentic-vault", "runtime"):
+        return "excluded"
+    if any(_path_matches_rule(rel_parts, rule) for rule in deny_zones):
+        return "denied"
+    if any(_path_matches_rule(rel_parts, rule) for rule in exclude_dirs):
+        return "excluded"
+    return None
+
+
+def _unique_config_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate configuration key")
+        result[key] = value
+    return result
+
+
+def _invalid_config_constant(_value):
+    raise ValueError("nonfinite configuration value")
+
+
+def _finite_config_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite configuration value")
+    return number
+
+
+class _RecallSettingsError(ValueError):
+    """The optional recall block is unusable."""
+
+
+def _checked_recall_settings(config: dict) -> dict:
+    """Validate the optional recall block; the caller reports one fixed code.
+
+    A priority path only reorders notes that already passed every rule, so an
+    entry inside a deny or exclusion rule can never work and is a mistake.
+    """
+    if "recall" not in config:
+        return {}
+    block = config["recall"]
+    if type(block) is not dict or not RECALL_SETTING_KEYS.issuperset(block):
+        raise _RecallSettingsError
+    if "max_total_read_bytes" in block:
+        budget = block["max_total_read_bytes"]
+        if type(budget) is not int or not MAX_FILE_BYTES <= budget <= MAX_CONFIGURED_TOTAL_READ_BYTES:
+            raise _RecallSettingsError
+    priority = block.get("priority_paths", [])
+    if type(priority) is not list or len(priority) > MAX_PRIORITY_PATHS:
+        raise _RecallSettingsError
+    deny_zones = tuple(config.get("deny_zones") or ())
+    exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
+    for value in priority:
+        if type(value) is not str or len(value) > MAX_PRIORITY_PATH_CHARS:
+            raise _RecallSettingsError
+        try:
+            parts = relative_parts(value, "recall priority path")
+        except ValueError as exc:
+            raise _RecallSettingsError from exc
+        if _classified_skip(parts, deny_zones, exclude_dirs):
+            raise _RecallSettingsError
+    return block
+
+
+def _priority_rules(config: dict) -> tuple[tuple[str, ...], ...]:
+    """Case-folded path prefixes of a validated config, in their listed order."""
+    entries = (config.get("recall") or {}).get("priority_paths") or ()
+    return tuple(tuple(part.casefold() for part in relative_parts(value, "recall priority path"))
+                 for value in entries)
+
+
+def _priority_rank(rel_path: str, rules: Sequence[tuple[str, ...]]) -> int:
+    """Position of the first rule covering a path; with no rules every path is 0."""
+    folded = tuple(part.casefold() for part in rel_path.split("/"))
+    for rank, rule in enumerate(rules):
+        if folded[:len(rule)] == rule:
+            return rank
+    return len(rules)
+
+
+def _read_order(paths: list, rules: Sequence[tuple[str, ...]]) -> list:
+    """Move prioritised notes ahead; a stable sort keeps the path order otherwise."""
+    return sorted(paths, key=lambda item: _priority_rank(item[0], rules)) if rules else paths
+
+
+def _read_config(vault: Path, diagnostics: dict) -> dict | None:
+    try:
+        config_path = resolve_note_path(vault, CONFIG_RELPATH)
+        metadata = config_path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("config is not a regular file")
+        size = metadata.st_size
+        if size > MAX_CONFIG_BYTES:
+            diagnostics["status"] = "invalid_config"
+            _omit(diagnostics, "config_byte_limit")
+            return None
+        raw_bytes, stable = _read_regular_bytes(config_path, MAX_CONFIG_BYTES)
+        if not stable:
+            raise OSError("config changed while being read")
+        if len(raw_bytes) > MAX_CONFIG_BYTES:
+            diagnostics["status"] = "invalid_config"
+            _omit(diagnostics, "config_byte_limit")
+            return None
+        raw = json.loads(raw_bytes.decode("utf-8-sig"), object_pairs_hook=_unique_config_fields,
+                         parse_constant=_invalid_config_constant, parse_float=_finite_config_float)
+        config = validate_config(raw)
+        settings = _checked_recall_settings(config)
+        # The caller's diagnostics carry the budget of this call: each reader
+        # takes it from there, so recall, retrieval and evaluators cannot differ.
+        if "max_total_read_bytes" in settings:
+            diagnostics["limits"]["total_read_bytes"] = settings["max_total_read_bytes"]
+        if settings.get("priority_paths"):
+            diagnostics["limits"]["priority_paths"] = len(settings["priority_paths"])
+        return config
+    except _RecallSettingsError:
+        diagnostics["status"] = "invalid_config"
+        _omit(diagnostics, "recall_config_invalid")
+    except FileNotFoundError:
+        diagnostics["status"] = "not_vault"
+        _omit(diagnostics, "config_unavailable")
+    except (
+        HealthcheckError, json.JSONDecodeError, UnicodeError, OSError,
+        ValueError, RecursionError, OverflowError,
+    ):
+        diagnostics["status"] = "invalid_config"
+        _omit(diagnostics, "config_invalid")
+    return None
+
+
+def _read_regular_bytes(path: Path, byte_limit: int) -> tuple[bytes, bool]:
+    """Read a stable regular file without ever allocating beyond ``byte_limit``."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        # A hardlink can alias an outside or denied file through an allowed name.
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("path is not a regular file")
+        if before.st_size > byte_limit:
+            raise OverflowError("file exceeds byte limit")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            content = handle.read(before.st_size)
+        after = os.fstat(descriptor)
+        stable = len(content) == before.st_size and after.st_size == before.st_size
+        return content, stable
+    finally:
+        os.close(descriptor)
+
+
+def _markdown_paths(
+    vault: Path,
+    deny_zones: Sequence[str],
+    exclude_dirs: Sequence[str],
+    diagnostics: dict,
+    *, directory_sink=None, listing_sink=None,
+) -> list[tuple[str, Path]]:
+    # listing_sink(rel, names) receives the entry names of each directory whose
+    # single listing completed within the entry cap; it reuses this walk's
+    # listing so callers can fingerprint membership without a second scan.
+    found: list[tuple[str, Path]] = []
+    worktrees = WorktreeScope(vault)
+    # The flag marks a folder below a linked tree that is not left out: its zones stay closed.
+    pending: list[tuple[tuple[str, ...], Path, bool]] = [((), vault, False)]
+    hit_entry_limit = False
+
+    while pending and not hit_entry_limit:
+        rel_parts, directory, in_tree = pending.pop()
+        try:
+            if directory_sink is not None:
+                directory_sink('/'.join(rel_parts), directory)
+            with os.scandir(directory) as iterator:
+                entries = []
+                for entry in iterator:
+                    if diagnostics["entries_scanned"] >= MAX_DIRECTORY_ENTRIES:
+                        diagnostics["omitted_entry_limit"] += 1
+                        _omit(diagnostics, "directory_entry_limit")
+                        hit_entry_limit = True
+                        break
+                    diagnostics["entries_scanned"] += 1
+                    entries.append(entry)
+            if listing_sink is not None and not hit_entry_limit:
+                listing_sink('/'.join(rel_parts), [entry.name for entry in entries])
+        except (OSError, ValueError):
+            diagnostics["skipped_unreadable"] += 1
+            _omit(diagnostics, "unreadable_path")
+            continue
+
+        child_dirs: list[tuple[tuple[str, ...], Path, bool]] = []
+        for entry in sorted(entries, key=lambda item: (item.name.casefold(), item.name)):
+            child_parts = (*rel_parts, entry.name)
+            classification = _classified_skip(child_parts, deny_zones, exclude_dirs)
+            if classification is None and in_tree:
+                classification = next(filter(None, (_classified_skip(view, deny_zones, exclude_dirs)
+                                                    for view in worktrees.views(child_parts))), None)
+            if classification == "denied":
+                diagnostics["skipped_denied"] += 1
+                continue
+            if classification == "excluded":
+                diagnostics["skipped_excluded"] += 1
+                continue
+
+            rel_path = "/".join(child_parts)
+            try:
+                safe_path = resolve_note_path(vault, rel_path, deny_zones)
+                is_directory = entry.is_dir(follow_symlinks=False)
+            except (OSError, ValueError):
+                diagnostics["skipped_unsafe"] += 1
+                _omit(diagnostics, "unsafe_path")
+                continue
+
+            linked = is_directory and worktrees.linked(safe_path)
+            if linked and worktrees.registered(safe_path):
+                # A second copy of the notes, not more notes: named, and the search stays complete.
+                skipped_worktrees = diagnostics.setdefault("skipped_worktrees", [])
+                if len(skipped_worktrees) < MAX_RESULTS:
+                    skipped_worktrees.append(rel_path)
+            elif is_directory:
+                child_dirs.append((child_parts, safe_path, in_tree or linked))
+            elif entry.name.casefold().endswith(".md"):
+                found.append((rel_path.replace("\\", "/"), safe_path))
+
+        # LIFO traversal needs reverse insertion to retain lexical directory order.
+        pending.extend(reversed(child_dirs))
+
+    return sorted(found, key=lambda item: (item[0].casefold(), item[0]))
+
+
+def _read_markdown(path: Path, diagnostics: dict, rel_path: str, *, raw_sink=None) -> str | None:
+    try:
+        metadata = path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            diagnostics["skipped_unsafe"] += 1
+            _omit(diagnostics, "unsafe_path")
+            return None
+        size = metadata.st_size
+        if size > MAX_FILE_BYTES:
+            diagnostics["skipped_oversized"] += 1
+            # Still never read partially, but name the file (bounded list) so a
+            # caller can tell which note is missing instead of only how many.
+            if len(diagnostics["oversized_files"]) < MAX_RESULTS:
+                diagnostics["oversized_files"].append({"path": rel_path, "bytes": size})
+            _omit(diagnostics, "file_byte_limit")
+            return None
+        total_limit = diagnostics["limits"]["total_read_bytes"]
+        if diagnostics["bytes_read"] + size > total_limit:
+            diagnostics["omitted_total_byte_limit"] += 1
+            _omit(diagnostics, "total_byte_limit")
+            return None
+        remaining = total_limit - diagnostics["bytes_read"]
+        content, stable = _read_regular_bytes(path, min(MAX_FILE_BYTES, remaining))
+        diagnostics["bytes_read"] += len(content)
+        if not stable:
+            diagnostics["skipped_unreadable"] += 1
+            _omit(diagnostics, "file_changed")
+            return None
+        diagnostics["files_read"] += 1
+        if raw_sink is not None:
+            raw_sink(content)
+        # utf-8-sig: a BOM must not hide the frontmatter title (same as healthcheck).
+        return content.decode("utf-8-sig", errors="replace")
+    except OverflowError:
+        diagnostics["omitted_total_byte_limit"] += 1
+        _omit(diagnostics, "total_byte_limit")
+        return None
+    except ValueError:
+        diagnostics["skipped_unsafe"] += 1
+        _omit(diagnostics, "unsafe_path")
+        return None
+    except OSError:
+        diagnostics["skipped_unreadable"] += 1
+        _omit(diagnostics, "unreadable_file")
+        return None
+
+
+# The two helpers below give the same values as the former
+# re.match(r"^\s*title\s*:\s*(.*?)\s*$", line, re.IGNORECASE).group(1) and
+# re.match(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", line).group(1). Their lazy groups
+# retried the optional suffix at every position: quadratic, and cubic for the
+# heading, on a long whitespace run inside one line ('# a' + many spaces + 'b').
+# Precondition: no line feed in line; callers pass str.splitlines() lines.
+# For str patterns \s is str.isspace, the test argument-free strip(),
+# lstrip() and rstrip() use. tests/test_linear_line_parsers.py keeps the
+# former patterns as oracles.
+def _title_value(line: str) -> str | None:
+    match = _TITLE_KEY_RE.match(line)
+    return line[match.end():].strip() if match else None
+
+
+def _heading_label(line: str) -> str | None:
+    match = _HEADING_OPEN_RE.match(line)
+    if not match:
+        return None
+    rest = line[match.end():]
+    body = rest.lstrip()
+    if not body:
+        return rest[-1] if len(rest) >= 2 else None
+    return body.rstrip().rstrip("#").rstrip() or body[0]
+
+
+def _title(lines: list[str], fallback: str) -> tuple[str, int, str, bool]:
+    if lines and lines[0].strip() == "---":
+        for index, line in enumerate(lines[1:65], start=2):
+            if line.strip() == "---":
+                break
+            value = _title_value(line)
+            if value is not None:
+                value = value.strip().strip('"\'')
+                return value, index, line.strip(), True
+    for index, line in enumerate(lines, start=1):
+        label = _heading_label(line)
+        if label is not None:
+            return label, index, line.strip(), True
+    return fallback, 0, "", False
+
+
+def _line_quality(normalized_line: str, phrase: str, query_terms: Sequence[str]) -> tuple[int, int, int]:
+    phrase_hit = int(bool(phrase and phrase in normalized_line))
+    term_hits = sum(term in normalized_line for term in query_terms)
+    occurrences = sum(min(normalized_line.count(term), 3) for term in query_terms)
+    return phrase_hit, term_hits, occurrences
+
+
+def _snippet(line: str, phrase: str, query_terms: Sequence[str]) -> str:
+    clean = line.strip()
+    if len(clean) <= MAX_SNIPPET_CHARS:
+        return clean
+    offset_text = _normalize(clean)
+    positions = [offset_text.find(value) for value in (phrase, *query_terms)]
+    positions = [position for position in positions if position >= 0]
+    normalized_position = min(positions) if positions else 0
+    # Locate the source prefix that reaches the normalized match. Normalizing
+    # whole prefixes accounts for uneven expansions, composition and whitespace;
+    # a global source/normalized length ratio cannot locate a particular match.
+    low, high = 0, len(clean)
+    while low < high:
+        middle = (low + high) // 2
+        if len(_normalize(clean[:middle])) <= normalized_position:
+            low = middle + 1
+        else:
+            high = middle
+    center = max(0, low - 1)
+    start = max(0, center - MAX_SNIPPET_CHARS // 4)
+    end = min(len(clean), start + MAX_SNIPPET_CHARS)
+    excerpt = clean[start:end]
+    return ("..." if start else "") + excerpt + ("..." if end < len(clean) else "")
+
+
+def _rank_document(rel_path: str, text: str, phrase: str, query_terms: Sequence[str]) -> dict | None:
+    lines = text.splitlines()
+    title, title_line, title_source, title_has_source = _title(lines, Path(rel_path).stem)
+    normalized_title = _normalize(title) if title_has_source else ""
+    normalized_body = _normalize(text)
+    title_quality = _line_quality(normalized_title, phrase, query_terms)
+    body_quality = _line_quality(normalized_body, phrase, query_terms)
+    if body_quality[1] == 0 and title_quality[1] == 0:
+        return None
+
+    score = (
+        title_quality[0] * 40
+        + body_quality[0] * 20
+        + title_quality[1] * 10
+        + body_quality[1] * 4
+        + min(body_quality[2], len(query_terms) * 3)
+    )
+
+    best_line = title_line
+    best_source = title_source
+    best_quality = _line_quality(_normalize(title_source), phrase, query_terms)
+    for line_number, line in enumerate(lines, start=1):
+        quality = _line_quality(_normalize(line), phrase, query_terms)
+        if quality > best_quality:
+            best_line = line_number
+            best_source = line
+            best_quality = quality
+
+    return {
+        "path": rel_path,
+        "line": best_line,
+        # Rank using the complete title, but bound metadata outside context budgets.
+        "title": title if len(title) <= MAX_TITLE_CHARS else title[:MAX_TITLE_CHARS - 3].rstrip() + "...",
+        "score": score,
+        "snippet": _snippet(best_source, phrase, query_terms),
+    }
+
+
+def _fit_block(label: str, snippet: str, prefix: str, max_tokens: int) -> tuple[str | None, bool]:
+    full = label + "\n" + snippet
+    candidate = prefix + full
+    if estimate_tokens(candidate) <= max_tokens:
+        return full, False
+    if not snippet or estimate_tokens(prefix + label + "\n" + snippet[:1] + "...") > max_tokens:
+        return None, False
+
+    low, high = 1, len(snippet)
+    best = snippet[:1] + "..."
+    while low <= high:
+        middle = (low + high) // 2
+        shortened = snippet[:middle].rstrip()
+        marker = "..." if middle < len(snippet) else ""
+        if estimate_tokens(prefix + label + "\n" + shortened + marker) <= max_tokens:
+            best = shortened + marker
+            low = middle + 1
+        else:
+            high = middle - 1
+    return label + "\n" + best, True
+
+
+def _render_context(matches: list[dict], max_tokens: int, diagnostics: dict) -> str:
+    if max_tokens == 0:
+        diagnostics["context_omitted"] = len(matches)
+        return ""
+    blocks: list[str] = []
+    for match in matches:
+        label = f"[Source: {match['path']}:{match['line']}]"
+        prefix = "\n\n".join(blocks)
+        if prefix:
+            prefix += "\n\n"
+        block, truncated = _fit_block(label, match["snippet"], prefix, max_tokens)
+        if block is None:
+            diagnostics["context_omitted"] += 1
+            continue
+        blocks.append(block)
+        diagnostics["context_matches"] += 1
+        if truncated:
+            diagnostics["context_truncated"] += 1
+    return "\n\n".join(blocks)
+
+
+def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500) -> dict:
+    """Return bounded lexical context, attributed source matches, and diagnostics."""
+    diagnostics = _diagnostics()
+    if not isinstance(query, str):
+        diagnostics["status"] = "invalid_query"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+    if (
+        not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > MAX_RESULTS
+        or not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens < 0
+    ):
+        diagnostics["status"] = "invalid_options"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+    if not isinstance(vault, Path):
+        diagnostics["status"] = "invalid_vault"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+
+    bounded_query = query[:MAX_QUERY_CHARS]
+    if not _terms(bounded_query):
+        diagnostics["status"] = "invalid_query"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+    if len(query) > MAX_QUERY_CHARS:
+        diagnostics["query_truncated"] = 1
+    query_terms = _terms(bounded_query)[:MAX_QUERY_TERMS]
+    diagnostics["query_terms_used"] = len(query_terms)
+    phrase = _normalize(bounded_query)
+
+    try:
+        if not vault.is_dir():
+            raise OSError
+        # Validate the caller-supplied root itself before normalizing it; otherwise
+        # resolving first would conceal a symlink or Windows junction vault root.
+        resolve_note_path(vault, CONFIG_RELPATH)
+        safe_vault = vault.resolve(strict=True)
+    except (OSError, ValueError):
+        diagnostics["status"] = "invalid_vault"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+
+    config = _read_config(safe_vault, diagnostics)
+    if config is None:
+        return _empty_result(diagnostics)
+    try:
+        revocations = RevocationPolicy(safe_vault, config)
+    except RevocationError:
+        diagnostics["status"] = "revocation_unavailable"
+        diagnostics["search_complete"] = False
+        return _empty_result(diagnostics)
+    deny_zones = tuple(config.get("deny_zones") or ())
+    # Git internals are reserved metadata even when users clear optional exclusions.
+    exclude_dirs = (*tuple(config.get("exclude_dirs") or ()), ".git")
+    priority = _priority_rules(config)
+    candidates = _read_order(_markdown_paths(safe_vault, deny_zones, exclude_dirs, diagnostics), priority)
+    omitted = [rel_path for rel_path, _ in candidates[MAX_FILES:]]
+    if len(candidates) > MAX_FILES:
+        diagnostics["omitted_file_limit"] = len(candidates) - MAX_FILES
+        _omit(diagnostics, "file_count_limit")
+        candidates = candidates[:MAX_FILES]
+
+    ranked: list[dict] = []
+    for index, (rel_path, path) in enumerate(candidates):
+        diagnostics["files_considered"] += 1
+        try:
+            metadata = path.stat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                diagnostics["skipped_unsafe"] += 1
+                _omit(diagnostics, "unsafe_path")
+                omitted.append(rel_path)
+                continue
+            size = metadata.st_size
+        except OSError:
+            diagnostics["skipped_unreadable"] += 1
+            _omit(diagnostics, "unreadable_file")
+            omitted.append(rel_path)
+            continue
+        if diagnostics["bytes_read"] + min(size, MAX_FILE_BYTES + 1) > diagnostics["limits"]["total_read_bytes"]:
+            diagnostics["omitted_total_byte_limit"] += len(candidates) - index
+            _omit(diagnostics, "total_byte_limit")
+            omitted.extend(remaining_path for remaining_path, _ in candidates[index:])
+            break
+        raw_source = []
+        text = (_read_markdown(path, diagnostics, rel_path, raw_sink=raw_source.append)
+                if revocations.enabled else _read_markdown(path, diagnostics, rel_path))
+        if text is None:
+            omitted.append(rel_path)
+            continue
+        if revocations.enabled:
+            try:
+                text = revocations.filter_text(rel_path, raw_source[0].decode("utf-8")).removeprefix("\ufeff")
+            except (RevocationError, UnicodeError):
+                _omit(diagnostics, "revoked_source_unavailable")
+                omitted.append(rel_path)
+                continue
+        match = _rank_document(rel_path, text, phrase, query_terms)
+        if match is not None:
+            ranked.append(match)
+
+    ranked.sort(key=lambda match: (-match["score"], _priority_rank(match["path"], priority),
+                                   match["path"].casefold(), match["path"]))
+    matches = ranked[:limit]
+    context = _render_context(matches, max_tokens, diagnostics)
+    if revocations.enabled:
+        try:
+            revocations.recheck()
+            if _read_config(safe_vault, _diagnostics()) != config:
+                raise RevocationError("configuration_changed")
+        except RevocationError:
+            diagnostics["status"] = "revocation_changed_or_unavailable"
+            diagnostics["search_complete"] = False
+            return _empty_result(diagnostics)
+    _sample_omitted(diagnostics, omitted)
+    _record_scope(diagnostics, len(matches))
+    return {"context": context, "matches": matches, "diagnostics": diagnostics}
+
+
+def recall(
+    vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
+    as_of: str | None = None, expand_links: int = 0, backend: str = "lexical",
+    external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None,
+    lexical_ngrams=None,
+) -> dict:
+    """Preserve legacy output by default; advanced options add source review data."""
+    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and lexical_ngrams is None:
+        return _legacy_recall(vault, query, limit, max_tokens)
+    return _advanced_retrieval.retrieve(
+        vault, query, limit, max_tokens, as_of=as_of, expand_links=expand_links,
+        backend=backend, external_candidates=external_candidates,
+        excluded_sources=excluded_sources, expand_query=expand_query, query_mapping=query_mapping,
+        lexical_ngrams=lexical_ngrams,
+    )
+
+
+# Eager module binding also works when an importlib host removes SCRIPT_DIR
+# from sys.path after loading this file. Import the module, not a partially
+# initialized function: vault_retrieval reuses this module's bounded readers.
+import vault_retrieval as _advanced_retrieval
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--vault", required=True, type=Path)
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--max-tokens", type=int, default=1500)
+    parser.add_argument("--as-of", help="ISO date or ISO datetime with explicit timezone")
+    parser.add_argument("--expand-links", type=int, choices=(0, 1, 2), default=0)
+    parser.add_argument("--backend", choices=("lexical", "bm25", "hybrid"), default="lexical")
+    parser.add_argument("--external-candidates", help="vault-relative JSON sidecar (paths/ranks only)")
+    parser.add_argument("--exclude-source", action="append", default=[], help="additional excluded path/zone")
+    parser.add_argument("--expand-query", action="store_true", help="opt-in bounded aliases/plain query mapping")
+    parser.add_argument("--query-mapping", help="vault-relative plain trigger => replacement mapping; requires --expand-query")
+    parser.add_argument("--lexical-ngrams", choices=("hangul2",),
+                        help="opt-in Hangul syllable-bigram BM25 rank added to RRF; bm25/hybrid only")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    result = recall(
+        args.vault, args.query, args.limit, args.max_tokens, as_of=args.as_of,
+        expand_links=args.expand_links, backend=args.backend,
+        external_candidates=args.external_candidates,
+        excluded_sources=tuple(args.exclude_source),
+        expand_query=args.expand_query, query_mapping=args.query_mapping,
+        lexical_ngrams=args.lexical_ngrams,
+    )
+    if args.format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        if result["context"]:
+            print(result["context"])
+        diagnostics = result["diagnostics"]
+        if diagnostics.get("lexical_ngram_channel", {}).get("status") == "ignored_lexical_backend":
+            print("recall note: --lexical-ngrams is ignored by the lexical backend; use --backend bm25 or hybrid",
+                  file=sys.stderr)
+        if diagnostics["status"] != "ok":
+            print(f"recall unavailable: {diagnostics['status']}", file=sys.stderr)
+        elif not diagnostics["search_complete"]:
+            reasons = ", ".join(diagnostics["omissions"])
+            print(f"recall incomplete: omitted {reasons}", file=sys.stderr)
+            limit_kib = MAX_FILE_BYTES // 1024
+            for skipped in diagnostics["oversized_files"]:
+                # Round up (as ls -h does) so a file just over the limit never
+                # prints as if it fit within it.
+                size_kib = -(-skipped["bytes"] // 1024)
+                print(
+                    f"recall skipped (over {limit_kib} KiB): {skipped['path']} ({size_kib} KiB)",
+                    file=sys.stderr,
+                )
+            unlisted = diagnostics["skipped_oversized"] - len(diagnostics["oversized_files"])
+            if unlisted > 0:
+                # The name list is bounded; say how many more were skipped.
+                print(f"recall skipped: {unlisted} more oversized file(s) not listed", file=sys.stderr)
+    return 0 if result["diagnostics"]["status"] == "ok" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
