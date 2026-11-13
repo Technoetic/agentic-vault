@@ -161,6 +161,15 @@ def logged_calls(folder: Path) -> list[dict]:
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
 
 
+@contextlib.contextmanager
+def caller_home(root: Path):
+    """Point the caller's home at a temporary folder, so even a broken verifier cannot lead
+    the fake agy to the user's real home."""
+    home = root / "caller home"
+    with patch.dict(os.environ, {"USERPROFILE": str(home), "HOME": str(home)}):
+        yield home
+
+
 def strings_in(value) -> list[str]:
     if isinstance(value, str):
         return [value]
@@ -183,7 +192,7 @@ class AgyCallContractTests(unittest.TestCase):
         ))
 
     def test_other_argument_combinations_are_refused_before_a_process_starts(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, caller_home(Path(temporary)):
             root = Path(temporary).resolve()
             fake = write_fake(root / "fake")
             command = verifier.agy_command(str(fake))
@@ -213,7 +222,7 @@ class AgyCallContractTests(unittest.TestCase):
         # No wrapper script: the six variables come from this module, inside the given home.
         self.assertEqual(verifier.HOME_VARIABLES, ("USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "TMP", "TEMP"))
         self.assertNotIn("agy_iso", SCRIPT.read_text(encoding="utf-8"))
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, caller_home(Path(temporary)):
             home = Path(temporary).resolve() / "home"
             with patch.dict(os.environ, {name: "from-the-caller" for name in DROPPED}):
                 environment = verifier.isolated_environment(home)
@@ -230,7 +239,7 @@ class AgyCallContractTests(unittest.TestCase):
 
     def test_a_native_agy_path_runs_directly(self) -> None:
         self.assertEqual(verifier.agy_command(sys.executable), [str(Path(sys.executable).resolve())])
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, caller_home(Path(temporary)):
             root = Path(temporary).resolve()
             fake = write_fake(root / "fake")
             self.assertEqual(verifier.agy_command(str(fake)), [sys.executable, str(fake.resolve())])
@@ -486,16 +495,22 @@ class VerificationTests(unittest.TestCase):
 
         notes = {"findings": [{"severity": "note", "message": "no agents"}],
                  "components": {"skills": 3, "hooks": ["agentic-vault"]}}
-        outcome = self.run_verifier({"validate": notes})
-        self.assertEqual(outcome.code, 0, outcome.stderr)
-        self.assertEqual(outcome.report["validate"],
-                         {"errors": 0, "warnings": 0, "notes": 1, "components": {"hooks": 1, "skills": 3}})
+        # Notes are allowed even if --strict were to exit non-zero for them.
+        for returncode in (0, 1):
+            with self.subTest(exit_code=returncode):
+                outcome = self.run_verifier({"validate": notes, "validate_rc": returncode})
+                self.assertEqual(outcome.code, 0, outcome.stderr)
+                self.assertEqual(outcome.report["validate"],
+                                 {"errors": 0, "warnings": 0, "notes": 1, "components": {"hooks": 1, "skills": 3}})
 
-    def test_validate_error_exit_code_and_unreadable_output_fail(self) -> None:
+    def test_validate_error_unexplained_exit_and_unreadable_output_fail(self) -> None:
         cases = {
             "error": ({"validate": {"findings": [{"severity": "error"}]}}, "validate: 1 error(s) and 0 warning(s)"),
-            "exit code": ({"validate_rc": 1}, "validate: agy plugin validate exited 1"),
+            "exit without a finding": ({"validate_rc": 1},
+                                       "validate: agy plugin validate exited 1 without a finding"),
             "not JSON": ({"validate_text": "Plugin is invalid"}, "validate: output is not JSON"),
+            "not JSON and an exit": ({"validate_text": "Plugin is invalid", "validate_rc": 2},
+                                     "validate: output is not JSON (agy plugin validate exited 2)"),
         }
         for name, (control, failure) in cases.items():
             with self.subTest(case=name):
