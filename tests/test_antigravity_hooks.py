@@ -1112,6 +1112,60 @@ class AntigravityFailureTests(unittest.TestCase):
         self.assertEqual(list((self.vault / RUNTIME).glob("checkpoint-*.json")) if (self.vault / RUNTIME).is_dir()
                          else [], [])
 
+    def test_helpers_fallback_drops_a_closed_stdout(self) -> None:
+        # Without its helpers each hook still answers {}. A host that has stopped reading makes
+        # that write fail: the failure is dropped, exit code 0, only the fixed diagnostic on
+        # stderr, and the descriptor behind stdout then writes to the null device.
+        cases = (("session_start.py", "SessionStart", START_UNAVAILABLE),
+                 ("session_checkpoint.py", "Stop", CHECKPOINT_UNAVAILABLE))
+        for name, event, unavailable in cases:
+            with self.subTest(hook=name, stream="closed pipe"):
+                hook = load(f"antigravity_closed_fallback_{event}", HOOKS / name)
+                descriptor, path = tempfile.mkstemp(dir=self.temp)
+                self.addCleanup(os.close, descriptor)
+
+                class ClosedPipe(io.RawIOBase):
+                    broken = True
+
+                    def writable(self) -> bool:
+                        return True
+
+                    def fileno(self) -> int:
+                        return descriptor
+
+                    def write(self, data) -> int:
+                        if self.broken:
+                            raise OSError(errno.EINVAL, "Invalid argument")
+                        return len(data)
+
+                pipe = ClosedPipe()
+                stream = io.TextIOWrapper(io.BufferedWriter(pipe), encoding="utf-8")
+                stderr = io.StringIO()
+                stdin = io.TextIOWrapper(io.BytesIO(self.event(hookEventName=event)), encoding="utf-8")
+                with mock.patch.object(sys, "stdin", stdin), mock.patch.object(sys, "stdout", stream), \
+                        mock.patch.object(sys, "stderr", stderr), \
+                        mock.patch.object(hook, "_antigravity_helpers", side_effect=ImportError("SECRET")):
+                    code = hook.main(["--host", "antigravity"])
+                pipe.broken = False
+                stream.close()
+                os.write(descriptor, b"written after the failure")
+                self.assertEqual(code, 0)
+                self.assertEqual(stderr.getvalue(), unavailable.format("helpers_unavailable") + "\n")
+                self.assertEqual(Path(path).read_bytes(), b"")
+            with self.subTest(hook=name, stream="closed stream"):
+                # A closed stream raises ValueError; the hook still exits 0.
+                hook = load(f"antigravity_closed_stream_{event}", HOOKS / name)
+                closed = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+                closed.close()
+                stderr = io.StringIO()
+                stdin = io.TextIOWrapper(io.BytesIO(self.event(hookEventName=event)), encoding="utf-8")
+                with mock.patch.object(sys, "stdin", stdin), mock.patch.object(sys, "stdout", closed), \
+                        mock.patch.object(sys, "stderr", stderr), \
+                        mock.patch.object(hook, "_antigravity_helpers", side_effect=ImportError("SECRET")):
+                    code = hook.main(["--host", "antigravity"])
+                self.assertEqual(code, 0)
+                self.assertEqual(stderr.getvalue(), unavailable.format("helpers_unavailable") + "\n")
+
     def test_checkpoint_passes_only_the_conversation_id_to_the_writer(self) -> None:
         hook = load("antigravity_checkpoint_call_test", HOOKS / "session_checkpoint.py")
         calls = []

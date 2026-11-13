@@ -727,6 +727,44 @@ def _write_stdout(text: str) -> None:
     buffer.flush()
 
 
+def _discard_output(stream) -> None:
+    """Point the file descriptor behind stream at the null device; best effort.
+
+    A copy of antigravity_hook._discard_output for the answer written when
+    that module cannot be imported.
+    """
+    try:
+        descriptor = stream.fileno()
+        null = os.open(os.devnull, os.O_WRONLY)
+    except (AttributeError, OSError, ValueError):
+        return
+    if null == descriptor:  # the descriptor had been closed and now names the null device
+        return
+    try:
+        os.dup2(null, descriptor)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(null)
+        except OSError:
+            pass
+
+
+def _write_empty_answer() -> None:
+    """Answer {} when the Antigravity CLI helpers cannot be imported.
+
+    As in antigravity_hook.emit, a host that has stopped reading makes the
+    write fail; the failure is dropped and stdout is pointed at the null
+    device, so the flush at exit cannot fail again and no traceback names
+    the plugin path. The Claude Code path keeps _write_stdout unchanged.
+    """
+    try:
+        _write_stdout("{}\n")
+    except (OSError, ValueError):
+        _discard_output(sys.stdout)
+
+
 def _vault_policy(vault: Path) -> tuple[dict, RevocationPolicy]:
     """Load the validated configuration of vault and its revocation policy."""
     config = _load_config(resolve_note_path(vault, CONFIG_REL))
@@ -817,7 +855,7 @@ def _antigravity_main(explicit: Path | None) -> int:
         helpers = _antigravity_helpers()
     except Exception:
         print(ANTIGRAVITY_UNAVAILABLE_DIAGNOSTIC.format(code="helpers_unavailable"), file=sys.stderr)
-        _write_stdout("{}\n")
+        _write_empty_answer()
         return 0
     try:
         answer = _antigravity_answer(helpers, explicit)

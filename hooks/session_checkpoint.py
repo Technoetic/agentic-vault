@@ -81,19 +81,52 @@ def _antigravity_helpers():
     return antigravity_hook
 
 
+def _discard_output(stream):
+    """Point the file descriptor behind stream at the null device; best effort.
+
+    A copy of antigravity_hook._discard_output for the answer written when
+    that module cannot be imported.
+    """
+    try:
+        descriptor = stream.fileno()
+        null = os.open(os.devnull, os.O_WRONLY)
+    except (AttributeError, OSError, ValueError):
+        return
+    if null == descriptor:  # the descriptor had been closed and now names the null device
+        return
+    try:
+        os.dup2(null, descriptor)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(null)
+        except OSError:
+            pass
+
+
 def _write_empty_object():
-    """Answer {} when the Antigravity CLI helpers cannot be imported."""
+    """Answer {} when the Antigravity CLI helpers cannot be imported.
+
+    As in antigravity_hook.emit, a host that has stopped reading makes the
+    write fail; the failure is dropped and stdout is pointed at the null
+    device, so the flush at exit cannot fail again and no traceback names
+    the plugin path.
+    """
     stream = sys.stdout
     if stream is None:
         return
-    buffer = getattr(stream, 'buffer', None)
-    if buffer is None:
-        stream.write('{}\n')
+    try:
+        buffer = getattr(stream, 'buffer', None)
+        if buffer is None:
+            stream.write('{}\n')
+            stream.flush()
+            return
         stream.flush()
-        return
-    stream.flush()
-    buffer.write(b'{}\n')
-    buffer.flush()
+        buffer.write(b'{}\n')
+        buffer.flush()
+    except (OSError, ValueError):
+        _discard_output(stream)
 
 
 def record_antigravity_stop(helpers, explicit_vault=None):
@@ -102,7 +135,8 @@ def record_antigravity_stop(helpers, explicit_vault=None):
     Only an object event whose hookEventName is absent or Stop, whose
     fullyIdle is true and whose conversationId is a valid id counts, in a
     vault resolved as for SessionStart. The record keeps the SHA-256 of the
-    conversation id, never the user input, the transcript or any path. The
+    conversation id, never the user input, the transcript path or a workspace
+    path (vault-relative note paths stay, as in Claude Code checkpoints). The
     package runs several handlers per event; with an integer executionNum the
     claim lets one of them write, and the same conversation and executionNum
     again within 120 seconds writes nothing.

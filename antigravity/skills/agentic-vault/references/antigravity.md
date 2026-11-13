@@ -25,9 +25,10 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
 `vault-harden`, `vault-jarvis-setup`.
 
 - 명령 스킬에는 `disable-model-invocation: true`를 넣어 사용자가 부르는 명령으로 두었다.
-- 슬래시 명령: 공식 문서는 스킬마다 `/<스킬 이름>` 명령이 생긴다고 적는다(예: `/vault-day`). 플러그인 스킬에
-  이름공간(`/agentic-vault:vault-day` 같은 꼴)이 붙는지와 뒤에 적은 텍스트가 스킬에 전달되는 방식은 문서에 없고
-  확인하지 않았다. agy가 보여 주는 표기(`/skills` 목록)를 쓴다.
+- 슬래시 명령: Plugins·Build plugins 문서는 플러그인 스킬을 `/<스킬 이름>`으로 부른다고 적고(예: `/vault-day`),
+  Customization discovery 문서는 플러그인 스킬의 이름이 `agentic-vault:vault-day`처럼 플러그인 이름으로 시작한다고
+  적는다(이 꼴이면 `/agentic-vault:vault-day`). 실제 agy가 어느 표기를 쓰는지와 뒤에 적은 텍스트가 스킬에
+  전달되는 방식은 확인하지 않았다. agy가 보여 주는 표기(`/skills` 목록)를 쓴다.
 - 공통 문서의 `/vault-*` 표기는 같은 이름의 스킬을 뜻한다. 명령 이름 없이 자연어로 요청하면 의도에 맞는
   명령 하나를 골라 `<PLUGIN_ROOT>/skills/<명령>/SKILL.md`를 읽고 그 절차를 따른다. 범위가 불명확하면 쓰기 전에
   필요한 것만 묻는다.
@@ -69,15 +70,17 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
   `00-meta/vault-config.json`이 있는 폴더 하나다. 없거나 여럿이면 주입도 체크포인트도 하지 않는다.
 - **SessionStart:** Claude Code 시작 때와 같은 인계·핫 컨텍스트(같은 설정 검증·예산·9,500자 상한)를
   `injectSteps`의 시스템 메시지 하나로 넣는다. 처리기 셋이 함께 와도 하나만 넣는다(같은 대화의 표지는 120초 동안
-  유효하다. 대화를 다시 열 때 SessionStart가 다시 오는지는 확인하지 않았다). 주입이 있으면 재사용하고, 없으면
-  `vault-session-start` 스킬로 복원한다.
+  유효하다. 대화 ID가 없거나 표지 파일을 만들 수 없으면 둘 이상이 넣을 수 있다. 대화를 다시 열 때
+  SessionStart가 다시 오는지는 확인하지 않았다). 주입이 있으면 재사용하고, 없으면 `vault-session-start` 스킬로
+  복원한다.
 - **Stop:** `fullyIdle`이 참일 때만 `00-meta/.agentic-vault/runtime/`에 Claude Code와 같은 형식의 체크포인트를
   남긴다. 대화 ID는 해시로만 남고 사용자 입력·대화 기록 경로·작업 공간 경로는 저장하지 않는다.
 - Antigravity에는 압축·세션 종료 이벤트가 없다. 압축 뒤 재주입은 없다. PreCompact·SessionEnd 체크포인트도
   없다. 긴 대화에서 인계가 맥락에서 빠지면 `vault-session-start` 스킬로 다시 복원한다.
 - Claude Code가 시작할 때 비동기로 돌리는 무결성 검사는 돌지 않는다. 검사는 `vault-lint` 스킬로 한다.
 - Windows에서 훅 명령을 실행하는 셸은 문서에 없다. 그래서 이벤트마다 `sh` 래퍼·`py -3`·`python` 처리기
-  세 개를 두고 임시 폴더의 표시 파일로 그중 하나만 동작하게 한다. 실행기가 없는 처리기는 실패하고 agy가
+  세 개를 두고 임시 폴더의 표지 파일로 그중 하나만 동작하게 한다(표지 파일을 만들 수 없거나 SessionStart에 대화
+  ID가, Stop에 정수 `executionNum`이 없으면 둘 이상이 동작할 수 있다). 실행기가 없는 처리기는 실패하고 agy가
   그 오류를 기록한 뒤 무시한다. 셋 다 실패하면 주입과 체크포인트가 없다.
 - 훅은 오류가 나도 빈 JSON 객체를 내고 0으로 끝난다. stderr에는 고정된 문구 한 줄만 쓰고 경로·노트 내용은
   쓰지 않는다.

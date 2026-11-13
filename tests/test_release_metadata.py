@@ -2790,11 +2790,13 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         "제3자 소프트웨어로 Antigravity 로그인에 접근하면 약관 위반",
         "Windows에서 훅 명령을 실행하는 셸은 문서에 없고 확인하지 않았다.",
         "실행기가 없는 처리기는 실패하고 agy가 그 오류를 기록한다",
-        # The skills page documents one slash command per skill; a plugin namespace and the way the text
-        # after the command reaches the skill are what is open.
-        "공식 문서는 스킬마다 `/<스킬 이름>` 슬래시 명령이 생긴다고 적는다(`/vault-day`).",
-        "플러그인 스킬에 이름공간이 붙는지와, 뒤에 적은 텍스트가 스킬에 어떻게 전달되는지는 문서에 없고 확인하지 "
-        "않았다.",
+        # The Plugins and Build plugins pages call a plugin skill /<skill-name>; Customization discovery
+        # names plugin skills <plugin>:<skill>. Which form agy shows and how the text after the command
+        # reaches the skill are what is open.
+        "Plugins·Build plugins 문서는 플러그인 스킬을 `/<스킬 이름>`으로 부른다고 적고(`/vault-day`),",
+        "Customization discovery 문서는 플러그인 스킬의 이름이 `agentic-vault:vault-day`처럼 플러그인 이름으로 "
+        "시작한다고 적는다.",
+        "실제 agy가 어느 표기를 쓰는지와, 뒤에 적은 텍스트가 스킬에 어떻게 전달되는지는 확인하지 않았다.",
         "`injectSteps`의 크기 상한은 확인하지 않았다.",
         "압축 뒤에는 인계를 다시 넣지 않",
         # A claim marker lasts 120 seconds: how agy numbers executionNum and whether a reopened
