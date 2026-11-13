@@ -325,6 +325,24 @@ class ListingTests(unittest.TestCase):
                 self.assertEqual(problems, [problem])
 
 
+class PackageManifestTests(unittest.TestCase):
+    def test_the_package_manifest_must_name_agentic_vault_and_carry_a_version(self) -> None:
+        cases = {
+            '{"name": "agentic-vault", "version": "0.48.0"}': ("0.48.0", None),
+            '{"name": "other-plugin", "version": "0.48.0"}': (None, "plugin.json does not name agentic-vault"),
+            '{"name": "agentic-vault"}': (None, "plugin.json has no version"),
+            '{"name": "agentic-vault", "version": ""}': (None, "plugin.json has no version"),
+            "not JSON": (None, "plugin.json is missing or not JSON"),
+            None: (None, "plugin.json is missing or not JSON"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(manifest=text), tempfile.TemporaryDirectory() as temporary:
+                package = Path(temporary)
+                if text is not None:
+                    (package / "plugin.json").write_text(text, encoding="utf-8")
+                self.assertEqual(verifier.manifest_version(package), expected)
+
+
 class FingerprintTests(unittest.TestCase):
     def test_names_sizes_and_modification_times_are_compared(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -534,6 +552,13 @@ class VerificationTests(unittest.TestCase):
                         install[0])
         self.assertIn("listed: agentic-vault listed 0 times, expected once", report["failures"])
         self.assert_no_paths(report)
+
+    def test_package_manifest_without_a_version_fails_the_run(self) -> None:
+        (self.package / "plugin.json").write_text(json.dumps({"name": "agentic-vault"}) + "\n", encoding="utf-8")
+        outcome = self.run_verifier()
+        self.assertEqual(outcome.code, 1)
+        self.assertIsNone(outcome.report["package_version"])
+        self.assertEqual(outcome.report["failures"][0], "package_version: plugin.json has no version")
 
     def test_failed_version_call_is_reported_and_the_other_checks_run(self) -> None:
         outcome = self.run_verifier({"version_rc": 2})
