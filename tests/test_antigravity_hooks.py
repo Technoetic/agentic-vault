@@ -1153,16 +1153,23 @@ class AntigravityFailureTests(unittest.TestCase):
                 self.assertEqual(stderr.getvalue(), unavailable.format("helpers_unavailable") + "\n")
                 self.assertEqual(Path(path).read_bytes(), b"")
             with self.subTest(hook=name, stream="closed stream"):
-                # A closed stream raises ValueError; the hook still exits 0.
+                # The stream is closed after the hook started and before it answers, so writing the answer raises
+                # ValueError; the hook still exits 0. (It is open while the parser is built: Python 3.14's argparse
+                # asks stdout whether it is a terminal at that point, which a closed stream refuses.)
                 hook = load(f"antigravity_closed_stream_{event}", HOOKS / name)
-                closed = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
-                closed.close()
+                closing = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+
+                def close_then_fail():
+                    closing.close()
+                    raise ImportError("SECRET")
+
                 stderr = io.StringIO()
                 stdin = io.TextIOWrapper(io.BytesIO(self.event(hookEventName=event)), encoding="utf-8")
-                with mock.patch.object(sys, "stdin", stdin), mock.patch.object(sys, "stdout", closed), \
+                with mock.patch.object(sys, "stdin", stdin), mock.patch.object(sys, "stdout", closing), \
                         mock.patch.object(sys, "stderr", stderr), \
-                        mock.patch.object(hook, "_antigravity_helpers", side_effect=ImportError("SECRET")):
+                        mock.patch.object(hook, "_antigravity_helpers", side_effect=close_then_fail):
                     code = hook.main(["--host", "antigravity"])
+                self.assertTrue(closing.closed)
                 self.assertEqual(code, 0)
                 self.assertEqual(stderr.getvalue(), unavailable.format("helpers_unavailable") + "\n")
 
