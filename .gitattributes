@@ -8,3 +8,5 @@ tests/fixtures/memory_units/** text eol=lf
 # Promotion certificates bind corpus_sha256, the SHA-256 of these bytes, and the release ZIP
 # carries LF; a CRLF checkout (core.autocrlf=true) would compute a different hash.
 skills/agentic-vault/scripts/resources/lint-benign-v1.json text eol=lf
+# Generated Antigravity package: LF everywhere so the committed copy equals the generator output on every OS.
+antigravity/** text eol=lf

@@ -14,6 +14,7 @@ committed `antigravity/` folder with a fresh build once the folder exists.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import posixpath
@@ -302,6 +303,17 @@ class PackageBuildTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertEqual(second[relative], data)
 
+    def test_module_loads_unregistered_and_matches_the_folder(self) -> None:
+        # Tests here load scripts through importlib without registering them in sys.modules.
+        spec = importlib.util.spec_from_file_location("antigravity_package_under_test", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        package = module.build_package(self.repo)
+        self.assertEqual(package.version, self.version)
+        self.assertEqual(package.files, self.files)
+        self.assertEqual(sorted(package.skill_bodies), sorted(path for path in self.files
+                                                              if re.fullmatch(r"skills/[^/]+/SKILL\.md", path)))
+
     def test_layout_is_exact(self) -> None:
         self.assertEqual({path.split("/", 1)[0] for path in self.files}, TOP_LEVEL)
         self.assertEqual({path.split("/", 1)[1] for path in self.files if path.startswith("hooks/")}, HOOK_FILES)
@@ -517,6 +529,10 @@ class PackageBuildTests(unittest.TestCase):
         prefix = re.compile(re.escape(REPO_URL) + r"/(blob|tree)/v" + re.escape(self.version) + r"/([^#]+)")
         checked = 0
         for path, text in self.markdown().items():
+            if path == "README.md":
+                # Generated text, not rewritten links; its fixed URLs are pinned by the README test
+                # (docs/antigravity.md is written with the release).
+                continue
             for target in _link_targets(text):
                 match = prefix.fullmatch(target.split("#", 1)[0])
                 if not match:
@@ -693,6 +709,51 @@ class GeneratorRefusalTests(unittest.TestCase):
     def test_usage_errors_exit_2(self) -> None:
         self.assertEqual(_run().returncode, 2)
         self.assertEqual(_run("publish").returncode, 2)
+
+
+class MarkdownScanningTests(unittest.TestCase):
+    """Which link targets the generator sees, and how it cuts sections, on small texts."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        spec = importlib.util.spec_from_file_location("antigravity_package_scanning", SCRIPT)
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def targets(self, text: str) -> list[str]:
+        return [text[start:end] for start, end in self.module.link_destinations(text)]
+
+    def test_code_is_never_a_link(self) -> None:
+        text = ("[a](one.md) `[b](two.md)` ``x [c](three.md) x``\n"
+                "\n```\n[d](four.md)\n```\n\n"
+                "   ~~~text\n   [e](five.md)\n   ~~~\n\n"
+                "start `span\ncontinues [f](six.md)` end [g](seven.md)\n"
+                "\n## Heading with `tick\n"
+                "next [h](eight.md) and ` [i](nine.md)\n"
+                "\\[escaped](ten.md) ```inline [j](eleven.md)```\n")
+        self.assertEqual(self.targets(text), ["one.md", "seven.md", "eight.md", "nine.md"])
+
+    def test_link_forms(self) -> None:
+        text = ('![img](pic.png "title") [t](<a b.md>) [p](x_(y).md) [u](https://e.com) [h](#anchor) '
+                "[n [nested]](n.md#part)\n- item [l](list.md)\n| cell [c](cell.md) |\n")
+        self.assertEqual(self.targets(text), ["pic.png", "a b.md", "x_(y).md", "https://e.com", "#anchor",
+                                              "n.md#part", "list.md", "cell.md"])
+
+    def test_cut_sections_keeps_order_and_skips_fenced_headings(self) -> None:
+        move = self.module.SectionMove(source="x.md", target="refs/x.md", title="# T", origin="> o",
+                                       replacement="> moved", wanted="sections",
+                                       matches=lambda level, title: level == 3 and title.startswith("Opt"))
+        body = ("# Top\n\n### Opt one\n\nA\n\n```\n### Opt fenced\n```\n\n#### Sub\n\nB\n\n"
+                "### Keep\n\nC\n\n### Opt two\n\nD\n\n## Next\n\nE\n")
+        kept, sections = self.module._cut_sections(body, move)
+        self.assertEqual(kept.replace(self.module.SENTINEL, "<moved>"),
+                         "# Top\n\n<moved>\n\n### Keep\n\nC\n\n## Next\n\nE\n")
+        self.assertEqual(sections, ["### Opt one\n\nA\n\n```\n### Opt fenced\n```\n\n#### Sub\n\nB",
+                                    "### Opt two\n\nD"])
+        none = self.module.SectionMove(source="x.md", target="refs/x.md", title="# T", origin="> o",
+                                       replacement="> moved", wanted="sections", matches=lambda level, title: False)
+        with self.assertRaises(self.module.BuildError):
+            self.module._cut_sections(body, none)
 
 
 class GitAttributesTests(unittest.TestCase):
