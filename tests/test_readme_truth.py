@@ -38,6 +38,9 @@ PROSE_CLAIMS = (
     ("rules", r"`vault-\*\.md` (\d+)종"),
     ("rules", r"\b(\w+) engine-owned rule files"),
     ("rules", r"engine-owned rule files \((\w+) since"),
+    # The generated Antigravity CLI package holds one skill per command plus the shared skills.
+    ("antigravity_skills", r"Antigravity CLI용 스킬 (\d+)개"),
+    ("antigravity_skills", r"(\d+) Antigravity CLI skills"),
 )
 
 
@@ -56,6 +59,10 @@ def actual_counts() -> dict[str, int]:
         # Top-level template files (notes, stubs, config, permissions); rules/ is separate.
         "templates": sum(1 for path in TEMPLATES.iterdir() if path.is_file()),
         "rules": len(list((TEMPLATES / "rules").glob("vault-*.md"))),
+        # scripts/build_antigravity_package.py turns every command into a skill of the same name and
+        # carries the shared skills (skills/*/SKILL.md) over.
+        "antigravity_skills": len(list((ROOT / "commands").glob("*.md")))
+        + len(list((ROOT / "skills").glob("*/SKILL.md"))),
     }
 
 
@@ -169,8 +176,9 @@ class PublicDocsTests(unittest.TestCase):
 
     def test_relative_links_resolve(self) -> None:
         for document in (README, ROOT / "SECURITY.md", ROOT / "docs" / "README.md",
-                         ROOT / "docs" / "codex.md",
-                         ROOT / "docs" / "releases" / f"v{manifest_version()}.md"):
+                         ROOT / "docs" / "codex.md", ROOT / "docs" / "antigravity.md",
+                         ROOT / "docs" / "releases" / f"v{manifest_version()}.md",
+                         ROOT / "docs" / "verification" / f"v{manifest_version()}.md"):
             text = document.read_text(encoding="utf-8")
             for target in relative_links(text):
                 with self.subTest(document=document.name, target=target):

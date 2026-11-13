@@ -21,7 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".codex-plugin/plugin.json",
-             ".agents/plugins/marketplace.json")
+             ".agents/plugins/marketplace.json", "antigravity/plugin.json")
+# The manifests that carry the release version; antigravity/plugin.json is generated and takes its
+# version from .claude-plugin/plugin.json.
+VERSIONED_MANIFESTS = (".claude-plugin/plugin.json", ".claude-plugin/marketplace.json",
+                       ".codex-plugin/plugin.json", "antigravity/plugin.json")
+GENERATOR = "scripts/build_antigravity_package.py"
 MARKER = re.compile(r"^# --- BEGIN (.+?)(?: \(| ---)", re.MULTILINE)
 MARKERS_TODAY = {"SHARED PATH RULE", "SHARED ZONE RULE", "SHARED WORKTREE RULE", "ATX HEADING"}
 # A test module path or a test name written as inline code in the guide.
@@ -202,6 +207,21 @@ class ContributorGuideTests(unittest.TestCase):
                 self.assertNotIn("CLAUDE.md", text)
         self.assertFalse((ROOT / "SKILL.md").exists())
         self.assertNotIn("export-ignore", _text(ROOT / ".gitattributes"))
+
+    def test_guide_states_the_generated_package_rule(self) -> None:
+        # antigravity/ is generated from the repository and committed; the guide names the four
+        # versioned manifests, forbids hand edits there and gives the generator's build and check commands.
+        guide = " ".join(self._read("AGENTS.md").split())
+        for manifest in VERSIONED_MANIFESTS:
+            with self.subTest(manifest=manifest):
+                self.assertIn(f"`{manifest}`", guide)
+        self.assertIn("The four manifests", guide)
+        self.assertNotIn("The three manifests", guide)
+        for literal in ("`antigravity/` is generated", "Do not edit anything under `antigravity/` by hand",
+                        f"`python {GENERATOR} build`", f"`python {GENERATOR} check`"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, guide)
+        self.assertTrue((ROOT / GENERATOR).is_file(), f"the guide runs {GENERATOR}")
 
 
 if __name__ == "__main__":

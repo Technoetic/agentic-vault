@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.47.0"
-EXPECTED_PUBLIC_REF = "0.47.0"
+EXPECTED = "0.48.0"
+EXPECTED_PUBLIC_REF = "0.48.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.47.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.47.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.48.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.48.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.47.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.48.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -658,7 +658,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(commit, verification_section)
                 self.assertIn(commit, record)
 
-    # v0.47.0 changes none of the seven bound files, so it keeps the v0.46.0 value below.
+    # v0.47.0 and v0.48.0 change none of the seven bound files, so they keep the v0.46.0 value below.
     def test_stated_source_checker_hash_matches_actual_certificate(self) -> None:
         # The expected value is declared, never derived from the implementation under test.
         # A child process reads the actual checkout beside the certificate CLI.
@@ -1940,7 +1940,9 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                     continue
                 if any("engine=0.47.0" in line for line in head):
                     stamped.add(path.relative_to(REPO_ROOT).as_posix())
-        self.assertEqual(stamped, self.DECLARED_STAMPS)
+        # The health check's stamp follows the manifest version and moved to engine=0.48.0 in v0.48.0;
+        # the other two declared files still carry engine=0.47.0.
+        self.assertEqual(stamped, self.DECLARED_STAMPS - {"skills/agentic-vault/scripts/vault_healthcheck.py"})
 
     def test_v0470_default_changes_are_numbered(self) -> None:
         import re
@@ -2380,7 +2382,9 @@ class V0470SharedSurfaceTests(unittest.TestCase):
     )
     # Where the eleven items come from, as each of the seven places states it: items 1-8 from the
     # review that compared the plugin with the vendor guide, item 9 a request handled in the same
-    # review, items 10 and 11 carried over from the v0.46.0 release.
+    # review, items 10 and 11 carried over from the v0.46.0 release. Since v0.48.0 the seventh place,
+    # the Codex long description, describes the current release, so SOURCE_CODEX_LONG is the opening
+    # of its text in tag v0.47.0 and is no longer read from the tree.
     SOURCE_RELEASE_OPENING = "견준 대조 검토가 고칠 곳을 찾았다. 이번 릴리스는 열한 항목을 다룬다."
     SOURCE_RELEASE_SPLIT = (
         "이 가운데 `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이고, 시험 fixture의 경합과 "
@@ -2444,15 +2448,16 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         korean = _section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령")
         self.assertIn(self.SOURCE_README_KOREAN, _folded(korean))
         self.assertNotIn("외부", korean)
-        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v0.47.0**"))
+        # Since v0.48.0 the current-version line keeps the v0.47.0 summary as retained history.
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v"))
         self.assertIn(self.SOURCE_README_CURRENT, current)
         self.assertNotIn("외부 검토", current)
         english = _section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
         codex_doc = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         codex_section = _section(codex_doc, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command")
-        codex_long = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        # The Codex long description describes the current release (v0.48.0 since then); its v0.47.0 text
+        # is kept in tag v0.47.0.
         texts = {"readme": english, "docs_codex": codex_section,
-                 "codex_long": codex_long["interface"]["longDescription"],
                  "record": V0470ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8")}
         for name, text in texts.items():
             with self.subTest(text=name):
@@ -2475,7 +2480,8 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         scope = _section(record, "## Release content and scope")
         korean = _folded(_section(readme, "## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령"))
         english = _folded(_section(readme, "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command"))
-        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v0.47.0**"))
+        # The current-version line keeps the v0.47.0 summary as history since v0.48.0.
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v"))
         codex_section = _folded(_section(codex_doc,
                                          "## v0.47.0 — guide-comparison fixes and the aside-repl procedure command"))
         expected = (
@@ -2499,7 +2505,8 @@ class V0470SharedSurfaceTests(unittest.TestCase):
                                            "command " + self.SOURCE_README_ENGLISH))
         self.assertTrue(codex_section.startswith("## v0.47.0 — guide-comparison fixes and the aside-repl "
                                                  "procedure command " + self.SOURCE_CODEX_DOC))
-        self.assertTrue(codex_long.startswith(self.SOURCE_CODEX_LONG + " a contributor guide at the repository root"))
+        # The Codex long description moved on to v0.48.0; SOURCE_CODEX_LONG opens its text in tag v0.47.0, and
+        # the stale phrasings below stay forbidden in the current one.
         # The numbers the record's sentence names exist in its item list.
         self.assertEqual(re.findall(r"^- Item (\d+)\b", scope, re.MULTILINE), [str(n) for n in range(1, 12)])
         texts = {"release": release, "record": record, "readme": readme, "docs_codex": codex_doc,
@@ -2728,3 +2735,433 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         self.assertIn("aside-repl-command.md", codex)
         self.assertIn("subprocess", codex)
+
+
+# v0.48.0: six items that add a generated Antigravity CLI package (antigravity/) beside the unchanged
+# Claude Code and Codex plugin root: the Antigravity mode of the session-start hook, the Stop checkpoint,
+# the generator and its committed package, the isolated install verifier, host-neutral shared texts and
+# the documents. No certificate-bound file changed (the v0.46.0 fingerprint stays), only the health check
+# moves to engine=0.48.0, and no real agy conversation was run. The note fixes the publication order; the
+# record specifies gates, not results.
+class V0480ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.48.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.48.0.md"
+    TITLE = "# v0.48.0 — Antigravity CLI 겸용 패키지"
+    SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 참고와 기존 활용의 차이",
+                "## 검증", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.48.0`이다."
+    AGY_URL = "https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity"
+    CHANGES = 6
+    CERTIFICATE_SENTENCE = (
+        f"일곱 bound 파일은 v0.46.0·v0.47.0과 같으므로 checker_sha256는 `{CHECKER_SHA256_V0460}` 그대로다. "
+        "v0.46.0이나 v0.47.0에서 만든 인증서는 실제 설치 바이트가 같으면 그대로 맞는다. v0.45.1 이하에서 올 때는 "
+        "[v0.46.0의 순서](v0.46.0.md#하위호환업그레이드)를 따른다."
+    )
+    DEFAULT_CHANGES_LEAD = (
+        "플러그인을 갱신하면 명령·스킬·훅 코드는 바로 바뀐다. 볼트에 설치된 사본(규칙·healthcheck·생성 "
+        "AGENTS.md)은 /vault-upgrade(Codex는 upgrade)를 실행하기 전까지 예전대로다."
+    )
+    # The list is drafted from the specification; the flags-off comparison of the integrated tree
+    # confirms it (every difference maps to an entry) before the count is final.
+    DEFAULT_CHANGES = 10
+    ORDER_SENTENCE = (
+        "후보 브랜치 CI(최종 커밋) → 로컬 태그·ZIP·재빌드 확인·Codex 설치 확인·Antigravity 패키지 확인과 격리 "
+        "설치·인증서 → 태그 push → 태그 CI 11/11 → 참고 대장 갱신과 독립 확인 → 독립 릴리스 검토 → master push → "
+        "master CI 11/11 → 검증 기록(verification.json) → 업로드 → 초안 점검 → 게시 → 게시 후 확인"
+    )
+    LOCAL_RUNS = ("전체 로컬 시험은 통합한 트리에서 첫 후보 브랜치 push 전에, 그 뒤 트리가 바뀐 후보 push 전마다, "
+                  "그리고 최종 커밋에서 다시 실행한다.")
+    NO_CONVERSATION = "실제 agy 대화 세션은 하지 않았다."
+    RECORD_TITLE = "# v0.48.0 verification contract"
+    RECORD_OPENING = V0470ReleaseMetadataTests.RECORD_OPENING
+    RECORD_SECTIONS = V0470ReleaseMetadataTests.RECORD_SECTIONS
+    GATE_LABELS = V0470ReleaseMetadataTests.GATE_LABELS
+    # The local steps that the release repeats before every changed candidate and on the final commit;
+    # the three Antigravity steps replace the /aside-repl run of v0.47.0 (that command did not change).
+    GATE_ONE_STEPS = ("unittest", "compile", "whitespace", "smoke", "claude plugin validate --strict",
+                      "build_antigravity_package.py check", "verify_antigravity_plugin.py",
+                      "agy plugin validate --strict", "flags-off", "independent source review")
+    GATE_THREE_ANTIGRAVITY = "the Antigravity package check and the isolated install from the extracted ZIP"
+    # The two placeholders of the generated command skills are named in code spans; nothing else in the
+    # documents is a fill-in marker.
+    NAMED_PLACEHOLDERS = ("`<PLUGIN_ROOT>`", "`<ARGUMENTS>`")
+    BOUNDARY_LITERALS = (
+        "실제 agy 대화 세션(모델 호출)은 실행하지 않았다.",
+        "제3자 소프트웨어로 Antigravity 로그인에 접근하면 약관 위반",
+        "Windows에서 훅 명령을 실행하는 셸은 문서에 없고 확인하지 않았다.",
+        "실행기가 없는 처리기는 실패하고 agy가 그 오류를 기록한다",
+        "슬래시 표기(`/vault-day` 또는 `/agentic-vault:vault-day`)",
+        "`injectSteps`의 크기 상한은 확인하지 않았다.",
+        "압축 뒤에는 인계를 다시 넣지 않",
+        "deny zone 가드·교훈 단서 훅·Aside 자동 기동 훅",
+        "Jarvis 브리지는 Claude CLI로만 응답을 만들며",
+        "`vault_doctor.py`는 agy 설치와 Antigravity 플러그인 상태를 진단하지 않는다.",
+        "상호작용 데이터 수집",
+        "설정에서 끌 수 있",
+    )
+    RECORD_LIMIT_LITERALS = (
+        "No real agy conversation was run",
+        "were not run",
+        "the shell that runs hook commands on Windows",
+        "three handlers",
+        "are not ported",
+        "interaction data",
+    )
+    # Files under assets/, hooks/ and skills/ that carry engine=0.48.0 in their first five lines.
+    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+
+    def test_v0480_release_note_sections_and_install_ref(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        lines = release.splitlines()
+        self.assertEqual(lines[0], self.TITLE)
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+        # The closing paragraph after the last section states the install refs and the stamp.
+        closing = _folded(release[release.index("\n" + self.SECTIONS[-1] + "\n"):])
+        for literal in (self.INSTALL_REF, "engine=0.48.0", "--ref v0.48.0", f"`{self.AGY_URL}`"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, closing)
+
+    def test_v0480_changes_are_the_six_items(self) -> None:
+        changes = _section(self.RELEASE.read_text(encoding="utf-8"), "## 변경")
+        bullets = [line for line in changes.splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), self.CHANGES)
+        # Items 1 to 6 of the specification, in order.
+        for bullet, start in zip(bullets, ("- [세션 시작 훅](../../hooks/session_start.py)",
+                                           "- [체크포인트 훅](../../hooks/session_checkpoint.py)",
+                                           "- [패키지 생성기](../../scripts/build_antigravity_package.py)",
+                                           "- [격리 설치 확인 도구](../../scripts/verify_antigravity_plugin.py)",
+                                           "- 공용 문구:", "- 문서:")):
+            with self.subTest(item=start):
+                self.assertTrue(bullet.startswith(start), bullet[:60])
+        self.assertIn("v0.47.0과 같다", _folded(changes[:changes.index("\n- [체크포인트 훅]")]))
+
+    def test_v0480_states_the_unchanged_checker_once(self) -> None:
+        for document in (self.RELEASE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.name):
+                self.assertEqual(text.count(CHECKER_SHA256_V0460), 1)
+                self.assertEqual(text.count(CHECKER_SHA256_V0460[:8]), 1)
+            for digest in (CHECKER_SHA256_V0340, CHECKER_SHA256_V0330, CHECKER_SHA256_V0320):
+                with self.subTest(document=document.name, absent=digest[:8]):
+                    self.assertNotIn(digest[:8], text)
+        release = self.RELEASE.read_text(encoding="utf-8")
+        self.assertIn(self.CERTIFICATE_SENTENCE, _folded(_section(release, "## 하위호환·업그레이드")))
+        record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
+        self.assertIn(f"checker fingerprint `{CHECKER_SHA256_V0460}`", record)
+        self.assertIn(f"`{V0470ReleaseMetadataTests.CORPUS_SHA256}`", record)
+        self.assertIn(f"`{V0470ReleaseMetadataTests.RESULT_SHA256}`", record)
+
+    def test_v0480_publication_order(self) -> None:
+        import re
+
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        gates = _section(record, "## Final release gates")
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. \*\*", gates), [str(n) for n in range(1, 15)])
+        folded = _folded(gates)
+        position = -1
+        for number, label in enumerate(self.GATE_LABELS, 1):
+            with self.subTest(gate=number):
+                found = folded.find(f"{number}. **{label}**")
+                self.assertGreater(found, position)
+                position = found
+        release = self.RELEASE.read_text(encoding="utf-8")
+        check = _section(release, "## 검증")
+        self.assertIn(self.ORDER_SENTENCE, check.splitlines())
+        self.assertEqual(_folded(release).count(self.ORDER_SENTENCE), 1)
+        self.assertIn("](../verification/v0.48.0.md)", check)
+        self.assertIn(self.NO_CONVERSATION, _folded(check))
+
+    def test_v0480_record_specifies_gates_not_results(self) -> None:
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        lines = record.splitlines()
+        self.assertEqual(lines[0], self.RECORD_TITLE)
+        self.assertTrue(_folded(record).startswith(self.RECORD_TITLE + " " + self.RECORD_OPENING))
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        folded = _folded(record)
+        for literal in ("verification.json", "claude plugin validate --strict", "agy plugin validate --strict",
+                        "Reference Atlas", "flags-off", "this document does not assert they passed",
+                        "measured at gate 3"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+        # The number of resources the native Codex check compares is measured at gate 3, not carried over.
+        self.assertNotIn("130", folded)
+
+    def test_v0480_gate_one_and_three_name_the_antigravity_checks(self) -> None:
+        gates = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Final release gates"))
+        gate_one = gates[gates.index("1. **" + self.GATE_LABELS[0]):gates.index("2. **" + self.GATE_LABELS[1])]
+        for step in self.GATE_ONE_STEPS:
+            with self.subTest(step=step):
+                self.assertIn(step, gate_one)
+        self.assertIn("Before the first candidate-branch push", gate_one)
+        self.assertIn("again on the final commit", gate_one)
+        gate_three = gates[gates.index("3. **" + self.GATE_LABELS[2]):gates.index("4. **" + self.GATE_LABELS[3])]
+        self.assertIn(self.GATE_THREE_ANTIGRAVITY, gate_three)
+        self.assertIn("only candidate branches have been pushed", gate_three)
+        self.assertNotIn("Nothing is pushed", gates)
+        # The release note names the same repetitions and the same Antigravity checks as gate 1.
+        check = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 검증"))
+        self.assertIn(self.LOCAL_RUNS, check)
+        for literal in ("`build_antigravity_package.py check`", "`agy plugin validate --strict`",
+                        "`verify_antigravity_plugin.py`"):
+            with self.subTest(note=literal):
+                self.assertIn(literal, check)
+
+    def test_v0480_moves_only_the_declared_stamps(self) -> None:
+        stamped = set()
+        for top in ("assets", "hooks", "skills"):
+            for path in (REPO_ROOT / top).rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    head = path.read_text(encoding="utf-8-sig").splitlines()[:5]
+                except UnicodeDecodeError:
+                    continue
+                if any("engine=0.48.0" in line for line in head):
+                    stamped.add(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(stamped, self.DECLARED_STAMPS)
+
+    def test_v0480_default_changes_are_numbered(self) -> None:
+        import re
+
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")
+        self.assertIn(self.DEFAULT_CHANGES_LEAD, _folded(section))
+        self.assertEqual(re.findall(r"(?m)^(\d+)\. ", section),
+                         [str(n) for n in range(1, self.DEFAULT_CHANGES + 1)])
+        # Every entry names whom it concerns.
+        entries = re.split(r"(?m)^\d+\. ", section)[1:]
+        for number, entry in enumerate(entries, 1):
+            with self.subTest(entry=number):
+                self.assertIn("대상:", entry)
+
+    def test_v0480_no_placeholder_left(self) -> None:
+        import re
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            text = document.read_text(encoding="utf-8")
+            for placeholder in self.NAMED_PLACEHOLDERS:
+                text = text.replace(placeholder, "")
+            with self.subTest(document=document.name):
+                self.assertIsNone(re.search(r"<[^<>\n]*>", text))
+                self.assertNotIn("TBD", text)
+                self.assertNotIn("TODO", text)
+
+    def test_v0480_document_links_resolve(self) -> None:
+        import re
+        from urllib.parse import unquote
+
+        for document in (self.RELEASE, self.VERIFICATION):
+            for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
+                if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                with self.subTest(document=document.name, target=target):
+                    self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
+
+    def test_v0480_boundaries_state_what_was_not_run(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        boundaries = _folded(_section(release, "## 알려진 경계"))
+        for literal in self.BOUNDARY_LITERALS:
+            with self.subTest(boundary=literal[:30]):
+                self.assertIn(literal, boundaries)
+        self.assertIn("](../antigravity.md#직접-해-보는-확인)", boundaries)
+        limits = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Limits"))
+        for literal in self.RECORD_LIMIT_LITERALS:
+            with self.subTest(limit=literal):
+                self.assertIn(literal, limits)
+
+    def test_v0480_reference_table_names_the_sources_read(self) -> None:
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 참고와 기존 활용의 차이")
+        rows = [line for line in section.splitlines() if line.startswith("| [")]
+        self.assertEqual(len(rows), 4)
+        for page in ("build-plugins", "hooks", "customization-discovery", "plugins", "faq"):
+            with self.subTest(page=page):
+                self.assertIn(f"](https://antigravity.google/docs/{page})", rows[0])
+        self.assertIn("2026-11-13", rows[0])
+        self.assertIn("](https://github.com/google-antigravity/antigravity-cli)", rows[1])
+        self.assertIn("`87bd973`", rows[1])
+        self.assertIn("](https://github.com/tw93/Waza)", rows[2])
+        self.assertIn("](https://github.com/obra/superpowers)", rows[3])
+        never_cited = "이 저장소의 이전 문서는 이 자료를 인용하지 않았다."
+        for row in rows[:3]:
+            with self.subTest(row=row[:40]):
+                self.assertTrue(row.rstrip().endswith(never_cited + " |"), row[-80:])
+        # The internal plans did name skills of the superpowers workflow, so that row says what they named
+        # instead of claiming that nothing earlier mentioned it.
+        self.assertNotIn(never_cited, rows[3])
+        self.assertIn("`superpowers:subagent-driven-development`", rows[3])
+        plans = REPO_ROOT / "docs/superpowers/plans"
+        self.assertTrue(any("superpowers:subagent-driven-development" in path.read_text(encoding="utf-8")
+                            for path in plans.glob("*.md")))
+
+
+# v0.48.0 shared surfaces: README, SECURITY.md, docs/antigravity.md, docs/codex.md, docs/README.md,
+# docs/hardening.md, docs/release-integrity.md and the Codex long description.
+class V0480SharedSurfaceTests(unittest.TestCase):
+    GUIDE = REPO_ROOT / "docs/antigravity.md"
+    PACKAGE = REPO_ROOT / "antigravity"
+    KOREAN = "## v0.48.0 — Antigravity CLI 겸용 패키지"
+    ENGLISH = "## v0.48.0 — Antigravity CLI package"
+    GUIDE_SECTIONS = ("## 설치", "## 갱신", "## 무엇이 들어 있나", "## 훅 동작", "## 볼트에서 읽는 규칙",
+                      "## 직접 해 보는 확인", "## 하지 않는 것", "## 권한", "## 데이터", "## 약관 메모",
+                      "## 확인하지 않은 것", "## agy 판")
+
+    @staticmethod
+    def agy_url() -> str:
+        return f"https://github.com/Technoetic/agentic-vault/tree/v{EXPECTED_PUBLIC_REF}/antigravity"
+
+    def test_readme_sections_link_the_v0480_documents(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        self.assertLess(readme.index("\n" + self.KOREAN + "\n"),
+                        readme.index("\n## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령\n"))
+        self.assertLess(readme.index("\n" + self.ENGLISH + "\n"),
+                        readme.index("\n## v0.47.0 — guide-comparison fixes and the aside-repl procedure command\n"))
+        korean = _folded(_section(readme, self.KOREAN))
+        english = _folded(_section(readme, self.ENGLISH))
+        for name, text in (("korean", korean), ("english", english)):
+            for link in ("](docs/releases/v0.48.0.md)", "](docs/verification/v0.48.0.md)", "](docs/antigravity.md)"):
+                with self.subTest(section=name, link=link):
+                    self.assertIn(link, text)
+        self.assertIn("인증서가 묶는 일곱 파일은 v0.46.0·v0.47.0과 같아", korean)
+        self.assertIn("실제 agy 대화 세션으로는 확인하지 않았다", korean)
+        self.assertIn("unchanged from v0.46.0 and v0.47.0", english)
+        self.assertIn("No real agy conversation was run", english)
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v"))
+        self.assertTrue(current.startswith("현재 버전은 **v0.48.0**이며 **Claude Code, Codex 겸용**이고"), current[:60])
+        self.assertIn("](docs/antigravity.md)", current)
+
+    def test_readme_tree_lists_the_antigravity_package(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        tree = readme[readme.index("agentic-vault/\n├── .claude-plugin/"):]
+        tree = tree[:tree.index("```")]
+        lines = {line.split("←")[0].strip(): line for line in tree.splitlines()}
+        column = len(EXPECTED_TREE_LINE.split("←")[0])
+        for entry in ("├── antigravity/", "│   ├── antigravity_hook.py", "│   │   ├── antigravity.md"):
+            with self.subTest(entry=entry):
+                self.assertIn(entry, lines)
+                # The new lines put their arrow in the column of the manifest line.
+                self.assertEqual(len(lines[entry].split("←")[0]), column)
+
+    def test_agy_install_lines_pin_the_current_tag(self) -> None:
+        import re
+
+        texts = {"readme": README.read_text(encoding="utf-8"),
+                 "guide": self.GUIDE.read_text(encoding="utf-8"),
+                 "release": V0480ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")}
+        for name, text in texts.items():
+            urls = re.findall(r"agy plugin install (https://[^\s`]+)", text)
+            with self.subTest(text=name):
+                self.assertTrue(urls or name == "release")
+                self.assertEqual(set(urls) - {self.agy_url()}, set())
+        for name in ("readme", "guide"):
+            with self.subTest(own_line=name):
+                self.assertIn("agy plugin install " + self.agy_url(), texts[name].splitlines())
+        # The repository root is never offered as an agy install source (the automatic conversion
+        # injects no handoff).
+        for name, text in texts.items():
+            with self.subTest(root=name):
+                self.assertNotRegex(text, r"agy plugin install https://github\.com/Technoetic/agentic-vault/?(?:\s|`|$)")
+
+    def test_codex_long_description_states_the_v0480_package(self) -> None:
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        long_description = codex["interface"]["longDescription"]
+        for literal in ("Release v0.48.0", "antigravity/", "No real agy conversation was run",
+                        "unchanged from v0.46.0 and v0.47.0", "Some default results change"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, long_description)
+        for digest in (CHECKER_SHA256_V0460, CHECKER_SHA256_V0340):
+            self.assertNotIn(digest[:8], long_description)
+
+    def test_codex_doc_opens_with_the_v0480_section(self) -> None:
+        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.ENGLISH)
+        section = _folded(_section(codex, self.ENGLISH))
+        for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
+                        "unchanged from v0.46.0 and v0.47.0"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, section)
+        self.assertIn("설치 ref·검증 기록 안내와 [설치](#설치) 절은 v0.48.0 기준이다.", codex)
+        self.assertIn("](antigravity.md)", _section(codex, "## 설치"))
+
+    def test_docs_index_names_the_latest_release_and_the_guide(self) -> None:
+        index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
+        self.assertIn("최신 소스는 [v0.48.0](releases/v0.48.0.md); [검증 기록](verification/v0.48.0.md).", row)
+        self.assertIn("이전 [v0.47.0](releases/v0.47.0.md) / [v0.46.0](releases/v0.46.0.md)", row)
+        guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
+        self.assertIn("(v0.48.0)", guide)
+
+    def test_release_integrity_and_hardening_name_the_current_release(self) -> None:
+        integrity = _folded((REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8"))
+        self.assertIn("현재 v0.48.0의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.48.0.md)",
+                      integrity)
+        self.assertIn("`antigravity/`", integrity)
+        hardening = _folded((REPO_ROOT / "docs/hardening.md").read_text(encoding="utf-8"))
+        self.assertIn("v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, "
+                      "인증서 전환은 맨 위 v0.46.0 절을 따른다.", hardening)
+
+    def test_hardening_names_every_checkpoint_event(self) -> None:
+        import re
+
+        # The drift section lists the last events a checkpoint can carry; they are the health check's own
+        # set (PreCompact and SessionEnd from Claude Code and Codex, Stop from the Antigravity package).
+        source = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8")
+        assign = next(node for node in ast.parse(source).body if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "_CHECKPOINT_EVENTS"
+                              for target in node.targets))
+        events = set(ast.literal_eval(assign.value.args[0]))
+        section = _section((REPO_ROOT / "docs/hardening.md").read_text(encoding="utf-8"),
+                           "### checkpoint 이후 바뀐 엔진 노트")
+        named = re.search(r"마지막 사건\(([^)]*)\)", section)
+        self.assertIsNotNone(named)
+        self.assertEqual(set(re.findall(r"`(\w+)`", named.group(1))), events)
+        self.assertIn("Stop", events)
+
+    def test_security_states_the_antigravity_limits(self) -> None:
+        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("| 0.47.0 and earlier | No. Upgrade to 0.48.0.", security)
+        scope = _section(security, "## Scope")
+        self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
+        self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
+        limits = _section(security, "## Known limitations")
+        bullets = [_folded(bullet) for bullet in ("\n" + limits).split("\n- ")[1:]]
+        named = [bullet for bullet in bullets if bullet.startswith("**Antigravity CLI")]
+        self.assertEqual(len(named), 1)
+        for literal in ("without a separate trust step", "non-zero", "fail open", "three handlers",
+                        "deny-zone guard", "`/permissions`", "opts out", "Google", "violates its terms",
+                        "No real agy conversation was run"):
+            with self.subTest(limit=literal):
+                self.assertIn(literal, named[0])
+        summary = _folded(_section(security, "## 한국어 요약"))
+        for literal in ("최신 0.48.0 소스", "Antigravity CLI", "별도 신뢰 단계 없이", "fail-open", "약관 위반"):
+            with self.subTest(summary=literal):
+                self.assertIn(literal, summary)
+
+    def test_antigravity_guide_covers_the_contract(self) -> None:
+        guide = self.GUIDE.read_text(encoding="utf-8")
+        headings = [line for line in guide.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.GUIDE_SECTIONS)
+        folded = _folded(guide)
+        for literal in ("`fullyIdle`", "`injectSteps`", "`/hooks`", "`/skills`", "`read_file`", "(opt-out)",
+                        "1.5.6 이상", "1.5.7", "`workspacePaths`", "`cwd`", "agentic-vault-hook-claims",
+                        "에이전트가 agy를 감싸 실행하지 않는다", "Google로 전송된다",
+                        "`<PLUGIN_ROOT>`", "`<ARGUMENTS>`", "`jarvis_claude_cli_unavailable`"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_antigravity_guide_matches_the_generated_package(self) -> None:
+        # The handler commands, the skill count and the version that the guide states, read from the
+        # committed generated package.
+        guide = self.GUIDE.read_text(encoding="utf-8")
+        hooks = json.loads((self.PACKAGE / "hooks.json").read_text(encoding="utf-8"))
+        commands = [handler["command"] for events in hooks.values() for handlers in events.values()
+                    for handler in handlers]
+        self.assertEqual(len(commands), 6)
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn(command, guide.splitlines())
+        skills = sorted(path.parent.name for path in (self.PACKAGE / "skills").glob("*/SKILL.md"))
+        self.assertIn(f"스킬 {len(skills)}개", guide)
+        manifest = json.loads((self.PACKAGE / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], EXPECTED)
