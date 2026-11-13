@@ -327,9 +327,9 @@ class ReferenceTests(unittest.TestCase):
     """skills/agentic-vault/references/antigravity.md: the list of section 3.6, in Korean, at most 9,000 bytes."""
 
     def setUp(self) -> None:
-        self.raw = REFERENCE.read_bytes()
+        # A Windows checkout with core.autocrlf=true has CRLF; the committed bytes are LF.
+        self.raw = REFERENCE.read_bytes().replace(b"\r\n", b"\n")
         self.text = self.raw.decode("utf-8")
-        self.folded = _folded(self.text)
 
     def section(self, heading: str) -> str:
         return _folded(_section(self.text, heading))
