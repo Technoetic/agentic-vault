@@ -48,6 +48,11 @@ HOT_HEADER = "=== HOT CONTEXT ==="
 INVALID_CONFIG_DIAGNOSTIC = "agentic-vault: invalid session context configuration"
 INVALID_EVENT_DIAGNOSTIC = "agentic-vault: invalid session hook event"
 COMPACT_BUDGET_DIAGNOSTIC = "agentic-vault: compact budget cannot retain fixed constraints"
+# --host antigravity (Antigravity CLI): the answer is always one JSON object and
+# a diagnostic names a fixed code, never a path or note text.
+SEVERAL_VAULTS_DIAGNOSTIC = "agentic-vault: several vault candidates; nothing injected"
+ANTIGRAVITY_UNAVAILABLE_DIAGNOSTIC = "agentic-vault: session start unavailable ({code})"
+ANTIGRAVITY_ID_CHARS = 256
 MAX_EVENT_BYTES = 64 * 1024
 FIXED_HEADER = "=== FIXED CONSTRAINTS (source-bound snapshot, not new authority) ==="
 MAX_FIXED_ITEMS = 8
@@ -722,6 +727,110 @@ def _write_stdout(text: str) -> None:
     buffer.flush()
 
 
+def _vault_policy(vault: Path) -> tuple[dict, RevocationPolicy]:
+    """Load the validated configuration of vault and its revocation policy."""
+    config = _load_config(resolve_note_path(vault, CONFIG_REL))
+    return config, RevocationPolicy(vault, config)
+
+
+def _session_sources(vault: Path, config: dict, revocations: RevocationPolicy) -> list[SectionSource | None]:
+    """The handoff and hot sections, each read under its configured path and budget."""
+    return [
+        _configured_source(
+            vault,
+            config,
+            path_key="handoff_note",
+            budget_key="handoff_max_tokens",
+            header=HANDOFF_HEADER,
+            revocations=revocations,
+        ),
+        _configured_source(
+            vault,
+            config,
+            path_key="hot_note",
+            budget_key="hot_max_tokens",
+            header=HOT_HEADER,
+            revocations=revocations,
+        ),
+    ]
+
+
+def _session_context(
+    vault: Path,
+    config: dict,
+    revocations: RevocationPolicy,
+    sources: Sequence[SectionSource | None],
+    event_source: str,
+) -> SessionContext:
+    """Render the context for event_source, then recheck what the rendering relied on."""
+    context = ((compose_compact_context(vault, config, sources, revocations=revocations)
+                if revocations.enabled else compose_compact_context(vault, config, sources))
+               if event_source == 'compact' else compose_context(sources))
+    revocations.recheck()
+    if revocations.enabled and _load_config(resolve_note_path(vault, CONFIG_REL)) != config:
+        raise ValueError('configuration_changed')
+    return context
+
+
+def _antigravity_helpers():
+    """Import the Antigravity CLI helpers that ship in this hook's folder."""
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.append(folder)
+    import antigravity_hook
+
+    return antigravity_hook
+
+
+def _antigravity_answer(helpers, explicit: Path | None) -> dict:
+    """The JSON object that answers one Antigravity CLI SessionStart event.
+
+    The vault is the one folder among the event's cwd and workspacePaths (or
+    the explicit --vault) that holds a vault configuration. The context is
+    the startup context of the default path, rendered under the same checks,
+    budgets and host cap; Antigravity CLI has no compaction event.
+    """
+    event = helpers.read_event()
+    vault, reason = helpers.resolve_vault(explicit, event)
+    if vault is None:
+        if reason == "several_vaults":
+            print(SEVERAL_VAULTS_DIAGNOSTIC, file=sys.stderr)
+        return {}
+    fields = event if isinstance(event, dict) else {}
+    conversation = helpers.valid_id(fields.get("conversationId"), ANTIGRAVITY_ID_CHARS)
+    # The package runs several handlers per event; one of them injects.
+    if conversation and not helpers.claim_once("SessionStart", conversation):
+        return {}
+    config, revocations = _vault_policy(vault)
+    context = _session_context(vault, config, revocations,
+                               _session_sources(vault, config, revocations), 'startup')
+    if not context.stdout:
+        return {}
+    return {"injectSteps": [{"systemMessage": {
+        "systemMessage": context.stdout, "metadata": {"source": "agentic-vault"},
+    }}]}
+
+
+def _antigravity_main(explicit: Path | None) -> int:
+    """Answer an Antigravity CLI SessionStart event with one JSON object; always exit 0."""
+    try:
+        helpers = _antigravity_helpers()
+    except Exception:
+        print(ANTIGRAVITY_UNAVAILABLE_DIAGNOSTIC.format(code="helpers_unavailable"), file=sys.stderr)
+        _write_stdout("{}\n")
+        return 0
+    try:
+        answer = _antigravity_answer(helpers, explicit)
+    except (HealthcheckError, OSError, RuntimeError, UnicodeError, ValueError):
+        print(ANTIGRAVITY_UNAVAILABLE_DIAGNOSTIC.format(code="invalid_configuration"), file=sys.stderr)
+        answer = {}
+    except Exception:
+        print(ANTIGRAVITY_UNAVAILABLE_DIAGNOSTIC.format(code="unclassified_failure"), file=sys.stderr)
+        answer = {}
+    helpers.emit(answer)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _utf8_streams()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -729,7 +838,15 @@ def main(argv: list[str] | None = None) -> int:
         "--vault", type=Path,
         help="Vault directory (defaults to CLAUDE_PROJECT_DIR, then the current directory).",
     )
+    parser.add_argument(
+        "--host", choices=("claude", "antigravity"), default="claude",
+        help="Hook host. claude (default; Claude Code and Codex) prints plain text. antigravity "
+             "(Antigravity CLI) finds the vault among the event's workspace folders, never the "
+             "current directory, and answers with one JSON object.",
+    )
     args = parser.parse_args(argv)
+    if args.host == "antigravity":
+        return _antigravity_main(args.vault)
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
     try:
         vault = args.vault
@@ -738,43 +855,19 @@ def main(argv: list[str] | None = None) -> int:
         config_candidate = vault / CONFIG_REL
         if not config_candidate.is_file():
             return 0
-        config_path = resolve_note_path(vault, CONFIG_REL)
-        config = _load_config(config_path)
-        revocations = RevocationPolicy(vault, config)
+        config, revocations = _vault_policy(vault)
         try:
             event_source = _read_hook_event()
         except (ValueError, OSError, UnicodeError):
             print(INVALID_EVENT_DIAGNOSTIC, file=sys.stderr)
             return 0
-        sources = [
-            _configured_source(
-                vault,
-                config,
-                path_key="handoff_note",
-                budget_key="handoff_max_tokens",
-                header=HANDOFF_HEADER,
-                revocations=revocations,
-            ),
-            _configured_source(
-                vault,
-                config,
-                path_key="hot_note",
-                budget_key="hot_max_tokens",
-                header=HOT_HEADER,
-                revocations=revocations,
-            ),
-        ]
+        sources = _session_sources(vault, config, revocations)
     except (HealthcheckError, OSError, RuntimeError, UnicodeError, ValueError):
         print(INVALID_CONFIG_DIAGNOSTIC, file=sys.stderr)
         return 0
 
     try:
-        context = ((compose_compact_context(vault, config, sources, revocations=revocations)
-                    if revocations.enabled else compose_compact_context(vault, config, sources))
-                   if event_source == 'compact' else compose_context(sources))
-        revocations.recheck()
-        if revocations.enabled and _load_config(resolve_note_path(vault, CONFIG_REL)) != config:
-            raise ValueError('configuration_changed')
+        context = _session_context(vault, config, revocations, sources, event_source)
     except (HealthcheckError, OSError, RuntimeError, UnicodeError, ValueError):
         print(INVALID_CONFIG_DIAGNOSTIC, file=sys.stderr)
         return 0

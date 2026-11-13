@@ -1642,7 +1642,7 @@ CHECKPOINT_NAME_RE = re.compile(r"checkpoint-[0-9a-f]{32}\.json")
 _SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 _CHECKPOINT_KEYS = frozenset({"version", "session_sha256", "config_sha256",
                               "sources", "events", "pending_references"})
-_CHECKPOINT_EVENTS = frozenset({"PreCompact", "SessionEnd"})
+_CHECKPOINT_EVENTS = frozenset({"PreCompact", "SessionEnd", "Stop"})
 MAX_CHECKPOINT_BYTES = 64 * 1024        # vault_state.MAX_RUNTIME_BYTES
 MAX_CHECKPOINT_CANDIDATES = 64          # newest files by mtime that are parsed
 MAX_CHECKPOINT_SOURCES = 16

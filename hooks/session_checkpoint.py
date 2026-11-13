@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist a minimal local checkpoint for PreCompact/SessionEnd, without models."""
+"""Persist a minimal local checkpoint for PreCompact/SessionEnd (or Antigravity CLI's Stop), without models."""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +18,10 @@ from vault_state import CONFIG_PATH, EVENTS, StateError, _pending, write_checkpo
 
 MAX_EVENT_BYTES = 64 * 1024
 FAILURE_CODE_RE = re.compile(r'[a-z][a-z0-9_]{0,63}')
+# Antigravity CLI (--host antigravity) records its fully idle Stop. The id bound
+# is write_checkpoint's session id bound.
+STOP_EVENT = 'Stop'
+MAX_CONVERSATION_ID_CHARS = 128
 
 
 def read_hook_event(stream=None, *, expected_event=None):
@@ -59,11 +63,86 @@ def failure_code(error):
     return code if FAILURE_CODE_RE.fullmatch(code) else 'unclassified_failure'
 
 
+def _antigravity_helpers():
+    """Import the Antigravity CLI helpers that ship in this hook's folder."""
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.append(folder)
+    import antigravity_hook
+
+    return antigravity_hook
+
+
+def _write_empty_object():
+    """Answer {} when the Antigravity CLI helpers cannot be imported."""
+    stream = sys.stdout
+    if stream is None:
+        return
+    buffer = getattr(stream, 'buffer', None)
+    if buffer is None:
+        stream.write('{}\n')
+        stream.flush()
+        return
+    stream.flush()
+    buffer.write(b'{}\n')
+    buffer.flush()
+
+
+def record_antigravity_stop(helpers, explicit_vault=None):
+    """Record a Stop checkpoint for a fully idle Antigravity CLI conversation.
+
+    Only an object event whose hookEventName is absent or Stop, whose
+    fullyIdle is true and whose conversationId is a valid id counts, in a
+    vault resolved as for SessionStart. The record keeps the SHA-256 of the
+    conversation id, never the user input, the transcript or any path. The
+    package runs several handlers per event; with an integer executionNum the
+    claim lets one of them write.
+    """
+    event = helpers.read_event()
+    if (not isinstance(event, dict) or event.get('hookEventName', STOP_EVENT) != STOP_EVENT
+            or event.get('fullyIdle') is not True):
+        return
+    conversation = helpers.valid_id(event.get('conversationId'), MAX_CONVERSATION_ID_CHARS)
+    if conversation is None:
+        return
+    vault, _reason = helpers.resolve_vault(explicit_vault, event)
+    if vault is None:
+        return
+    execution = event.get('executionNum')
+    if type(execution) is int and not helpers.claim_once(STOP_EVENT, conversation, str(execution)):
+        return
+    try:
+        write_checkpoint(vault, STOP_EVENT, session_id=conversation, pending_references=None)
+    except (StateError, EvidenceError, HealthcheckError, ValueError, OSError, UnicodeError, RuntimeError) as error:
+        print(f'agentic-vault: checkpoint unavailable ({failure_code(error)})', file=sys.stderr)
+
+
+def antigravity_main(explicit_vault=None):
+    """Antigravity CLI Stop hook: always {} on stdout and exit 0."""
+    try:
+        helpers = _antigravity_helpers()
+    except Exception:
+        print('agentic-vault: checkpoint unavailable (helpers_unavailable)', file=sys.stderr)
+        _write_empty_object()
+        return 0
+    try:
+        record_antigravity_stop(helpers, explicit_vault)
+    except Exception as error:
+        print(f'agentic-vault: checkpoint unavailable ({failure_code(error)})', file=sys.stderr)
+    helpers.emit({})
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--vault', type=Path)
     parser.add_argument('--event', choices=sorted(EVENTS))
+    parser.add_argument('--host', choices=('claude', 'antigravity'), default='claude',
+                        help='claude (default; Claude Code and Codex events) or antigravity '
+                             '(Antigravity CLI Stop event; answers {})')
     args = parser.parse_args(argv)
+    if args.host == 'antigravity':
+        return antigravity_main(args.vault)
     project = os.environ.get('CLAUDE_PROJECT_DIR', '').strip()
     vault = args.vault or (Path(project) if project else Path.cwd())
     # Non-vault invocations neither consume stdin nor produce diagnostics.

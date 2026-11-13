@@ -45,7 +45,7 @@ ITEM_ID_RE = re.compile(r'(?:[A-Za-z][A-Za-z0-9_]{0,23}-?\d{1,10}|av-[0-9a-f]{20
 PENDING_ID_RE = re.compile(r'(?:[A-Za-z][A-Za-z0-9_]{0,23}-?\d{1,10}|av-[0-9a-f]{20}|[0-9a-f]{32,64})')
 BEGIN = '<!-- agentic-vault:handoff begin -->'
 END = '<!-- agentic-vault:handoff end -->'
-EVENTS = frozenset({'PreCompact', 'SessionEnd'})
+EVENTS = frozenset({'PreCompact', 'SessionEnd', 'Stop'})
 # Read failures a caller can act on; every other source failure stays folded.
 READ_FAILURE_CODES = frozenset({'input_too_large', 'file_changed_during_read'})
 
