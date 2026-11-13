@@ -1166,6 +1166,26 @@ class AntigravityFailureTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertEqual(stderr.getvalue(), unavailable.format("helpers_unavailable") + "\n")
 
+    def test_fallback_copies_of_discard_output_match_the_helper(self) -> None:
+        # Both hooks keep a copy of antigravity_hook._discard_output for the answer written when that module
+        # cannot be imported. The copies must not drift from the helper (docstrings and annotations aside).
+        import ast
+
+        def shape(path: Path) -> str:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            [function] = [node for node in tree.body
+                          if isinstance(node, ast.FunctionDef) and node.name == "_discard_output"]
+            body = function.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                body = body[1:]
+            return ast.dump(function.args) + "".join(ast.dump(statement) for statement in body)
+
+        expected = shape(HELPERS)
+        for name in ("session_start.py", "session_checkpoint.py"):
+            with self.subTest(hook=name):
+                self.assertEqual(shape(HOOKS / name), expected)
+
     def test_checkpoint_passes_only_the_conversation_id_to_the_writer(self) -> None:
         hook = load("antigravity_checkpoint_call_test", HOOKS / "session_checkpoint.py")
         calls = []

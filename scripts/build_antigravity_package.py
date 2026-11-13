@@ -62,7 +62,7 @@ MAX_DESCRIPTION_CHARS = 1_024
 HOOK_FILES = ("session_start.py", "session_checkpoint.py", "antigravity_hook.py", "run_python_hook.sh")
 HOOK_MODULE = "hooks/antigravity_hook.py"
 # Three handlers per event because the shell Antigravity uses for hook commands on Windows is not
-# documented; the hooks themselves make sure only one of them acts per event.
+# documented; a claim file in the hooks lets one of them act per event (hooks/antigravity_hook.py).
 HOOK_RUNNERS = ("sh ./hooks/run_python_hook.sh", "py -3", "python")
 HOOK_EVENTS = (("SessionStart", "session_start.py", 30), ("Stop", "session_checkpoint.py", 15))
 SHARED_SKILLS = ("agentic-vault", "webapp-principles")

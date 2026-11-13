@@ -2823,8 +2823,8 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         "`executionNum`",
         "120 seconds",
     )
-    # Sentences of the first candidate that the independent review found false or wider than their
-    # evidence; none may come back in the release note or the guide.
+    # Sentences that the independent review found false or wider than their evidence (first and second
+    # pass); none may come back in the release note or the guide.
     RETRACTED = (
         "`/vault-day` 또는 `/agentic-vault:vault-day`",
         "가장 최근 체크포인트는 에이전트가 마지막으로 완전히 멈춘 시점의 해시다",
@@ -2835,6 +2835,7 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         "같은 볼트를 세 호스트에서 쓸 수 있다.",
         "(둘 이상이면 표준 오류에",
         "원본 격리 같은 절차가 실패한다.",
+        "이름공간이 붙는지와, 뒤에 적은 텍스트가 스킬에 어떻게 전달되는지는 문서에 없고",
     )
     # Official Antigravity pages read on 2026-11-13 that the release note and the guide cite
     # (https://antigravity.google/docs/<page>).
