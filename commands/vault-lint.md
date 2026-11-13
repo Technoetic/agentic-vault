@@ -13,10 +13,10 @@ description: 볼트 무결성 검증 + 자가 치유 — 치명 이슈(프런트
 ## 1. 검증 엔진 실행
 
 ```
-python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py"
+python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_healthcheck.py" --vault "<볼트 루트>"
 ```
 
-- 볼트 경로는 스크립트가 `CLAUDE_PROJECT_DIR`(없으면 cwd)에서 자동으로 읽는다. 다른 볼트를 검사하려면 `--vault <경로>`를 붙인다.
+- 볼트 경로는 `--vault`로 넘긴다. 생략하면 스크립트가 `CLAUDE_PROJECT_DIR`(Claude Code), 없으면 현재 폴더를 쓴다.
 - 이 명령은 **full 리포트 모드**다. 현재 워킹트리의 활성 노트 전체를 검사하고 config의 `health_report`에 리포트를 쓴다. 외부 임시 경로가 필요하면 `--output <경로>`를 명시할 수 있다.
 - exit 0 + 리포트 = 치명 이슈 없음(관리성만 있을 수 있음), exit 1 = 치명 이슈 존재 또는 설정 오류, exit 2 = `--vault`로 준 경로가 없거나 폴더가 아님.
 - 설정 오류(config 파싱 실패, 검사 대상 0개 등)가 출력되면 치유를 시작하지 말고 원인을 사용자에게 보고하라.

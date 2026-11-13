@@ -12,7 +12,7 @@ description: 세션 복원 — 볼트의 handoff/hot/index를 로드하고 장�
 
 ## 1. 상태 파일 로드
 
-1. SessionStart 훅이 주입한 handoff/hot이 있으면 그 출력을 재사용하라. 생략 표시가 있다고 전체 파일을 다시 읽어 예산을 우회하지 마라. 주입이 없으면 `${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py`를 Python으로 실행해 같은 경로 검증·예산 제한을 적용한 출력을 사용하라(`CLAUDE_PROJECT_DIR`은 현재 볼트 루트). 설정 오류가 보고되면 상태 파일을 다른 도구로 읽지 말고 오류를 안내하라.
+1. SessionStart 훅이 주입한 handoff/hot이 있으면 그 출력을 재사용하라. 생략 표시가 있다고 전체 파일을 다시 읽어 예산을 우회하지 마라. 주입이 없으면 `${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py --vault <볼트 루트>`를 Python으로 실행해 같은 경로 검증·예산 제한을 적용한 출력을 사용하라. 설정 오류가 보고되면 상태 파일을 다른 도구로 읽지 말고 오류를 안내하라.
 2. handoff 상단에 **기준 커밋(anchor)** 해시가 있고 볼트가 git 저장소이면, 7~64자리 16진수이며 실제 커밋으로 해석되는 값인지 먼저 확인하라. 현재 HEAD와 다를 때 `git log --oneline <anchor>..HEAD`로 변경 범위를 확인하되, 파일의 값을 셸 코드로 삽입하지 마라. 조사한 출처에 근거해 최신 변경을 브리핑에 반영하고, 확인하지 못한 변경은 미확인으로 표시하라. 해시 차이만으로 기억이 정확하거나 최신이라고 단정하지 마라.
 3. `index_note`는 플러그인 `vault_paths.resolve_note_path(vault, rel_path, deny_zones)`로 경로를 확인한 뒤 읽어 볼트의 전체 지도를 파악하라. 분량이 크면 최상단 구조 섹션만 훑어라.
 4. handoff와 hot이 모두 비어 있으면 같은 경로 검증을 거쳐 `log_note` 최상단 5~10줄로 최근 활동을 대신 파악하라.
