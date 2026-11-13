@@ -2782,22 +2782,33 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
                       "build_antigravity_package.py check", "verify_antigravity_plugin.py",
                       "agy plugin validate --strict", "flags-off", "independent source review")
     GATE_THREE_ANTIGRAVITY = "the Antigravity package check and the isolated install from the extracted ZIP"
-    # The two placeholders of the generated command skills are named in code spans; nothing else in the
-    # documents is a fill-in marker.
-    NAMED_PLACEHOLDERS = ("`<PLUGIN_ROOT>`", "`<ARGUMENTS>`")
+    # The two placeholders of the generated command skills and the slash-command form of the official
+    # skills page are named in code spans; nothing else in the documents is a fill-in marker.
+    NAMED_PLACEHOLDERS = ("`<PLUGIN_ROOT>`", "`<ARGUMENTS>`", "`/<스킬 이름>`")
     BOUNDARY_LITERALS = (
         "실제 agy 대화 세션(모델 호출)은 실행하지 않았다.",
         "제3자 소프트웨어로 Antigravity 로그인에 접근하면 약관 위반",
         "Windows에서 훅 명령을 실행하는 셸은 문서에 없고 확인하지 않았다.",
         "실행기가 없는 처리기는 실패하고 agy가 그 오류를 기록한다",
-        "슬래시 표기(`/vault-day` 또는 `/agentic-vault:vault-day`)",
+        # The skills page documents one slash command per skill; a plugin namespace and the way the text
+        # after the command reaches the skill are what is open.
+        "공식 문서는 스킬마다 `/<스킬 이름>` 슬래시 명령이 생긴다고 적는다(`/vault-day`).",
+        "플러그인 스킬에 이름공간이 붙는지와, 뒤에 적은 텍스트가 스킬에 어떻게 전달되는지는 문서에 없고 확인하지 "
+        "않았다.",
         "`injectSteps`의 크기 상한은 확인하지 않았다.",
         "압축 뒤에는 인계를 다시 넣지 않",
+        # A claim marker lasts 120 seconds: how agy numbers executionNum and whether a reopened
+        # conversation starts a new SessionStart are not documented.
+        "표지는 120초 동안만 유효하다.",
+        "`executionNum`의 범위",
+        "SessionStart가 다시 오는지는 문서에 없고 확인하지 않았다.",
         "deny zone 가드·교훈 단서 훅·Aside 자동 기동 훅",
         "Jarvis 브리지는 Claude CLI로만 응답을 만들며",
         "`vault_doctor.py`는 agy 설치와 Antigravity 플러그인 상태를 진단하지 않는다.",
         "상호작용 데이터 수집",
         "설정에서 끌 수 있",
+        "비즈니스 계정에서는 이 수집이 늘 꺼져 있다.",
+        "실행 권한을 보존하는지",
     )
     RECORD_LIMIT_LITERALS = (
         "No real agy conversation was run",
@@ -2806,6 +2817,40 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         "three handlers",
         "are not ported",
         "interaction data",
+        "business accounts",
+        "`executionNum`",
+        "120 seconds",
+    )
+    # Sentences of the first candidate that the independent review found false or wider than their
+    # evidence; none may come back in the release note or the guide.
+    RETRACTED = (
+        "`/vault-day` 또는 `/agentic-vault:vault-day`",
+        "가장 최근 체크포인트는 에이전트가 마지막으로 완전히 멈춘 시점의 해시다",
+        "실행 번호(`executionNum`)마다 한 번만 쓴다",
+        "`lastUserInput`·`transcriptPath`와 경로는 저장하지 않고",
+        "훅이나 `--event Stop`으로만 생기므로",
+        "URL이 아니라,",
+        "같은 볼트를 세 호스트에서 쓸 수 있다.",
+        "(둘 이상이면 표준 오류에",
+        "원본 격리 같은 절차가 실패한다.",
+    )
+    # Official Antigravity pages read on 2026-11-13 that the release note and the guide cite
+    # (https://antigravity.google/docs/<page>).
+    OFFICIAL_PAGES = ("build-plugins", "hooks", "customization-discovery", "plugins", "rules", "permissions",
+                      "cli/commands/permissions", "settings", "cli/reference", "skills", "faq")
+    # Probe IDs of the release specification and of the feature evidence tool: the item each probe covers
+    # and literals of what it measures, its baseline included.
+    PROBES = (
+        ("E1", "- Item 3:", ("`antigravity/plugin.json`", "`agy plugin validate --strict --json`", "17 skills",
+                            "1 hook group", "no plugin.json found")),
+        ("E2", "- Item 4:", ("`agy plugin install`", "`agy plugin list --json`", "source `antigravity`",
+                            "byte-identical", "`real_home_unchanged`", "`claude-code`", "`agentic-vault-cmd-*`")),
+        ("E3", "- Item 1:", ("`workspacePaths`", "`injectSteps`", "the default-mode startup output",
+                            "several-vaults line", "0 bytes")),
+        ("E4", "- Item 2:", ("`fullyIdle`", "SHA-256 of the `conversationId`", "`lastUserInput`",
+                            "`transcriptPath`", "`--host antigravity`", "`--event Stop`")),
+        ("E5", "- Probe E5", ("`startup`", "`compact`", "`PreCompact`", "`SessionEnd`", "minus their time field",
+                             "byte-identical", "`hooks/hooks.json`", "`assets/templates/settings-permissions.json`")),
     )
     # Files under assets/, hooks/ and skills/ that carry engine=0.48.0 in their first five lines.
     DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
@@ -2974,7 +3019,7 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 참고와 기존 활용의 차이")
         rows = [line for line in section.splitlines() if line.startswith("| [")]
         self.assertEqual(len(rows), 4)
-        for page in ("build-plugins", "hooks", "customization-discovery", "plugins", "faq"):
+        for page in self.OFFICIAL_PAGES:
             with self.subTest(page=page):
                 self.assertIn(f"](https://antigravity.google/docs/{page})", rows[0])
         self.assertIn("2026-11-13", rows[0])
@@ -2993,6 +3038,89 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         plans = REPO_ROOT / "docs/superpowers/plans"
         self.assertTrue(any("superpowers:subagent-driven-development" in path.read_text(encoding="utf-8")
                             for path in plans.glob("*.md")))
+
+    def test_v0480_default_changes_five_six_and_nine(self) -> None:
+        import re
+
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")
+        entries = [_folded(entry) for entry in re.split(r"(?m)^\d+\. ", section)[1:]]
+        host, stop, version = entries[4], entries[5], entries[8]
+        # 5: the new --host option. Its abbreviation --h of --help now matches --help and --host.
+        for literal in ("`--host {claude,antigravity}`", "`--help`를 `--h`로 줄여 쓰면",
+                        "`--help`·`--host` 둘에 맞아 인자 오류(종료 코드 2)로 끝난다(v0.47.0은 도움말을 냈다).",
+                        "줄임 옵션 `--h`를 빼면"):
+            with self.subTest(entry=5, literal=literal):
+                self.assertIn(literal, host)
+        # 6: Stop wherever it is written or read, the stdin Stop that the default path still refuses, and
+        # the helper bundle copies that the upgrade plan reports as differing.
+        for literal in ("`--event`가 `Stop`도 받는다", "`--event` 없이 표준 입력으로 온 `Stop`은 v0.47.0처럼 거부",
+                        "`checkpoint_drift_check`", "`--host antigravity`", "helper bundle",
+                        "`vault_state.py`·`vault_healthcheck.py`", "`differs`"):
+            with self.subTest(entry=6, literal=literal):
+                self.assertIn(literal, stop)
+        self.assertNotIn("{claude,antigravity}", stop)
+        # 9: the health check stamp and ENGINE_VERSION.
+        for literal in ("healthcheck 스탬프와 `ENGINE_VERSION`", "`00-meta/scripts/vault_healthcheck.py`"):
+            with self.subTest(entry=9, literal=literal):
+                self.assertIn(literal, version)
+
+    def test_v0480_default_path_is_unchanged_except_the_abbreviation(self) -> None:
+        release = self.RELEASE.read_text(encoding="utf-8")
+        compatibility = _folded(_section(release, "## 하위호환·업그레이드"))
+        self.assertIn("줄임 옵션 `--h`를 빼면 두 훅의 기본 경로(`--host` 없음)는 v0.47.0과 같은 출력을 낸다",
+                      compatibility)
+        changes = _folded(_section(release, "## 변경"))
+        self.assertIn("줄임 옵션 `--h`(아래 `기본 결과 변경` 5번)를 빼면 플래그 없는 기본 경로", changes)
+        record = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Release content and scope"))
+        self.assertIn("apart from its help text and the abbreviation `--h`", record)
+
+    def test_v0480_checkpoint_item_scopes_what_is_not_stored(self) -> None:
+        changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        checkpoint = changes[changes.index("- [체크포인트 훅]"):changes.index("- [패키지 생성기]")]
+        for literal in ("훅 입력의 `lastUserInput`·`transcriptPath`·작업 공간 경로는 저장하지 않고",
+                        "노트의 볼트 기준 상대 경로·크기·해시는 Claude Code 체크포인트처럼 남는다",
+                        "120초 안에 다시 오면"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, checkpoint)
+        start = changes[:changes.index("- [체크포인트 훅]")]
+        self.assertIn("표지는 120초 동안만 유효하다", start)
+
+    def test_v0480_retracted_sentences_stay_out(self) -> None:
+        texts = {"release": self.RELEASE, "guide": REPO_ROOT / "docs/antigravity.md"}
+        for name, path in texts.items():
+            folded = _folded(path.read_text(encoding="utf-8"))
+            for sentence in self.RETRACTED:
+                with self.subTest(document=name, sentence=sentence[:30]):
+                    self.assertNotIn(sentence, folded)
+        check = _folded(self.RELEASE.read_text(encoding="utf-8"))
+        self.assertIn("공개 문서가 아니라", check)
+
+    def test_v0480_probes_follow_the_specification(self) -> None:
+        import re
+
+        record = self.VERIFICATION.read_text(encoding="utf-8")
+        section = _section(record, "## Required feature evidence")
+        self.assertEqual(sorted(re.findall(r"\bProbe (E\d)\b", section)), ["E1", "E2", "E3", "E4", "E5"])
+        bullets = [_folded(part) for part in re.split(r"(?m)^(?=- )", section) if part.startswith("- ")]
+        lead = _folded(section[:section.index("\n- ")])
+        self.assertIn("E1 package, E2 install, E3 SessionStart, E4 Stop and E5 unchanged defaults", lead)
+        for probe, item, literals in self.PROBES:
+            holders = [bullet for bullet in bullets if f"Probe {probe}" in bullet]
+            with self.subTest(probe=probe):
+                self.assertEqual(len(holders), 1)
+                self.assertTrue(holders[0].startswith(item), holders[0][:40])
+            for literal in literals:
+                with self.subTest(probe=probe, literal=literal):
+                    self.assertIn(literal, holders[0])
+        # The merged default-bytes bullet is probe E5 now.
+        self.assertNotIn("Default hook and permission bytes", record)
+
+    def test_v0480_record_states_the_real_home_scope(self) -> None:
+        record = _folded(self.VERIFICATION.read_text(encoding="utf-8"))
+        boundaries = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Evidence boundaries"))
+        self.assertIn("The verifier's real-home check covers `~/.gemini/config` only", boundaries)
+        self.assertIn("`~/.gemini/antigravity-cli`", boundaries)
+        self.assertIn("the unchanged real `~/.gemini/config`", record)
 
 
 # v0.48.0 shared surfaces: README, SECURITY.md, docs/antigravity.md, docs/codex.md, docs/README.md,
@@ -3128,15 +3256,23 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         bullets = [_folded(bullet) for bullet in ("\n" + limits).split("\n- ")[1:]]
         named = [bullet for bullet in bullets if bullet.startswith("**Antigravity CLI")]
         self.assertEqual(len(named), 1)
-        for literal in ("without a separate trust step", "non-zero", "fail open", "three handlers",
-                        "deny-zone guard", "`/permissions`", "opts out", "Google", "violates its terms",
-                        "No real agy conversation was run"):
+        # No per-hook approval is documented, the CLI asks whether to trust a workspace, and when plugin
+        # hooks start to run was not observed; data collection is the personal-account default.
+        for literal in ("no per-hook approval step", "trust a workspace folder",
+                        "was not checked in a real session", "non-zero", "fail open", "three handlers",
+                        "deny-zone guard", "`/permissions`", "opts out", "business accounts", "Google",
+                        "violates its terms", "No real agy conversation was run"):
             with self.subTest(limit=literal):
                 self.assertIn(literal, named[0])
         summary = _folded(_section(security, "## 한국어 요약"))
-        for literal in ("최신 0.48.0 소스", "Antigravity CLI", "별도 신뢰 단계 없이", "fail-open", "약관 위반"):
+        for literal in ("최신 0.48.0 소스", "Antigravity CLI", "훅마다 승인하는 단계는 문서에 없고",
+                        "작업 공간 신뢰 대화상자", "실제 세션에서 확인하지 않았다", "fail-open", "비즈니스 계정",
+                        "약관 위반"):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
+        for retracted in ("without a separate trust step", "별도 신뢰 단계 없이"):
+            with self.subTest(retracted=retracted):
+                self.assertNotIn(retracted, _folded(security))
 
     def test_antigravity_guide_covers_the_contract(self) -> None:
         guide = self.GUIDE.read_text(encoding="utf-8")
@@ -3165,3 +3301,55 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn(f"스킬 {len(skills)}개", guide)
         manifest = json.loads((self.PACKAGE / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["version"], EXPECTED)
+
+    def test_antigravity_guide_states_the_reviewed_limits(self) -> None:
+        guide = _folded(self.GUIDE.read_text(encoding="utf-8"))
+        for literal in (
+            # The several-vaults line comes from the SessionStart hook only.
+            "(SessionStart 훅은 둘 이상일 때 표준 오류에 `agentic-vault: several vault candidates; nothing "
+            "injected` 한 줄을 남긴다)",
+            # A claim marker lasts 120 seconds; the reasons are what agy does not document.
+            "표지는 120초 동안만 유효하다.", "`executionNum`의 범위",
+            "SessionStart가 다시 오는지는 문서에 없고 확인하지 않았다.",
+            # What a Stop checkpoint keeps, and what of the hook input it leaves out.
+            "노트의 볼트 기준 상대 경로·크기·해시",
+            "`transcriptPath`(대화 기록 경로)·작업 공간 경로는 저장하지 않는다.",
+            # The manual check: an answer counts only when no tool ran before it; where agy shows a hook
+            # error is not known.
+            "`grep_search` 등)를 하나도 부르지 않았고", "도구를 불렀다면",
+            "주입은 실패한 것으로 보고 훅 오류를 확인한다.",
+            "`/hooks`", "`--log-file", "실제로 남는지는 확인하지 않았다.",
+            # A read_file deny can make a move fail; a shell move was not tried.
+            "절차가 실패할 수 있다(셸 명령으로 옮기는 경우도 막히는지는 확인하지 않았다).",
+            # Collection is the default of a personal Google account and always off for business accounts.
+            "개인 Google 계정", "비즈니스 계정에서는 수집이 늘 꺼져 있다.",
+            # agy may not keep the executable bit of the vault git hooks.
+            "실행 권한을 보존하는지", "`chmod +x`",
+            # The skills page documents one slash command per skill.
+            "`/<스킬 이름>`", "같은 볼트를 세 호스트(Claude Code·Codex·Antigravity CLI)에서 쓰도록 만든 패키지다.",
+        ):
+            with self.subTest(literal=literal[:40]):
+                self.assertIn(literal, guide)
+        text = self.GUIDE.read_text(encoding="utf-8")
+        cited = text[text.index("참고한 공식 자료:"):]
+        for page in V0480ReleaseMetadataTests.OFFICIAL_PAGES:
+            with self.subTest(page=page):
+                self.assertIn(f"](https://antigravity.google/docs/{page})", cited)
+
+    def test_readme_v0480_sections_except_the_abbreviation(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        korean = _folded(_section(readme, self.KOREAN))
+        english = _folded(_section(readme, self.ENGLISH))
+        self.assertIn("도움말과 줄임 옵션 `--h`를 빼면 플래그 없는 기본 경로는 v0.47.0과 같다.", korean)
+        self.assertIn("apart from the help text and the abbreviation `--h`, which now matches both `--help` and "
+                      "`--host`", english)
+        # The verifier's real-home check is named in the Korean list of what it does.
+        self.assertIn("실제 `~/.gemini/config`가 그대로인지", korean)
+
+    def test_vault_lint_not_a_vault_line_matches_the_vault_argument(self) -> None:
+        lint = (REPO_ROOT / "commands/vault-lint.md").read_text(encoding="utf-8")
+        premise = _section(lint, "## 0. 전제")
+        # The step 1 command always passes --vault, so the not-a-vault answer has no flag condition.
+        self.assertIn('vault_healthcheck.py" --vault "<볼트 루트>"', _section(lint, "## 1. 검증 엔진 실행"))
+        self.assertNotIn("`--vault` 없이 실행한", premise)
+        self.assertIn('- 검증 엔진이 "볼트 아님"을 출력하면(exit 0), 여기가 볼트가 아니라는 사실을', premise)

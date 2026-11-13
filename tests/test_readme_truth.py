@@ -7,6 +7,7 @@ template or rule file fails here until the README says the same thing.
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 import unittest
@@ -19,6 +20,9 @@ README = ROOT / "README.md"
 HEALTHCHECK = ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 TEMPLATES = ROOT / "assets" / "templates"
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
+AGY_VERIFIER = ROOT / "scripts" / "verify_antigravity_plugin.py"
+# The README sections of the release that added the Antigravity CLI package and its verifier.
+ANTIGRAVITY_SECTIONS = ("## v0.48.0 — Antigravity CLI 겸용 패키지", "## v0.48.0 — Antigravity CLI package")
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -64,6 +68,22 @@ def actual_counts() -> dict[str, int]:
         "antigravity_skills": len(list((ROOT / "commands").glob("*.md")))
         + len(list((ROOT / "skills").glob("*/SKILL.md"))),
     }
+
+
+def agy_calls() -> tuple:
+    """AGY_CALLS of the isolated install verifier, read with ast so the script is not imported."""
+    for node in ast.parse(AGY_VERIFIER.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "AGY_CALLS" for target in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError("AGY_CALLS is not a literal constant of verify_antigravity_plugin.py")
+
+
+def readme_section(text: str, heading: str) -> str:
+    """One README section (to the next level-2 heading), whitespace folded."""
+    start = text.index("\n" + heading + "\n")
+    end = text.find("\n## ", start + 1)
+    return " ".join(text[start:end if end != -1 else len(text)].split())
 
 
 def relative_links(text: str) -> list[str]:
@@ -183,6 +203,21 @@ class PublicDocsTests(unittest.TestCase):
             for target in relative_links(text):
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / target).exists(), target)
+
+    def test_antigravity_sections_name_every_agy_call_of_the_verifier(self) -> None:
+        # The README says what the isolated install verifier runs; its call list is AGY_CALLS. The first
+        # call, `agy --version`, is named in both sections; the others are `agy plugin` subcommands.
+        calls = agy_calls()
+        self.assertEqual(calls[0], ("--version",))
+        self.assertEqual(sorted(call[1] for call in calls[1:] if call[0] == "plugin"),
+                         ["install", "list", "validate"])
+        self.assertEqual(len(calls), 4)
+        readme = README.read_text(encoding="utf-8")
+        for heading in ANTIGRAVITY_SECTIONS:
+            section = readme_section(readme, heading)
+            with self.subTest(section=heading):
+                self.assertIn("`agy --version`", section)
+                self.assertIn("`agy plugin", section)
 
 
 class ContinuousIntegrationTests(unittest.TestCase):

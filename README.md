@@ -42,10 +42,12 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
   `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity`나 로컬 폴더로
   한다([Antigravity CLI 안내](docs/antigravity.md)).
 - 세션 시작 훅은 생성 패키지가 주는 `--host antigravity` 플래그가 있을 때만 훅 입력의 `cwd`·`workspacePaths`에서
-  볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 플래그 없는 기본 경로는 v0.47.0과 같다. 체크포인트 훅은
+  볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 도움말과 줄임 옵션 `--h`를 빼면 플래그 없는 기본 경로는
+  v0.47.0과 같다. `--h`는 이제 `--help`·`--host` 둘에 맞아 인자 오류(종료 코드 2)로 끝난다. 체크포인트 훅은
   Antigravity의 `Stop`(에이전트가 완전히 멈췄을 때)에 체크포인트를 남긴다.
-- [격리 설치 확인 도구](scripts/verify_antigravity_plugin.py)는 가짜 홈 폴더에서 `agy plugin validate --strict`,
-  설치, 목록, 바이트 대조만 하고 대화는 하지 않는다.
+- [격리 설치 확인 도구](scripts/verify_antigravity_plugin.py)는 가짜 홈 폴더에서 `agy --version`,
+  `agy plugin validate --strict`, 설치, 목록, 설치본 바이트 대조를 하고 실제 `~/.gemini/config`가 그대로인지
+  확인할 뿐 대화는 하지 않는다.
 - 공용 스킬, `/vault-session-start`, `/vault-lint`, 볼트 AGENTS.md 스텁이 Antigravity CLI를 함께 적는다.
   Antigravity CLI의 훅 사건에는 압축·세션 종료가 없고, deny zone 가드·교훈 단서·Aside 훅은 Antigravity CLI에서
   돌지 않으며, Jarvis 브리지는 Claude CLI로만 응답을 만든다.
@@ -412,10 +414,12 @@ keeps the committed folder equal to the generator's output. Install it from the 
 copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit
 `--host antigravity` mode that finds the one vault named in the hook input and injects the handoff and
 hot note through `injectSteps`, and the checkpoint hook records Antigravity's `Stop` event; without the
-flag the session-start output is that of v0.47.0. The repository root stays the Claude Code and Codex
-plugin, and their hook definitions are unchanged. No real agy conversation was run: Antigravity's FAQ
-says that wrapping agy inside third-party agents is not supported under consumer plans, so the release
-checks run only the `agy plugin` commands that need no login, in an isolated home.
+flag the session-start output is that of v0.47.0, apart from the help text and the abbreviation `--h`,
+which now matches both `--help` and `--host` and ends with an argument error (exit code 2). The
+repository root stays the Claude Code and Codex plugin, and their hook definitions are unchanged. No
+real agy conversation was run: Antigravity's FAQ says that wrapping agy inside third-party agents is
+not supported under consumer plans, so the release checks run only `agy --version` and the
+`agy plugin` commands that need no login, in an isolated home.
 
 Some results change without a new option; the release note lists each one under
 `기본 결과 변경`. The seven certificate-bound checker files are unchanged from v0.46.0 and v0.47.0, so
