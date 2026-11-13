@@ -28,6 +28,11 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import unquote
 
+try:
+    from _git_env import git_environment
+except ImportError:  # pragma: no cover - imported as tests.test_antigravity_package
+    from tests._git_env import git_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "build_antigravity_package.py"
@@ -57,10 +62,11 @@ HEADER = (
     "> - `<PLUGIN_ROOT>`: 이 플러그인 설치 폴더의 절대 경로다. 이 SKILL.md가 있는 폴더의 두 단계 위 폴더다"
     "(보통 `~/.gemini/config/plugins/agentic-vault`). 셸 명령에는 펼친 절대 경로를 따옴표로 감싸 넣는다.\n"
     "> - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다.\n"
-    "> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 "
-    "`--vault <볼트 루트>`로 넘긴다.\n"
+    "> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 볼트를 다루는 엔진 스크립트에 "
+    "볼트를 넘길 때는 `--vault <볼트 루트>`를 쓴다. 본문 명령의 인자는 적힌 대로 쓴다.\n"
     "> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계"
-    "(설정 파일 `.claude/…`, PreToolUse 훅)는 Antigravity 세션에서 실행하지 않는다."
+    "(`.claude/settings.json`·`.claude/settings.local.json` 병합, PreToolUse 훅 설치)는 Antigravity 세션에서 "
+    "실행하지 않는다. `.claude/rules/`와 AGENTS.md는 본문대로 만든다."
 )
 SKILL_REPLACEMENT = (
     "> 선택형 도구 안내(교훈 검증·묶음 복구·큰 볼트 운영·변경 영향·기억 형성·기억 철회·기록 보존·기억 신뢰 경계)는 "
@@ -73,9 +79,21 @@ INIT_REPLACEMENT = (
     "쓰지 않는다. 같은 볼트를 Claude Code에서도 쓰고 사용자가 따로 승인했을 때만 그 파일의 절차를 따른다."
 )
 UPGRADE_REPLACEMENT = (
+    "> 보강 helper bundle과 선택 이행 절차, 그리고 그 뒤에 이어지던 `0.9.0` 안내 목록 4개(Codex 진입점·세션 주입 "
+    "예산·`/vault-recall` 파일 셋·백업 스냅샷)는 [references/helper-bundle.md](references/helper-bundle.md)로 "
+    "옮겼다(Antigravity 스킬 본문 한도). 그 파일을 읽고 따른 뒤 아래 두 줄로 검증한다."
+)
+# The replacement when only the helper bundle paragraphs move (the v0.48.0 draft): the 0.9.0 list stays in
+# the skill body whenever the body then fits the limit.
+UPGRADE_HELPER_ONLY_REPLACEMENT = (
     "> 보강 helper bundle과 선택 이행 절차는 [references/helper-bundle.md](references/helper-bundle.md)로 "
     "옮겼다(Antigravity 스킬 본문 한도). 해당 단계에서 그 파일을 읽는다."
 )
+# commands/vault-upgrade.md, step 2: the first line of the 0.9.0 list and the first verification line,
+# which ends the moved section.
+UPGRADE_LIST_START = "- `0.9.0`은 Codex에서도 같은 엔진을 사용한다."
+UPGRADE_VERIFY_START = "- 볼트가 git 저장소이고 훅을 설치했으면"
+UPGRADE_HEALTHCHECK = 'vault_healthcheck.py" --vault .'
 # (source, heading predicate, package file the sections move to, replacement line)
 SPLITS = (
     ("skills/agentic-vault/SKILL.md", lambda line: line.startswith("### 선택형"),
@@ -86,9 +104,16 @@ SPLITS = (
      "skills/vault-upgrade/references/helper-bundle.md", UPGRADE_REPLACEMENT),
 )
 GITATTRIBUTES_LINES = (
-    "# Generated Antigravity package: LF everywhere so the committed copy equals the generator output on every OS.",
-    "antigravity/** text eol=lf",
+    "# Generated Antigravity package: LF in every text file (binary files untouched) so the committed copy "
+    "equals the generator output on every OS.",
+    "antigravity/** text=auto eol=lf",
 )
+# Copied as they are, never normalised: the generator's list of known binary file types (a NUL byte also
+# marks a file as binary).
+BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".pdf", ".zip")
+# The copied trees whose git mode (100644 or 100755) the package copy keeps.
+COPIED_PREFIXES = ("assets/", "skills/agentic-vault/scripts/", "hooks/")
+README_UNCONFIRMED = ("실제 agy 대화 세션으로는 확인하지 않았다", "not yet confirmed in a real agy conversation")
 
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 HEADING = re.compile(r"^(#{1,6})(?:[ \t]|$)")
@@ -99,8 +124,12 @@ SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 PLUGIN_ROOT_PATH = re.compile(r"<PLUGIN_ROOT>/([A-Za-z0-9_./-]*)")
 
 
-def _lf(data: bytes) -> bytes:
-    return data if b"\0" in data else data.replace(b"\r\n", b"\n")
+def _is_binary(data: bytes, relative: str) -> bool:
+    return b"\0" in data or relative.lower().endswith(BINARY_SUFFIXES)
+
+
+def _lf(data: bytes, relative: str) -> bytes:
+    return data if _is_binary(data, relative) else data.replace(b"\r\n", b"\n")
 
 
 def _text(path: Path) -> str:
@@ -137,10 +166,34 @@ def _copy_repo(dest: Path, *, minimal: bool = False) -> Path:
     return dest
 
 
-def _run(*args: str) -> subprocess.CompletedProcess:
-    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+def _run(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    env = dict(os.environ if env is None else env, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=600)
+
+
+def _git_modes(repo: Path, environment: dict) -> dict[str, str] | None:
+    """Path -> mode (`100644`, `100755`) of the git index of repo; None unless repo is the top of a work tree."""
+    def git(*args: str) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, env=environment,
+                                  stdin=subprocess.DEVNULL, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0 or \
+            Path(top.stdout.decode("utf-8", errors="replace").strip()).resolve() != repo.resolve():
+        return None
+    result = git("ls-files", "-s", "-z")
+    if result is None or result.returncode != 0:
+        return None
+    modes = {}
+    for record in result.stdout.split(b"\0"):
+        if record:
+            info, _, path = record.partition(b"\t")
+            modes[path.decode("utf-8")] = info.split(b" ", 1)[0].decode("ascii")
+    return modes
 
 
 def _tree(root: Path) -> dict[str, bytes]:
@@ -345,12 +398,12 @@ class PackageBuildTests(unittest.TestCase):
             for relative in _tree(ROOT / top):
                 if "__pycache__" in relative.split("/") or relative.endswith((".pyc", ".pyo")):
                     continue
-                expected[f"{top}/{relative}"] = _lf((ROOT / top / relative).read_bytes())
+                expected[f"{top}/{relative}"] = _lf((ROOT / top / relative).read_bytes(), relative)
         for name in HOOK_FILES:
             source = ROOT / "hooks" / name
             if not source.exists():
                 source = self.repo / "hooks" / name
-            expected[f"hooks/{name}"] = _lf(source.read_bytes())
+            expected[f"hooks/{name}"] = _lf(source.read_bytes(), name)
         copied = {path: data for path, data in self.files.items()
                   if path.startswith(("assets/", "skills/agentic-vault/scripts/", "hooks/"))}
         self.assertEqual(sorted(copied), sorted(expected))
@@ -360,6 +413,8 @@ class PackageBuildTests(unittest.TestCase):
 
     def test_text_files_use_lf_and_utf8(self) -> None:
         for relative, data in self.files.items():
+            if _is_binary(data, relative):
+                continue
             with self.subTest(path=relative):
                 self.assertNotIn(b"\r\n", data)
                 data.decode("utf-8")
@@ -415,6 +470,16 @@ class PackageBuildTests(unittest.TestCase):
         self.assertIn(f"]({REPO_URL}/blob/v{self.version}/docs/antigravity.md)", readme)
         self.assertLess(readme.index("생성물"), readme.index("generated"))
         self.assertLess(len(readme.encode("utf-8")), 4000)
+        # The hook effects are stated as built, not as observed: no real agy conversation ran, and the Stop
+        # checkpoint is written only when the agent is fully idle.
+        korean, english = readme.split("\n## English\n", 1)
+        self.assertIn(README_UNCONFIRMED[0], korean)
+        self.assertIn(README_UNCONFIRMED[1], english)
+        for part in (korean, english):
+            with self.subTest(part=part[:20]):
+                self.assertIn("`fullyIdle`", part)
+        self.assertNotIn("에이전트가 멈출 때 checkpoint를 남긴다", korean)
+        self.assertNotIn("write a checkpoint when the agent stops", english)
 
     def test_skill_frontmatter_names_descriptions_and_bodies(self) -> None:
         for name in sorted(SHARED_SKILLS + tuple(_commands())):
@@ -488,6 +553,48 @@ class PackageBuildTests(unittest.TestCase):
                 self.assertEqual(restored, _content_lines(_placeholders(original)))
         helpers = self.text("skills/agentic-vault/references/optional-helpers.md")
         self.assertTrue(helpers.startswith("# 선택형 도구 안내\n\n> "))
+
+    def _upgrade_source_lines(self) -> list[str]:
+        return _placeholders(_frontmatter(_text(ROOT / "commands" / "vault-upgrade.md"))[1]).split("\n")
+
+    def test_vault_upgrade_keeps_its_verification_lines(self) -> None:
+        # The helper bundle section of commands/vault-upgrade.md has no heading after it before `## 3. 보고`,
+        # so the move ends at the step 2 verification lines; they stay in the skill body.
+        source = self._upgrade_source_lines()
+        start = next(index for index, line in enumerate(source) if line.startswith(UPGRADE_VERIFY_START))
+        verification = source[start:source.index("## 3. 보고")]
+        verification = [line for line in verification if line.strip()]
+        self.assertEqual(len(verification), 2, verification)
+        self.assertIn(UPGRADE_HEALTHCHECK, verification[1])
+        lines = _frontmatter(self.text("skills/vault-upgrade/SKILL.md"))[1].split("\n")
+        step = lines[lines.index("## 2. 검증"):lines.index("## 3. 보고")]
+        self.assertEqual([line for line in step if line.strip()],
+                         ["## 2. 검증", UPGRADE_REPLACEMENT, *verification])
+        self.assertEqual(sum(UPGRADE_HEALTHCHECK in line for line in lines), 1)
+        reference = self.text("skills/vault-upgrade/references/helper-bundle.md")
+        self.assertNotIn(UPGRADE_HEALTHCHECK, reference)
+        self.assertNotIn(UPGRADE_VERIFY_START, reference)
+
+    def test_vault_upgrade_moves_the_090_list_only_because_the_body_would_not_fit(self) -> None:
+        # The 0.9.0 list stays in the skill body when the body then fits 23,500 bytes; it fits not, so it
+        # moves with the helper bundle paragraphs and the replacement line names it.
+        source = self._upgrade_source_lines()
+        first = source.index(next(line for line in source if line.startswith(UPGRADE_LIST_START)))
+        stop = next(index for index, line in enumerate(source) if line.startswith(UPGRADE_VERIFY_START))
+        listed = [line for line in source[first:stop] if line.strip()]
+        self.assertEqual(len(listed), 4, listed)
+        self.assertTrue(all(line.startswith("- ") for line in listed), listed)
+        body = _frontmatter(self.text("skills/vault-upgrade/SKILL.md"))[1]
+        reference = self.text("skills/vault-upgrade/references/helper-bundle.md").split("\n")
+        for line in listed:
+            with self.subTest(line=line[:40]):
+                self.assertNotIn(_masked(line), _masked(body).split("\n"))
+                self.assertIn(_masked(line), [_masked(kept) for kept in reference])
+        self.assertIn("`0.9.0` 안내 목록 4개", UPGRADE_REPLACEMENT)
+        kept = body.replace(UPGRADE_REPLACEMENT, UPGRADE_HELPER_ONLY_REPLACEMENT + "\n\n" + "\n".join(listed), 1)
+        self.assertGreater(len(kept.strip("\n").encode("utf-8")), MAX_BODY_BYTES,
+                           "the 0.9.0 list fits the vault-upgrade skill body again: keep it there (end the move "
+                           "before the list) and restore the helper-bundle-only replacement")
 
     def test_references_and_docs_change_only_link_targets(self) -> None:
         for path, text in self.markdown().items():
@@ -653,6 +760,109 @@ class GeneratorRefusalTests(unittest.TestCase):
         self.assertRefused(_run("build", "--repo", str(repo), "--out", str(out)), "commands/vault-upgrade.md")
         self.assertFalse(out.exists())
 
+    def test_missing_end_of_a_moved_section_fails(self) -> None:
+        # Without its end line the vault-upgrade move would take the step 2 verification lines along.
+        repo = self.variant()
+        command = repo / "commands" / "vault-upgrade.md"
+        text = _text(command)
+        self.assertEqual(text.count("\n" + UPGRADE_VERIFY_START), 1)
+        command.write_bytes(text.replace("\n" + UPGRADE_VERIFY_START, "\n- git 볼트에 훅을 설치했으면").encode("utf-8"))
+        out = repo.parent / f"{repo.name}-out"
+        self.assertRefused(_run("build", "--repo", str(repo), "--out", str(out)), "commands/vault-upgrade.md",
+                           UPGRADE_VERIFY_START.split(" 훅을")[0])
+        self.assertFalse(out.exists())
+
+    def test_binary_assets_keep_their_bytes(self) -> None:
+        repo = self.variant()
+        samples = {"assets/logo.png": b"\x89PNG\r\n\x1a\nIHDR\r\nno NUL byte\r\n",
+                   "assets/photo.JPG": b"\xff\xd8\xff\xe0\r\nJFIF\r\n"}
+        for relative, data in samples.items():
+            (repo / relative).write_bytes(data)
+        (repo / "assets" / "plain.txt").write_bytes(b"one\r\ntwo\r\n")
+        out = repo.parent / f"{repo.name}-out"
+        built = _run("build", "--repo", str(repo), "--out", str(out))
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        for relative, data in samples.items():
+            with self.subTest(path=relative):
+                self.assertEqual((out / relative).read_bytes(), data)
+        self.assertEqual((out / "assets" / "plain.txt").read_bytes(), b"one\ntwo\n")
+        same = _run("check", "--repo", str(repo), "--against", str(out))
+        self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+
+    def test_check_compares_git_modes_inside_a_repository(self) -> None:
+        # The generator writes bytes only; an executable source (the git hooks) keeps its mode in the package
+        # only through the git index, so check compares the index modes when the package is in the repository.
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        repo = self.variant()
+        # The ceiling keeps git from finding a repository above the temporary folder.
+        environment = dict(git_environment(), GIT_CEILING_DIRECTORIES=str(self.temp))
+
+        def git(*args: str) -> None:
+            result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", env=environment,
+                                    stdin=subprocess.DEVNULL, timeout=300)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        def check(*args: str) -> tuple[int, list[str]]:
+            result = _run("check", "--repo", str(repo), *args, env=environment)
+            self.assertNotIn("Traceback", result.stderr)
+            return result.returncode, result.stdout.splitlines()
+
+        built = _run("build", "--repo", str(repo), env=environment)
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        # Outside a git work tree (a release ZIP, for one) only the bytes are compared, and check says so.
+        code, lines = check()
+        self.assertEqual(code, 0, lines)
+        self.assertTrue(lines[-1].startswith("git modes: not compared (git finds no work tree at "), lines)
+        git("init", "-q")
+        # Files the index does not hold yet (a build not added) are not compared.
+        code, lines = check()
+        self.assertEqual(code, 0, lines)
+        self.assertEqual(lines[-1], "git modes: not compared (no copied file is in the git index together with "
+                                    "its source)")
+        git("add", "-A")
+        hooks = ("assets/git-hooks/pre-commit", "assets/git-hooks/pre-push")
+        copies = tuple(f"antigravity/{path}" for path in hooks)
+        git("update-index", "--chmod=+x", *hooks)
+        git("update-index", "--chmod=-x", *copies)
+        code, lines = check()
+        self.assertEqual(code, 1, lines)
+        for path, copy in zip(hooks, copies):
+            with self.subTest(path=path):
+                found = [line for line in lines if line.startswith(f"mode differs: {path} ")]
+                self.assertEqual(len(found), 1, lines)
+                self.assertIn("100644", found[0])
+                self.assertIn("100755", found[0])
+                self.assertIn(f"git update-index --chmod=+x {copy}", found[0])
+        self.assertEqual(len([line for line in lines if line.startswith("mode differs:")]), 2, lines)
+        self.assertFalse([line for line in lines if line.startswith(("differs:", "only in", "missing from"))])
+        self.assertTrue(lines[-1].startswith("git modes: compared "), lines)
+        self.assertTrue(lines[-1].endswith("; run the git update-index commands above there"), lines)
+        git("update-index", "--chmod=+x", *copies)
+        code, lines = check()
+        self.assertEqual(code, 0, lines)
+        self.assertRegex(lines[-1], r"^git modes: compared [1-9][0-9]* copied files with their sources in the git "
+                                    r"index of ")
+        self.assertNotIn("update-index", lines[-1])
+        # An executable copy of a plain source is a difference too, fixed with --chmod=-x.
+        script = "skills/agentic-vault/scripts/vault_paths.py"
+        git("update-index", "--chmod=+x", f"antigravity/{script}")
+        code, lines = check()
+        self.assertEqual(code, 1, lines)
+        self.assertEqual([line for line in lines if line.startswith("mode differs:")],
+                         [f"mode differs: {script} (package copy 100755, source 100644): "
+                          f"git update-index --chmod=-x antigravity/{script}"])
+        git("update-index", "--chmod=-x", f"antigravity/{script}")
+        # A package folder outside the repository is compared by bytes only.
+        outside = self.temp / f"{repo.name}-outside" / "antigravity"
+        elsewhere = _run("build", "--repo", str(repo), "--out", str(outside), env=environment)
+        self.assertEqual(elsewhere.returncode, 0, elsewhere.stdout + elsewhere.stderr)
+        code, lines = check("--against", str(outside))
+        self.assertEqual(code, 0, lines)
+        self.assertTrue(lines[-1].startswith("git modes: not compared ("), lines)
+        self.assertIn("is outside the git work tree", lines[-1])
+
     def test_build_replaces_only_a_previous_package(self) -> None:
         repo = self.variant()
         out = repo / "antigravity"
@@ -755,12 +965,58 @@ class MarkdownScanningTests(unittest.TestCase):
         with self.assertRaises(self.module.BuildError):
             self.module._cut_sections(body, none)
 
+    def test_cut_sections_stops_at_the_end_line(self) -> None:
+        # Text after a section's last paragraph that belongs to the parent step has no heading of its own;
+        # the end condition keeps it (and everything after it) in place.
+        move = self.module.SectionMove(source="x.md", target="refs/x.md", title="# T", origin="> o",
+                                       replacement="> moved", wanted="section 'Move'",
+                                       matches=lambda level, title: level == 3 and title == "Move",
+                                       ends=lambda line: line.startswith("- Stay"),
+                                       end_wanted="a line starting '- Stay'")
+        body = ("## Step\n\n### Move\n\nA\n\n```\n- Stay inside a fence\n```\n\n- listed\n\n"
+                "- Stay one\n- Stay two\n\n## Next\n\nE\n")
+        kept, sections = self.module._cut_sections(body, move)
+        self.assertEqual(kept.replace(self.module.SENTINEL, "<moved>"),
+                         "## Step\n\n<moved>\n\n- Stay one\n- Stay two\n\n## Next\n\nE\n")
+        self.assertEqual(sections, ["### Move\n\nA\n\n```\n- Stay inside a fence\n```\n\n- listed"])
+        # An end line after the next heading of the same or a higher level is not this section's end.
+        late = "## Step\n\n### Move\n\nA\n\n## Next\n\n- Stay late\n"
+        with self.assertRaises(self.module.BuildError) as caught:
+            self.module._cut_sections(late, move)
+        self.assertIn("a line starting '- Stay'", str(caught.exception))
+        self.assertIn("x.md", str(caught.exception))
+
+    def test_only_text_files_are_normalised(self) -> None:
+        normalise = self.module._normalise
+        self.assertEqual(normalise(b"a\r\nb\r\n", "assets/notes.txt"), b"a\nb\n")
+        self.assertEqual(normalise(b"a\r\nb\r\n", "hooks/run_python_hook.sh"), b"a\nb\n")
+        signature = b"\x89PNG\r\n\x1a\nIHDR\r\n"  # a PNG signature has CRLF; this sample has no NUL byte
+        for name in ("assets/logo.png", "assets/LOGO.PNG", "a.jpg", "a.jpeg", "a.webp", "a.gif", "a.ico",
+                     "a.pdf", "a.zip"):
+            with self.subTest(name=name):
+                self.assertEqual(normalise(signature, name), signature)
+        self.assertEqual(normalise(b"\0a\r\n", "assets/data.bin"), b"\0a\r\n")
+
 
 class GitAttributesTests(unittest.TestCase):
     def test_generated_package_is_lf_everywhere(self) -> None:
         lines = _text(ROOT / ".gitattributes").rstrip("\n").split("\n")
         self.assertEqual(tuple(lines[-2:]), GITATTRIBUTES_LINES)
         self.assertEqual(lines.count(GITATTRIBUTES_LINES[1]), 1)
+
+    def test_git_leaves_binary_package_files_alone(self) -> None:
+        # text=auto: git normalises the text files to LF and does not touch a file it finds binary (a logo).
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        result = subprocess.run(["git", "-C", str(ROOT), "check-attr", "text", "eol", "--",
+                                 "antigravity/assets/logo.png", "antigravity/README.md"],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                env=git_environment(), stdin=subprocess.DEVNULL, timeout=120)
+        if result.returncode != 0:
+            self.skipTest("not a git work tree (a release ZIP, for one)")
+        self.assertEqual(result.stdout.splitlines(), [
+            "antigravity/assets/logo.png: text: auto", "antigravity/assets/logo.png: eol: lf",
+            "antigravity/README.md: text: auto", "antigravity/README.md: eol: lf"])
 
 
 class CommittedPackageSyncTests(unittest.TestCase):
@@ -769,6 +1025,21 @@ class CommittedPackageSyncTests(unittest.TestCase):
         self.assertTrue((ROOT / "antigravity" / "plugin.json").is_file(), "generated package antigravity/ is missing")
         result = _run("check", "--repo", str(ROOT))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_committed_copies_keep_the_git_mode_of_their_sources(self) -> None:
+        # The generator cannot set file modes, so the commit of the package does: an executable source (the
+        # git hooks, 100755) needs `git update-index --chmod=+x` on its copy, or POSIX hosts install hooks that
+        # git ignores.
+        modes = _git_modes(ROOT, git_environment()) if shutil.which("git") else None
+        if modes is None:
+            self.skipTest("not the top of a git work tree (a release ZIP, for one) or git is not installed")
+        copies = sorted(path[len("antigravity/"):] for path in modes
+                        if path.startswith(tuple(f"antigravity/{prefix}" for prefix in COPIED_PREFIXES)))
+        self.assertIn("assets/git-hooks/pre-commit", copies)
+        self.assertIn("100755", {modes.get(path) for path in copies})
+        mismatched = [f"antigravity/{path}: {modes[f'antigravity/{path}']}, source {modes.get(path)}"
+                      for path in copies if modes.get(path) != modes[f"antigravity/{path}"]]
+        self.assertEqual(mismatched, [], "set the copies' modes with git update-index --chmod=+x (or -x)")
 
 
 if __name__ == "__main__":

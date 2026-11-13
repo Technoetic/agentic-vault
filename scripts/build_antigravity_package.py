@@ -16,8 +16,14 @@ no timestamps), so `check` can compare a committed copy byte for byte.
 `build` replaces the output folder only when it is absent or holds an earlier generated package. Both
 commands exit 1 with a message when the package cannot be built: the hook module is missing, a skill
 body is over 23,500 UTF-8 bytes, a description is over 1,024 characters, a Claude placeholder remains
-under `skills/`, or a section to move is gone. `check` also exits 1, printing each difference, when the
-folder differs from a fresh build. Standard library only.
+under `skills/`, or a section to move (or the line that ends it) is gone. `check` also exits 1, printing
+each difference, when the folder differs from a fresh build. Text files are written with LF; binary files
+(a NUL byte or a known image or archive suffix) are copied as they are. The generator writes bytes, not
+file modes: when the package folder lies in the repository's git work tree, `check` also compares the git
+index mode of every copied file with its source (the git hooks are 100755), names the
+`git update-index --chmod` that fixes a difference and exits 1 on any. A file the index does not hold yet
+is not compared, and a folder outside the work tree (a release ZIP) is compared by bytes only; the last
+line of `check` says which. Standard library only.
 """
 from __future__ import annotations
 
@@ -29,9 +35,10 @@ from pathlib import Path
 import posixpath
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
-from typing import Callable
+from typing import Callable, Iterable
 from urllib.parse import quote, unquote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +72,16 @@ EXCLUDED_DOC_FOLDERS = frozenset({"releases", "verification", "superpowers", "pl
 SKIPPED_DIRS = frozenset({"__pycache__", ".git", ".venv", "venv"})
 SKIPPED_FILES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
 SKIPPED_SUFFIXES = (".pyc", ".pyo", ".tmp", "~")
+# Copied byte for byte, never normalised (a NUL byte also marks a file as binary). A logo for a
+# marketplace listing, for one, may have no NUL byte and a CRLF in its signature.
+BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".pdf", ".zip")
+GIT_TIMEOUT = 120
+# Variables that would make git read a repository or index other than the one holding --repo.
+GIT_REPOSITORY_VARIABLES = frozenset({"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+                                      "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+                                      "GIT_PREFIX"})
+# git update-index --chmod option that gives a copy the mode of its source.
+CHMOD_FLAGS = {"100755": "+x", "100644": "-x"}
 BYTE_ORDER_MARK = chr(0xFEFF)
 
 COMMAND_HEADER = "\n".join((
@@ -73,10 +90,11 @@ COMMAND_HEADER = "\n".join((
     "> - `<PLUGIN_ROOT>`: 이 플러그인 설치 폴더의 절대 경로다. 이 SKILL.md가 있는 폴더의 두 단계 위 폴더다"
     "(보통 `~/.gemini/config/plugins/agentic-vault`). 셸 명령에는 펼친 절대 경로를 따옴표로 감싸 넣는다.",
     "> - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다.",
-    "> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 "
-    "`--vault <볼트 루트>`로 넘긴다.",
+    "> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 볼트를 다루는 엔진 스크립트에 "
+    "볼트를 넘길 때는 `--vault <볼트 루트>`를 쓴다. 본문 명령의 인자는 적힌 대로 쓴다.",
     "> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계"
-    "(설정 파일 `.claude/…`, PreToolUse 훅)는 Antigravity 세션에서 실행하지 않는다.",
+    "(`.claude/settings.json`·`.claude/settings.local.json` 병합, PreToolUse 훅 설치)는 Antigravity 세션에서 "
+    "실행하지 않는다. `.claude/rules/`와 AGENTS.md는 본문대로 만든다.",
 ))
 REFERENCE_ROOT_NOTE = "`<PLUGIN_ROOT>`는 이 플러그인 설치 폴더의 절대 경로로, 이 파일이 있는 폴더의 세 단계 위 폴더다."
 
@@ -84,12 +102,18 @@ REFERENCE_ROOT_NOTE = "`<PLUGIN_ROOT>`는 이 플러그인 설치 폴더의 절�
 class SectionMove:
     """Sections of one source that move to a reference file in the package.
 
+    A section runs from its heading to the next heading of the same or a higher level. `ends`, when given,
+    ends it earlier, at the first line after the heading (outside fenced code) for which it is true: text
+    that belongs to the parent step but has no heading of its own stays in the skill. The build fails when
+    that line is not found before the next heading (`end_wanted` names it in the message).
+
     A plain class rather than a dataclass, so the module also loads through
     importlib without being registered in sys.modules (as the tests load scripts).
     """
 
     def __init__(self, *, source: str, target: str, title: str, origin: str, replacement: str, wanted: str,
-                 matches: Callable[[int, str], bool]) -> None:
+                 matches: Callable[[int, str], bool], ends: Callable[[str], bool] | None = None,
+                 end_wanted: str = "") -> None:
         self.source = source
         self.target = target
         self.title = title
@@ -97,6 +121,8 @@ class SectionMove:
         self.replacement = replacement
         self.wanted = wanted
         self.matches = matches
+        self.ends = ends
+        self.end_wanted = end_wanted
 
 
 MOVES = (
@@ -126,17 +152,26 @@ MOVES = (
         wanted="sections '## 4-2.' and '## 4-3.'",
         matches=lambda level, title: level == 2 and title.startswith(("4-2.", "4-3.")),
     ),
+    # In commands/vault-upgrade.md this `###` section is followed, without a heading, by the 0.9.0 list and
+    # the two verification lines of step 2. The verification lines always stay in the skill body (the move
+    # ends at the first of them). The 0.9.0 list moves too, because with it the skill body passes
+    # MAX_SKILL_BODY_BYTES; tests/test_antigravity_package.py measures that and fails once it would fit.
     SectionMove(
         source="commands/vault-upgrade.md",
         target="skills/vault-upgrade/references/helper-bundle.md",
-        title="# vault-upgrade: 보강 helper bundle과 선택 이행",
-        origin="> 원본은 저장소 `commands/vault-upgrade.md`의 '보강 helper bundle과 선택 이행' 절이고, Antigravity 스킬 "
-               "본문 한도 때문에 `scripts/build_antigravity_package.py`가 이 파일로 옮겼다. 이 파일을 직접 고치지 않는다. "
+        title="# vault-upgrade: 보강 helper bundle과 선택 이행, 0.9.0 안내 목록",
+        origin="> 원본은 저장소 `commands/vault-upgrade.md` 2단계의 '보강 helper bundle과 선택 이행' 절과 그 뒤의 "
+               "`0.9.0` 안내 목록이고(2단계의 검증 두 줄은 스킬 본문에 남겼다), Antigravity 스킬 본문 한도 때문에 "
+               "`scripts/build_antigravity_package.py`가 이 파일로 옮겼다. 이 파일을 직접 고치지 않는다. "
                + REFERENCE_ROOT_NOTE,
-        replacement="> 보강 helper bundle과 선택 이행 절차는 [references/helper-bundle.md](references/helper-bundle.md)로 "
-                    "옮겼다(Antigravity 스킬 본문 한도). 해당 단계에서 그 파일을 읽는다.",
+        replacement="> 보강 helper bundle과 선택 이행 절차, 그리고 그 뒤에 이어지던 `0.9.0` 안내 목록 4개(Codex 진입점·"
+                    "세션 주입 예산·`/vault-recall` 파일 셋·백업 스냅샷)는 "
+                    "[references/helper-bundle.md](references/helper-bundle.md)로 옮겼다(Antigravity 스킬 본문 한도). "
+                    "그 파일을 읽고 따른 뒤 아래 두 줄로 검증한다.",
         wanted="section '### 보강 helper bundle과 선택 이행'",
         matches=lambda level, title: level == 3 and title == "보강 helper bundle과 선택 이행",
+        ends=lambda line: line.startswith("- 볼트가 git 저장소이고"),
+        end_wanted="the step 2 verification line '- 볼트가 git 저장소이고 …'",
     ),
 )
 MOVES_BY_SOURCE = {move.source: move for move in MOVES}
@@ -161,11 +196,13 @@ class Package:
 
     skill_bodies: SKILL.md path -> body bytes; moved: the sections each move took; links: package path ->
     counts of links kept relative (and how many of those changed) and links turned into GitHub URLs;
-    docs: the documents included; github_missing: GitHub-linked targets the repository does not hold.
+    docs: the documents included; github_missing: GitHub-linked targets the repository does not hold;
+    copied: the package paths that are copies of the same repository path (scripts, hooks, assets).
     """
 
     def __init__(self, *, version: str, files: dict[str, bytes], skill_bodies: dict[str, int], moved: list[dict],
-                 links: dict[str, dict[str, int]], docs: list[str], github_missing: list[str]) -> None:
+                 links: dict[str, dict[str, int]], docs: list[str], github_missing: list[str],
+                 copied: list[str] | None = None) -> None:
         self.version = version
         self.files = files
         self.skill_bodies = skill_bodies
@@ -173,6 +210,7 @@ class Package:
         self.links = links
         self.docs = docs
         self.github_missing = github_missing
+        self.copied = list(copied or [])
 
 
 # --- Markdown scanning -------------------------------------------------------------------------------
@@ -333,20 +371,28 @@ def link_destinations(text: str) -> list[tuple[int, int]]:
     return found
 
 
-def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
-    """(line index, level, title) of ATX headings outside fenced code blocks."""
-    found: list[tuple[int, int, str]] = []
+def _outside_fences(lines: list[str]) -> list[bool]:
+    """For each line, whether it lies outside fenced code blocks (fence lines count as inside)."""
+    flags: list[bool] = []
     fence: str | None = None
-    for index, line in enumerate(lines):
+    for line in lines:
         if fence is not None:
             if _closes(line, fence):
                 fence = None
+            flags.append(False)
             continue
         marker = _fence_marker(line)
         if marker:
             fence = marker
-            continue
-        match = ATX_HEADING.match(line)
+        flags.append(not marker)
+    return flags
+
+
+def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """(line index, level, title) of ATX headings outside fenced code blocks."""
+    found: list[tuple[int, int, str]] = []
+    for index, (line, outside) in enumerate(zip(lines, _outside_fences(lines))):
+        match = ATX_HEADING.match(line) if outside else None
         if match:
             found.append((index, len(match.group(1)), (match.group(2) or "").strip()))
     return found
@@ -356,6 +402,7 @@ def _cut_sections(body: str, move: SectionMove) -> tuple[str, list[str]]:
     """Remove the matching sections; the first one leaves SENTINEL behind. Returns (kept, sections)."""
     lines = body.split("\n")
     headings = _headings(lines)
+    outside = _outside_fences(lines)
     ranges: list[tuple[int, int]] = []
     for position, (index, level, title) in enumerate(headings):
         if not move.matches(level, title) or (ranges and index < ranges[-1][1]):
@@ -365,6 +412,13 @@ def _cut_sections(body: str, move: SectionMove) -> tuple[str, list[str]]:
             if later_level <= level:
                 end = later
                 break
+        if move.ends is not None:
+            stop = next((number for number in range(index + 1, end) if outside[number] and move.ends(lines[number])),
+                        None)
+            if stop is None:
+                raise BuildError(f"{move.source}: {move.wanted} does not end at {move.end_wanted} before the next "
+                                 "heading of its level or above; update scripts/build_antigravity_package.py")
+            end = stop
         ranges.append((index, end))
     if not ranges:
         raise BuildError(f"{move.source}: no {move.wanted} to move; update scripts/build_antigravity_package.py")
@@ -383,9 +437,13 @@ def _cut_sections(body: str, move: SectionMove) -> tuple[str, list[str]]:
 
 # --- Sources ------------------------------------------------------------------------------------------
 
-def _normalise(data: bytes) -> bytes:
-    """LF line ends for text; a file with a NUL byte is binary and kept as it is."""
-    return data if b"\0" in data else data.replace(b"\r\n", b"\n")
+def _is_binary(data: bytes, relative: str) -> bool:
+    return b"\0" in data or relative.lower().endswith(BINARY_SUFFIXES)
+
+
+def _normalise(data: bytes, relative: str) -> bytes:
+    """LF line ends for text; a file with a NUL byte or a known binary suffix is kept as it is."""
+    return data if _is_binary(data, relative) else data.replace(b"\r\n", b"\n")
 
 
 def _decode(data: bytes, relative: str) -> str:
@@ -659,8 +717,9 @@ def _readme(version: str, commands: int) -> str:
         "# agentic-vault — Antigravity CLI 패키지",
         "",
         f"이 폴더는 [agentic-vault]({REPO_URL})를 Antigravity CLI(`agy`)에 설치하는 플러그인 패키지다. "
-        f"명령 {commands}개가 같은 이름의 스킬로 들어 있고, `hooks.json`의 훅이 세션을 시작할 때 볼트의 인계를 주입하고 "
-        "에이전트가 멈출 때 checkpoint를 남긴다.",
+        f"명령 {commands}개가 같은 이름의 스킬로 들어 있다. `hooks.json`의 훅은 세션을 시작할 때 볼트의 인계를 주입하고, "
+        "에이전트가 완전히 멈췄을 때(Stop 입력의 `fullyIdle`이 참일 때)만 checkpoint를 남기도록 만들었다. "
+        "이 훅 동작은 실제 agy 대화 세션으로는 확인하지 않았다.",
         "",
         f"설치(v{version} 태그 고정):",
         "",
@@ -674,8 +733,9 @@ def _readme(version: str, commands: int) -> str:
         "## English",
         "",
         f"This folder is the Antigravity CLI (`agy`) plugin package of [agentic-vault]({REPO_URL}). The {commands} "
-        "commands are skills with the same names, and the hooks in `hooks.json` inject the vault handoff when a "
-        "session starts and write a checkpoint when the agent stops.",
+        "commands are skills with the same names. The hooks in `hooks.json` are built to inject the vault handoff "
+        "when a session starts and to write a checkpoint only when the agent is fully idle (a Stop input with "
+        "`fullyIdle` true). This hook behavior is not yet confirmed in a real agy conversation.",
         "",
         f"Install (pinned to the v{version} tag):",
         "",
@@ -736,9 +796,9 @@ def build_package(repo: Path) -> Package:
     copies: dict[str, bytes] = {}
     for top in ("assets", "skills/agentic-vault/scripts"):
         for relative in _walk(repo / top, top):
-            copies[f"{top}/{relative}"] = _normalise((repo / top / relative).read_bytes())
+            copies[f"{top}/{relative}"] = _normalise((repo / top / relative).read_bytes(), relative)
     for name in HOOK_FILES:
-        copies[f"hooks/{name}"] = _normalise((repo / "hooks" / name).read_bytes())
+        copies[f"hooks/{name}"] = _normalise((repo / "hooks" / name).read_bytes(), name)
     references = sorted(path.name for path in (repo / "skills/agentic-vault/references").glob("*.md")
                         if path.is_file())
 
@@ -844,7 +904,8 @@ def build_package(repo: Path) -> Package:
     if problems:
         raise BuildError("\n".join(sorted(set(problems))))
     return Package(version=version, files=dict(sorted(files.items())), skill_bodies=bodies, moved=moved,
-                   links=dict(sorted(linker.counts.items())), docs=docs, github_missing=sorted(linker.missing))
+                   links=dict(sorted(linker.counts.items())), docs=docs, github_missing=sorted(linker.missing),
+                   copied=sorted(copies))
 
 
 # --- Output -------------------------------------------------------------------------------------------
@@ -921,6 +982,71 @@ def compare(files: dict[str, bytes], against: Path) -> list[str]:
     return differences
 
 
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess | None:
+    """Run git in cwd with no terminal input; None when git cannot be started or does not answer."""
+    environment = {key: value for key, value in os.environ.items()
+                   if key.upper() not in GIT_REPOSITORY_VARIABLES}
+    try:
+        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, env=environment,
+                              stdin=subprocess.DEVNULL, timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _index_path(prefix: str, relative: str) -> str:
+    return f"{prefix}/{relative}" if prefix else relative
+
+
+def mode_differences(copied: Iterable[str], repo: Path, against: Path) -> tuple[list[str], str]:
+    """Compare the git index mode of each copy in the package folder with the mode of its source.
+
+    Returns (one `mode differs:` line per copy, a `git modes:` line that says what was compared). The
+    comparison runs only when the package folder lies inside the git work tree that holds repo; a release
+    ZIP or a folder elsewhere is compared by bytes alone. A copy or source that the git index does not hold
+    (a new file not added yet) is skipped. Raises BuildError when git fails inside that work tree.
+    """
+    found = _git(repo, "rev-parse", "--show-toplevel")
+    if found is None:
+        return [], "git modes: not compared (git is not available)"
+    if found.returncode != 0 or not found.stdout.strip():
+        return [], f"git modes: not compared (git finds no work tree at {repo})"
+    top = Path(found.stdout.decode("utf-8", errors="replace").strip()).resolve()
+    try:
+        repo_prefix = repo.resolve().relative_to(top).as_posix()
+        against_prefix = Path(os.path.abspath(against)).resolve().relative_to(top).as_posix()
+    except ValueError:
+        return [], f"git modes: not compared ({os.path.abspath(against)} is outside the git work tree {top})"
+    repo_prefix = "" if repo_prefix == "." else repo_prefix
+    if against_prefix in (".", repo_prefix):
+        return [], "git modes: not compared (the package folder is the repository itself)"
+    listed = _git(top, "ls-files", "--stage", "-z")
+    if listed is None or listed.returncode != 0:
+        raise BuildError(f"git ls-files --stage failed in {top}; the git modes of the copies cannot be compared")
+    modes: dict[str, str] = {}
+    for record in listed.stdout.split(b"\0"):
+        info, tab, path = record.partition(b"\t")
+        fields = info.split(b" ")
+        if tab and len(fields) == 3 and fields[2] == b"0":
+            modes[path.decode("utf-8", errors="replace")] = fields[0].decode("ascii", errors="replace")
+    lines: list[str] = []
+    compared = 0
+    for relative in sorted(copied):
+        copy_path = _index_path(against_prefix, relative)
+        source_mode, copy_mode = modes.get(_index_path(repo_prefix, relative)), modes.get(copy_path)
+        if source_mode is None or copy_mode is None:
+            continue
+        compared += 1
+        if source_mode == copy_mode:
+            continue
+        flag = CHMOD_FLAGS.get(source_mode) if copy_mode in CHMOD_FLAGS else None
+        fix = f": git update-index --chmod={flag} {copy_path}" if flag else ": no git update-index --chmod fixes this"
+        lines.append(f"mode differs: {relative} (package copy {copy_mode}, source {source_mode}){fix}")
+    if not compared:
+        return [], "git modes: not compared (no copied file is in the git index together with its source)"
+    where = f"git modes: compared {compared} copied files with their sources in the git index of {top}"
+    return lines, where + ("; run the git update-index commands above there" if lines else "")
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -947,6 +1073,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         against = args.against if args.against is not None else repo / PACKAGE_FOLDER
         differences = compare(package.files, against)
+        mode_lines, mode_note = mode_differences(package.copied, repo, against)
+        differences += mode_lines
     except BuildError as error:
         for line in str(error).splitlines():
             print(f"build_antigravity_package: error: {line}", file=sys.stderr)
@@ -958,8 +1086,10 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
     if differences:
         print(f"{len(differences)} difference(s) between a fresh build and {os.path.abspath(against)}")
+        print(mode_note)
         return 1
     print(f"identical: {len(package.files)} files in {os.path.abspath(against)}")
+    print(mode_note)
     return 0
 
 
