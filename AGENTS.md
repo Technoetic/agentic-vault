@@ -4,7 +4,7 @@ This guide is for people and coding agents who change this plugin repository. It
 Obsidian vault or to a session that only uses the installed plugin: a vault has its own contract
 (`CLAUDE.md`, `AGENTS.md` and `.claude/rules/` written by `/vault-init`). If you reached this file from a
 vault session, ignore it. `.claude/CLAUDE.md` imports this file for Claude Code; Codex reads it
-directly.
+directly. Antigravity CLI reads it too when a session starts inside the checkout.
 
 ## Who decides what
 
@@ -63,6 +63,22 @@ To change a copied rule:
 4. If a copy or its source is one of the certificate-bound files (below), the certificate changes as well.
 5. If `deny-guard.py` changed, its stamp and the stamp of `ps-parse.ps1` move to the release version together.
 
+### Generated Antigravity CLI package
+
+`antigravity/` is generated: `python scripts/build_antigravity_package.py build` writes it from the
+repository for Antigravity CLI. It holds byte copies of the engine scripts under
+`skills/agentic-vault/scripts/`, of four hook files (`session_start.py`, `session_checkpoint.py`,
+`antigravity_hook.py`, `run_python_hook.sh`) and of `assets/`, and rewritten copies of the commands (one
+skill each), the shared skills and the documents they link. The root `AGENTS.md` and `.claude/CLAUDE.md`
+are not copied into it.
+
+Do not edit anything under `antigravity/` by hand. Change the source, rebuild with
+`python scripts/build_antigravity_package.py build`, confirm with
+`python scripts/build_antigravity_package.py check` (it prints every difference and exits 1 on any) and
+commit the rebuilt folder with the source change. The sync test in `tests/test_antigravity_package.py`
+runs the same check. It is the only test that keeps these copies equal to their sources: the copy tests
+above do not read `antigravity/`.
+
 ## Engine files and vault data
 
 Everything in this repository is engine: commands, skills, hooks, templates, adapters and scripts. A change to
@@ -94,9 +110,11 @@ any of them changes what agents do in every vault after the update.
   `vault_paths.py`. Any byte change in them changes the fingerprint and stops vaults that promote warnings
   until they follow the upgrade order. Such a change needs the maintainer's decision, the new value in
   `tests/test_release_metadata.py` and the release documents.
-- The three manifests (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
-  `.codex-plugin/plugin.json`), the health check stamp, `README.md`, `docs/codex.md` and `SECURITY.md` move to
-  a new version together; `tests/test_release_metadata.py` and `tests/test_readme_truth.py` check them.
+- The four manifests (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+  `.codex-plugin/plugin.json` and the generated `antigravity/plugin.json`, which takes its version from
+  `.claude-plugin/plugin.json` when the package is rebuilt), the health check stamp, `README.md`,
+  `docs/codex.md` and `SECURITY.md` move to a new version together; `tests/test_release_metadata.py` and
+  `tests/test_readme_truth.py` check them.
 - `README.md` is bilingual: a release adds a Korean section and an English section. Korean documents stay
   Korean and English documents stay English.
 - Release notes (`docs/releases/`) and verification records (`docs/verification/`) of a published version keep

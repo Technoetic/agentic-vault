@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.47.0-10B981?style=for-the-badge)](docs/releases/v0.47.0.md)
+[![Version](https://img.shields.io/badge/v0.48.0-10B981?style=for-the-badge)](docs/releases/v0.48.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -29,6 +29,33 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 <img src="docs/screenshots/hero-cast.svg" width="90%" alt="agentic-vault 세션 사이클 데모 — /vault-init로 볼트를 만들고, SessionStart 훅이 직전 세션 인계를 자동 주입하고, /vault-session-end가 다음 세션의 나에게 편지를 남기는 터미널 시뮬레이션"/>
 
 </div>
+
+## v0.48.0 — Antigravity CLI 겸용 패키지
+
+Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 명령·스킬·훅·엔진 스크립트로 만든 생성 패키지
+`antigravity/`를 더한다. 저장소 루트는 지금처럼 Claude Code·Codex 플러그인이고 기본 훅 정의(`hooks/hooks.json`)는
+바뀌지 않는다. 실제 agy 대화 세션으로는 확인하지 않았다.
+
+- 패키지에는 Antigravity CLI용 스킬 17개(공용 스킬 둘과 명령 15개를 같은 이름으로 바꾼 스킬)와 훅
+  둘(SessionStart·Stop)이 들어 있다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
+  폴더가 생성 결과와 같은지는 시험이 지킨다. 설치는 태그를 고정한 주소
+  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity`나 로컬 폴더로
+  한다([Antigravity CLI 안내](docs/antigravity.md)).
+- 세션 시작 훅은 생성 패키지가 주는 `--host antigravity` 플래그가 있을 때만 훅 입력의 `cwd`·`workspacePaths`에서
+  볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 플래그 없는 기본 경로는 v0.47.0과 같다. 체크포인트 훅은
+  Antigravity의 `Stop`(에이전트가 완전히 멈췄을 때)에 체크포인트를 남긴다.
+- [격리 설치 확인 도구](scripts/verify_antigravity_plugin.py)는 가짜 홈 폴더에서 `agy plugin validate --strict`,
+  설치, 목록, 바이트 대조만 하고 대화는 하지 않는다.
+- 공용 스킬, `/vault-session-start`, `/vault-lint`, 볼트 AGENTS.md 스텁이 Antigravity CLI를 함께 적는다.
+  Antigravity CLI의 훅 사건에는 압축·세션 종료가 없고, deny zone 가드·교훈 단서·Aside 훅은 Antigravity CLI에서
+  돌지 않으며, Jarvis 브리지는 Claude CLI로만 응답을 만든다.
+
+새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.48.0.md)의 `기본 결과 변경` 절에 모두
+적었다. 인증서가 묶는 일곱 파일은 v0.46.0·v0.47.0과 같아, 그 판에서 올 때는 경고 승격 인증서를 다시 만들 필요가
+없다(실제 설치 바이트가 같을 때). v0.45.1 이하에서 올 때는
+[v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)를 따른다. healthcheck 스탬프만
+`engine=0.48.0`이고 규칙·어댑터 스탬프는 그대로다. 볼트에 설치된 사본은 `/vault-upgrade`(Codex `upgrade`) 전까지
+옛 동작이다. [검증 계약](docs/verification/v0.48.0.md)을 함께 본다.
 
 ## v0.47.0 — 안내서 대조 검토 반영과 aside-repl 절차 명령
 
@@ -298,7 +325,7 @@ v0.38.0 후보의 선택형 출처 바인딩, 한영 합성 대조군과 로컬 
 그대로 유지한다. `9d55755` 구현 체크포인트의 로컬 모델 관측은 새 측정이 아니며,
 교정 전 오염 조건을 충족하지 않아 엄격한 복구 점수는 0이고 효능은 미확인이다.
 [릴리스 범위](docs/releases/v0.38.1.md)와 [검증 기록](docs/verification/v0.38.1.md)을 참고한다.
-아래 v0.38.0 절은 공개하지 않은 후보의 준비 이력이다. 현재 설치 ref는 v0.47.0이다.
+아래 v0.38.0 절은 공개하지 않은 후보의 준비 이력이다. 현재 설치 ref는 v0.48.0이다.
 
 ## v0.38.0 — 출처 보존과 모델 행동 평가
 
@@ -373,6 +400,28 @@ python scripts/evaluate_knowledge_evolution.py
 [OpenWiki](https://github.com/langchain-ai/openwiki/tree/7bb583d664f2d1c2484fa44b9d591f6103ca8166)의
 버전 근거·페이지 관리·LEDGER 평가에서 설계 아이디어를 참고한 범위 제한 구현이다.
 자세한 내용은 [이번 변경·검증 범위](docs/releases/v0.36.1.md)를 참고한다.
+
+## v0.48.0 — Antigravity CLI package
+
+This release adds a package for Google's Antigravity CLI (`agy`), so that the same vault can be used
+there. The package lives in `antigravity/` and is generated from the repository's commands, skills,
+hooks and engine scripts by [`scripts/build_antigravity_package.py`](scripts/build_antigravity_package.py);
+it holds 17 Antigravity CLI skills (the two shared skills and one per command) and two hooks, and a test
+keeps the committed folder equal to the generator's output. Install it from the release tag with
+`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity` or from a local
+copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit
+`--host antigravity` mode that finds the one vault named in the hook input and injects the handoff and
+hot note through `injectSteps`, and the checkpoint hook records Antigravity's `Stop` event; without the
+flag the session-start output is that of v0.47.0. The repository root stays the Claude Code and Codex
+plugin, and their hook definitions are unchanged. No real agy conversation was run: Antigravity's FAQ
+says that wrapping agy inside third-party agents is not supported under consumer plans, so the release
+checks run only the `agy plugin` commands that need no login, in an isolated home.
+
+Some results change without a new option; the release note lists each one under
+`기본 결과 변경`. The seven certificate-bound checker files are unchanged from v0.46.0 and v0.47.0, so
+certificates made with either stay valid when the installed bytes match. Only the health check stamp
+moves to `engine=0.48.0`; copies installed in a vault keep the old behaviour until `/vault-upgrade`.
+See [scope](docs/releases/v0.48.0.md) and [verification](docs/verification/v0.48.0.md).
 
 ## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
 
@@ -814,7 +863,7 @@ flowchart TB
 
 Apart from this section, the README is in Korean, and so are the commands, rule files and note templates (Korean-first). Start here if you read English.
 
-**What it is.** agentic-vault is a Claude Code and Codex plugin that keeps agent memory in a plain-Markdown Obsidian vault instead of the context window. A SessionStart hook injects the previous session's handoff and a short hot-context note within an estimated token budget; everything else is read on demand through the index and grep. The core uses only the Python 3.10+ standard library and runs on Windows, macOS and Linux. Outside a vault (no `00-meta/vault-config.json`) the hooks stay silent.
+**What it is.** agentic-vault is a Claude Code and Codex plugin that keeps agent memory in a plain-Markdown Obsidian vault instead of the context window. A SessionStart hook injects the previous session's handoff and a short hot-context note within an estimated token budget; everything else is read on demand through the index and grep. The core uses only the Python 3.10+ standard library and runs on Windows, macOS and Linux. Outside a vault (no `00-meta/vault-config.json`) the hooks stay silent. Since v0.48.0 the repository also carries a generated package for Antigravity CLI in `antigravity/`.
 
 **Install.** In Claude Code, type these two commands yourself (Claude cannot run `/plugin` for you), then restart Claude Code:
 
@@ -823,7 +872,7 @@ Apart from this section, the README is in Korean, and so are the commands, rule 
 /plugin install agentic-vault@agentic-vault
 ```
 
-For Codex, register the release tag and add the plugin as described in [the Codex guide](docs/codex.md).
+For Codex, register the release tag and add the plugin as described in [the Codex guide](docs/codex.md). For Antigravity CLI, install the generated package folder from the release tag as described in [the Antigravity CLI guide](docs/antigravity.md); no real agy conversation has been run with it.
 
 Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) lists "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume", and this plugin registers an async health-check SessionStart hook for startup, clear and resume. `hooks/hooks.json` is unchanged and does not adopt `onFailure` (only the opt-in deny-zone guard template described below sets it, in its own settings fragment); `vault_doctor.py --host-version` reports the local `claude --version` only when asked.
 
@@ -880,8 +929,8 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs below target v0.47.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.47.0.md);
+budgets; new findings warn first. The installation refs below target v0.48.0.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.48.0.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
@@ -1307,9 +1356,10 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.47.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.48.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
+├── antigravity/                       ← Antigravity CLI용 생성 패키지 (scripts/build_antigravity_package.py가 만든다, 손으로 고치지 않음)
 ├── AGENTS.md                          ← 이 저장소를 고치는 기여자·에이전트 안내 (볼트에 설치하지 않음)
 ├── .claude/CLAUDE.md                  ← Claude Code가 위 안내를 불러오는 한 줄 (@../AGENTS.md)
 │
@@ -1331,12 +1381,14 @@ agentic-vault/
 │   └── vault-upgrade.md               ← 기존 볼트를 현재 엔진으로 (멱등)  ⬆️
 │
 ├── hooks/
+│   ├── antigravity_hook.py            ← Antigravity CLI 모드 공용 도우미 (훅 입력 읽기·볼트 찾기·처리기 하나만 동작)
 │   ├── hooks.json                     ← SessionStart 바인딩 (주입 + 비동기 검사)
 │   └── session_start.py               ← handoff·hot 자동 주입  🔥
 │
 ├── skills/agentic-vault/
 │   ├── SKILL.md                       ← 작업 규율 (중복 grep → 스키마 → 링크 → 기록)
 │   ├── references/
+│   │   ├── antigravity.md             ← Antigravity CLI 설치 · 스킬 이름 · 자리표시자 · 훅 · 한계
 │   │   ├── codex.md                   ← Codex 작업 연결 · 경로 · 권한 · 훅 규약
 │   │   ├── linking-rules.md           ← 위키링크 규율 (고아 링크 철학 포함)
 │   │   └── memory-tiers.md            ← 계층형 메모리 + SSOT 룩업 설계
@@ -1412,7 +1464,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.47.0**이며 **Claude Code, Codex 겸용**이다. 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.47.0.md)에 있다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.48.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.48.0.md)에 있다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
 
 v0.34.0은 다음 기능을 더했고 v0.35.1에서도 유지한다. 명시적으로 켜는 기능 다섯 가지를 더하며, 모두 훅·CI·기본 실행에 연결하지 않는다. `check-support --bind-subject`는 첫 글자가 ASCII가 아닌 글자인 주어 앞에 [왼쪽 경계](docs/support-row-diagnostics.md#subject-left-edge)가 있어야 일치로 보므로, 주어 앞에 한글 한 음절이 더 붙은 긴 이름은 더 이상 주어 일치로 세지 않는다(값·기본 출력·종료 코드는 그대로다). `evaluate_recall.py --abstention-calibration conformal`은 평가기 안에서만 [답 없음 보정 문턱](docs/memory-evaluation.md#답-없음-보정-문턱)을 커밋한 분할의 dev 쪽에서 맞추고 heldout 쪽에서 잰다. recall_hard(팔마다 보정 문항 28개 이하, α = 0.05)에서는 문턱이 있어도 보정 신호의 최솟값 한 점에 걸리고 조건부판(Learn then Test)은 문턱을 내지 못하므로, 보정 집합을 늘린 뒤에 쓸모가 있다. `scripts/real_vault_audit.py plan`은 라벨하기 전에 [표본 크기와 합격 확률](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)을 정확한 정수 산술로 계산한다. `vault_improvements.py inspect`·`compare --receipt-order`는 계획과 완료 영수증의 [기록 순서](docs/improvement-experiments.md#영수증-기록-순서-선택)를 표시하며, 이는 관찰 시점이나 서명이 아니다. `evaluate_tool_matrix.py --string-patterns`는 같은 trial을 현재 스키마와 형식 패턴을 더한 스키마로 짝지어 실행하고 호스트 판정을 기록만 한다([문자열 인자 패턴 짝 비교](docs/evaluation-stability.md#문자열-인자-패턴-짝-비교)). 새 옵션을 주지 않으면 출력·종료 코드는 v0.33.1과 같고, 이미 있던 `--bind-subject`를 켠 결과(첫 글자가 ASCII가 아닌 글자인 주어), 바뀐 CLI의 도움말·usage 줄, argparse 약어(`evaluate_recall.py --f`가 모호해진다), 일부 평가기가 싣는 소스 해시만 다르다. 주어 경계가 `vault_ssot.py`를 바꾸므로 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.34.0.md)를 따른다.
 
@@ -1430,9 +1482,9 @@ v0.26.0의 Jarvis `via_bot` 수집 출처([수집과 경고](docs/hardening.md#�
 
 v0.25.0의 Claude Code 2.1.295 이상 권장과 요청할 때만 실행하는 `vault_doctor.py --host-version`, [동기화 충돌 사본·checkpoint 이후 변경 경고](docs/hardening.md#동기화-충돌-사본과-checkpoint-이후-변경-경고-선택), [실제 볼트 골드셋 평가와 소표본 정확 검정·비율 상한](docs/memory-evaluation.md), [llama-server 측정 조건 기록](docs/evaluation-stability.md), v0.24.0의 [Windows 부분 편집 보강·선택형 언어 매트릭스·Kiwi/qmd 검색 비교](docs/evaluation-stability.md), v0.23.0의 [도구 호출 실패 진단과 시간 유효성 render-matched 대조군](docs/memory-evaluation.md), [한글 음절 bigram BM25](docs/memory-patterns.md), [날조 후보·대장 출처 뒷받침 경고](docs/hardening.md)와 CI 경고 전용 공급망 점검을 유지한다. [GitHub 불변 릴리스](docs/release-integrity.md)는 v0.23.0부터 적용했다. v0.22.1의 한국어 답변·근거 분리, 생성된 상태 변경 순서, 합성 도구 호출 평가와 합성 대조군·실제 모델 관측 분리, [지침량·인덱스 정리·검증 누락 진단](docs/moai-diagnostics.md), 기존 [교훈 비교·작업 복구·연결 진단](docs/tower-reliability.md) 다섯 선택형 도구도 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.47.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.48.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.47.0) 경로는 v0.47.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.47.0 검증 기록](docs/verification/v0.47.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.48.0) 경로는 v0.48.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.48.0 검증 기록](docs/verification/v0.48.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -1475,7 +1527,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.47.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.48.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -1484,9 +1536,19 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 같은 이름의 로컬 소스나 이전 태그가 이미 등록돼 있으면 먼저 등록 소스를 교체한다.
 [기존 설치 갱신 절차](docs/codex.md#설치)에 `remove` → 새 태그 등록 → 플러그인 설치 순서를 설명한다.
 
+### Antigravity CLI 설치
+
+터미널에서 이 릴리스 태그의 패키지 폴더를 설치한다:
+
+```text
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity
+```
+
+Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더 경로를 줘도 된다. 저장소 루트 주소로 설치하면 agy가 Claude Code 플러그인 구조를 자동 변환해 설치하지만, 그 설치로는 인계가 주입되지 않는 것으로 보여 쓰지 않는다. 설치·갱신·직접 해 보는 확인 절차와 한계는 [Antigravity CLI 안내](docs/antigravity.md)에 있다. 실제 agy 대화 세션으로는 확인하지 않았다.
+
 ### 요구사항
 
-Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). Windows에서 훅 실행은 `sh`(Git Bash)를 요구한다(Claude Code Windows가 이미 요구하는 구성). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
+Python 3.10+ (표준 라이브러리만 사용 — pip 설치 0개). Windows에서 훅 실행은 `sh`(Git Bash)를 요구한다(Claude Code Windows가 이미 요구하는 구성). Antigravity CLI 패키지의 훅은 `sh`·`py -3`·`python` 가운데 있는 실행기로 돈다([훅 동작](docs/antigravity.md#훅-동작)). 옵시디언은 선택이지만 강력 추천 — 그래프 뷰가 지식 네트워크를 보여준다.
 
 **Claude Code는 2.1.295 이상을 권장한다.** 그 이전 버전은 이 플러그인이 `startup|clear|resume`에 등록한 비동기 건강 검사 SessionStart 훅의 바뀌지 않은 컨텍스트를 resume할 때마다 대화에 다시 붙일 수 있다. 근거는 [Claude Code 공식 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md)의 2.1.295 항목 "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume"이다(2026-10-19 원문 확인, 이 저장소에서는 재현하지 않았다). handoff·hot을 넣는 `session_start.py`는 동기 훅이라 이 수정 항목의 대상이 아니다. 권장일 뿐 낮은 버전의 설치나 훅 실행을 막지 않으며 `hooks/hooks.json`은 바꾸지 않았다. 같은 버전에 추가된 `onFailure: "block"`은 훅이 시작하지 못하거나 시간 초과·예상 밖 종료 코드로 끝날 때 동작을 막도록 실패 동작을 바꾸므로 `hooks/hooks.json`에는 채택하지 않았고(v0.32.0의 선택형 deny zone 가드 템플릿만 자기 설정 조각에서 쓴다), Codex에서는 대응 필드가 확인되지 않았다. 설치된 버전은 `vault_doctor.py --host-version`으로 확인하고, 훅 소요 시간과 resume 동작은 [실측 절차(아직 실행하지 않음)](docs/reliability.md#호스트-버전과-sessionstart-실측)를 따른다.
 
@@ -1682,6 +1744,7 @@ full 모드는 개별 노트의 읽기 실패(클라우드 하이드레이션·�
 | 3 | 파일 **위치** 규율(볼트 루트 잡파일 등)은 healthcheck 검사 밖 | 행동 계약(`.claude/rules/` 산문)이 커버 — 향후 버전 후보 |
 | 4 | Python 3.10+가 필요하며 토큰 계산은 근사치다 | 런처가 사용 가능한 인터프리터를 고르고, 없으면 진단한다 |
 | 5 | `backup_target`이 같은 물리 디스크면 디스크 장애는 미방어 | 외장·오프사이트 대상 별도 지정 권장 |
+| 6 | Antigravity CLI 패키지는 실제 agy 대화 세션으로 확인하지 않았다(소비자 요금제에서는 에이전트가 agy를 감싸 실행하지 않는다) | [Antigravity CLI 안내](docs/antigravity.md#직접-해-보는-확인)의 절차를 사용자가 직접 실행 |
 
 ---
 

@@ -69,7 +69,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
 
 ## v0.33.1 source and certificate migration
 
@@ -877,6 +877,8 @@ start/end는 원본 UTF-8 **바이트**의 반열린 범위다. untouched 바이
 유효 시간이 지난 PID에 `os.kill(pid,0)`을 호출하지 않는다. 중단된 guard는 안전한 수동 복구가 필요할 수 있다.
 
 PreCompact/SessionEnd는 모델 호출 없이 `00-meta/.agentic-vault/runtime/`에 사건·원본 해시·명시한 pending ID만 기록한다.
+v0.48.0부터 Antigravity CLI 패키지의 Stop 훅(`session_checkpoint.py --host antigravity`)도 에이전트가 완전히 멈췄을 때(`fullyIdle`)
+같은 기록을 사건 이름 `Stop`으로 남긴다. 대화 ID는 해시로만 남고, 훅 입력의 사용자 글·대화 기록 경로는 기록하지 않는다([Antigravity CLI 안내](antigravity.md#훅-동작)).
 hot/tasks/handoff를 자동 작성하거나 완료로 바꾸지 않는다. runtime은 Git ignore 및 일반 노트 inventory에서 제외한다.
 내부 runtime 쓰기는 inventory exclude의 예외이며 deny 정책은 계속 적용한다.
 compact SessionStart는 고정 제약 발췌/현재 source 해시를 먼저 유지한다. 제약 블록 전체가 예산에 맞지 않으면 내용 없이 진단한다.
@@ -1055,10 +1057,10 @@ staged(pre-commit) 모드는 이 검사를 하지 않는다. 새 키의 형식 �
 
 ### checkpoint 이후 바뀐 엔진 노트
 
-PreCompact·SessionEnd 훅은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`에 `hot_note`·`handoff_note`·`log_note`·`tasks_note`의
+PreCompact·SessionEnd 훅(Antigravity CLI 패키지에서는 Stop 훅)은 `00-meta/.agentic-vault/runtime/checkpoint-*.json`에 `hot_note`·`handoff_note`·`log_note`·`tasks_note`의
 경로와 SHA-256을 남긴다(위 [부분 편집과 checkpoint](#부분-편집과-checkpoint)). `checkpoint_drift_check`를 켜면 healthcheck가 가장 최근
 checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`state: changed`)와 없어진 노트(`state: missing`)를 `checkpoint-drift` 경고로 보고한다.
-`details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
+`details`에는 checkpoint 파일 이름, 마지막 사건(`PreCompact`/`SessionEnd`/`Stop`)과 그 시각, 기록 해시와 현재 해시가 들어간다.
 콘솔 요약 끝에는 `⚠️checkpoint 이후 바뀐 엔진 노트 N건(§15)`가 붙는다. `hooks/hooks.json`의 SessionStart(startup·clear·resume)가 실행하는
 비동기 healthcheck도 이 비교를 한다. 그 결과는 health-report §15와 그 비동기 훅이 출력하는 한 줄 요약에 남는다. 이 요약 줄은 호스트가 대화
 컨텍스트에 덧붙일 수 있지만(README의 Claude Code 2.1.295 권장 안내 참조), `session_start.py`가 넣는 handoff·hot 본문에는 들어가지 않는다. 직전 checkpoint 이후 세션 밖에서 생긴 변경(외부 편집기, 동기화 클라이언트,
@@ -1073,7 +1075,8 @@ checkpoint의 해시를 지금 파일 바이트와 비교해, 달라진 노트(`
 
 - 탐지만 한다. 외부 편집기·동기화 클라이언트의 쓰기를 막거나 순서를 정하지 못하며 다중 파일 트랜잭션도 아니다.
 - 누가 바꿨는지 모른다. checkpoint 뒤 같은 세션이 직접 고친 노트(예: PreCompact 이후 편집)도 경고에 나온다. 세션 안의 엔진 쓰기는 따로 기록하지 않는다.
-- checkpoint는 PreCompact·SessionEnd 훅이 실행될 때만 생긴다. 훅이 돌지 않은 세션이나 강제 종료 뒤에는 더 오래된 checkpoint와 비교한다.
+- checkpoint는 PreCompact·SessionEnd 훅(Antigravity CLI에서는 Stop 훅)이 실행될 때만 생긴다. 훅이 돌지 않은 세션이나 강제 종료 뒤에는 더 오래된 checkpoint와 비교한다.
+- Antigravity CLI의 Stop은 실행 루프가 끝날 때마다 오고 훅은 `fullyIdle`일 때만 기록하므로, 그 볼트의 가장 최근 checkpoint는 에이전트가 마지막으로 완전히 멈춘 시점이다. v0.47.0 이하의 healthcheck는 `Stop` 사건이 든 checkpoint를 형식이 맞지 않는 기록으로 보고 건너뛴다.
 - 이름 규칙은 문서에 적힌 형태만 본다. 클라이언트 버전·설정에 따른 다른 이름은 놓치고, 같은 모양의 이름을 일부러 쓴 파일은 오탐이 된다.
 - 실제 볼트에서의 오탐률·놓침률은 측정하지 않았다(2026-10-19 기준). 근거는 단위 테스트가 만든 임시 볼트의 합성 자료뿐이다.
 
