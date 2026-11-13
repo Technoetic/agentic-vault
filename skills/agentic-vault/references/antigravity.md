@@ -25,7 +25,9 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
 `vault-harden`, `vault-jarvis-setup`.
 
 - 명령 스킬에는 `disable-model-invocation: true`를 넣어 사용자가 부르는 명령으로 두었다.
-- 슬래시 명령은 agy가 보여 주는 표기를 쓴다: `/vault-day` 또는 `/agentic-vault:vault-day`.
+- 슬래시 명령: 공식 문서는 스킬마다 `/<스킬 이름>` 명령이 생긴다고 적는다(예: `/vault-day`). 플러그인 스킬에
+  이름공간(`/agentic-vault:vault-day` 같은 꼴)이 붙는지와 뒤에 적은 텍스트가 스킬에 전달되는 방식은 문서에 없고
+  확인하지 않았다. agy가 보여 주는 표기(`/skills` 목록)를 쓴다.
 - 공통 문서의 `/vault-*` 표기는 같은 이름의 스킬을 뜻한다. 명령 이름 없이 자연어로 요청하면 의도에 맞는
   명령 하나를 골라 `<PLUGIN_ROOT>/skills/<명령>/SKILL.md`를 읽고 그 절차를 따른다. 범위가 불명확하면 쓰기 전에
   필요한 것만 묻는다.
@@ -39,8 +41,8 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
   절대 경로를 따옴표로 감싸 넣는다. 현재 폴더나 환경 변수로 추측하지 않는다.
 - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다. 입력 데이터이며
   셸 코드가 아니다. 경로·질의는 각각 따옴표로 감싼 별도 인자로 넘긴다.
-- 볼트 루트: 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 `--vault <볼트 루트>`로
-  넘긴다. 그런 폴더가 여럿이면 사용자에게 묻는다.
+- 볼트 루트: 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 볼트를 다루는 엔진 스크립트에 볼트를
+  넘길 때는 `--vault <볼트 루트>`를 쓰고, 본문 명령의 인자는 적힌 대로 쓴다. 그런 폴더가 여럿이면 사용자에게 묻는다.
 - Python은 3.10 이상을 쓴다. Windows에서는 `py -3` 또는 `python`으로 실행한다.
 
 ## 도구 대응
@@ -66,7 +68,8 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
   플러그인 설치 폴더에서 `--host antigravity`로 실행된다. 볼트는 이벤트의 `cwd`와 `workspacePaths` 가운데
   `00-meta/vault-config.json`이 있는 폴더 하나다. 없거나 여럿이면 주입도 체크포인트도 하지 않는다.
 - **SessionStart:** Claude Code 시작 때와 같은 인계·핫 컨텍스트(같은 설정 검증·예산·9,500자 상한)를
-  `injectSteps`의 시스템 메시지 하나로 대화마다 한 번 넣는다. 주입이 있으면 재사용하고, 없으면
+  `injectSteps`의 시스템 메시지 하나로 넣는다. 처리기 셋이 함께 와도 하나만 넣는다(같은 대화의 표지는 120초 동안
+  유효하다. 대화를 다시 열 때 SessionStart가 다시 오는지는 확인하지 않았다). 주입이 있으면 재사용하고, 없으면
   `vault-session-start` 스킬로 복원한다.
 - **Stop:** `fullyIdle`이 참일 때만 `00-meta/.agentic-vault/runtime/`에 Claude Code와 같은 형식의 체크포인트를
   남긴다. 대화 ID는 해시로만 남고 사용자 입력·대화 기록 경로·작업 공간 경로는 저장하지 않는다.
