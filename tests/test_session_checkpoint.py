@@ -141,6 +141,30 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(result.stderr, 'agentic-vault: invalid checkpoint event\n')
         self.assertEqual(self.records(), [])
 
+    def test_default_mode_rejects_a_stop_named_on_stdin_without_the_event_flag(self):
+        # v0.47.0 took only PreCompact and SessionEnd from stdin. Stop joined
+        # vault_state.EVENTS in v0.48.0, but a Claude-shaped Stop without
+        # --event is still refused as v0.47.0 refused it: the same stderr line
+        # and no record. Only --event Stop (or --host antigravity) records Stop.
+        for arguments in ((), ('--host', 'claude')):
+            with self.subTest(arguments=arguments):
+                result = self.run_hook({'hook_event_name': 'Stop', 'session_id': 's2'}, arguments=arguments)
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, '', 'agentic-vault: invalid checkpoint event\n'))
+        self.assertEqual(self.records(), [])
+        spec = importlib.util.spec_from_file_location('checkpoint_stdin_stop_test', HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        import vault_state as state
+        with self.assertRaisesRegex(state.StateError, 'invalid_checkpoint_event'):
+            hook.read_hook_event(io.StringIO('{"hook_event_name":"Stop"}'))
+        named = hook.read_hook_event(io.StringIO('{"hook_event_name":"Stop"}'), expected_event='Stop')
+        self.assertEqual(named['event'], 'Stop')
+        for event in ('PreCompact', 'SessionEnd'):
+            with self.subTest(event=event):
+                self.assertEqual(hook.read_hook_event(io.StringIO(json.dumps({'hook_event_name': event})))['event'],
+                                 event)
+
     def test_denied_configured_source_does_not_leave_partial_checkpoint(self):
         self.write('00-meta/vault-config.json', b'{"deny_zones":["private"],"hot_note":"private/no.md"}')
         self.write('private/no.md', b'PRIVATE-NOTE')
