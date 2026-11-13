@@ -7,15 +7,15 @@ disable-model-invocation: true
 > **Antigravity CLI용 생성 문서.** 원본은 저장소의 `commands/vault-lint.md`이고 `scripts/build_antigravity_package.py`가 만든다. 이 파일을 직접 고치지 않는다.
 > - `<PLUGIN_ROOT>`: 이 플러그인 설치 폴더의 절대 경로다. 이 SKILL.md가 있는 폴더의 두 단계 위 폴더다(보통 `~/.gemini/config/plugins/agentic-vault`). 셸 명령에는 펼친 절대 경로를 따옴표로 감싸 넣는다.
 > - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다.
-> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 `--vault <볼트 루트>`로 넘긴다.
-> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계(설정 파일 `.claude/…`, PreToolUse 훅)는 Antigravity 세션에서 실행하지 않는다.
+> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 볼트를 다루는 엔진 스크립트에 볼트를 넘길 때는 `--vault <볼트 루트>`를 쓴다. 본문 명령의 인자는 적힌 대로 쓴다.
+> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계(`.claude/settings.json`·`.claude/settings.local.json` 병합, PreToolUse 훅 설치)는 Antigravity 세션에서 실행하지 않는다. `.claude/rules/`와 AGENTS.md는 본문대로 만든다.
 
 볼트 자가 치유 파이프라인을 수행하라.
 
 ## 0. 전제
 
 - 이 명령은 루트에 `00-meta/vault-config.json`이 있는 볼트에서만 동작한다.
-- `--vault` 없이 실행한 검증 엔진이 "볼트 아님"을 출력하면(exit 0), 여기가 볼트가 아니라는 사실을 한 줄로 정중히 안내하고 즉시 종료하라. 다른 작업을 하지 마라.
+- 검증 엔진이 "볼트 아님"을 출력하면(exit 0), 여기가 볼트가 아니라는 사실을 한 줄로 정중히 안내하고 즉시 종료하라. 다른 작업을 하지 마라.
 - **절대 금지: 사용자 확인 없는 노트 삭제.** 치유는 보완·교정·이동(아카이브)까지만이며, 이동조차 관리성 이슈에서는 사용자 승인이 선행돼야 한다.
 
 ## 1. 검증 엔진 실행

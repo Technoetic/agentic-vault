@@ -1,6 +1,6 @@
-# vault-upgrade: 보강 helper bundle과 선택 이행
+# vault-upgrade: 보강 helper bundle과 선택 이행, 0.9.0 안내 목록
 
-> 원본은 저장소 `commands/vault-upgrade.md`의 '보강 helper bundle과 선택 이행' 절이고, Antigravity 스킬 본문 한도 때문에 `scripts/build_antigravity_package.py`가 이 파일로 옮겼다. 이 파일을 직접 고치지 않는다. `<PLUGIN_ROOT>`는 이 플러그인 설치 폴더의 절대 경로로, 이 파일이 있는 폴더의 세 단계 위 폴더다.
+> 원본은 저장소 `commands/vault-upgrade.md` 2단계의 '보강 helper bundle과 선택 이행' 절과 그 뒤의 `0.9.0` 안내 목록이고(2단계의 검증 두 줄은 스킬 본문에 남겼다), Antigravity 스킬 본문 한도 때문에 `scripts/build_antigravity_package.py`가 이 파일로 옮겼다. 이 파일을 직접 고치지 않는다. `<PLUGIN_ROOT>`는 이 플러그인 설치 폴더의 절대 경로로, 이 파일이 있는 폴더의 세 단계 위 폴더다.
 
 ### 보강 helper bundle과 선택 이행
 
@@ -25,6 +25,3 @@ dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한�
 - `0.9.0`의 세션 주입은 예산을 실제 출력에 적용하며 0은 주입 비활성화다. 주입은 검사기 `validate_config` 전체를 통과해야 동작한다 — 어떤 키든 형식 오류(정수 키에 문자열·실수, `null`, `./` 접두·끝 슬래시 경로, 확장자가 `.md`가 아닌 `hot_note`·`handoff_note`, 빈 enum 등)면 handoff·hot이 둘 다 조용히 빠지고 stderr 한 줄만 남으니, 업그레이드 직후 healthcheck로 config 오류부터 확인하라. 구판 설정값은 유지하고 이 의미 변경을 안내하라. 절대경로·상위 경로·deny zone·심볼릭 링크/정션을 가리키는 상태 파일은 주입되지 않으므로, 설정 오류를 우회하지 말고 사용자에게 정상적인 볼트 내부 경로를 제시하라.
 - 새 `/vault-recall`은 플러그인 안의 `vault_recall.py`와 `vault_paths.py`, `vault_healthcheck.py`를 함께 사용한다. 스크립트 하나만 볼트에 복사하지 마라. 플러그인 갱신으로 세 파일을 같은 버전에서 로드한다. 기존 standalone healthcheck·git 훅 설치 절차는 유지한다.
 - 새 백업은 `backup_target/snapshots/`에 독립 사본을 추가한다. 기존 `mirror/`·`bundles/`를 삭제하거나 덮어쓰지 않는다. 새 스냅샷을 검증한 뒤 필요하면 새 디렉터리로 복구할 수 있음을 `docs/reliability.md`의 CLI로 안내하라.
-
-- 볼트가 git 저장소이고 훅을 설치했으면: 임시 검증 없이 다음 실제 커밋이 게이트를 통과하는지로 확인된다는 점을 안내하라.
-- `python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_healthcheck.py" --vault .`를 실행해 exit 0을 확인하라(치명 위반이 있으면 업그레이드가 아니라 기존 문제 — /vault-lint 안내).

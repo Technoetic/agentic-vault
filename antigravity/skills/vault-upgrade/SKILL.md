@@ -7,8 +7,8 @@ disable-model-invocation: true
 > **Antigravity CLI용 생성 문서.** 원본은 저장소의 `commands/vault-upgrade.md`이고 `scripts/build_antigravity_package.py`가 만든다. 이 파일을 직접 고치지 않는다.
 > - `<PLUGIN_ROOT>`: 이 플러그인 설치 폴더의 절대 경로다. 이 SKILL.md가 있는 폴더의 두 단계 위 폴더다(보통 `~/.gemini/config/plugins/agentic-vault`). 셸 명령에는 펼친 절대 경로를 따옴표로 감싸 넣는다.
 > - `<ARGUMENTS>`: 사용자가 슬래시 명령 뒤에 적은 텍스트다. 없으면 이번 요청에서 찾는다.
-> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 엔진 스크립트에는 `--vault <볼트 루트>`로 넘긴다.
-> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계(설정 파일 `.claude/…`, PreToolUse 훅)는 Antigravity 세션에서 실행하지 않는다.
+> - 볼트 루트는 작업 공간에서 `00-meta/vault-config.json`이 있는 폴더다. 볼트를 다루는 엔진 스크립트에 볼트를 넘길 때는 `--vault <볼트 루트>`를 쓴다. 본문 명령의 인자는 적힌 대로 쓴다.
+> - 본문의 `/vault-*` 표기는 이 플러그인의 같은 이름 스킬을 뜻한다. Claude Code 전용 단계(`.claude/settings.json`·`.claude/settings.local.json` 병합, PreToolUse 훅 설치)는 Antigravity 세션에서 실행하지 않는다. `.claude/rules/`와 AGENTS.md는 본문대로 만든다.
 
 # /vault-upgrade — 기존 볼트 업그레이드
 
@@ -72,7 +72,10 @@ disable-model-invocation: true
 
 ## 2. 검증
 
-> 보강 helper bundle과 선택 이행 절차는 [references/helper-bundle.md](references/helper-bundle.md)로 옮겼다(Antigravity 스킬 본문 한도). 해당 단계에서 그 파일을 읽는다.
+> 보강 helper bundle과 선택 이행 절차, 그리고 그 뒤에 이어지던 `0.9.0` 안내 목록 4개(Codex 진입점·세션 주입 예산·`/vault-recall` 파일 셋·백업 스냅샷)는 [references/helper-bundle.md](references/helper-bundle.md)로 옮겼다(Antigravity 스킬 본문 한도). 그 파일을 읽고 따른 뒤 아래 두 줄로 검증한다.
+
+- 볼트가 git 저장소이고 훅을 설치했으면: 임시 검증 없이 다음 실제 커밋이 게이트를 통과하는지로 확인된다는 점을 안내하라.
+- `python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_healthcheck.py" --vault .`를 실행해 exit 0을 확인하라(치명 위반이 있으면 업그레이드가 아니라 기존 문제 — /vault-lint 안내).
 
 ## 3. 보고
 

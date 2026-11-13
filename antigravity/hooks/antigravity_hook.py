@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import time
@@ -25,8 +26,16 @@ import unicodedata
 # hook event; past this bound the event is not used.
 MAX_EVENT_BYTES = 16 * 1024 * 1024
 CONFIG_REL = "00-meta/vault-config.json"
+# Claim markers live in this folder of the temporary folder. On POSIX, where
+# the temporary folder can be shared (/tmp), the name ends with "-<user id>".
 CLAIM_FOLDER = "agentic-vault-hook-claims"
 CLAIM_NAME_CHARS = 40
+# A marker holds its key this long: a second handler of the same event, or the
+# same key again, is not processed within it. An older marker is stale and the
+# next caller processes the key again, so a reopened conversation or an
+# executionNum that comes again is handled after two minutes.
+CLAIM_VALID_SECONDS = 120
+# The sweep removes marker files older than this.
 CLAIM_MAX_AGE_SECONDS = 2 * 24 * 60 * 60
 CLAIM_SWEEP_ENTRIES = 200
 _HEX = frozenset("0123456789abcdef")
@@ -133,7 +142,7 @@ def resolve_vault(explicit, event: object) -> tuple[Path | None, str]:
 
 
 def _sweep(folder: Path) -> None:
-    """Remove claim markers older than two days; best effort, bounded."""
+    """Remove marker and takeover files older than two days; best effort, bounded."""
     cutoff = time.time() - CLAIM_MAX_AGE_SECONDS
     try:
         with os.scandir(folder) as entries:
@@ -152,27 +161,42 @@ def _sweep(folder: Path) -> None:
         pass
 
 
-def claim_once(*parts: str) -> bool:
-    """Return True for the first caller with these parts and False after that.
+def _claim_folder() -> Path | None:
+    """Return the folder for claim markers, or None when it must not be used.
 
-    Antigravity CLI runs every handler registered for an event, and the
-    package registers several so that one of them finds a Python. The first
-    one to create the marker file acts. Any failure other than an existing
-    marker returns True: acting twice is better than losing the event.
+    The Windows temporary folder belongs to the user, so the folder there
+    keeps its plain name. A POSIX temporary folder such as /tmp can be
+    shared: the name ends with the user id, the folder is made with mode
+    0700, and it is used only when lstat shows a directory (a symbolic link
+    is not one) owned by this user. Otherwise no marker is made there and
+    nothing in it is swept; the caller acts (fail open).
     """
-    digest = hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()
-    try:
-        folder = Path(tempfile.gettempdir()) / CLAIM_FOLDER
+    base = Path(tempfile.gettempdir())
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        folder = base / CLAIM_FOLDER
         folder.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return True
-    _sweep(folder)
+        return folder
+    uid = getuid()
+    folder = base / f"{CLAIM_FOLDER}-{uid}"
     try:
-        descriptor = os.open(folder / digest[:CLAIM_NAME_CHARS], os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.mkdir(folder, 0o700)
+    except FileExistsError:
+        pass
+    info = os.lstat(folder)
+    if stat.S_ISDIR(info.st_mode) and info.st_uid == uid:
+        return folder
+    return None
+
+
+def _make_marker(path: Path) -> bool | None:
+    """Create path exclusively: True when made, False when it exists, None on any other failure."""
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
         return False
     except OSError:
-        return True
+        return None
     try:
         os.close(descriptor)
     except OSError:
@@ -180,20 +204,117 @@ def claim_once(*parts: str) -> bool:
     return True
 
 
+def _fresh(info: os.stat_result) -> bool:
+    """Whether a marker still holds its key: its time is within CLAIM_VALID_SECONDS of now.
+
+    A time further ahead of the clock (a clock set back) counts as stale too,
+    so no marker holds a key much longer than the validity.
+    """
+    return abs(time.time() - info.st_mtime) < CLAIM_VALID_SECONDS
+
+
+def _renew_stale(marker: Path) -> bool:
+    """For a marker that exists: False while it is fresh, True for the one caller that renews it.
+
+    Handlers of one event can find the same stale marker at once. Each tries
+    to create, exclusively, a takeover file named after the marker and its
+    modification time; the one that creates it sets the marker's time to now
+    and acts, and the others return False. A renewal never removes the
+    marker, so no caller finds its name free in between. The sweep removes
+    takeover files like markers, after two days.
+    """
+    try:
+        info = os.lstat(marker)
+    except FileNotFoundError:  # swept meanwhile: a new claim
+        return _make_marker(marker) is not False
+    except OSError:
+        return True
+    if not stat.S_ISREG(info.st_mode):
+        return True
+    if _fresh(info):
+        return False
+    takeover = hashlib.sha256(f"{marker.name}\0{info.st_mtime_ns}".encode("ascii")).hexdigest()
+    if _make_marker(marker.with_name(takeover[:CLAIM_NAME_CHARS])) is False:
+        return False
+    try:
+        os.utime(marker)
+    except FileNotFoundError:  # swept meanwhile: claim it anew
+        return _make_marker(marker) is not False
+    except OSError:
+        pass
+    return True
+
+
+def claim_once(*parts: str) -> bool:
+    """Return True when this caller is to act for the key these parts make, else False.
+
+    Antigravity CLI runs every handler registered for an event, and the
+    package registers several so that one of them finds a Python. The first
+    one to create the marker file acts; the others find the marker fresh. A
+    marker holds its key for CLAIM_VALID_SECONDS; after that one caller
+    renews it and acts again. Any failure other than a fresh or a lost claim
+    returns True: acting twice is better than losing the event.
+    """
+    digest = hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()
+    try:
+        folder = _claim_folder()
+    except (OSError, ValueError):
+        return True
+    if folder is None:
+        return True
+    _sweep(folder)
+    marker = folder / digest[:CLAIM_NAME_CHARS]
+    made = _make_marker(marker)
+    if made is not False:  # made it, or could not make it: act
+        return True
+    return _renew_stale(marker)
+
+
+def _discard_output(stream) -> None:
+    """Point the file descriptor behind stream at the null device; best effort."""
+    try:
+        descriptor = stream.fileno()
+        null = os.open(os.devnull, os.O_WRONLY)
+    except (AttributeError, OSError, ValueError):
+        return
+    if null == descriptor:  # the descriptor had been closed and now names the null device
+        return
+    try:
+        os.dup2(null, descriptor)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(null)
+        except OSError:
+            pass
+
+
 def emit(obj: object) -> None:
-    """Write obj as one line of compact JSON: UTF-8 bytes and an LF, flushed."""
+    """Write obj as one line of compact JSON: UTF-8 bytes and an LF, flushed.
+
+    A host that has stopped reading (a closed pipe) makes the write fail. The
+    hook must still exit 0 without a traceback, which would name the plugin
+    path, so the failure is dropped. The bytes that did not go out stay in
+    the stream's buffer and the interpreter flushes them again at exit; the
+    descriptor behind the stream is pointed at the null device first, so that
+    flush cannot fail again.
+    """
     data = (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8", "replace")
     stream = sys.stdout
     if stream is None:
         return
-    buffer = getattr(stream, "buffer", None)
-    if buffer is None:
-        stream.write(data.decode("utf-8"))
+    try:
+        buffer = getattr(stream, "buffer", None)
+        if buffer is None:
+            stream.write(data.decode("utf-8"))
+            stream.flush()
+            return
         stream.flush()
-        return
-    stream.flush()
-    buffer.write(data)
-    buffer.flush()
+        buffer.write(data)
+        buffer.flush()
+    except (OSError, ValueError):
+        _discard_output(stream)
 
 
 def valid_id(value: object, limit: int) -> str | None:

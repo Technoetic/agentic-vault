@@ -22,10 +22,17 @@ FAILURE_CODE_RE = re.compile(r'[a-z][a-z0-9_]{0,63}')
 # is write_checkpoint's session id bound.
 STOP_EVENT = 'Stop'
 MAX_CONVERSATION_ID_CHARS = 128
+# Without --event the event name comes from stdin, and only the events v0.47.0
+# took are accepted: a Stop needs --event Stop or --host antigravity.
+STDIN_EVENTS = EVENTS - {STOP_EVENT}
 
 
 def read_hook_event(stream=None, *, expected_event=None):
-    """Read bounded host JSON, ignore transcripts and all unrelated fields."""
+    """Read bounded host JSON, ignore transcripts and all unrelated fields.
+
+    Without expected_event the input must name PreCompact or SessionEnd
+    (STDIN_EVENTS); Stop is accepted only as the expected event.
+    """
     stream = sys.stdin if stream is None else stream
     if stream is None or stream.isatty():
         raise StateError('invalid_checkpoint_event')
@@ -42,7 +49,8 @@ def read_hook_event(stream=None, *, expected_event=None):
     if not isinstance(data, dict):
         raise StateError('invalid_checkpoint_event')
     event = data.get('hook_event_name', expected_event)
-    if (not isinstance(event, str) or event not in EVENTS
+    allowed = STDIN_EVENTS if expected_event is None else EVENTS
+    if (not isinstance(event, str) or event not in allowed
             or (expected_event is not None and event != expected_event)):
         raise StateError('invalid_checkpoint_event')
     session_id = data.get('session_id')
@@ -96,7 +104,8 @@ def record_antigravity_stop(helpers, explicit_vault=None):
     vault resolved as for SessionStart. The record keeps the SHA-256 of the
     conversation id, never the user input, the transcript or any path. The
     package runs several handlers per event; with an integer executionNum the
-    claim lets one of them write.
+    claim lets one of them write, and the same conversation and executionNum
+    again within 120 seconds writes nothing.
     """
     event = helpers.read_event()
     if (not isinstance(event, dict) or event.get('hookEventName', STOP_EVENT) != STOP_EVENT
