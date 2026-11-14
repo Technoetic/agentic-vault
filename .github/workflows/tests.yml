@@ -55,6 +55,8 @@ jobs:
         run: python scripts/evaluate_improvement_experiments.py
       - name: Evaluator and improvement-cost evidence (no model calls)
         run: python scripts/evaluate_improvement_accounting.py
+      - name: Source-aware task and staged cycle controls (no model calls)
+        run: python scripts/evaluate_task_workflows.py
       - name: Paired memory formation controls (no model calls)
         run: python scripts/evaluate_memory_formation.py
       - name: Cross-process selective memory repair controls (no model calls)

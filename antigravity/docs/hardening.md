@@ -19,8 +19,8 @@ align every engine copy that checks the vault (Claude Code, Codex, and the git v
 `00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
 that installation (including its harmless replay), then promote again.
 Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination.
-See the [release note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.46.0.md#하위호환업그레이드) and the
-[verification contract](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.46.0.md). No installed plugin or vault
+See the [release note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.46.0.md#하위호환업그레이드) and the
+[verification contract](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.46.0.md). No installed plugin or vault
 engine copy is updated by release preparation.
 
 ## v0.35.1 source and certificate migration
@@ -39,8 +39,8 @@ coordination documented in the historical sections below. The v0.34.0 features a
 its original migration record remain available; their dated observations are not
 new v0.35.1 release measurements. Final source, CI, ZIP, draft and publication gates
 are recorded separately in `verification.json` and `post-publication.json`;
-version preparation does not certify them. See the [v0.35.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.1.md).
-This patch supersedes the [unpublished v0.35.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.0.md);
+version preparation does not certify them. See the [v0.35.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.35.1.md).
+This patch supersedes the [unpublished v0.35.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.35.0.md);
 its failed/canceled CI is retained as history, and the fixture-only repair requires fresh CI.
 Plugin installation, vault upgrade and application deployment remain separate operations.
 
@@ -60,7 +60,7 @@ kept as published with v0.33.1, and the v0.33.1 release/verification records ret
 fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [v0.34.0 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.34.0.md) and [subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/subject-boundary-20261030.md).
+See the [v0.34.0 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.34.0.md) and [subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/subject-boundary-20261030.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -69,7 +69,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
+v0.34.0은 선택형 `--bind-subject`의 주어에 [왼쪽 경계](support-row-diagnostics.md#subject-left-edge)를 더하고, 비슷한 이름이 다른 법인이라는 기록을 `different_from` 행으로 적는 [형식 안내](support-row-diagnostics.md#recording-confusable-names-format-guidance)를 둔다. 값 비교와 기본 `check-support`의 출력·판정은 그대로이며, 인증서는 [v0.34.0 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.34.0.md#하위호환업그레이드)를 따른다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 변경 이력이고, 그 뒤 helper 안내·표는 v0.34.0 기능을 유지하며, v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않아 v0.46.0과 같은 인증서를 쓰며, 인증서 전환은 맨 위 v0.46.0 절을 따른다.
 
 ## v0.33.1 source and certificate migration
 
@@ -81,7 +81,7 @@ Positive test fixtures canonicalize temporary roots; strict runtime guards stay 
 The published baseline remains v0.32.0. Its release/verification records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [v0.33.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.33.1.md) and [source fingerprint and verification note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/memory-boundaries-20261028.md).
+See the [v0.33.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.33.1.md) and [source fingerprint and verification note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/memory-boundaries-20261028.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -90,7 +90,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.32.0. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.33.1은 선택형 [행 참조와 물리 줄 주어 진단](support-row-diagnostics.md)을 포함한다. 기존 `check-support` 출력·판정은 새 옵션을 끄면 유지하며, 인증서는 [v0.33.1 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.33.1.md#하위호환업그레이드)를 따른다. 아래는 이전 버전의 변경 이력이다.
+v0.33.1은 선택형 [행 참조와 물리 줄 주어 진단](support-row-diagnostics.md)을 포함한다. 기존 `check-support` 출력·판정은 새 옵션을 끄면 유지하며, 인증서는 [v0.33.1 전환 절차](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.33.1.md#하위호환업그레이드)를 따른다. 아래는 이전 버전의 변경 이력이다.
 
 v0.32.0은 기본 lint·`check-support`·healthcheck·recall이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·위키링크·
 Markdown 링크, frontmatter 블록)을 시험한 입력에서 같은 결과를 내는 [선형 처리](#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로
@@ -121,10 +121,10 @@ v0.31.0은 `d8f9559a…`, v0.32.0은 `9bca12a79bfa87ff2bf44afecb2e5527e19c199b95
 `promotion certificate checker_sha256 differs from current harmless replay`와 함께 설정 오류(종료 코드 1)로 멈추고,
 SessionStart 훅이 주입하지 않으며, staged 검사(`--staged`)가 커밋을 막고, `vault_doctor.py`가 `invalid_config`(종료 코드 2)를
 보고한다. 볼트 설정 전체를 검증하는 다른 도구도 멈춘다(예: `/vault-recall`은 `invalid_config`, 아래 `vault_ssot.py`는
-`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.32.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.32.0.md#하위호환업그레이드)·
-[v0.31.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.31.0.md#하위호환업그레이드)와
-[v0.26.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
-[v0.25.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.25.0.md#하위호환업그레이드)에 있다.
+`check-support`를 포함해 `ssot_operation_unavailable`). 측정과 순서는 [v0.32.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.32.0.md#하위호환업그레이드)·
+[v0.31.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.31.0.md#하위호환업그레이드)와
+[v0.26.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.26.0.md#하위호환업그레이드)에, 이전 버전 사이의 조건은
+[v0.25.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.25.0.md#하위호환업그레이드)에 있다.
 
 기존 Markdown/Git 노트를 유지하면서 필요한 helper를 명시적으로 선택한다.
 모든 결과는 자료이며 실행 권한·사실 확정·검증자 신원을 자동으로 만들지 않는다.

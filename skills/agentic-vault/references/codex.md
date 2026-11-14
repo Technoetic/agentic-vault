@@ -61,6 +61,9 @@ v0.35.1부터 전체 플러그인에는
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |
 | `runs <하위 명령과 인자>` | [교훈 검증·복구](../../../docs/tower-reliability.md), `scripts/vault_runs.py`; 명시한 실행 조건과 관찰 결과의 준비·기록·조회·비교, 영수증 없는 사례별 뒤집힘 표(`flips`) |
+| `task-contracts capture / inspect / revise` | [작업 명세](../../../docs/task-contracts.md), `scripts/vault_task_contracts.py`; 출처별 요구·가정·질문·개정, 실행 승인 없음 |
+| `staged-evaluation evaluate` | [단계별 검증](../../../docs/staged-evaluation.md), `scripts/vault_staged_evaluation.py`; 기존 evidence/coverage의 읽기 전용 단계 검토 |
+| `improvement-cycles audit` | [반복 관찰](../../../docs/improvement-cycles.md), `scripts/vault_improvement_cycles.py`; 고정 명세의 성공·정체·회귀·소진 관찰, 자동 실행 없음 |
 | `run-costs <하위 명령과 인자>` | [평가기·비용 근거](../../../docs/improvement-accounting.md), `scripts/vault_run_costs.py`; 명시한 실행의 호스트 사용량 기록·조회·합산·비교. 계측·효율·적용 인증 없음 |
 | `improvements <하위 명령과 인자>` | [개선 실험](../../../docs/improvement-experiments.md), `scripts/vault_improvements.py --vault PATH`; 네 조건 후보 계보·비교·수정별 관찰과 교훈 후보 기록. 모델 실행·자동 적용 없음 |
 | `assembly <하위 명령과 인자>` | [현재 값 근거 조립](../../../docs/memory-assembly.md), `scripts/vault_assembly.py`; 현재 대장의 후보 추출과 명시적 권한·범위·유효기간에 따른 선택을 분리하는 읽기 전용 도구 |

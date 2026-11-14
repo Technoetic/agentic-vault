@@ -367,7 +367,7 @@ what its runs did. That record is what `--session-evidence` reads.
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 
 > 이 절차는 작성만 했고 아직 실행하지 않았다. 이 절차의 측정값(훅 소요 시간·resume 재주입)은 아직 없다.
-> 실행하면 결과를 날짜·버전과 함께 [검증 기록](https://github.com/Technoetic/agentic-vault/tree/v0.48.0/docs/verification)에 따로 남긴다.
+> 실행하면 결과를 날짜·버전과 함께 [검증 기록](https://github.com/Technoetic/agentic-vault/tree/v0.49.0/docs/verification)에 따로 남긴다.
 
 훅별 소요 시간은 Claude Code 2.1.296 이상의 디버그 로그에 남는다. 같은 변경 기록의 2.1.296 항목:
 "Improved `--debug` output for hooks: command hooks on tool calls, prompts, SessionStart and

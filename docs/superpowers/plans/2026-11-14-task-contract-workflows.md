@@ -26,10 +26,10 @@
 - Do not hand-edit antigravity generated copies. Root rebuilds them and updates package routing/version.
 
 ## Tasks
-- [ ] 1. Write failing tests, implement task contract capture/inspect/revise and immutable source binding. Test blocking questions, provenance, revision parentage/staleness, forged IDs, unsafe/changed sources, CLI. Owner task_contracts.
-- [ ] 2. Write failing tests, implement staged review over native evidence+coverage with command/skip/review distinctions and CLI. Test hard-fail veto, no-evidence, per-AC completeness, model-only support, stale contracts/reports, unknown IDs. Owner staged_evaluation.
-- [ ] 3. Write failing tests, implement read-only cycles audit over recomputed staged reports with fixed criteria/limits and CLI. Test first-success, no-progress, oscillation/regression, budget/unknown cost, final-generation success, stale inputs and false completion. Owner improvement_cycles.
-- [ ] 4. Root integrates examples/documentation, skill/Codex routes, package copy lists, bilingual README and release version0.49.0 surfaces.
+- [x] 1. Write failing tests, implement task contract capture/inspect/revise and immutable source binding. Test blocking questions, provenance, revision parentage/staleness, forged IDs, unsafe/changed sources, CLI. Owner task_contracts.
+- [x] 2. Write failing tests, implement staged review over native evidence+coverage with command/skip/review distinctions and CLI. Test hard-fail veto, no-evidence, per-AC completeness, model-only support, stale contracts/reports, unknown IDs. Owner staged_evaluation.
+- [x] 3. Write failing tests, implement read-only cycles audit over recomputed staged reports with fixed criteria/limits and CLI. Test first-success, no-progress, oscillation/regression, budget/unknown cost, final-generation success, stale inputs and false completion. Owner improvement_cycles.
+- [x] 4. Root integrates examples/documentation, skill/Codex routes, package copy lists, bilingual README and release version0.49.0 surfaces.
 - [ ] 5. Independent cross-feature security/behavior review, resolve findings with regression tests; execute targeted checks, full suite and required offline regressions. Rebuild generated Antigravity package.
 - [ ] 6. Create candidate PR and wait for required CI. Build/verify release assets, public reference citations and registry entry. Follow release-integrity procedure, publish v0.49.0 and independently verify exact public assets/commit/Pages. Record vault note/log/partial handoff/local commit.
 
@@ -45,3 +45,5 @@
 - Ruling: ship original stdlib opt-in helpers, no Ouroboros runtime dependency or autonomous executing controller.
 - Ruling: publication instruction authorizes plugin release and its public reference catalog update; does not authorize installing into active company vault.
 
+
+- Review: IR-001 credential-path reader gap reproduced and fixed through existing coverage path policy; independent12pre-read probes pass and66featuretests pass. Seven certificate-bound files unchanged.

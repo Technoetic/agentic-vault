@@ -105,6 +105,15 @@ runtime은 일반 지식 inventory에서 제외한다. 옵션 tokenizer/provider
 - **교훈 수정안:** 기존 사용자 소유 Markdown 한 파일의 승격은 [교훈 제안 절차](../../docs/lesson-proposals.md)를 따라 원문·대상 해시·결정·적용 기록을 보존한다. 적용 직전 해시가 달라지면 옛 제안을 적용하지 않는다. `--approve`는 이미 받은 사용자 승인을 기록하며 승인 자체를 만들어 내지 않는다.
 - hot·handoff는 **point-in-time 스냅숏**이다 — 볼트 원본과 모순되면 볼트를 우선하고, 스냅숏만 믿고 단정하지 마라. 노화 방지 원칙: [references/memory-tiers.md](references/memory-tiers.md)
 
+## 선택형 작업 명세와 검토
+
+복잡한 작업의 명세를 명시적으로 기록할 때 [작업 명세](../../docs/task-contracts.md)의
+`scripts/vault_task_contracts.py` capture / inspect / revise를 쓴다. 확인된 사용자 요청과
+호스트 가정을 구분하며, 준비 상태는 실행 승인이 아니다. 기존 근거의 단계별 점검은
+[단계별 검증](../../docs/staged-evaluation.md)의 `scripts/vault_staged_evaluation.py` evaluate,
+반복 기록 관찰은 [개선 반복](../../docs/improvement-cycles.md)의 `scripts/vault_improvement_cycles.py` audit다.
+세 도구는 자동 실행·모델 호출·게시·권한 부여를 하지 않는다. 이미 확정된 단순 작업에 새 인터뷰를 강제하지 않는다.
+
 ## 7. 참조 문서
 
 - [references/codex.md](references/codex.md) — Codex 진입점·설치 경로 해석·공통 명령 연결·백업 CLI

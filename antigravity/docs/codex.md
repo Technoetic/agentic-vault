@@ -1,5 +1,12 @@
 # Claude Code · Codex 겸용 사용
 
+## v0.49.0 — source-aware task workflows
+
+Opt-in helpers add source-aware task contracts, staged evaluation over existing evidence, and bounded cycle observation.
+They run no commands or models and grant no authority. See [task contracts](task-contracts.md),
+[staged evaluation](staged-evaluation.md), [cycle observation](improvement-cycles.md),
+[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.49.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.49.0.md).
+
 ## v0.48.0 — Antigravity CLI package
 
 v0.48.0 adds a generated package for Antigravity CLI in `antigravity/` ([guide](antigravity.md)). The
@@ -8,7 +15,7 @@ the Codex hook definitions are unchanged. On the Codex side the shared skill and
 stub also name Antigravity CLI, `upgrade` writes the new lines when it regenerates a generated
 `AGENTS.md`, and `lint` passes the vault root with `--vault`. The seven certificate-bound checker files
 are unchanged from v0.46.0 and v0.47.0. No Codex session and no agy conversation was run for this
-release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.48.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.48.0.md).
+release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.48.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.48.0.md).
 
 ## v0.47.0 — guide-comparison fixes and the aside-repl procedure command
 
@@ -18,8 +25,8 @@ over from the v0.46.0 release. On the Codex side, `init` and `upgrade` offer the
 the Aside clause is present, and Codex reads that file when the clause points to it; the shared
 session-end, process-inbox and lesson-delta changes apply as in Claude Code. The seven certificate-bound
 checker files are unchanged from v0.46.0, and the native Codex check byte-compares 130 installed
-resources. No Codex session ran the procedure for this release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.47.0.md) and
-[verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.47.0.md).
+resources. No Codex session ran the procedure for this release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.47.0.md) and
+[verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.47.0.md).
 
 ## v0.46.0 — deny-zone normalization and check gap fixes
 
@@ -29,8 +36,8 @@ the front-matter check finds unquoted wiki links that YAML reads as nested lists
 configuration keys, non-`.md` `hot_note`/`handoff_note` values and a `--vault` that is not a
 folder are reported; the template anchor is no longer a contract violation; and the butler
 shows its check mark only for a complete clean check. Some default results change, and vault
-copies keep the old behaviour until `upgrade`. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.46.0.md) and
-[verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.46.0.md).
+copies keep the old behaviour until `upgrade`. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.46.0.md) and
+[verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.46.0.md).
 
 ## v0.46.0 source and certificate migration
 
@@ -51,8 +58,8 @@ align every engine copy that checks the vault (Claude Code, Codex, and the git v
 `00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
 that installation (including its harmless replay), then promote again.
 Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination.
-See the [release note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.46.0.md#하위호환업그레이드) and the
-[verification contract](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.46.0.md). No installed plugin or vault
+See the [release note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.46.0.md#하위호환업그레이드) and the
+[verification contract](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.46.0.md). No installed plugin or vault
 engine copy is updated by release preparation.
 
 ## v0.45.1 — canonical owned test roots
@@ -60,7 +67,7 @@ engine copy is updated by release preparation.
 v0.45.1 supersedes the unpublished v0.45.0 macOS CI candidate. Only test-owned
 temporary roots are canonicalized; runtime linked-parent rejection is retained.
 The authored evidence and lesson tools below are unchanged. See
-[scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.45.1.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.45.1.md).
+[scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.45.1.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.45.1.md).
 
 ## v0.45.0 — authored recall evidence and lesson observations
 
@@ -72,7 +79,7 @@ explicit paired trial records without executing a host or model. Scripted demos,
 caller-reported actual-host observations, missing measurements and confounds remain
 separate. These are scoped observations, not semantic truth, authentic execution,
 causal efficacy or permission. Default recall, hooks and configuration stay unchanged.
-See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.45.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.45.0.md).
+See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.45.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.45.0.md).
 
 ## v0.44.0 - authored record probes and configured revocation at egress
 
@@ -89,7 +96,7 @@ Generated tests extend the existing development-only Hypothesis dependency. Thei
 is simulated and their inputs are synthetic; no persistent outbox or actual-model
 defense result is claimed. Conversation-budget research remains exploratory. Current
 install refs target v0.48.0; publication does not update active installations or company
-vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.44.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.44.0.md).
+vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.44.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.44.0.md).
 
 Earlier version sections below are historical; use the current installation commands.
 
@@ -107,7 +114,7 @@ called. [Lesson recurrence](lesson-recurrence.md) is read-only, and the
 to walks in both hosts; its deny guard part is Claude Code only. Synthetic numbers in
 [verifier fidelity](verifier-fidelity.md) are not evidence of real-world safety. Current
 install refs target v0.43.0; publication does not update live installations or company
-vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.43.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.43.0.md).
+vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.43.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.43.0.md).
 
 ## v0.42.0 - optional recovery, review planning and generated-memory experiments
 
@@ -120,8 +127,8 @@ persists authored checksum memories and reopens them in fresh workers. Scripted
 and mock-HTTP controls do not measure actual-model performance. Defaults remain
 offline; real local inference requires an explicit model, loopback endpoint and
 network opt-in. Current install refs target v0.42.0; publication does not update
-live installations or company vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.42.0.md) and
-[verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.42.0.md). Earlier sections retain their history.
+live installations or company vaults. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.42.0.md) and
+[verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.42.0.md). Earlier sections retain their history.
 
 ## v0.41.0 - optional source-bound ontology contracts
 
@@ -135,8 +142,8 @@ missing slots and stale or blocked sources withhold usable context.
 permission to execute a query. No NLP extraction, model/network/database call,
 MCP server, default hook/config change, active-installation update or company-vault
 conversion is added. No new model-performance observation is claimed. Current
-install refs target v0.41.0. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.41.0.md) and
-[pending final gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.41.0.md). Earlier sections retain their history.
+install refs target v0.41.0. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.41.0.md) and
+[pending final gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.41.0.md). Earlier sections retain their history.
 
 ## v0.40.1 - canonical temporary test setup
 
@@ -146,7 +153,7 @@ test paths preserves production evaluator behavior and strict symlink rejection.
 The v0.40.0 tag and failed CI remain history. Routing controls still measure the
 grader, not actual host/model routing; there is no live Codex adapter or automatic
 installation update. Its preparation install refs targeted v0.40.1. See
-[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.40.1.md) and [pending gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.40.1.md).
+[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.40.1.md) and [pending gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.40.1.md).
 
 ## v0.40.0 - optional routing evaluation
 
@@ -158,7 +165,7 @@ synthetic cases are grader controls, not actual-model routing measurements. Ther
 is no live Codex observation adapter, installation update or default hook/config
 change. Explicit owned-root catalog collection uses a strict frontmatter subset;
 overlap analysis is advisory. Its unpublished candidate refs targeted v0.40.0. See
-[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.40.0.md) and [pending gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.40.0.md).
+[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.40.0.md) and [pending gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.40.0.md).
 Earlier version sections retain their historical scope.
 
 ## v0.39.3 - align the existing CI policy expectation
@@ -172,7 +179,7 @@ requirements remain unchanged from v0.39.2. No model-performance result is added
 
 All three candidate tags and failed CI records are preserved; the last published
 release remains v0.38.1 until new publication. Its preparation install refs targeted v0.39.3.
-See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.39.3.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.39.3.md).
+See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.39.3.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.39.3.md).
 Publication and active installation updates remain separate. Older sections are historical.
 
 ## v0.39.2 - clock-independent stop contracts
@@ -190,7 +197,7 @@ smoke steps; no tests are omitted. No new model-performance result is added.
 
 Candidate tags and failed CI records are retained, alongside the last published
 v0.38.1 history. Candidate installation refs targeted v0.39.2. See
-[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.39.2.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.39.2.md).
+[release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.39.2.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.39.2.md).
 Publication and active installation updates remain separate. The following
 version sections are historical.
 
@@ -208,8 +215,8 @@ The original stage/Korean tools below remain available; no new model-performance
 measurement, dependency or installed-resource requirement is added. The seven
 certificate-bound files and committed LF harmless corpus remain unchanged when
 installed bytes match. Keep the failed candidate tag and CI records. The
-candidate installation refs targeted v0.39.1. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.39.1.md) and
-[verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.39.1.md); publication and active installation
+candidate installation refs targeted v0.39.1. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.39.1.md) and
+[verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.39.1.md); publication and active installation
 updates remain separate operations. The following version sections are historical.
 
 ## v0.39.0 - optional stage and Korean observation tools
@@ -234,12 +241,12 @@ The seven certificate-bound checker files and committed LF harmless corpus remai
 unchanged from v0.38.1 when installed bound bytes match. Older changed-byte
 transitions retain warning reset, engine alignment, certificate regeneration with
 harmless replay and re-promotion. Publication does not update an active installation
-or a company vault. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.39.0.md) and
-[verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.39.0.md). The following version sections are historical.
+or a company vault. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.39.0.md) and
+[verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.39.0.md). The following version sections are historical.
 
 ## v0.38.1 - portable timing test
 
-This patch supersedes the unpublished [v0.38.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.38.0.md).
+This patch supersedes the unpublished [v0.38.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.38.0.md).
 A coarse monotonic clock on Windows Python 3.10 can legitimately report `0.0` for a
 short measurement. The timing test now accepts finite nonnegative elapsed durations;
 no duration is fabricated and the evaluation runtime remains unchanged.
@@ -251,7 +258,7 @@ unconfirmed; this patch adds no model measurement. The seven certificate-bound c
 files and committed LF harmless corpus remain unchanged from v0.37.0 and the v0.38.0
 candidate when installed bound bytes match. Older changed-byte transitions retain warning
 reset, engine alignment, certificate regeneration with harmless replay and re-promotion.
-See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.38.1.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.38.1.md).
+See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.38.1.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.38.1.md).
 The following version sections are historical; current install refs target v0.48.0.
 
 ## v0.38.0 - optional source binding and local-model evaluation
@@ -273,7 +280,7 @@ remains unconfirmed. Default hooks/configuration and active installations are un
 The seven certificate-bound checker files and committed LF harmless corpus are unchanged
 from v0.37.0 when installed bound bytes match. Older changed-byte transitions retain warning
 reset, engine alignment, certificate regeneration with harmless replay and re-promotion.
-See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.38.0.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.38.0.md).
+See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.38.0.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.38.0.md).
 The following older version sections are historical.
 
 ## v0.37.0 — optional memory revocation and repair controls
@@ -289,7 +296,7 @@ The seven certificate-bound checker files and committed LF harmless corpus remai
 compatible with v0.36.1 when installed bound bytes match. Older changed-byte transitions
 retain warning reset, engine alignment, certificate regeneration with harmless replay and
 re-promotion. Publication does not change an active installation or configure a vault.
-See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.37.0.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.37.0.md).
+See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.37.0.md) and [verification gates](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.37.0.md).
 
 
 ## v0.36.1 source and certificate migration
@@ -298,7 +305,7 @@ v0.36.1 supersedes the unpublished v0.36.0 candidate after a Windows Python 3.10
 test-fixture failure. Test paths are constructed before mocking `os.name`; actual
 export behavior and guards remain unchanged. Preserve the failed candidate tag and
 its preparation records. Fresh gates are required; see the
-[v0.36.1 release](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.36.1.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.36.1.md).
+[v0.36.1 release](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.36.1.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.36.1.md).
 
 The seven certificate-bound checker files and harmless corpus are unchanged from v0.35.1.
 The checker fingerprint is `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`
@@ -307,7 +314,7 @@ When installed bound bytes match, this transition alone needs no certificate reg
 Older transitions with changed bound bytes still require reverting fatal warnings, aligning
 Claude Code, Codex and git-vault engine copies, regenerating the certificate with harmless
 replay, then promoting again. Publication does not authorize an active installation update or
-vault migration. Final CI and publication gates remain pending; see [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.36.1.md).
+vault migration. Final CI and publication gates remain pending; see [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.36.1.md).
 
 ## v0.36.0 source and certificate migration
 
@@ -318,11 +325,11 @@ When installed bound bytes match, this transition alone needs no certificate reg
 Older transitions with changed bound bytes still require reverting fatal warnings, aligning
 Claude Code, Codex and git-vault engine copies, regenerating the certificate with harmless
 replay, then promoting again. Publication does not authorize an active installation update or
-vault migration. Final CI and publication gates remain pending; see [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.36.0.md).
+vault migration. Final CI and publication gates remain pending; see [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.36.0.md).
 
 ## v0.35.1 웹앱 생성 원칙
 
-v0.35.1은 공개하지 않은 [v0.35.0 후보](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.35.0.md)를 대체하며, 백업 시험의
+v0.35.1은 공개하지 않은 [v0.35.0 후보](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.35.0.md)를 대체하며, 백업 시험의
 임시 Git 저장소만 안정화한다. 백업 엔진과 아래 공통 스킬의 동작 범위는 유지한다.
 
 [webapp-principles 스킬](../skills/webapp-principles/SKILL.md)은
@@ -353,8 +360,8 @@ coordination documented in the historical sections below. The v0.34.0 features a
 its original migration record remain available; their dated observations are not
 new v0.35.1 release measurements. Final source, CI, ZIP, draft and publication gates
 are recorded separately in `verification.json` and `post-publication.json`;
-version preparation does not certify them. See the [v0.35.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.1.md).
-This patch supersedes the [unpublished v0.35.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.35.0.md);
+version preparation does not certify them. See the [v0.35.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.35.1.md).
+This patch supersedes the [unpublished v0.35.0 candidate](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.35.0.md);
 its failed/canceled CI is retained as history, and the fixture-only repair requires fresh CI.
 Plugin installation, vault upgrade and application deployment remain separate operations.
 
@@ -374,7 +381,7 @@ migration text is kept as published with v0.33.1, and the v0.33.1 release/verifi
 records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [v0.34.0 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.34.0.md) and [subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/subject-boundary-20261030.md).
+See the [v0.34.0 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.34.0.md) and [subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/subject-boundary-20261030.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -383,7 +390,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 기록이고, v0.34.0 기능 서술은 그 버전의 이력이며, 설치 ref·검증 기록 안내와 [설치](#설치) 절은 v0.48.0 기준이다.
+v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 기록이고, v0.34.0 기능 서술은 그 버전의 이력이며, 설치 ref·검증 기록 안내와 [설치](#설치) 절은 v0.49.0 기준이다.
 
 ## v0.33.1 source and certificate migration
 
@@ -395,7 +402,7 @@ Positive test fixtures canonicalize temporary roots; strict runtime guards stay 
 The published baseline remains v0.32.0. Its release/verification records retain their fingerprint as history.
 Final source, CI, ZIP, draft and publication gates are recorded separately in
 `verification.json` and `post-publication.json`; version preparation does not certify them.
-See the [v0.33.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.33.1.md) and [source fingerprint and verification note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/memory-boundaries-20261028.md).
+See the [v0.33.1 release record](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.33.1.md) and [source fingerprint and verification note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/memory-boundaries-20261028.md).
 
 Before switching to or from these source bytes, return promoted levels to `warning`;
 align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
@@ -404,7 +411,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.32.0. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.33.1의 세 기능과 한계는 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.33.1.md)와 [행 진단](support-row-diagnostics.md)·[상태 변경 평가](state-revision-evaluation.md)·[근거 부족 평가](evidence-insufficiency-evaluation.md)에 있다. 새 옵션은 명시적으로 켜며 기본 출력·기존 판정은 유지한다.
+v0.33.1의 세 기능과 한계는 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.33.1.md)와 [행 진단](support-row-diagnostics.md)·[상태 변경 평가](state-revision-evaluation.md)·[근거 부족 평가](evidence-insufficiency-evaluation.md)에 있다. 새 옵션은 명시적으로 켜며 기본 출력·기존 판정은 유지한다.
 
 v0.32.0은 기본 lint·`check-support`·healthcheck·`recall`이 노트마다 돌리던 정규식(제목·frontmatter 줄, 인라인 코드·링크 등)을 시험한 입력에서 같은 결과를 내는 [선형 처리](hardening.md#제목frontmatter-파싱과-코드링크-스캔의-선형-시간)로 바꾼다. `check-support`는 [표를 뺀 자리와 줄 나눔](hardening.md#표를-뺀-자리와-줄-나눔)과 자기 인용 대장의 BOM을 다르게 읽어 그 경우에만 기본 출력이 바뀌고, 선택형 `--normalize-periods`는 잘못 읽던 꼴을 더 보류하고 v0.31.0이 지나치게 보류한 몇 꼴(`초과`, `2주 차질`, 목록 구분 기호 뒤의 시각·개수)은 기간 전체로 비교하며, 남은 실패를 [생성한 사례로 센다](hardening.md#기간-정규화의-알려진-실패-목록). 선택형 [답 없음 쌍둥이](memory-evaluation.md#답-없음-쌍둥이)(`--gold-removal-twins`)와 키 가명화 보고서의 행 토큰 정렬(`--redact-row-order token`), 저장소 도구 [실제 볼트 표본 감사](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)(`scripts/real_vault_audit.py`)를 더한다. Claude Code 전용 deny zone 가드 템플릿은 아래 [실행과 검증 범위](#실행과-검증-범위)에 있다. `checker_sha256`가 묶는 파일이 바뀌어 경고 승격 인증서의 `checker_sha256`가 바뀌므로 아래 [설치](#설치)의 인증서 순서를 따른다. 기본 훅·검색·15명령·Python 3.10+ 표준 라이브러리와, v0.31.0의 읽기 전용 [사례별 뒤집힘 표와 정정·유지 역할](tower-reliability.md#사례별-뒤집힘-표와-정정유지-역할-선택)(`runs`의 `flips`, fixture assertion의 선택 키 `role`)·[다른 대장 사실 표 표시](hardening.md#다른-대장의-사실-표에만-있는-값)·선택형 [기간 표현 정규화](hardening.md#기간-표현-정규화---normalize-periods)·`doctor`의 선택형 [세션 기록 SessionStart 확인](reliability.md#세션-기록으로-sessionstart-실행-확인-선택)(`--session-evidence`, Claude Code 세션 기록 하나와 상태 표시 문구를 확인하려고 이 플러그인 설치본의 `hooks/hooks.json`을 읽는다), v0.30.0의 [평가기 식별·개선 비용 근거](improvement-accounting.md)와 v0.29.0의 측정 기능을 유지한다.
 
@@ -414,10 +421,10 @@ v0.26.0은 Jarvis가 인라인 봇을 거친 메시지를 신뢰하지 않는 `v
 
 `v0.48.0`은 같은 Markdown 볼트, Python 엔진, 명령 문서를 두 클라이언트에서
 사용하고, Antigravity CLI는 같은 엔진으로 만든 생성 패키지(`antigravity/`)로 쓴다([Antigravity CLI 안내](antigravity.md)).
-이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.48.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.48.0.md)에 있다.
+이번 릴리스의 기능 검증과 게시 전 대기 항목은 [v0.48.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.48.0.md)에 있다.
 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다.
-이전 [v0.47.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.47.0.md), [v0.46.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.46.0.md), [v0.45.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.45.1.md), [v0.44.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.44.0.md), [v0.43.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.43.0.md), [v0.42.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.42.0.md), [v0.41.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.41.0.md), [v0.34.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.34.0.md), [v0.33.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.33.1.md), [v0.32.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.32.0.md), [v0.31.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.31.0.md), [v0.30.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.30.0.md), [v0.29.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.29.0.md), [v0.28.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.28.0.md), [v0.27.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.27.0.md), [v0.26.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.26.0.md), [v0.25.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.25.0.md), [v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.24.0.md), [v0.23.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.23.0.md), [v0.22.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.22.1.md), [v0.21.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.21.0.md)과 [v0.20.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.19.0.md)과 [v0.18.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.18.0.md)에 보존한다.
-이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.15.0.md)에 보존한다.
+이전 [v0.47.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.47.0.md), [v0.46.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.46.0.md), [v0.45.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.45.1.md), [v0.44.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.44.0.md), [v0.43.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.43.0.md), [v0.42.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.42.0.md), [v0.41.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.41.0.md), [v0.34.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.34.0.md), [v0.33.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.33.1.md), [v0.32.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.32.0.md), [v0.31.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.31.0.md), [v0.30.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.30.0.md), [v0.29.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.29.0.md), [v0.28.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.28.0.md), [v0.27.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.27.0.md), [v0.26.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.26.0.md), [v0.25.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.25.0.md), [v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.24.0.md), [v0.23.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.23.0.md), [v0.22.1 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.22.1.md), [v0.21.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.21.0.md)과 [v0.20.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.20.0.md)을 보존한다. 그 이전 공개판의 검증은 [v0.19.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.19.0.md)과 [v0.18.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.18.0.md)에 보존한다.
+이전 Codex 설치·발견·실행 실측은 [v0.15.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.15.0.md)에 보존한다.
 Python 3.10+와 Git이 필요하며, Windows의 공통 훅 실행에는 Git Bash가 필요하다.
 v0.9.0의 겸용 구조, v0.10.0의 기억 진단·교훈 수정안 도구, v0.11.0의 검증 근거·인계에 이어 v0.12.0은 브라우저 자동화 경계 규칙을 추가했다.
 v0.14.0의 파일 근거 Jev 판단에 이어 v0.15.0은 볼트 밖에서도 직접 질문을 native
@@ -434,7 +441,7 @@ v0.17.1은 세션 시작 주입을 호스트 출력 상한 아래로 묶고 reca
 v0.18.0은 하드링크·구조화된 비밀값·자원 상한을 보강하고 Jarvis 생성에 호스트가
 선택한 근거만 전달한다. **Jarvis의 `--bare` 모드는 구독 OAuth 대신 API/제공자 인증이
 필요하다.** 일반 플러그인 명령·Codex 대화에는 이 Jarvis 인증 조건을 적용하지 않는다.
-기존 Jarvis를 전환하기 전에 [릴리스의 인증 전환 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.18.0.md)를 확인한다.
+기존 Jarvis를 전환하기 전에 [릴리스의 인증 전환 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.18.0.md)를 확인한다.
 v0.19.0은 compact 제약 재주입, 모델 없이 기록하는 수명주기 체크포인트, 출처 검증,
 공유 상태 부분 수정, 시간 대장, 교훈 델타, 정제 품질·전송 경고와 명시적 토큰 보정을
 더한다. 기억 단위·교훈 관측·연속 작업 평가와 선택형 검색 확장도 포함한다.
@@ -447,7 +454,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.48.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.49.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -455,24 +462,24 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.48.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.49.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.48.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.49.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.48.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.49.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
-v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않으므로 v0.46.0·v0.47.0·v0.48.0 사이에서는 인증서를 다시 만들 필요가 없다(실제 설치 바이트가 같을 때). v0.45.1 이하와 오갈 때는 아래 v0.46.0 안내를 따른다. v0.46.0은 금지 구역 비교를 바꾸면서 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꿨다. 그래서 v0.46.0과 v0.45.1 이하 사이를 오갈 때는 경고 승격을 해제하고, 모든 엔진 사본을 같은 버전으로 맞추고, harmless replay와 함께 인증서를 다시 만든 뒤 다시 승격한다([v0.46.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.46.0.md#하위호환업그레이드)). 다음은 그 이전 버전 사이의 이력이다. v0.34.0에서 v0.35.1으로만 갱신하거나 되돌릴 때는 인증서가 묶는 일곱 파일과 harmless corpus가 같아 인증서 재생성이 필요하지 않다(실제 설치 바이트가 같을 때). 더 이전 버전과 오갈 때는 아래 이력과 [v0.35.1 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.35.1.md#하위호환업그레이드)를 따른다. v0.34.0은 선택형 주어 경계 때문에 `vault_ssot.py`를 다시 바꿔 v0.33.1과 인증서가 다르다. [v0.34.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 그 앞 버전의 이력은 다음과 같다.
-v0.33.1은 v0.33.0 후보의 `vault_ssot.py` 보강을 포함하므로 v0.32.0과 인증서가 다르다. [v0.33.1 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.33.1.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 다음 문단은 v0.32.0의 변경 이력이다.
+v0.47.0과 v0.49.0은 인증서가 묶는 일곱 파일을 바꾸지 않으므로 v0.46.0·v0.47.0·v0.49.0 사이에서는 인증서를 다시 만들 필요가 없다(실제 설치 바이트가 같을 때). v0.45.1 이하와 오갈 때는 아래 v0.46.0 안내를 따른다. v0.46.0은 금지 구역 비교를 바꾸면서 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꿨다. 그래서 v0.46.0과 v0.45.1 이하 사이를 오갈 때는 경고 승격을 해제하고, 모든 엔진 사본을 같은 버전으로 맞추고, harmless replay와 함께 인증서를 다시 만든 뒤 다시 승격한다([v0.46.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.46.0.md#하위호환업그레이드)). 다음은 그 이전 버전 사이의 이력이다. v0.34.0에서 v0.35.1으로만 갱신하거나 되돌릴 때는 인증서가 묶는 일곱 파일과 harmless corpus가 같아 인증서 재생성이 필요하지 않다(실제 설치 바이트가 같을 때). 더 이전 버전과 오갈 때는 아래 이력과 [v0.35.1 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.35.1.md#하위호환업그레이드)를 따른다. v0.34.0은 선택형 주어 경계 때문에 `vault_ssot.py`를 다시 바꿔 v0.33.1과 인증서가 다르다. [v0.34.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.34.0.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 그 앞 버전의 이력은 다음과 같다.
+v0.33.1은 v0.33.0 후보의 `vault_ssot.py` 보강을 포함하므로 v0.32.0과 인증서가 다르다. [v0.33.1 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.33.1.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 다음 문단은 v0.32.0의 변경 이력이다.
 v0.32.0은 `checker_sha256`가 묶는 파일 가운데
 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`·`vault_paths.py`를 바꿨다(`d8f9559a…`에서
 `9bca12a79bfa87ff2bf44afecb2e5527e19c199b95fc1435d9513d2be73b3563`로, 저장소 바이트로 측정. corpus는 같다).
@@ -482,14 +489,14 @@ staged 검사(`--staged`)가 커밋을 막고, `doctor`가 `invalid_config`(종�
 검증하는 다른 명령도 멈춘다(예: `recall`은 `invalid_config`, `check-support`를 포함한 `vault_ssot.py`는
 `ssot_operation_unavailable`). 갱신하거나 되돌리기 전에 승격 단계를 warning으로 되돌리고, Claude Code와 Codex
 설치본과 git 볼트의 엔진 사본(`00-meta/scripts/`, pre-commit 훅이 실행한다)을 모두 같은 버전으로 바꾼 뒤, 바꾼
-설치본에서 `vault_warning_policy.py --certificate`로 다시 생성해 승격한다([v0.32.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.32.0.md#하위호환업그레이드)).
+설치본에서 `vault_warning_policy.py --certificate`로 다시 생성해 승격한다([v0.32.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.32.0.md#하위호환업그레이드)).
 v0.31.0은 `checker_sha256`가 묶는 `vault_ssot.py`를 바꿨다(`84cf5235…`에서 `d8f9559a…`로, 저장소 바이트로
 측정). `role`로 준비한 실행은 v0.30.0 이하가 조회·비교하지 못하므로 그런 실행을 읽는 두 설치본도 함께 갱신한다.
 v0.26.0은 via_bot 수집 출처를 위해 `checker_sha256`가 묶는 `vault_provenance.py`를 바꿨다(`2ef4b9d4…`에서
 `84cf5235…`로, 저장소 바이트로 측정). 그래서 v0.25.0 이하에서 만든 인증서는 새 설치본에서 맞지 않고 fatal 승격이
 설정 오류로 멈춘다. 갱신 전에 승격 단계를 warning으로 되돌리고, 새 설치본에서 `vault_warning_policy.py --certificate`로
-다시 생성한 뒤 승격한다. 측정과 되돌리기 조건은 [v0.26.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.26.0.md#하위호환업그레이드)에,
-이전 버전 사이의 조건은 [v0.25.0 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.25.0.md#하위호환업그레이드)에 있다.
+다시 생성한 뒤 승격한다. 측정과 되돌리기 조건은 [v0.26.0 업그레이드 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.26.0.md#하위호환업그레이드)에,
+이전 버전 사이의 조건은 [v0.25.0 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.25.0.md#하위호환업그레이드)에 있다.
 v0.26.0 이전 엔진은 via_bot 수집을 `provenance-invalid`로 보고하므로 Claude Code와 Codex 설치본을 함께 갱신한다.
 게시만으로 활성 캐시나 볼트 엔진이 갱신되지는 않는다.
 인증서는 설치본의 실제 바이트를 묶으므로 줄바꿈 등 차이까지 자동 호환을 보장하지 않는다. v0.32.0부터 인증서가 묶는
@@ -515,7 +522,7 @@ macOS/Linux도 같은 명령에 해당 OS의 절대경로를 쓴다. 설치 후 
 신뢰 전에도 아래의 명시적 `session-start` 요청으로 복원할 수 있다.
 [Codex 훅 공식 문서](https://learn.chatgpt.com/docs/hooks)
 
-Claude Code 설치는 [README의 설치 안내](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/README.md#-설치)를
+Claude Code 설치는 [README의 설치 안내](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/README.md#-설치)를
 따른다. 두 클라이언트를 별도로 설치해도 볼트 데이터는 한 벌이다.
 Antigravity CLI에는 저장소의 `antigravity/` 생성 패키지를 따로 설치한다([Antigravity CLI 안내](antigravity.md)).
 같은 볼트를 쓰지만 훅 사건과 입출력이 다르고, 실제 agy 대화 세션으로는 확인하지 않았다.

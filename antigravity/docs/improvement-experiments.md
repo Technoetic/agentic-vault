@@ -168,4 +168,4 @@ python skills/agentic-vault/scripts/vault_improvements.py --vault PATH inspect-r
 엄밀성의 믿기 어려운 신호가 되지 않도록 저자와 독자가 그 한계를 알아야 한다고 쓴다. 그래서 표지 이름은
 기록 순서만 나타낸다.
 
-실제 수행한 명령·검사 수와 독립 검토 범위는 [2026-10-21 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/improvement-experiments-20261021.md)에서 확인한다.
+실제 수행한 명령·검사 수와 독립 검토 범위는 [2026-10-21 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/improvement-experiments-20261021.md)에서 확인한다.

@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.48.0",
+  "version": "0.49.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.48.0 adds a generated package for Google's Antigravity CLI in the repository's antigravity/ folder, installed separately with agy from the release tag; the repository root stays the Claude Code and Codex plugin and its hook definitions are unchanged. The session-start hook gains an explicit Antigravity mode, the checkpoint hook records Antigravity's Stop event, a generator and an isolated install verifier keep the package equal to its sources, and the shared skill, two commands and the stub of the vault's generated agent contract also name Antigravity CLI. No real agy conversation was run for this release. Some default results change; the release note lists each one. The seven certificate-bound checker files are unchanged from v0.46.0 and v0.47.0, so certificates made with either stay valid when the installed bytes match. For transitions from v0.45.1 or earlier, where checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again. Python 3.10+ standard-library runtime and hook bindings stay unchanged. Publication does not upgrade active installations or vaults.",
+    "longDescription": "Release v0.49.0 adds opt-in source-aware task contracts, staged evaluation over existing native evidence, and a read-only bounded improvement-cycle observer. User-origin claims stay distinct from repository facts and host defaults; unresolved blocking questions and revised contracts cannot silently reuse old decisions. Failed or absent executed evidence cannot be overridden by model support. The observer reports success, regression, repeated failures and limit exhaustion without running commands, making model calls, publishing or granting authority. The generated antigravity/ package remains supported; no real agy conversation was run. The seven certificate-bound checker files are unchanged from v0.46.0 through v0.48.0. Python 3.10+ standard-library runtime. Publication does not upgrade active installations or vaults. For transitions from v0.45.1 or earlier, where checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

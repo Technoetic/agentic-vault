@@ -11,7 +11,7 @@ agy 대화 세션으로는 확인하지 않았다(아래 [확인하지 않은 �
 터미널에서 릴리스 태그와 패키지 폴더를 고정한 주소로 설치한다.
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.48.0/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.49.0/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더를 지정해도 된다. 경로는 실제 위치로 바꾼다.

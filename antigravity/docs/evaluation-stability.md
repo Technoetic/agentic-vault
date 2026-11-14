@@ -6,12 +6,12 @@ v0.24.0에 포함된 선택형 평가 도구와 Windows 부분 편집 보강, v0
 문서만 바꿨다), v0.34.0에서 더한 선택형 [문자열 인자 패턴 짝 비교](#문자열-인자-패턴-짝-비교)다. 요청·설명 언어와 문자열 보존 지시, 공개 fixture의 검색 순위를 따로 비교하고, 로컬 모델
 실행의 프롬프트 캐시·슬롯 부하·반복 일치를 선택해서 기록한다. 간헐 실패 테스트는 같은 조건으로 반복해 x/N과
 정확한 상한으로 보고한다. 기본 세션 훅·모델 호출·런타임 의존성·검색 설정을 추가하지 않는다. 기존 설치 캐시와
-볼트는 설치·upgrade를 별도로 수행하기 전까지 그대로다. v0.34.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md)와 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.34.0.md),
-v0.31.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.31.0.md)와
-[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.31.0.md), v0.26.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.26.0.md)와
-[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.26.0.md), v0.25.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.25.0.md)와
-[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.25.0.md), v0.24.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.24.0.md)와
-[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.24.0.md)을 함께 확인한다.
+볼트는 설치·upgrade를 별도로 수행하기 전까지 그대로다. v0.34.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.34.0.md)와 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.34.0.md),
+v0.31.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.31.0.md)와
+[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.31.0.md), v0.26.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.26.0.md)와
+[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.26.0.md), v0.25.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.25.0.md)와
+[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.25.0.md), v0.24.0의 [릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.24.0.md)와
+[릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.24.0.md)을 함께 확인한다.
 
 ## 요청·설명 언어와 문자열 보존 비교
 
@@ -75,7 +75,7 @@ python scripts/evaluate_tool_matrix.py --backend local-model --model <local-mode
   `cache_prompt`가 가능하면 이전 요청의 KV 캐시를 재사용하며 기본값이 true라고 적는다. 백엔드에 따라 배치 크기가
   다르면 logits가 비트 단위로 같다는 보장이 없어 이 옵션이 비결정 결과를 낼 수 있다고도 적는다. `GET /slots`는
   기본으로 켜져 있고 `--no-slots`로 끌 수 있으며, 응답 예시는 슬롯마다 `id`·`is_processing` 등을 담은 배열이다.
-- 이 저장소의 [2026-10-18 관측](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/eval-stability-20261018.md)에서 첫 32에피소드는 별도 구조화 기억 추론과
+- 이 저장소의 [2026-10-18 관측](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/eval-stability-20261018.md)에서 첫 32에피소드는 별도 구조화 기억 추론과
   동시에 실행해 모델 오류 8건(요청 시간 초과 7, transport 오류 1)이 났다. 뒤의 8에피소드(0/4와 4/4)는 경쟁 호출 없이
   실행했다. v0.24.0의 행렬 도구도 원 응답은 영수증에 보관하므로 반복끼리 출력을 비교할 수는 있었다. 빠진 것은 같은
   seed의 반복과 조건 기록이다. 반복은 seed를 하나씩 올려 요청했고(뒤의 8에피소드는 17과 18) 같은 구성의 반복이 아니었으며, 슬롯
@@ -462,10 +462,10 @@ python scripts/flaky_repeat.py test_tool_safety_evaluation.TransportTests.test_h
 - [JSON Schema Regular Expressions](https://json-schema.org/understanding-json-schema/reference/regular_expressions), [llama.cpp b10729](https://github.com/ggml-org/llama.cpp/tree/b10729): `pattern`이 ECMA-262 문법이고 이식 가능한 부분집합을 권장한다는 근거(그 부분집합에도 `.`와 전방 탐색이 있어 더 좁은 허용 목록을 쓴다)와, 서버가 문자열 값의 `pattern`을 문법에 넣지 않는다는 소스 근거. 서버 동작은 실행으로 확인하지 않았다.
 
 공식 논문의 데이터·코드를 복사하거나 공식 벤치마크 점수를 재현했다고 주장하지 않는다.
-2026-10-18 개발 브랜치에서 실행한 관측은 [당시 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/eval-stability-20261018.md)과
-[기계 판독 요약](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/eval-stability-20261018.json)에 보존한다. 그 기록의 미공개·미설치
+2026-10-18 개발 브랜치에서 실행한 관측은 [당시 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/eval-stability-20261018.md)과
+[기계 판독 요약](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/eval-stability-20261018.json)에 보존한다. 그 기록의 미공개·미설치
 서술은 관측 시점의 상태다. 최종 릴리스 소스의 검사와 공개 자산 검증은
-[v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.24.0.md) 및 공개 릴리스의 `verification.json`에서 확인한다.
+[v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.24.0.md) 및 공개 릴리스의 `verification.json`에서 확인한다.
 
 경쟁 모델 호출 없이 같은 예산으로 실행한 한국어 clean 조건에서 canonical은 0/4,
 literal-identifiers는 4/4 완료했다(설명 언어별 각 두 반복, 오류 0). 최초 32에피소드의

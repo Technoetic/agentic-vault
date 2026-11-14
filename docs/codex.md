@@ -1,5 +1,12 @@
 # Claude Code · Codex 겸용 사용
 
+## v0.49.0 — source-aware task workflows
+
+Opt-in helpers add source-aware task contracts, staged evaluation over existing evidence, and bounded cycle observation.
+They run no commands or models and grant no authority. See [task contracts](task-contracts.md),
+[staged evaluation](staged-evaluation.md), [cycle observation](improvement-cycles.md),
+[release scope](releases/v0.49.0.md) and [verification](verification/v0.49.0.md).
+
 ## v0.48.0 — Antigravity CLI package
 
 v0.48.0 adds a generated package for Antigravity CLI in `antigravity/` ([guide](antigravity.md)). The
@@ -383,7 +390,7 @@ that installation (including its harmless replay), then promote again.
 This coordination also applies when returning to published v0.33.1. No installed
 plugin or vault engine copy is updated by release preparation.
 
-v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 기록이고, v0.34.0 기능 서술은 그 버전의 이력이며, 설치 ref·검증 기록 안내와 [설치](#설치) 절은 v0.48.0 기준이다.
+v0.34.0의 다섯 선택형 기능과 한계는 [릴리스 노트](releases/v0.34.0.md)와 [주어 왼쪽 경계](support-row-diagnostics.md#subject-left-edge)·[답 없음 보정 문턱](memory-evaluation.md#답-없음-보정-문턱)·[표본 감사 계획](memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)·[영수증 기록 순서](improvement-experiments.md#영수증-기록-순서-선택)·[문자열 인자 패턴 짝 비교](evaluation-stability.md#문자열-인자-패턴-짝-비교)에 있다. 새 옵션은 명시적으로 켜며 켜지 않으면 기존 출력·판정은 유지한다. 이미 있던 `--bind-subject`를 켠 결과는 주어 경계 때문에 바뀔 수 있다. 아래 v0.33.1 절의 인증서 전환 안내와 버전별 변경 서술은 이전 버전의 기록이고, v0.34.0 기능 서술은 그 버전의 이력이며, 설치 ref·검증 기록 안내와 [설치](#설치) 절은 v0.49.0 기준이다.
 
 ## v0.33.1 source and certificate migration
 
@@ -447,7 +454,7 @@ v0.21.0의 지침량·정리 미리보기·요구별 검증 진단, v0.22.1의 �
 터미널에서 GitHub의 해당 릴리스 태그를 등록한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.48.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.49.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -455,23 +462,23 @@ codex plugin add agentic-vault@agentic-vault-local
 Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 `codex` 대신 `codex.cmd`를
 사용한다. 실행 정책을 변경할 필요는 없다.
 
-이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.48.0 태그로
+이전 Git 태그나 로컬 폴더를 사용하는 `agentic-vault-local` 설치를 v0.49.0 태그로
 전환할 때는 같은 이름의 등록 소스를 먼저 교체한다. `marketplace upgrade`는 고정된
 옛 태그를 새 태그로 바꾸는 명령이 아니다. 아래 순서로 등록 소스와 설치본을 갱신한다.
 
 ```text
 codex plugin marketplace remove agentic-vault-local
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.48.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.49.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
 등록 제거 시 기존 플러그인 캐시나 활성화 상태가 보존된다고 가정하지 않는다.
 현재 세션이 참조 중인 구버전 캐시는 갱신 전에 보존하고 설치 후 실제 경로가 남아 있는지
-확인한다. 갱신 후 `codex plugin list`로 v0.48.0과 활성화 상태를 확인하고 새 대화를 연다.
+확인한다. 갱신 후 `codex plugin list`로 v0.49.0과 활성화 상태를 확인하고 새 대화를 연다.
 소스 갱신을 훅 신뢰 승인으로 해석하지 않는다. 볼트 파일은 플러그인과 별도 데이터다.
 로컬 소스를 계속 쓰려면 위 전환 대신 해당 소스를 갱신하고 로컬 설치 절차를 따른다.
 
-v0.47.0과 v0.48.0은 인증서가 묶는 일곱 파일을 바꾸지 않으므로 v0.46.0·v0.47.0·v0.48.0 사이에서는 인증서를 다시 만들 필요가 없다(실제 설치 바이트가 같을 때). v0.45.1 이하와 오갈 때는 아래 v0.46.0 안내를 따른다. v0.46.0은 금지 구역 비교를 바꾸면서 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꿨다. 그래서 v0.46.0과 v0.45.1 이하 사이를 오갈 때는 경고 승격을 해제하고, 모든 엔진 사본을 같은 버전으로 맞추고, harmless replay와 함께 인증서를 다시 만든 뒤 다시 승격한다([v0.46.0 업그레이드 안내](releases/v0.46.0.md#하위호환업그레이드)). 다음은 그 이전 버전 사이의 이력이다. v0.34.0에서 v0.35.1으로만 갱신하거나 되돌릴 때는 인증서가 묶는 일곱 파일과 harmless corpus가 같아 인증서 재생성이 필요하지 않다(실제 설치 바이트가 같을 때). 더 이전 버전과 오갈 때는 아래 이력과 [v0.35.1 업그레이드 안내](releases/v0.35.1.md#하위호환업그레이드)를 따른다. v0.34.0은 선택형 주어 경계 때문에 `vault_ssot.py`를 다시 바꿔 v0.33.1과 인증서가 다르다. [v0.34.0 업그레이드 안내](releases/v0.34.0.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 그 앞 버전의 이력은 다음과 같다.
+v0.47.0과 v0.49.0은 인증서가 묶는 일곱 파일을 바꾸지 않으므로 v0.46.0·v0.47.0·v0.49.0 사이에서는 인증서를 다시 만들 필요가 없다(실제 설치 바이트가 같을 때). v0.45.1 이하와 오갈 때는 아래 v0.46.0 안내를 따른다. v0.46.0은 금지 구역 비교를 바꾸면서 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꿨다. 그래서 v0.46.0과 v0.45.1 이하 사이를 오갈 때는 경고 승격을 해제하고, 모든 엔진 사본을 같은 버전으로 맞추고, harmless replay와 함께 인증서를 다시 만든 뒤 다시 승격한다([v0.46.0 업그레이드 안내](releases/v0.46.0.md#하위호환업그레이드)). 다음은 그 이전 버전 사이의 이력이다. v0.34.0에서 v0.35.1으로만 갱신하거나 되돌릴 때는 인증서가 묶는 일곱 파일과 harmless corpus가 같아 인증서 재생성이 필요하지 않다(실제 설치 바이트가 같을 때). 더 이전 버전과 오갈 때는 아래 이력과 [v0.35.1 업그레이드 안내](releases/v0.35.1.md#하위호환업그레이드)를 따른다. v0.34.0은 선택형 주어 경계 때문에 `vault_ssot.py`를 다시 바꿔 v0.33.1과 인증서가 다르다. [v0.34.0 업그레이드 안내](releases/v0.34.0.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 그 앞 버전의 이력은 다음과 같다.
 v0.33.1은 v0.33.0 후보의 `vault_ssot.py` 보강을 포함하므로 v0.32.0과 인증서가 다르다. [v0.33.1 업그레이드 안내](releases/v0.33.1.md#하위호환업그레이드)에 따라 이전 버전으로 되돌릴 때도 승격 해제·모든 엔진 사본 정렬·harmless replay와 인증서 재생성·재승격 순서를 따른다. 다음 문단은 v0.32.0의 변경 이력이다.
 v0.32.0은 `checker_sha256`가 묶는 파일 가운데
 `vault_ssot.py`·`vault_lint_extensions.py`·`vault_provenance.py`·`jev_client.py`·`vault_paths.py`를 바꿨다(`d8f9559a…`에서

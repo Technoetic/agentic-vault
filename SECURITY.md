@@ -8,8 +8,8 @@ and which limits are known and documented rather than bugs.
 
 | Version | Security fixes |
 |---|---|
-| 0.48.0 (latest) | Yes. Security fixes target the latest source version. |
-| 0.47.0 and earlier | No. Upgrade to 0.48.0. From 0.46.0 to 0.48.0 the seven certificate-bound checker files are unchanged, so a certificate made with 0.46.0 or 0.47.0 stays valid when the installed bytes match. From 0.45.1 and earlier, 0.46.0 and later close a deny-zone bypass through a folder name stored in another Unicode normalization form (NFC or NFD) than the zone and the front-matter link forms the commit gate missed; review the configured revocation egress, Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes first. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The transition from 0.45.1 and earlier changes certificate-bound bytes (`vault_paths.py`, `vault_lint_extensions.py`), so vaults that promote warnings to `fatal` must still demote them, align every engine copy, regenerate the certificate and promote again. |
+| 0.49.0 (latest) | Yes. Security fixes target the latest source version. |
+| 0.48.0 and earlier | No. Upgrade to 0.49.0. From 0.46.0 to 0.49.0 the seven certificate-bound checker files are unchanged, so a certificate made with 0.46.0 or 0.47.0 stays valid when the installed bytes match. From 0.45.1 and earlier, 0.46.0 and later close a deny-zone bypass through a folder name stored in another Unicode normalization form (NFC or NFD) than the zone and the front-matter link forms the commit gate missed; review the configured revocation egress, Jarvis API-auth, `via_bot` capture-origin and warning-certificate requirements in the release notes first. The unpublished v0.40.0, v0.39.2, v0.39.1, v0.39.0, v0.38.0, v0.36.0 and v0.35.0 candidates are superseded. The transition from 0.45.1 and earlier changes certificate-bound bytes (`vault_paths.py`, `vault_lint_extensions.py`), so vaults that promote warnings to `fatal` must still demote them, align every engine copy, regenerate the certificate and promote again. |
 
 Releases 0.3.0 through 0.15.0, which ship the Jarvis bridge, are affected by the
 Windows launcher issue described in [the v0.15.1 release notes](docs/releases/v0.15.1.md).
@@ -182,6 +182,8 @@ Out of scope (report these upstream): vulnerabilities in Claude Code, Codex,
 Antigravity CLI, Telegram or the Jev service themselves.
 
 ## Known limitations
+
+- **Task workflow helpers** are opt-in. Source origin/confirmation and executed-check labels are caller declarations; hashes detect changed selected bytes, not identity, permission, truth or independent execution. The cycle observer does not run an agent or enforce its spending. See [task contracts](docs/task-contracts.md), [staged evaluation](docs/staged-evaluation.md) and [cycle observation](docs/improvement-cycles.md).
 
 These are documented design limits, not vulnerabilities. A report that shows one of
 them being bypassed in a way the documentation does not describe is still welcome.
@@ -374,7 +376,7 @@ them being bypassed in a way the documentation does not describe is still welcom
 
 ## 한국어 요약
 
-- 보안 수정 대상은 최신 0.48.0 소스다. 0.47.0 이하는 0.48.0으로 갱신한다. 0.46.0부터 0.48.0까지는 인증서가 묶는 일곱 파일이 같아, 실제 설치 바이트가 같으면 0.46.0이나 0.47.0에서 만든 인증서가 그대로 맞는다. 0.45.1 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 갱신한다. 0.46.0부터 구역과 다른 유니코드 정규화 형식(NFC·NFD)으로 저장된 폴더 이름으로 금지 구역을 벗어나던 길과 커밋 게이트가 놓친 프런트매터 링크 꼴을 막는다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 0.45.1 이하에서 오는 전환은 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꾸므로, 경고를 `fatal`로 올린 볼트는 승격 해제·모든 엔진 사본 정렬·인증서 재생성(harmless replay 포함)·재승격 순서를 따른다.
+- 보안 수정 대상은 최신 0.49.0 소스다. 0.47.0 이하는 0.48.0으로 갱신한다. 0.46.0부터 0.48.0까지는 인증서가 묶는 일곱 파일이 같아, 실제 설치 바이트가 같으면 0.46.0이나 0.47.0에서 만든 인증서가 그대로 맞는다. 0.45.1 이하는 릴리스 노트의 Jarvis API 인증·`via_bot` 수집 출처·경고 승격 인증서 요건을 확인한 뒤 갱신한다. 0.46.0부터 구역과 다른 유니코드 정규화 형식(NFC·NFD)으로 저장된 폴더 이름으로 금지 구역을 벗어나던 길과 커밋 게이트가 놓친 프런트매터 링크 꼴을 막는다. 공개 전 CI에서 실패해 대체한 후보의 기록은 보존한다. 0.45.1 이하에서 오는 전환은 인증서가 묶는 `vault_paths.py`·`vault_lint_extensions.py`를 바꾸므로, 경고를 `fatal`로 올린 볼트는 승격 해제·모든 엔진 사본 정렬·인증서 재생성(harmless replay 포함)·재승격 순서를 따른다.
 - 취약점은 공개 이슈에 쓰지 말고 GitHub **Security → Report a vulnerability**로 비공개 제보한다.
   이 기능은 저장소 설정에서 켜져 있어야 하며, 없으면 내용 없이 연락 요청 이슈만 연다.
 - 범위: Jarvis 브리지, SessionStart·git 훅, 선택형 Aside 어댑터 훅·도우미, 선택형 deny zone 가드 훅·스크립트, 외부 판단 API(Jev) 전송, 선택형 세션 기록 읽기(`--session-evidence`, 내용을 출력하지 않아야 한다), 볼트 경로 처리, Antigravity CLI 패키지(`antigravity/`)와 두 훅의 Antigravity 모드(훅 입력의 `cwd`·`workspacePaths`에서 볼트를 정확히 하나 찾을 때만 동작하고, 표준 오류에 경로·노트 내용을 내지 않으며, Stop 체크포인트에 입력 글·대화 기록 경로를 남기지 않아야 한다).

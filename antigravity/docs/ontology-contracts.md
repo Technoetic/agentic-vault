@@ -14,7 +14,7 @@ changed. Active installation updates and real-vault configuration are separate.
 ## A fictitious example
 
 The complete small vault is in
-[`tests/fixtures/ontology_contracts`](https://github.com/Technoetic/agentic-vault/tree/v0.48.0/tests/fixtures/ontology_contracts).
+[`tests/fixtures/ontology_contracts`](https://github.com/Technoetic/agentic-vault/tree/v0.49.0/tests/fixtures/ontology_contracts).
 All names, definitions and dates are fictitious. Its Markdown says Machine Alpha
 is located in Factory One; good output counts accepted pieces while planned
 output counts planned pieces. Both metrics have the alias `production`.
@@ -191,5 +191,5 @@ The upstream [coverage implementation](https://github.com/NVIDIA/auto-ontology/b
 measures entity-hit coverage, not answer correctness. This helper emits no such
 score. Synthetic tests and the fictitious example establish code contracts;
 they do not measure model search quality, hallucination reduction, company
-data quality or production effectiveness. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.41.0.md)
-and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.41.0.md) for recorded gate status.
+data quality or production effectiveness. See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.41.0.md)
+and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.41.0.md) for recorded gate status.

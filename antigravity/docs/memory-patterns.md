@@ -87,7 +87,7 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_hard --compare
 **측정(2026-10-17, Windows 11·Python 3.12.10에서 직접 실행, 소스 `46ed685`).** `recall_hard`
 fixture 64질의(한국어 32·영어 32, 정답 있음 56·정답 없음 8)에서 같은 옵션의 개선 조건을 채널
 없이/있이 비교했다. p값은 정답 있는 56질의를 짝지은 `paired_randomization`(시드 1707, 10,000회,
-양측)이다. 상세는 [검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/hangul2-bigram-20261017.md)에 있다.
+양측)이다. 상세는 [검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/hangul2-bigram-20261017.md)에 있다.
 
 - CI와 같은 옵션(`--expand-query`·질의 매핑, top 3·5, 백엔드 미지정=lexical): 64/64질의에서 채널이
   무시됐고 지표가 같았다(recall@k 1.0000, nDCG@5 0.9803, p=1.0).

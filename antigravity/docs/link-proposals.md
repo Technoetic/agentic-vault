@@ -61,7 +61,7 @@ python scripts/evaluate_recall.py --fixture tests/fixtures/recall_experience
 
 새 fixture의 결과는 합성 자료에서의 출처 검색·근거 노출 평가다. 개인 볼트의
 정확도, 최종 답변의 보류, 실제 기억 오염 공격 성공률과 작업 성과는 별도로
-평가한다. 세부 필드와 분모는 [경험 fixture 설명](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/tests/fixtures/recall_experience/README.md)을 따른다.
+평가한다. 세부 필드와 분모는 [경험 fixture 설명](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/tests/fixtures/recall_experience/README.md)을 따른다.
 
 ## 설계 참고
 

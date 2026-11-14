@@ -127,7 +127,7 @@ letters, and a few Armenian, Hebrew and Syriac marks. U+119E is deliberately not
 blocked, a Korean tailoring of its default ALetter value: it is the NFKC form of
 U+318D (`ㆍ`), which Korean text writes in place of a middle dot, so
 `XYㆍ가나다전기` keeps an edge like `XY·가나다전기`. The
-[subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/subject-boundary-20261030.md) records how far
+[subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/subject-boundary-20261030.md) records how far
 the class is from the Word_Break table.
 
 Kept limits:
@@ -208,8 +208,8 @@ before re-promoting. Rollback also requires matching engine/certificate versions
 This implementation does not update installed engines or certificates.
 The [subject left edge](#subject-left-edge) changed `vault_ssot.py` again in
 v0.34.0, so v0.34.0 has its own `checker_sha256`; the
-[v0.34.0 release note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/releases/v0.34.0.md#하위호환업그레이드) and the
-[subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/subject-boundary-20261030.md) state it with
+[v0.34.0 release note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/releases/v0.34.0.md#하위호환업그레이드) and the
+[subject boundary note](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/subject-boundary-20261030.md) state it with
 the same coordination.
 
 Focused validation uses synthetic temporary vaults:

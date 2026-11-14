@@ -9,8 +9,8 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
 2026-10-20 API 조회에서 `"enabled": true`, `"enforced_by_owner": false`였다. v0.23.0과 v0.24.0은
 불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0도 2026-10-19
-게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.48.0의 최종 소스·CI·ZIP/blob 대조와
-재빌드 명세는 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.48.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.49.0의 최종 소스·CI·ZIP/blob 대조와
+재빌드 명세는 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.49.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
 `post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산
@@ -175,7 +175,7 @@ try {
 - PowerShell 형식은 v0.25.0 태그로 실행해 아래 UTC0 측정과 같은 SHA-256을 얻었고, 실행 뒤 `$env:TZ`는 원래대로
   비어 있었다(2026-10-20, 1회).
 
-같은 일을 하는 선택형 스크립트 [`scripts/release_rebuild.py`](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/scripts/release_rebuild.py)도 있다. 표준
+같은 일을 하는 선택형 스크립트 [`scripts/release_rebuild.py`](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/scripts/release_rebuild.py)도 있다. 표준
 라이브러리만 쓰고 네트워크를 쓰지 않는다. 위 명령을 그대로 실행하되 `TZ`는 git 하위 프로세스의 환경 사본에만
 넣고, 이미 있는 출력 파일은 덮어쓰지 않는다. 끝나면 아래 `rebuild_spec` JSON을 출력한다.
 
@@ -295,7 +295,7 @@ v0.22.1까지 게시한 GitHub 릴리스 23개는 불변 릴리스로 게시되�
 `No attestations for tag v0.22.1`과 함께 종료 코드 1로 끝났다(2026-10-17 측정). 이 릴리스들은 `SHA256SUMS`
 대조만 할 수 있다.
 
-이전 검증 기록([v0.20.0](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.20.0.md)·[v0.21.0](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.21.0.md)·[v0.22.0](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.22.0.md)·[v0.22.1](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.22.1.md))에
+이전 검증 기록([v0.20.0](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.20.0.md)·[v0.21.0](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.21.0.md)·[v0.22.0](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.22.0.md)·[v0.22.1](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.22.1.md))에
 쓴 "immutable"은 커밋·트리 해시와 `SHA256SUMS`로 고정한 소스·자산 내용을 뜻한다. GitHub 불변 릴리스
 기능을 뜻하지 않는다.
 
@@ -375,7 +375,7 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
   기본으로는 원격 변조를 확인하지 않고 배포본의 코드를 실행한다고 설명하고, 해시 확인 모드(`--require-hashes`)와
   소스 배포본 금지(`--only-binary :all:`)를 함께 쓰라고 안내한다. 이 모드에서는 모든 요구사항과 의존성에 해시가
   있어야 하고 버전을 `==` 등으로 고정해야 하며, 파일에 적히지 않은 의존성은 오류가 된다(2026-10-19에 읽은 pip 26.2.1
-  문서의 설명). [`ci/requirements-audit.txt`](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/ci/requirements-audit.txt)는 pip-audit 2.10.1과 그 의존성을 합친
+  문서의 설명). [`ci/requirements-audit.txt`](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/ci/requirements-audit.txt)는 pip-audit 2.10.1과 그 의존성을 합친
   29개 패키지를 고정하고, 각 고정 버전에 대해 PyPI에 올라온 파일 전체의 sha256 362개를 담는다. 해시가 맞지 않는
   파일, 목록에 없는 의존성, 소스 배포본은 설치하지 않는다. 설치가 실패하면 감사 단계를 건너뛰고 경고 두 개(설치,
   pip-audit)가 남는다.
@@ -426,7 +426,7 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
 
 1. **기준 시각을 정한다.** 갱신하는 날(UTC)의 14일 전 00:00Z를 `CUTOFF`로 쓴다. 지금 파일은 2026-10-18(UTC)에
    만들었고 `CUTOFF`는 `2026-10-04T00:00:00Z`다. 이보다 늦게 PyPI에 올라온 버전은 고르지 않는다(게시 14일 유예).
-   pip-audit을 올리려면 PyPI 게시일이 `CUTOFF`보다 앞선 버전으로 [`ci/requirements-audit.in`](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/ci/requirements-audit.in)의
+   pip-audit을 올리려면 PyPI 게시일이 `CUTOFF`보다 앞선 버전으로 [`ci/requirements-audit.in`](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/ci/requirements-audit.in)의
    고정값을 바꾼다.
 2. **저장소 밖 새 가상환경에 도구를 설치한다.** `VENV`는 저장소 밖 경로다. Windows에서는 `VENV/bin/` 대신
    `VENV\Scripts\`를 쓴다.

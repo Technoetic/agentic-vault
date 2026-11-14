@@ -7,8 +7,8 @@ v0.29.0은 한국어 평가의 응답률·조용한 오류율(`--answer-rates`)�
 [언어 매트릭스·Kiwi/qmd 비교·Windows 편집 보강](evaluation-stability.md)은
 기존 평가를 선택해서 확장한다. 요청·설명 언어와 문자열 보존 지시를 비교하며, 선택한 모델
 응답의 실패 진단과 알려진 인증값 정제를 함께 기록한다. 실제 관측과 최종 릴리스 검증은
-[v0.29.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.29.0.md), [v0.26.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.26.0.md), [v0.25.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.25.0.md)과
-[v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/v0.24.0.md)에서 구분한다.
+[v0.29.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.29.0.md), [v0.26.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.26.0.md), [v0.25.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.25.0.md)과
+[v0.24.0 검증 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/v0.24.0.md)에서 구분한다.
 기존 설치 캐시 갱신은 별도 작업이다.
 
 기존 회상 평가는 **찾은 출처와 반환한 근거**를 측정한다. 추가 평가 도구는
@@ -205,7 +205,7 @@ fixture 측정이다. recall 행은 CI와 같은 옵션에 `--render-matched`만
 - 시간에 민감한 질문이 적어 판정 지표별 0이 아닌 쌍이 0~4개다. 결정 규칙이 기전 효과를 가려내려면
   0이 아닌 쌍이 지표마다 최소 6개 필요하다(최소 p 2^(1−6)=0.031).
 - 읽는 모델이 없으므로 표시(렌더링) 자체가 답변에 주는 효과는 측정하지 않는다.
-- 측정 기록: [render-matched-20261017.md](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/render-matched-20261017.md)
+- 측정 기록: [render-matched-20261017.md](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/render-matched-20261017.md)
 
 ## 소표본 통계: 정확 부호 검정과 비율 상한
 
@@ -1081,7 +1081,7 @@ Qwen3-Coder 파서를 고르고, 파싱에 실패하면 표지가 assistant 본�
 `--slot-snapshots`)과 행렬의 반복 일치는 [측정 조건 기록](evaluation-stability.md)에 있다.
 
 2026-10-16 영수증의 재분류와 2026-10-17 재실행 결과는
-[도구 호출 진단 기록](https://github.com/Technoetic/agentic-vault/blob/v0.48.0/docs/verification/tool-call-diagnosis-20261017.md)에 있다.
+[도구 호출 진단 기록](https://github.com/Technoetic/agentic-vault/blob/v0.49.0/docs/verification/tool-call-diagnosis-20261017.md)에 있다.
 
 ## 연구와 결과 해석
 
