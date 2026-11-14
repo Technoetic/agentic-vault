@@ -2,8 +2,9 @@
 
 The shared skill, `/vault-session-start`, `/vault-lint` and the AGENTS stub carry the exact replacements of the
 v0.48.0 specification (section 3.6), and `skills/agentic-vault/references/antigravity.md` says how the generated
-Antigravity package is installed and used and what was not checked. Reverting the replacements gives back the
-v0.47.0 skill and stub byte for byte, so nothing written for Claude Code or Codex was removed.
+Antigravity package is installed and used and what was not checked. Reverting the published v0.48.0 replacements
+gives back the published v0.47.0 skill and stub byte for byte. The current skill additionally permits the explicit
+v0.49.0 task-workflow routing section; removing only that section must preserve the complete v0.48.0 skill.
 
 No Python function in the repository builds a vault's AGENTS.md: the agent follows `/vault-upgrade` step 1-1 (and
 `/vault-init` step 4-3). `build_vault_agents_md` below follows that text, and the size test bounds the result.
@@ -15,6 +16,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 
@@ -141,6 +144,24 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _tagged_skill(tag: str) -> str:
+    # Match the released-period differential tests: archive/shallow checkouts may lack Git history.
+    # CI fetches tags (fetch-depth: 0); these historical comparisons never fetch or use network data.
+    git = shutil.which("git")
+    if git is None:
+        raise unittest.SkipTest(f"cannot compare with {tag}: git is not installed")
+    try:
+        completed = subprocess.run(
+            [git, "show", f"refs/tags/{tag}:skills/agentic-vault/SKILL.md"],
+            cwd=ROOT, capture_output=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise unittest.SkipTest(f"cannot compare with {tag}: git show failed ({type(exc).__name__})") from None
+    if completed.returncode:
+        raise unittest.SkipTest(f"cannot compare with {tag}: the tag is not in this checkout (a shallow clone has no tags)")
+    return completed.stdout.decode("utf-8").replace("\r\n", "\n")
+
+
 def _section(text: str, heading: str) -> str:
     """From `heading` to the next heading of the same or a higher level."""
     level = len(heading) - len(heading.lstrip("#"))
@@ -214,15 +235,44 @@ class SkillTextTests(unittest.TestCase):
     def test_reference_is_linked_three_times(self) -> None:
         self.assertEqual(self.text.count(REFERENCE_LINK), 3)
 
-    def test_claude_code_and_codex_texts_are_kept(self) -> None:
-        # Reverting exactly the six replacements gives back the v0.47.0 file: nothing else changed or went away.
-        text = _replace_once(self, self.text, DESCRIPTION_NEW, DESCRIPTION_OLD)
+    def test_published_v048_additions_preserve_v047_skill_bytes(self) -> None:
+        # The old whole-file hash proves the v0.48.0 migration, not that the shared skill can never gain a route.
+        # Keep that exact guarantee against preserved release blobs rather than hashing today's later additions.
+        historical = _tagged_skill("v0.47.0")
+        self.assertEqual(_sha256(historical), V0470_SKILL_SHA256)
+        text = _replace_once(self, _tagged_skill("v0.48.0"), DESCRIPTION_NEW, DESCRIPTION_OLD)
         text = _replace_once(self, text, ANTIGRAVITY_BULLET + "\n", "")
         text = _replace_once(self, text, TIERS_NEW, TIERS_OLD)
         text = _replace_once(self, text, NOTATION_APPENDIX, "")
         text = _replace_once(self, text, CAP_NEW, CAP_OLD)
         text = _replace_once(self, text, "\n" + REFERENCE_BULLET, "")
+        self.assertEqual(text, historical)
         self.assertEqual(_sha256(text), V0470_SKILL_SHA256)
+
+    def test_current_skill_only_adds_task_workflow_routing_to_v048(self) -> None:
+        route = _section(self.text, "## 선택형 작업 명세와 검토")
+        # v0.49.0 intentionally adds one opt-in route; every pre-existing byte, including host-specific text,
+        # must still equal v0.48.0. Unknown removals or additions outside this section continue to fail.
+        self.assertEqual(_replace_once(self, self.text, route, ""), _tagged_skill("v0.48.0"))
+
+    def test_task_workflow_routes_are_opt_in_and_data_only(self) -> None:
+        # Current instruction checks run even without release history, and target only the new routing section.
+        heading = "## 선택형 작업 명세와 검토"
+        self.assertEqual(self.text.count(heading + "\n"), 1)
+        route = _section(self.text, heading)
+        for literal in ("[작업 명세](../../docs/task-contracts.md)",
+                        "`scripts/vault_task_contracts.py` capture / inspect / revise",
+                        "[단계별 검증](../../docs/staged-evaluation.md)",
+                        "`scripts/vault_staged_evaluation.py` evaluate",
+                        "[개선 반복](../../docs/improvement-cycles.md)",
+                        "`scripts/vault_improvement_cycles.py` audit",
+                        "명시적으로 기록할 때", "준비 상태는 실행 승인이 아니다",
+                        "자동 실행·모델 호출·게시·권한 부여를 하지 않는다",
+                        "이미 확정된 단순 작업에 새 인터뷰를 강제하지 않는다"):
+            with self.subTest(route_literal=literal):
+                self.assertIn(literal, route)
+
+    def test_claude_code_and_codex_texts_are_kept(self) -> None:
         for literal in (CODEX_BULLET, "Claude Code의 `/vault-*` 진입점은 그대로 사용한다",
                         "Codex는 `$agentic-vault:agentic-vault session-start`",
                         "Claude Code 훅 출력 10,000자 — 엔진은 9,500자로 묶는다",
