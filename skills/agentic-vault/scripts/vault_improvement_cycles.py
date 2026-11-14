@@ -259,10 +259,16 @@ def audit(vault, input_path):
     return output
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        print(json.dumps({'ok': False, 'error': 'invalid_cli_arguments'}))
+        self.exit(2)
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _ArgumentParser(description=__doc__)
     parser.add_argument('--vault', default='.')
-    commands = parser.add_subparsers(dest='command', required=True)
+    commands = parser.add_subparsers(dest='command', required=True, parser_class=_ArgumentParser)
     command = commands.add_parser('audit', help='observe an explicit bounded report history')
     command.add_argument('--input', required=True)
     args = parser.parse_args(argv)

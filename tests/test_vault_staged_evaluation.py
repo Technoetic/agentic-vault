@@ -410,6 +410,49 @@ class StagedEvaluationTests(unittest.TestCase):
         with self.assertRaises(staged.EvaluationError):
             self.evaluate()
 
+    def test_cli_argument_errors_are_content_free_json_without_stderr(self):
+        marker = 'PRIVATE_CALLER_MARKER_9182'
+        script = str(SCRIPTS / 'vault_staged_evaluation.py')
+        base = ['--vault', str(self.vault), 'evaluate', '--input', 'input/staged.json']
+        cases = [
+            [*base, '--unknown', marker],
+            [*base, '--' + marker],
+            ['--vault', str(self.vault), marker],
+            ['--vault', str(self.vault), 'evaluate'],
+            ['--vault', str(self.vault), 'evaluate', '--input'],
+            ['--vault'],
+            ['evaluate', '--input', marker],
+            ['--vault', str(self.vault), 'evaluate', '--input', '--' + marker],
+        ]
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run([sys.executable, script, *arguments],
+                                        capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn(marker, result.stdout + result.stderr)
+                self.assertEqual(result.stderr, '')
+                self.assertEqual(json.loads(result.stdout), {
+                    'version': 1, 'ok': False, 'status': 'error',
+                    'error': 'invalid_cli_arguments', 'authority': 'data_only',
+                })
+        bad_value = subprocess.run(
+            [sys.executable, script, '--vault', marker, 'evaluate', '--input', marker],
+            capture_output=True, encoding='utf-8', timeout=30)
+        self.assertEqual(bad_value.returncode, 2)
+        self.assertNotIn(marker, bad_value.stdout + bad_value.stderr)
+        self.assertEqual(bad_value.stderr, '')
+        self.assertEqual(json.loads(bad_value.stdout)['status'], 'error')
+
+    def test_cli_help_remains_conventional(self):
+        for arguments in (['--help'], ['--vault', str(self.vault), 'evaluate', '--help']):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPTS / 'vault_staged_evaluation.py'), *arguments],
+                    capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stderr, '')
+                self.assertIn('usage:', result.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

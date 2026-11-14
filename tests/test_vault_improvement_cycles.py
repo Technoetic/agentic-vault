@@ -329,6 +329,28 @@ class ImprovementCyclesTests(unittest.TestCase):
         self.assertEqual(child.stderr, '')
         self.assertFalse(json.loads(child.stdout)['ok'])
 
+    def test_cli_argument_errors_are_json_without_private_argument_echo(self):
+        marker = 'PRIVATE_CALLER_MARKER_9182'
+        arguments = [
+            ['--vault', '.', 'audit', '--input', 'input/example.json', '--unknown', marker],
+            ['--vault', '.', 'audit', '--input', 'input/example.json', '--unknown=' + marker],
+            ['--vault', marker, 'audit'],
+            ['--vault', '.', 'audit', '--input'],
+            ['--vault', '.', marker],
+        ]
+        command = [sys.executable, str(SCRIPTS / 'vault_improvement_cycles.py')]
+        for argv in arguments:
+            with self.subTest(argv=argv):
+                child = subprocess.run(command + argv, capture_output=True, text=True, timeout=30)
+                self.assertEqual(child.returncode, 2)
+                self.assertEqual(child.stderr, '')
+                self.assertEqual(json.loads(child.stdout), {'ok': False, 'error': 'invalid_cli_arguments'})
+                self.assertNotIn(marker, child.stdout + child.stderr)
+        help_result = subprocess.run(command + ['--help'], capture_output=True, text=True, timeout=30)
+        self.assertEqual(help_result.returncode, 0)
+        self.assertIn('usage:', help_result.stdout)
+        self.assertEqual(help_result.stderr, '')
+
 
 if __name__ == '__main__':
     unittest.main()

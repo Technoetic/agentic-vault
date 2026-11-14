@@ -387,14 +387,20 @@ def evaluate(vault, report_path):
             'issues': issues, 'limitations': list(LIMITATIONS)}
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse diagnostics can contain arbitrary caller argument values.
+        raise EvaluationError('invalid_cli_arguments')
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _ArgumentParser(description=__doc__)
     parser.add_argument('--vault', required=True, type=Path)
-    commands = parser.add_subparsers(dest='command', required=True)
+    commands = parser.add_subparsers(dest='command', required=True, parser_class=_ArgumentParser)
     command = commands.add_parser('evaluate', help='inspect staged review data without execution')
     command.add_argument('--input', required=True, dest='report_path')
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         result = evaluate(args.vault, args.report_path)
         print(evidence.encode(result).decode('ascii'))
         return 0 if result['ok'] else 1
