@@ -5,6 +5,15 @@ import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 class TaskWorkflowReleaseTests(unittest.TestCase):
+    def test_current_upgrade_and_result_links_do_not_point_to_prior_release(self):
+        security=(ROOT/'SECURITY.md').read_text(encoding='utf-8')
+        summary=next(line for line in security.splitlines() if line.startswith('- 보안 수정 대상은 최신'))
+        self.assertIn('0.48.0 이하는 0.49.0으로 갱신한다.',summary)
+        self.assertIn('0.46.0부터 0.49.0까지',summary)
+        readme=(ROOT/'README.md').read_text(encoding='utf-8')
+        current=next(line for line in readme.splitlines() if line.startswith('현재 버전은 **v'))
+        self.assertIn('[이번 변경·검증 범위](docs/releases/v0.49.0.md)',current)
+        self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.48.0.md)',current)
     def test_current_manifests_and_healthcheck_identify_release(self):
         for name in ('.claude-plugin/plugin.json','.codex-plugin/plugin.json'):
             self.assertEqual(json.loads((ROOT/name).read_text(encoding='utf-8'))['version'],'0.49.0')
