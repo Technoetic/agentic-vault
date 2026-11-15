@@ -3506,6 +3506,19 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("healthcheck version/help information", record)
         self.assertIn("healthcheck engine stamp (line 2", record)
 
+    def test_readme_and_codex_description_name_only_local_branches_and_tags(self) -> None:
+        # The README summaries and the Codex description carry the same local-only boundary
+        # (final-candidate check, minor): section 14c consults refs/heads and refs/tags only.
+        readme = _folded((REPO_ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertNotIn("detached HEAD no branch or tag contains", readme)
+        self.assertIn("detached HEAD no local branch or tag contains", readme)
+        self.assertNotIn("어느 분기·태그에도", readme)
+        self.assertEqual(readme.count("어느 로컬 분기·태그에도"), 2)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"] if "interface" in manifest else manifest["longDescription"]
+        self.assertNotIn("no branch or tag contains", description)
+        self.assertIn("no local branch or tag contains", description)
+
     def test_security_and_codex_name_only_local_branches_and_tags(self) -> None:
         # Section 14c consults refs/heads and refs/tags only (fix1 check, minor 2).
         security = _folded((REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8"))
