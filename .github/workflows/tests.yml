@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# v0.50.0: a newer commit on the same pull request cancels that pull request's
+# older run. Every other run (a push to master, a tag or a candidate branch, and
+# a manual run) gets a group of its own, so the release gates on master and tags
+# are never cancelled or queued behind another run.
+concurrency:
+  group: tests-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unittest:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
