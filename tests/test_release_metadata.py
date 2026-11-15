@@ -3441,3 +3441,61 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
                 if any("engine=0.50.0" in line for line in head):
                     stamped.add(path.relative_to(REPO_ROOT).as_posix())
         self.assertEqual(stamped, self.DECLARED_STAMPS)
+
+    # First independent source review of v0.50.0 (findings B1, F2, F4 and M1).
+    def test_the_patch_file_limit_names_only_linked_trees_in_the_vault_folder(self) -> None:
+        # vault_commit.py checks the location of a patch file only when it lies in the vault, so a
+        # linked tree elsewhere is not detected (finding B1).
+        guide = _folded(_section((REPO_ROOT / "docs/concurrent-commits.md").read_text(encoding="utf-8"),
+                                 "## Landing work from a linked worktree"))
+        changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
+        for name, text, present, stale in (
+                ("guide", guide,
+                 ("Paths inside a linked tree that sits in the vault folder (such as `.claude/worktrees/<name>`) "
+                  "are refused, the patch file too; a linked tree elsewhere is not detected.",
+                  "keep the patch file in the main tree or a temporary folder"),
+                 "paths inside a linked tree are refused, the patch file too"),
+                ("release", changes,
+                 ("볼트 폴더 안에 있는 연결 작업 트리(예: `.claude/worktrees/<이름>`) 안의 경로는 패치 파일까지 "
+                  "거부되지만, 다른 곳에 있는 연결 작업 트리는 감지되지 않는다.",
+                  "패치 파일은 본 트리나 임시 폴더에 둔다"),
+                 "(연결 작업 트리 안의 경로는 패치 파일까지 거부된다)")):
+            for literal in present:
+                with self.subTest(text=name, literal=literal[:30]):
+                    self.assertIn(literal, text)
+            with self.subTest(text=name, stale=stale[:30]):
+                self.assertNotIn(stale, text)
+
+    def test_no_text_says_help_gains_only_one_line(self) -> None:
+        # argparse adds the option to the usage block and one option line and realigns the six
+        # existing option lines (finding F2).
+        readme = README.read_text(encoding="utf-8")
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        places = (
+            ("record", _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"),
+                                        "## Default-result comparison")), "gains one line"),
+            ("release", _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")),
+             "줄이 하나 늘어난다"),
+            ("readme_ko", _folded(_section(readme, "## v0.50.0 — 낡은 PR CI 실행 취소와 연결 작업 트리 HEAD 확인")),
+             "`--help` 한 줄"),
+            ("readme_en", _folded(_section(readme,
+                                           "## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs")),
+             "one `--help` line"),
+            ("codex_long", codex["interface"]["longDescription"], "one help line"),
+        )
+        for name, text, stale in places:
+            with self.subTest(text=name):
+                self.assertNotIn(stale, text)
+                self.assertTrue("realign" in text or "다시 정렬" in text, name)
+
+    def test_codex_long_description_carries_the_checker_range_to_v0500(self) -> None:
+        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        long_description = codex["interface"]["longDescription"]
+        self.assertIn("unchanged from v0.46.0 through v0.50.0.", long_description)
+        self.assertNotIn("through v0.49.0", long_description)
+
+    def test_release_note_states_that_remote_tracking_refs_are_not_consulted(self) -> None:
+        boundaries = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 알려진 경계"))
+        self.assertIn("원격 추적 참조(`refs/remotes/*`)는 보지 않으므로", boundaries)
+        record = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Boundaries"))
+        self.assertIn("remote-tracking refs (`refs/remotes/*`) are not consulted", record)

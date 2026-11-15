@@ -180,9 +180,53 @@ class WorktreeHeadTests(unittest.TestCase):
         self.assertEqual(self.totals(report), self.totals(plain_report))
 
     def test_staged_mode_refuses_the_flag(self) -> None:
+        # v0.49.0 also exits 2 on the unknown option, so the explicit refusal is what is pinned.
         result, _report = self.check("--staged", FLAG)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn(FLAG, result.stderr)
+        self.assertIn("full 모드 전용", result.stderr)
+        self.assertNotIn("unrecognized arguments", result.stderr)
+
+    def test_a_vault_in_a_repository_subfolder_prints_the_main_tree_absolute(self) -> None:
+        # Only the vault's own tree prints as '.'; a main tree outside the vault prints its
+        # absolute path, and a linked tree inside the vault its vault-relative path.
+        repository = self.root / "repository"
+        repository.mkdir()
+        vault = repository / "vault"
+        self.vault.rename(vault)
+        (vault / ".git").rename(repository / ".git")
+        git(repository, "add", "-A")
+        git(repository, "commit", "-q", "-m", "move the vault into a subfolder")
+        git(repository, "checkout", "-q", "--detach")
+        (repository / "main.txt").write_text("work in the main tree\n", encoding="utf-8", newline="")
+        git(repository, "add", "main.txt")
+        git(repository, "commit", "-q", "-m", "main tree work")
+        main_sha = git(repository, "rev-parse", "HEAD").strip()
+        linked = vault / ".claude" / "worktrees" / "d1"
+        git(repository, "worktree", "add", "-q", "--detach", str(linked))
+        (linked / "work.txt").write_text("work in a linked tree\n", encoding="utf-8", newline="")
+        git(linked, "add", "work.txt")
+        git(linked, "commit", "-q", "-m", "linked tree work")
+        linked_sha = git(linked, "rev-parse", "HEAD").strip()
+        _result, report = self.check(FLAG, vault=vault)
+        self.assertEqual(self.section(report), [
+            HEADER.format(count=2),
+            ENTRY.format(path=repository.as_posix(), short=main_sha[:12]),
+            ENTRY.format(path=".claude/worktrees/d1", short=linked_sha[:12]),
+        ])
+        self.assertNotIn("\\", repository.as_posix())
+
+    def test_a_commit_only_a_remote_tracking_ref_holds_is_listed(self) -> None:
+        # Section 14c consults refs/heads and refs/tags only.
+        tree = self.root / "remote tree"
+        sha = self.detached_tree(tree)
+        git(self.vault, "update-ref", "refs/remotes/origin/side", sha)
+        self.assertIn("origin/side", git(self.vault, "branch", "-r", "--contains", sha))
+        _result, report = self.check(FLAG)
+        self.assertEqual(self.section(report), [
+            HEADER.format(count=1),
+            ENTRY.format(path=tree.as_posix(), short=sha[:12]),
+        ])
 
     def test_the_summary_carries_the_count_only_with_the_flag(self) -> None:
         self.detached_tree(self.root / "detached tree")
