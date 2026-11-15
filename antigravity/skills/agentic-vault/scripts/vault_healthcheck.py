@@ -28,6 +28,7 @@ exit 2로 끝난다.
   12  세션 종료 누락 의심 — handoff anchor와 git HEAD 커밋 거리 (관리성)
   14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
   14b 링크·정션 제외 — 따라가지 않은 링크 경로를 조용히 빼지 않고 보고 (관리성)
+  14c 분기·태그 밖 HEAD를 가진 연결 작업 트리 — --worktree-heads 때만 (관리성, 선택, v0.50.0)
       ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
   15  확장 경고 — 경고 전용 (관리성). 선택 키 sync_conflict_check·checkpoint_drift_check를
       켜면 동기화 충돌·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트도 여기에
@@ -42,13 +43,16 @@ exit 2로 끝난다.
 
 사용법:
   python vault_healthcheck.py [--vault <볼트 루트>] [--output <리포트 경로>] [--require-vault]
-                              [--json-summary]
+                              [--json-summary] [--worktree-heads]
   --vault  기본값: 환경변수 CLAUDE_PROJECT_DIR, 없으면 현재 디렉토리
   --output 기본값: vault-config.json 의 health_report (비어 있으면 00-meta/health-report.md)
   --require-vault  볼트 설정이 없으면 0 대신 2로 끝낸다
   --json-summary   full 모드에서 stdout 마지막 줄에 JSON 요약 한 줄을 더한다(건수만, 경로·노트
                    이름 없음; schema agentic-vault/healthcheck-summary/v1, status checked·
                    not_vault·vault_not_found·error). --staged와 함께 쓰면 인자 오류(exit 2).
+  --worktree-heads full 모드에서 등록된 작업 트리 가운데 detached HEAD를 어느 refs/heads/*·
+                   refs/tags/*도 포함하지 않는 것을 §14c에 적고 관리성 건수에 더한다(읽기 전용;
+                   --json-summary에 unreachable_worktree_heads). --staged와 함께 쓰면 인자 오류(exit 2).
 """
 from __future__ import annotations
 
@@ -855,6 +859,53 @@ def _git(vault: Path, *args: str) -> str | None:
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _worktree_display(vault: Path, raw: str) -> str:
+    """A worktree path for the report: vault-relative POSIX inside the vault ('.' for the
+    vault itself), otherwise absolute with forward slashes."""
+    try:
+        path = Path(raw).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return raw.replace("\\", "/")
+    try:
+        return path.relative_to(vault).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def scan_worktree_heads(vault: Path) -> tuple[int, list[str]]:
+    """§14c (opt-in --worktree-heads): registered worktrees whose detached HEAD no
+    refs/heads/* or refs/tags/* contains. Read-only; such a commit is lost once the
+    tree is removed and git prunes it. Returns (count, report lines). A git failure
+    gives one '(확인 실패)' line that is not counted, never an exception."""
+    listing = _git(vault, "worktree", "list", "--porcelain")
+    if listing is None:
+        return 0, ["- (확인 실패) git worktree list 실패 — 저장소 아님·git 없음·시간 초과"]
+    count, lines = 0, []
+    for block in listing.split("\n\n"):
+        fields: dict[str, str] = {}
+        for raw in block.splitlines():
+            key, _, value = raw.partition(" ")
+            fields.setdefault(key, value)
+        if "worktree" not in fields or "bare" in fields or "branch" in fields:
+            continue
+        if "detached" not in fields:
+            continue
+        display = _worktree_display(vault, fields["worktree"])
+        sha = fields.get("HEAD", "")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha):
+            lines.append(f"- (확인 실패) {display} — HEAD 값을 읽지 못함")
+            continue
+        holder = _git(vault, "for-each-ref", "--count=1", "--contains", sha,
+                      "--format=%(refname)", "refs/heads", "refs/tags")
+        if holder is None:
+            lines.append(f"- (확인 실패) {display} — git for-each-ref 실패")
+        elif not holder:
+            count += 1
+            lines.append(f"- {display} HEAD {sha[:12]} — 어느 분기·태그에도 없다. "
+                         "작업 트리를 지우기 전에 `git branch <이름> <sha>`로 고정한다.")
+    return count, lines
 
 
 def scan_anchor_drift(vault: Path, handoff_rel: str,
@@ -2397,9 +2448,13 @@ def main() -> int:
                     help="볼트 설정이 없으면 0 대신 2로 끝낸다")
     ap.add_argument("--json-summary", action="store_true",
                     help="full 모드 stdout 마지막 줄에 건수만 담은 JSON 요약 한 줄을 더한다")
+    ap.add_argument("--worktree-heads", action="store_true",
+                    help="연결 작업 트리 HEAD가 어느 분기·태그에도 없는지 확인한다(선택, 읽기 전용)")
     args = ap.parse_args()
     if args.json_summary and args.staged:
         ap.error("--json-summary는 --staged와 함께 쓸 수 없다(full 모드 전용)")
+    if args.worktree_heads and args.staged:
+        ap.error("--worktree-heads는 --staged와 함께 쓸 수 없다(full 모드 전용)")
 
     # The summary of a run that checks no notes; _main fills it as it returns.
     summary: dict[str, object] = {
@@ -2409,6 +2464,8 @@ def main() -> int:
         "complete": False, "extension_input_complete": False,
         "warning_promotion_active": False,
     }
+    if args.worktree_heads:
+        summary["unreachable_worktree_heads"] = 0
     rc = _main(args, summary)
     if args.json_summary:
         summary["exit_code"] = rc
@@ -2910,6 +2967,10 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
             extension_diagnostics.extend(drift_findings)
     promoted_count = sum(x["severity"] == "fatal" for x in extension_diagnostics)
 
+    # --- 섹션 14c: 분기·태그 밖 HEAD를 가진 연결 작업 트리 (선택, v0.50.0) ---------
+    worktree_head_count, worktree_head_lines = (
+        scan_worktree_heads(vault) if args.worktree_heads else (0, []))
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
@@ -2921,6 +2982,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
                     + len(unreadable)
                     + len(link_skipped) + len(linked_trees)
                     + len(extension_diagnostics)
+                    + worktree_head_count
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
@@ -3069,6 +3131,12 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
           or ["- 없음"]),
         "",
     ]
+    if args.worktree_heads:
+        lines += [
+            f"## 14c. 분기·태그 밖 HEAD를 가진 연결 작업 트리 — 관리성 ({worktree_head_count})",
+            *(worktree_head_lines or ["- 없음"]),
+            "",
+        ]
     if extension_diagnostics:
         lines += [
             f"## 15. Markdown warning extensions ({len(extension_diagnostics)})",
@@ -3119,6 +3187,8 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
         "extension_input_complete": extension_input_complete,
         "warning_promotion_active": any(level == "fatal" for level in policy_levels.values()),
     })
+    if args.worktree_heads:
+        summary["unreachable_worktree_heads"] = worktree_head_count
     return 1 if critical > 0 else 0
 
 

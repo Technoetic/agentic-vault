@@ -70,16 +70,16 @@ class WorktreeHeadTests(unittest.TestCase):
 
     @staticmethod
     def section(report: str) -> list[str]:
-        """The lines of section 14c up to the next blank line."""
-        lines = report.split("\n")
+        """The lines of section 14c up to the next blank line (the report may end lines with CRLF)."""
+        lines = report.splitlines()
         start = next(index for index, line in enumerate(lines) if line.startswith("## 14c. "))
-        end = lines.index("", start)
+        end = next((index for index in range(start, len(lines)) if not lines[index]), len(lines))
         return lines[start:end]
 
     @staticmethod
     def totals(report: str) -> tuple[int, int]:
         """(관리성 total, 총 이슈) from the report's count line."""
-        line = next(line for line in report.split("\n") if line.startswith("- 검사 노트 수:"))
+        line = next(line for line in report.splitlines() if line.startswith("- 검사 노트 수:"))
         total = int(line.split("총 이슈: **")[1].split("**")[0])
         managed = int(line.split(TOTAL)[-1].rstrip(")"))
         return managed, total
@@ -112,7 +112,7 @@ class WorktreeHeadTests(unittest.TestCase):
     def test_the_section_follows_section_14b(self) -> None:
         self.detached_tree(self.root / "detached tree")
         _result, report = self.check(FLAG)
-        headings = [line for line in report.split("\n") if line.startswith("## ")]
+        headings = [line for line in report.splitlines() if line.startswith("## ")]
         position = next(index for index, line in enumerate(headings) if line.startswith("## 14c. "))
         self.assertTrue(headings[position - 1].startswith("## 14b. "), headings)
 

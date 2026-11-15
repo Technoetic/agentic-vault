@@ -95,6 +95,17 @@ Differences from the default mode:
 
 **No automatic fallback.** A failed commit is reported and left for the caller.
 
+## Landing work from a linked worktree
+
+A linked worktree keeps a session's working files apart, but the vault's history is still the main branch, `master`, checked out in the shared main tree. Work done in a linked tree reaches it in these steps:
+
+1. Commit the work in the linked tree on a branch of its own (`git worktree add -b <name> <path>` or `git switch -c <name>` there), not on a detached HEAD.
+2. Land it on `master` from the shared main tree with this command. Copy each changed note into the main tree and commit it with `--path` and its sha256. Land lines of shared notes with `--own-lines`, and keep the patch file outside the linked tree: paths inside a linked tree are refused, the patch file too.
+3. Do not run `git merge` or `git cherry-pick` in the shared main tree. Both write the shared index that other sessions are using. `git merge` aborts while other sessions have staged changes, and this command refuses to commit while a merge is in progress.
+4. Before removing a linked tree, run `vault_healthcheck.py --worktree-heads` (section 14c of its report) or `git branch --contains <sha>` and `git tag --contains <sha>`. A commit on a detached HEAD that no branch or tag contains is lost once the tree is removed and git prunes it; `git branch <name> <sha>` keeps it.
+
+Backup snapshots skip registered linked worktree copies inside the vault ([linked worktree copies](hardening.md#linked-worktree-copies-and-deny-zones)), so uncommitted work in a linked tree is not in a snapshot either.
+
 ## Measured conditions
 
 The numbers here measure git commands, not this tool, and they set its design and default limit. All are from synthetic repositories on Git for Windows 2.55.0.windows.3, Python 3.12.10 and 32 logical CPUs, in 187 runs with 8,112 commit attempts. Writers committed with 0 to 50 ms between commits, which is an extreme load, so the rates describe that load and not the frequency in real sessions. Items marked sequential do not depend on load.
