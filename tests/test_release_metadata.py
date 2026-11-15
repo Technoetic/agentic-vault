@@ -3499,3 +3499,18 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("원격 추적 참조(`refs/remotes/*`)는 보지 않으므로", boundaries)
         record = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Boundaries"))
         self.assertIn("remote-tracking refs (`refs/remotes/*`) are not consulted", record)
+
+    def test_verification_record_names_the_engine_stamp_not_a_version_output(self) -> None:
+        # The healthcheck prints no version; only its line-2 engine stamp moves (fix1 check, minor 1).
+        record = _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"), "## Default-result comparison"))
+        self.assertNotIn("healthcheck version/help information", record)
+        self.assertIn("healthcheck engine stamp (line 2", record)
+
+    def test_security_and_codex_name_only_local_branches_and_tags(self) -> None:
+        # Section 14c consults refs/heads and refs/tags only (fix1 check, minor 2).
+        security = _folded((REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8"))
+        codex = _folded((REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8"))
+        for name, text in (("SECURITY.md", security), ("docs/codex.md", codex)):
+            with self.subTest(file=name):
+                self.assertNotIn("detached HEAD no branch or tag contains", text)
+                self.assertIn("detached HEAD no local branch or tag contains", text)
