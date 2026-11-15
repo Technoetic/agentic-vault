@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.49.0"
-EXPECTED_PUBLIC_REF = "0.49.0"
+EXPECTED = "0.50.0"
+EXPECTED_PUBLIC_REF = "0.50.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.49.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.49.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.50.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.50.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.49.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.50.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -3210,7 +3210,8 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
         self.assertIn(self.ENGLISH, headings)
-        self.assertEqual(headings[0], "## v0.49.0 — source-aware task workflows")
+        self.assertIn("## v0.49.0 — source-aware task workflows", headings)
+        self.assertEqual(headings[0], "## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs")
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3223,7 +3224,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3255,7 +3256,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.48.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.49.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3360,3 +3361,83 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn('vault_healthcheck.py" --vault "<볼트 루트>"', _section(lint, "## 1. 검증 엔진 실행"))
         self.assertNotIn("`--vault` 없이 실행한", premise)
         self.assertIn('- 검증 엔진이 "볼트 아님"을 출력하면(exit 0), 여기가 볼트가 아니라는 사실을', premise)
+
+
+class V0500ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.50.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.50.0.md"
+    TITLE = "# v0.50.0 — 낡은 PR CI 실행 취소와 연결 작업 트리 HEAD 확인"
+    SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증",
+                "## 연구 출처와 기존 기능의 차이", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.50.0`이다."
+    CERTIFICATE_SENTENCE = (
+        "인증서가 묶는 일곱 파일은 v0.49.0과 같아 v0.46.0 이후 인증서는 실제 바이트가 같은 경우 계속 유효하다. "
+        "v0.45.1 이하와 오갈 때는 [v0.46.0 업그레이드 안내](v0.46.0.md#하위호환업그레이드)를 따른다."
+    )
+    RECORD_TITLE = "# v0.50.0 verification contract"
+    RECORD_SECTIONS = ("## Scope", "## Feature evidence", "## Default-result comparison",
+                       "## Required release gates", "## Boundaries")
+    SOURCES = (
+        "https://www.youtube.com/watch?v=iysCcCRKZA4",
+        "https://www.anthropic.com/research/redesigning-source-control",
+        "https://openai.com/index/scaling-git-at-openai/",
+        "https://github.blog/engineering/infrastructure/inside-githubs-new-git-storage-architecture/",
+    )
+    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+
+    def test_release_note_title_and_sections_are_in_order(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], self.TITLE)
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+
+    def test_release_note_states_the_install_ref_and_the_unchanged_certificate(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        upgrade = _section(text, "## 하위호환·업그레이드")
+        self.assertIn(self.INSTALL_REF, upgrade)
+        self.assertIn(self.CERTIFICATE_SENTENCE, _folded(upgrade))
+        self.assertIn("healthcheck만 `engine=0.50.0`으로 이동하며 기존 규칙·어댑터 스탬프는 유지한다.", upgrade)
+        self.assertIn(f"`{CHECKER_SHA256_V0460}` 그대로다.", upgrade)
+
+    def test_release_note_names_the_default_changes(self) -> None:
+        defaults = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경"))
+        for literal in ("`--worktree-heads` 줄", "설치한 플러그인의 동작이 아니다",
+                        "그 밖에는 새 플래그 없이 바뀌는 결과가 없다."):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, defaults)
+
+    def test_release_note_cites_the_four_sources(self) -> None:
+        sources = _section(self.RELEASE.read_text(encoding="utf-8"), "## 연구 출처와 기존 기능의 차이")
+        for url in self.SOURCES:
+            with self.subTest(url=url):
+                self.assertIn(f"]({url})", sources)
+        self.assertIn("Scion·Pando", sources)
+        self.assertIn("이전 저장소 문서는 이 네 출처를 인용하지 않았다", _folded(sources))
+
+    def test_verification_title_sections_and_fourteen_gates(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], self.RECORD_TITLE)
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        gates = _section(text, "## Required release gates")
+        numbers = [int(line.split(".", 1)[0]) for line in gates.splitlines() if line[:1].isdigit()]
+        self.assertEqual(numbers, list(range(1, 15)))
+        for literal in ("nine OS/Python unit and two stateful required CI successes", "push only the tag",
+                        "Update Reference Atlas", "Publish immutable Latest", "Never rewrite a public tag."):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, gates)
+        self.assertIn(CHECKER_SHA256_V0460, _section(text, "## Default-result comparison"))
+
+    def test_v0500_moves_only_the_healthcheck_stamp(self) -> None:
+        stamped = set()
+        for top in ("assets", "hooks", "skills"):
+            for path in (REPO_ROOT / top).rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    head = path.read_text(encoding="utf-8-sig").splitlines()[:5]
+                except UnicodeDecodeError:
+                    continue
+                if any("engine=0.50.0" in line for line in head):
+                    stamped.add(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(stamped, self.DECLARED_STAMPS)
