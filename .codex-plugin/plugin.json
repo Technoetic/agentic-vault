@@ -1,6 +1,6 @@
 {
   "name": "agentic-vault",
-  "version": "0.49.0",
+  "version": "0.50.0",
   "description": "Shared Markdown memory, bounded session context, source-attributed recall and verified backups for Codex and Claude Code.",
   "author": {
     "name": "전문준"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Agentic Vault",
     "shortDescription": "Shared file-based memory for Codex and Claude Code.",
-    "longDescription": "Release v0.49.0 adds opt-in source-aware task contracts, staged evaluation over existing native evidence, and a read-only bounded improvement-cycle observer. User-origin claims stay distinct from repository facts and host defaults; unresolved blocking questions and revised contracts cannot silently reuse old decisions. Failed or absent executed evidence cannot be overridden by model support. The observer reports success, regression, repeated failures and limit exhaustion without running commands, making model calls, publishing or granting authority. The generated antigravity/ package remains supported; no real agy conversation was run. The seven certificate-bound checker files are unchanged from v0.46.0 through v0.48.0. Python 3.10+ standard-library runtime. Publication does not upgrade active installations or vaults. For transitions from v0.45.1 or earlier, where checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again.",
+    "longDescription": "Release v0.50.0 adds an opt-in, read-only health-check flag, --worktree-heads, that lists registered linked worktrees whose detached HEAD no branch or tag contains, with a guide for landing linked-worktree work on master; the repository's own CI now cancels a pull request's older run when a newer commit arrives on that pull request, while master, tag, candidate-branch and manual runs are never cancelled. Without the new flag the health check output is unchanged apart from the version surfaces and one help line. The v0.49.0 task workflow helpers and the generated antigravity/ package remain supported; no real agy conversation was run. The seven certificate-bound checker files are unchanged from v0.46.0 through v0.49.0. Python 3.10+ standard-library runtime. Publication does not upgrade active installations or vaults. For transitions from v0.45.1 or earlier, where checker_sha256 changes: if warnings were promoted to fatal, revert them to warning, bring the Claude Code and Codex installations and a git vault's 00-meta/scripts engine copy to the same version (also when rolling back), regenerate the certificate there, then promote again.",
     "developerName": "Technoetic",
     "category": "Productivity",
     "capabilities": [

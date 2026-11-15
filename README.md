@@ -13,7 +13,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
-[![Version](https://img.shields.io/badge/v0.49.0-10B981?style=for-the-badge)](docs/releases/v0.49.0.md)
+[![Version](https://img.shields.io/badge/v0.50.0-10B981?style=for-the-badge)](docs/releases/v0.50.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -30,9 +30,22 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 
 </div>
 
+## v0.50.0 — 낡은 PR CI 실행 취소와 연결 작업 트리 HEAD 확인
+
+[최신 릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.50.0) · [이번 변경·검증 범위](docs/releases/v0.50.0.md)
+
+두 항목을 다룬다. 저장소 CI는 같은 풀 리퀘스트에 새 커밋이 오면 그 풀 리퀘스트의 이전 실행만 취소한다.
+master·태그·후보 분기 push와 수동 실행은 실행마다 묶음이 따로라 취소되거나 다른 실행 뒤에 줄 서지 않는다.
+이것은 저장소 CI의 변경이며 설치한 플러그인의 동작은 바뀌지 않는다. healthcheck에는 선택형·읽기 전용
+`--worktree-heads`가 생겨, 어느 분기·태그에도 담기지 않은 HEAD를 가진 연결 작업 트리를 관리성 섹션 14c로
+알린다. 플래그가 없으면 기본 보고서·`--staged`·`--json-summary`는 판 표면과 `--help` 한 줄 말고는 v0.49.0과 같다.
+
+- [동시 커밋 안내](docs/concurrent-commits.md): 연결 작업 트리 작업을 master에 반영하는 순서와 작업 트리를 지우기 전 확인.
+- [변경과 한계](docs/releases/v0.50.0.md), [검증 계약](docs/verification/v0.50.0.md). 인증서가 묶는 일곱 파일은 v0.49.0과 같다.
+
 ## v0.49.0 — 요구 출처·단계별 검증·개선 반복 관찰
 
-[최신 릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.49.0) · [이번 변경·검증 범위](docs/releases/v0.49.0.md)
+[릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.49.0) · [이번 변경·검증 범위](docs/releases/v0.49.0.md)
 
 사용자 요청과 확인 답변, 저장소 사실, 호스트가 추정한 기본값을 분리하는 선택형 작업 명세를 더한다.
 미확정 질문과 명세 개정 이력을 남기고 기존 요구사항·검증 근거 연결을 재사용한다. 단계별 검토는 실제
@@ -53,7 +66,7 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
 - 패키지에는 Antigravity CLI용 스킬 17개(공용 스킬 둘과 명령 15개를 같은 이름으로 바꾼 스킬)와 훅
   둘(SessionStart·Stop)이 들어 있다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
   폴더가 생성 결과와 같은지는 시험이 지킨다. 설치는 태그를 고정한 주소
-  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.49.0/antigravity`나 로컬 폴더로
+  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.50.0/antigravity`나 로컬 폴더로
   한다([Antigravity CLI 안내](docs/antigravity.md)).
 - 세션 시작 훅은 생성 패키지가 주는 `--host antigravity` 플래그가 있을 때만 훅 입력의 `cwd`·`workspacePaths`에서
   볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 도움말과 줄임 옵션 `--h`를 빼면 플래그 없는 기본 경로는
@@ -417,6 +430,18 @@ python scripts/evaluate_knowledge_evolution.py
 버전 근거·페이지 관리·LEDGER 평가에서 설계 아이디어를 참고한 범위 제한 구현이다.
 자세한 내용은 [이번 변경·검증 범위](docs/releases/v0.36.1.md)를 참고한다.
 
+## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs
+
+The repository's CI now cancels a pull request's older run when a newer commit arrives on that pull request.
+Pushes to master, tags and candidate branches and manual runs each get a group of their own, so they are neither
+cancelled nor queued; this concerns the repository's own CI, not the installed plugin. The health check gains an
+opt-in, read-only `--worktree-heads` flag (full mode only) that lists registered linked worktrees whose detached
+HEAD no branch or tag contains, in a new 관리성 section 14c, and the [concurrent commits guide](docs/concurrent-commits.md)
+explains how to land linked-worktree work on master. Without the flag the default report, `--staged` and
+`--json-summary` are unchanged apart from the version surfaces and one `--help` line. The seven certificate-bound
+checker files are unchanged from v0.49.0. See [release scope](docs/releases/v0.50.0.md) and
+[verification contract](docs/verification/v0.50.0.md). Active installations and vault copies are not upgraded by publication.
+
 ## v0.49.0 — source-aware tasks, staged evaluation and cycle observation
 
 Opt-in task contracts separate user requests and confirmed answers from repository facts and inferred defaults.
@@ -437,7 +462,7 @@ there. The package lives in `antigravity/` and is generated from the repository'
 hooks and engine scripts by [`scripts/build_antigravity_package.py`](scripts/build_antigravity_package.py);
 it holds 17 Antigravity CLI skills (the two shared skills and one per command) and two hooks, and a test
 keeps the committed folder equal to the generator's output. Install it from the release tag with
-`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.49.0/antigravity` or from a local
+`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.50.0/antigravity` or from a local
 copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit
 `--host antigravity` mode that finds the one vault named in the hook input and injects the handoff and
 hot note through `injectSteps`, and the checkpoint hook records Antigravity's `Stop` event; without the
@@ -1387,7 +1412,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.49.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.50.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 ├── antigravity/                       ← Antigravity CLI용 생성 패키지 (scripts/build_antigravity_package.py가 만든다, 손으로 고치지 않음)
@@ -1495,7 +1520,7 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.49.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.49.0.md)에 있다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.50.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다. 새 옵션 없이 바뀌는 결과는 [이번 변경·검증 범위](docs/releases/v0.50.0.md)에 있다. v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
 
 v0.34.0은 다음 기능을 더했고 v0.35.1에서도 유지한다. 명시적으로 켜는 기능 다섯 가지를 더하며, 모두 훅·CI·기본 실행에 연결하지 않는다. `check-support --bind-subject`는 첫 글자가 ASCII가 아닌 글자인 주어 앞에 [왼쪽 경계](docs/support-row-diagnostics.md#subject-left-edge)가 있어야 일치로 보므로, 주어 앞에 한글 한 음절이 더 붙은 긴 이름은 더 이상 주어 일치로 세지 않는다(값·기본 출력·종료 코드는 그대로다). `evaluate_recall.py --abstention-calibration conformal`은 평가기 안에서만 [답 없음 보정 문턱](docs/memory-evaluation.md#답-없음-보정-문턱)을 커밋한 분할의 dev 쪽에서 맞추고 heldout 쪽에서 잰다. recall_hard(팔마다 보정 문항 28개 이하, α = 0.05)에서는 문턱이 있어도 보정 신호의 최솟값 한 점에 걸리고 조건부판(Learn then Test)은 문턱을 내지 못하므로, 보정 집합을 늘린 뒤에 쓸모가 있다. `scripts/real_vault_audit.py plan`은 라벨하기 전에 [표본 크기와 합격 확률](docs/memory-evaluation.md#실제-볼트-표본-감사초기하-정확-상한)을 정확한 정수 산술로 계산한다. `vault_improvements.py inspect`·`compare --receipt-order`는 계획과 완료 영수증의 [기록 순서](docs/improvement-experiments.md#영수증-기록-순서-선택)를 표시하며, 이는 관찰 시점이나 서명이 아니다. `evaluate_tool_matrix.py --string-patterns`는 같은 trial을 현재 스키마와 형식 패턴을 더한 스키마로 짝지어 실행하고 호스트 판정을 기록만 한다([문자열 인자 패턴 짝 비교](docs/evaluation-stability.md#문자열-인자-패턴-짝-비교)). 새 옵션을 주지 않으면 출력·종료 코드는 v0.33.1과 같고, 이미 있던 `--bind-subject`를 켠 결과(첫 글자가 ASCII가 아닌 글자인 주어), 바뀐 CLI의 도움말·usage 줄, argparse 약어(`evaluate_recall.py --f`가 모호해진다), 일부 평가기가 싣는 소스 해시만 다르다. 주어 경계가 `vault_ssot.py`를 바꾸므로 인증서 전환은 위 절차와 [이번 변경·검증 범위](docs/releases/v0.34.0.md)를 따른다.
 
@@ -1558,7 +1583,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.49.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.50.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -1572,7 +1597,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 터미널에서 이 릴리스 태그의 패키지 폴더를 설치한다:
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.49.0/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.50.0/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더 경로를 줘도 된다. 저장소 루트 주소로 설치하면 agy가 Claude Code 플러그인 구조를 자동 변환해 설치하지만, 그 설치로는 인계가 주입되지 않는 것으로 보여 쓰지 않는다. 설치·갱신·직접 해 보는 확인 절차와 한계는 [Antigravity CLI 안내](docs/antigravity.md)에 있다. 실제 agy 대화 세션으로는 확인하지 않았다.
