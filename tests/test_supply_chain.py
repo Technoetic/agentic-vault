@@ -29,6 +29,25 @@ AUDIT_REQUIREMENTS_IN = ROOT / "ci" / "requirements-audit.in"
 AUDIT_REQUIREMENTS = ROOT / "ci" / "requirements-audit.txt"
 AUDIT_JOB = "supply-chain-audit"
 BLOCKING_JOBS = ("unittest", "stateful")
+# v0.50.0: the workflow-level concurrency block. A newer commit on the same pull
+# request cancels that pull request's older run; every other run (push to master,
+# a tag or a candidate branch, manual run) gets a group of its own (run-<run_id>),
+# so the push runs the release evidence uses are never cancelled or queued.
+CONCURRENCY_COMMENT = (
+    "# v0.50.0: a newer commit on the same pull request cancels that pull request's",
+    "# older run. Every other run (a push to master, a tag or a candidate branch, and",
+    "# a manual run) gets a group of its own, so the release gates on master and tags",
+    "# are never cancelled or queued behind another run.",
+)
+CONCURRENCY_LINES = [
+    "  group: tests-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)"
+    " || format('run-{0}', github.run_id) }}",
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+]
+# The workflow runs on every push, pull request and manual run, unfiltered: a path,
+# branch or tag filter would drop runs the release evidence or the gates rely on.
+WORKFLOW_TRIGGERS = ["  push:", "  pull_request:", "  workflow_dispatch:"]
+TRIGGER_FILTERS = ("paths", "paths-ignore", "branches", "branches-ignore", "tags", "tags-ignore")
 # Time limits (minutes) of the blocking jobs. The workflow comment above the
 # unit-job cap holds the reason for 60; the stateful job keeps 10. Exact finite
 # caps remain required.
@@ -426,6 +445,41 @@ class SupplyChainAuditJobTests(unittest.TestCase):
                 for marker in ("ci/requirements-audit", "pip_audit", "pip-audit"):
                     with self.subTest(job=name, marker=marker):
                         self.assertNotIn(marker, line)
+
+    def test_workflow_concurrency_cancels_only_superseded_pull_request_runs(self) -> None:
+        lines = self.text.splitlines()
+        self.assertEqual(lines.count("concurrency:"), 1)
+        self.assertEqual(block_after(lines, "concurrency:"), CONCURRENCY_LINES)
+        self.assertEqual(scalars(block_after(lines, "concurrency:"), 2), {
+            "group": CONCURRENCY_LINES[0].split(": ", 1)[1],
+            "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+        })
+
+    def test_workflow_concurrency_sits_between_permissions_and_jobs_with_its_reason(self) -> None:
+        lines = self.text.splitlines()
+        self.assertIn("concurrency:", lines)
+        position = lines.index("concurrency:")
+        self.assertEqual(lines[position - 4:position], list(CONCURRENCY_COMMENT))
+        self.assertLess(lines.index("permissions:"), position - 4)
+        self.assertLess(position, lines.index("jobs:"))
+        self.assertEqual(lines[lines.index("permissions:"):position - 4], ["permissions:", "  contents: read", ""])
+        self.assertEqual(lines[position + 3:lines.index("jobs:")], [""])
+
+    def test_no_job_sets_its_own_concurrency(self) -> None:
+        self.assertTrue(self.jobs)
+        for name, job_lines in self.jobs.items():
+            keys = {strip_comment(line).strip().partition(":")[0] for line in job_lines}
+            with self.subTest(job=name):
+                self.assertNotIn("concurrency", keys)
+                self.assertNotIn("cancel-in-progress", keys)
+
+    def test_triggers_stay_push_pull_request_and_manual_without_filters(self) -> None:
+        lines = self.text.splitlines()
+        self.assertEqual(block_after(lines, "on:"), WORKFLOW_TRIGGERS)
+        keys = {strip_comment(line).strip().partition(":")[0] for line in block_after(lines, "on:")}
+        for name in TRIGGER_FILTERS:
+            with self.subTest(filter=name):
+                self.assertNotIn(name, keys)
 
 
 class AuditRequirementsTests(unittest.TestCase):
