@@ -322,7 +322,9 @@ zizmor, pip-audit 설치, pip-audit 감사 세 단계와 작업 모두 `continue
   릴리스 게이트로 쓰는 실행은 취소되지도 다른 실행 뒤에 대기하지도 않는다. 위 2026-10-17 측정의 "고치지
   않았다"는 이 실행들의 방식을 바꾸는 제한을 가리킨 것이다. 바꾼 이유는 측정한 중복 실행이다. 2026-09-10부터
   2026-11-14까지의 실행 200건에서 커밋 89개 중 71개가 두 번에서 네 번 실행됐고, 그중 31개는 push와
-  pull_request 양쪽으로 실행됐다.
+  pull_request 양쪽으로 실행됐다. zizmor 1.30.1(PyPI 휠, 오프라인 모드)로 다시 재면 v0.49.0의 `tests.yml`은
+  regular persona 0건, pedantic·auditor persona 각 1건(Low, `concurrency-limits`)이었고, 이 블록을 넣은
+  `tests.yml`은 세 persona 모두 0건이었다(2026-11-15 로컬 측정).
 - **고정 버전(게시 14일 유예):** zizmor action v0.7.0과 v0.7.1은 둘 다 2026-10-15에 게시되어 2026-10-17 기준
   14일이 지나지 않았다. 그래서 2026-09-09에 게시된 v0.6.4를 커밋 `cc914d7f3750a2d13d75c7f184a1060aa0e9d482`로
   고정한다. v0.6.4는 자기 저장소 `support/versions`에 digest로 고정한 Docker 이미지
