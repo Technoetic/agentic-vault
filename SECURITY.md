@@ -184,7 +184,7 @@ Antigravity CLI, Telegram or the Jev service themselves.
 ## Known limitations
 
 - **Task workflow helpers** are opt-in. Source origin/confirmation and executed-check labels are caller declarations; hashes detect changed selected bytes, not identity, permission, truth or independent execution. The cycle observer does not run an agent or enforce its spending. See [task contracts](docs/task-contracts.md), [staged evaluation](docs/staged-evaluation.md) and [cycle observation](docs/improvement-cycles.md).
-- **Worktree HEAD check** (`vault_healthcheck.py --worktree-heads`) is opt-in and read-only. It lists registered linked worktrees whose detached HEAD no branch or tag contains. It does not stop a worktree removal or `git worktree prune`, create a branch, or see uncommitted changes or unregistered copies. See [concurrent commits](docs/concurrent-commits.md).
+- **Worktree HEAD check** (`vault_healthcheck.py --worktree-heads`) is opt-in and read-only. It lists registered linked worktrees whose detached HEAD no local branch or tag contains (remote-tracking refs are not consulted). It does not stop a worktree removal or `git worktree prune`, create a branch, or see uncommitted changes or unregistered copies. See [concurrent commits](docs/concurrent-commits.md).
 
 These are documented design limits, not vulnerabilities. A report that shows one of
 them being bypassed in a way the documentation does not describe is still welcome.

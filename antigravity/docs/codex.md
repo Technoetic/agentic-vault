@@ -3,7 +3,7 @@
 ## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs
 
 The health check gains an opt-in, read-only `--worktree-heads` flag that lists registered linked worktrees whose
-detached HEAD no branch or tag contains, and the [concurrent commits guide](concurrent-commits.md) adds how to land
+detached HEAD no local branch or tag contains, and the [concurrent commits guide](concurrent-commits.md) adds how to land
 linked-worktree work on master. The repository CI now cancels a pull request's older run when a newer commit arrives
 on it; the installed plugin does not change. The seven certificate-bound checker files are unchanged from v0.49.0.
 See [release scope](https://github.com/Technoetic/agentic-vault/blob/v0.50.0/docs/releases/v0.50.0.md) and [verification](https://github.com/Technoetic/agentic-vault/blob/v0.50.0/docs/verification/v0.50.0.md).
