@@ -38,7 +38,9 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 master·태그·후보 분기 push와 수동 실행은 실행마다 묶음이 따로라 취소되거나 다른 실행 뒤에 줄 서지 않는다.
 이것은 저장소 CI의 변경이며 설치한 플러그인의 동작은 바뀌지 않는다. healthcheck에는 선택형·읽기 전용
 `--worktree-heads`가 생겨, 어느 분기·태그에도 담기지 않은 HEAD를 가진 연결 작업 트리를 관리성 섹션 14c로
-알린다. 플래그가 없으면 기본 보고서·`--staged`·`--json-summary`는 판 표면과 `--help` 한 줄 말고는 v0.49.0과 같다.
+알린다. 플래그가 없으면 기본 보고서·`--staged`·`--json-summary`는 판 표면 말고는 v0.49.0과 같다. `--help`에서는
+argparse가 사용법에 `[--worktree-heads]`를 붙이고(기본 폭에서 사용법이 한 줄 늘어난다) 옵션 줄을 하나 더하며, 기존
+옵션 줄 여섯 개를 한 칸씩 다시 정렬한다.
 
 - [동시 커밋 안내](docs/concurrent-commits.md): 연결 작업 트리 작업을 master에 반영하는 순서와 작업 트리를 지우기 전 확인.
 - [변경과 한계](docs/releases/v0.50.0.md), [검증 계약](docs/verification/v0.50.0.md). 인증서가 묶는 일곱 파일은 v0.49.0과 같다.
@@ -438,7 +440,9 @@ cancelled nor queued; this concerns the repository's own CI, not the installed p
 opt-in, read-only `--worktree-heads` flag (full mode only) that lists registered linked worktrees whose detached
 HEAD no branch or tag contains, in a new 관리성 section 14c, and the [concurrent commits guide](docs/concurrent-commits.md)
 explains how to land linked-worktree work on master. Without the flag the default report, `--staged` and
-`--json-summary` are unchanged apart from the version surfaces and one `--help` line. The seven certificate-bound
+`--json-summary` are unchanged apart from the version surfaces; in `--help`, argparse adds `[--worktree-heads]` to the
+usage block (one more usage line at the default width) and one option line, and realigns the six existing option lines
+by one column. The seven certificate-bound
 checker files are unchanged from v0.49.0. See [release scope](docs/releases/v0.50.0.md) and
 [verification contract](docs/verification/v0.50.0.md). Active installations and vault copies are not upgraded by publication.
 
