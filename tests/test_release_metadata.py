@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.51.0"
-EXPECTED_PUBLIC_REF = "0.51.0"
+EXPECTED = "0.52.0"
+EXPECTED_PUBLIC_REF = "0.52.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.51.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.51.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.52.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.52.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.51.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.52.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -3212,7 +3212,8 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn(self.ENGLISH, headings)
         self.assertIn("## v0.49.0 — source-aware task workflows", headings)
         self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
-        self.assertEqual(headings[0], "## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter")
+        self.assertIn("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter", headings)
+        self.assertEqual(headings[0], V0520ReleaseMetadataTests.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3225,7 +3226,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3257,7 +3258,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.50.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.51.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3495,6 +3496,7 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(f"unchanged from v0.46.0 through v{EXPECTED}.", long_description)
         self.assertNotIn("through v0.49.0", long_description)
         self.assertNotIn("through v0.50.0", long_description)
+        self.assertNotIn("through v0.51.0", long_description)
 
     def test_release_note_states_that_remote_tracking_refs_are_not_consulted(self) -> None:
         boundaries = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 알려진 경계"))
@@ -3545,12 +3547,12 @@ class V0510ReleaseMetadataTests(unittest.TestCase):
     def test_active_install_and_stamp_lines_have_no_stale_versions(self) -> None:
         readme = README.read_text(encoding="utf-8")
         active_readme = readme[:readme.index("📜 이전 버전 변경 이력")]
-        self.assertIn("git 볼트의 healthcheck 스탬프는 `engine=0.51.0`이다.", active_readme)
+        self.assertIn(f"git 볼트의 healthcheck 스탬프는 `engine={EXPECTED}`이다.", active_readme)
         self.assertNotIn("engine=0.48.0", active_readme)
         self.assertNotIn("releases/tag/v0.48.0", active_readme)
         self.assertNotIn("docs/verification/v0.48.0.md", active_readme)
         antigravity_doc = (REPO_ROOT / "docs/antigravity.md").read_text(encoding="utf-8")
-        self.assertIn("`version`이 `0.51.0`이고", antigravity_doc)
+        self.assertIn(f"`version`이 `{EXPECTED}`이고", antigravity_doc)
         self.assertNotIn("`version`이 `0.48.0`이고", antigravity_doc)
 
     def test_release_note_uses_absolute_links_for_github_release_paste(self) -> None:
@@ -3563,3 +3565,234 @@ class V0510ReleaseMetadataTests(unittest.TestCase):
             )
         self.assertIn(CHECKER_SHA256_V0460, text)
         self.assertIn(CHECKER_SHA256_V0460, self.VERIFICATION.read_text(encoding="utf-8"))
+
+
+class V0520ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.52.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.52.0.md"
+    TITLE = "# v0.52.0 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
+    SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증",
+                "## 연구 출처와 기존 기능의 차이", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.52.0`이다."
+    CERTIFICATE_SENTENCE = (
+        "인증서가 묶는 일곱 파일(`vault_lint_extensions.py`·`vault_warning_policy.py`·`vault_provenance.py`·"
+        "`vault_egress.py`·`vault_ssot.py`·`jev_client.py`·`vault_paths.py`)은 v0.46.0부터 v0.52.0까지 바이트 "
+        "단위로 같아, 실제 설치 바이트가 같은 경우 기존 경고 승격 인증서가 그대로 유효하다."
+    )
+    RECORD_TITLE = "# v0.52.0 verification contract"
+    RECORD_SECTIONS = ("## Scope", "## Feature evidence", "## Default-result comparison",
+                       "## Required release gates", "## Boundaries")
+    KOREAN = "## v0.52.0 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
+    ENGLISH = "## v0.52.0 — same-number report, defused header lines and kept Jev answers on escalation"
+    PREVIOUS = (("## v0.51.0 — 독립 평가 결함 수정과 선택형 BizRouter Decisions 어댑터",
+                 "## v0.50.0 — 낡은 PR CI 실행 취소와 연결 작업 트리 HEAD 확인"),
+                ("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter",
+                 "## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs"))
+    # Each source is cited by the address that answered on 2026-11-16 (the GitHub pages after redirects).
+    SOURCES = (
+        "https://arxiv.org/abs/2403.14720",
+        "https://arxiv.org/abs/2510.09023",
+        "https://docs.jj-vcs.dev/latest/guides/divergence/",
+        "https://arxiv.org/abs/2607.10139",
+        "https://arxiv.org/abs/2407.02348",
+        "https://slsa.dev/spec/v1.2/source-requirements",
+        "https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/"
+        "configure-vulnerability-reporting/configure-for-a-repository",
+        "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/"
+        "managing-rulesets/about-rulesets",
+        "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/"
+        "managing-rulesets/available-rules-for-rulesets",
+    )
+    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+    REJECTED_MODELS = ("typesafe/jev-1.13.0", "typesafe/jev-latest")
+
+    def test_release_note_title_and_sections_are_in_order(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], self.TITLE)
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+
+    def test_release_note_states_the_install_ref_the_certificate_and_the_rejected_models(self) -> None:
+        upgrade = _section(self.RELEASE.read_text(encoding="utf-8"), "## 하위호환·업그레이드")
+        self.assertIn(self.INSTALL_REF, upgrade.splitlines())
+        folded = _folded(upgrade)
+        self.assertIn(self.CERTIFICATE_SENTENCE, folded)
+        self.assertIn("healthcheck만 `engine=0.52.0`으로 이동하며 기존 규칙·어댑터 스탬프는 유지한다.", folded)
+        self.assertIn(f"`checker_sha256`는 `{CHECKER_SHA256_V0460}` 그대로다.", folded)
+        # The two TypeSafe Jev names that v0.51.0 sent to BizRouter are now refused with the old error.
+        for model in self.REJECTED_MODELS:
+            with self.subTest(model=model):
+                self.assertIn(f"`{model}`", folded)
+        self.assertIn("`invalid_arguments`", folded)
+
+    def test_release_note_names_the_default_changes(self) -> None:
+        defaults = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경"))
+        # The version metadata, the three conditions of decision D1 and the BizRouter model narrowing.
+        for literal in ("`engine=0.52.0`", "`ENGINE_VERSION`", "섹션 14d", "`duplicate_entry_ids`",
+                        "`[note line, not a hook header] `", "`--escalate-bizrouter`", "`primary`", "`agreement`",
+                        "`disagreed_ids`", "`provider_disagreement`", "`invalid_arguments`",
+                        "v0.51.0과 바이트 단위로 같다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, defaults)
+        bullets = [line for line in _section(self.RELEASE.read_text(encoding="utf-8"), "## 기본 결과 변경")
+                   .splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 5)
+
+    def test_release_note_cites_each_source_once_and_claims_no_numbers(self) -> None:
+        sources = _section(self.RELEASE.read_text(encoding="utf-8"), "## 연구 출처와 기존 기능의 차이")
+        for url in self.SOURCES:
+            with self.subTest(url=url):
+                self.assertEqual(sources.count(f"]({url})"), 1)
+        folded = _folded(sources)
+        for literal in ("부록 I", "효과 수치는 이 저장소의 효과로 주장하지 않는다",
+                        "이전 저장소 문서는 이 출처들을 인용하지 않았다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_release_note_uses_absolute_links_for_github_release_paste(self) -> None:
+        import re
+        text = self.RELEASE.read_text(encoding="utf-8")
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            with self.subTest(target=target):
+                self.assertTrue(target.startswith(("https://", "#")), target)
+        # Links to repository files name this release's tag, not the previous one.
+        refs = re.findall(r"\]\(https://github\.com/Technoetic/agentic-vault/(?:blob|tree)/([^/)\s]+)/", text)
+        self.assertTrue(refs)
+        self.assertEqual(set(refs), {"v0.52.0"})
+        self.assertIn(CHECKER_SHA256_V0460, text)
+
+    def test_verification_title_sections_and_fourteen_gates(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], self.RECORD_TITLE)
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        gates = _section(text, "## Required release gates")
+        numbered = [line for line in gates.splitlines() if line[:1].isdigit()]
+        self.assertEqual([int(line.split(".", 1)[0]) for line in numbered], list(range(1, 15)))
+        for literal in ("nine OS/Python unit and two stateful required CI successes", "push only the tag",
+                        "Update Reference Atlas", "Publish immutable Latest", "Never rewrite a public tag."):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, gates)
+        # The two repository settings are applied just before the tag push and read back there.
+        for literal in ("`v*` tag ruleset", "private vulnerability reporting", "read back"):
+            with self.subTest(gate4=literal):
+                self.assertIn(literal, numbered[3])
+        evidence = _folded(_section(text, "## Feature evidence"))
+        for literal in ("section 14d", "`[note line, not a hook header] `", "`primary`", "`agreement`",
+                        "`disagreed_ids`", "`provider_disagreement`", "`google/gemini-decision-1`",
+                        "tag ruleset", "private vulnerability reporting", "`V0520ReleaseMetadataTests`"):
+            with self.subTest(evidence=literal):
+                self.assertIn(literal, evidence)
+        defaults = _folded(_section(text, "## Default-result comparison"))
+        self.assertIn(f"`checker_sha256` stays `{CHECKER_SHA256_V0460}`", defaults)
+        self.assertIn("byte-identical to v0.51.0", defaults)
+
+    def test_v0520_moves_only_the_healthcheck_stamp(self) -> None:
+        stamped = set()
+        for top in ("assets", "hooks", "skills"):
+            for path in (REPO_ROOT / top).rglob("*"):
+                if not path.is_file() or "__pycache__" in path.parts:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    continue
+                if "engine=0.52.0" in text:
+                    stamped.add(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(stamped, self.DECLARED_STAMPS)
+        lines = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines[1], "# agentic-vault:healthcheck engine=0.52.0")
+        self.assertEqual(sum("engine=0.52.0" in line for line in lines), 1)
+
+    def test_readme_sections_link_the_v0520_documents_and_fold_v0510(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        overview = readme.index("## 🌐 English overview")
+        history = readme.index("📜 이전 버전 변경 이력")
+        for heading in (self.KOREAN, self.ENGLISH):
+            with self.subTest(heading=heading):
+                self.assertEqual(readme.count("\n" + heading + "\n"), 1)
+                self.assertLess(overview, readme.index("\n" + heading + "\n"))
+                self.assertLess(readme.index("\n" + heading + "\n"), history)
+        korean = _folded(_section(readme, self.KOREAN))
+        english = _folded(_section(readme, self.ENGLISH))
+        for name, text in (("korean", korean), ("english", english)):
+            for link in ("](docs/releases/v0.52.0.md)", "](docs/verification/v0.52.0.md)"):
+                with self.subTest(section=name, link=link):
+                    self.assertIn(link, text)
+        self.assertIn("](https://github.com/Technoetic/agentic-vault/releases/tag/v0.52.0)", korean)
+        self.assertIn("v0.46.0부터 v0.52.0까지", korean)
+        self.assertIn("unchanged from v0.46.0 through v0.52.0", english)
+        # v0.51.0 keeps its two sections, now first in the folded history.
+        self.assertIn("📜 이전 버전 변경 이력 (v0.9.0 ~ v0.51.0 / Historical release notes)", readme)
+        for previous, older in self.PREVIOUS:
+            with self.subTest(previous=previous):
+                self.assertEqual(readme.count("\n" + previous + "\n"), 1)
+                self.assertLess(history, readme.index("\n" + previous + "\n"))
+                self.assertLess(readme.index("\n" + previous + "\n"), readme.index("\n" + older + "\n"))
+        active = readme[:history]
+        for stale in ("releases/tag/v0.51.0", "docs/verification/v0.51.0.md", "engine=0.51.0", "--ref v0.51.0",
+                      "tree/v0.51.0/"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, active)
+
+    def test_codex_guide_and_description_name_the_release(self) -> None:
+        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.ENGLISH)
+        section = _folded(_section(codex, self.ENGLISH))
+        for literal in ("](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
+                        "unchanged from v0.46.0 through v0.52.0"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, section)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"]
+        for literal in ("Release v0.52.0", "section 14d", "google/gemini-decision-1", "primary"):
+            with self.subTest(description=literal):
+                self.assertIn(literal, description)
+
+    def test_security_states_the_reporting_form_and_the_session_start_hygiene_limit(self) -> None:
+        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        reporting = _folded(_section(security, "## Reporting a vulnerability"))
+        self.assertIn("Private vulnerability reporting is enabled for this repository since 2026-11-16", reporting)
+        self.assertIn("Security contact request", reporting)
+        self.assertNotIn("Its current state could not be verified from the source tree.", reporting)
+        limits = _folded(_section(security, "## Known limitations"))
+        for literal in ("`[note line, not a hook header] `", "not a guarantee against adaptive prompt injection",
+                        "](https://arxiv.org/abs/2510.09023)", "deny zones"):
+            with self.subTest(limit=literal):
+                self.assertIn(literal, limits)
+        summary = _folded(_section(security, "## 한국어 요약"))
+        for literal in ("2026-11-16", "`[note line, not a hook header] `", "적응형 프롬프트 주입", "결정론적 통제"):
+            with self.subTest(summary=literal):
+                self.assertIn(literal, summary)
+
+    def test_release_integrity_records_the_tag_ruleset_and_the_source_track(self) -> None:
+        text = (REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8")
+        immutable = _section(text, "## v0.23.0부터: 불변 릴리스")
+        lines = immutable.splitlines()
+        marker = "- **v0.52.0(2026-11-16):**"
+        starts = [index for index, line in enumerate(lines) if line.startswith(marker)]
+        self.assertEqual(len(starts), 1)
+        bullet = [lines[starts[0]]]
+        for line in lines[starts[0] + 1:]:
+            if not line.startswith("  "):
+                break
+            bullet.append(line)
+        bullet = _folded("\n".join(bullet))
+        for literal in ("`refs/tags/v*`", "우회 주체", "태그 70개 가운데 41개", "릴리스 23개", "초안만 있는 태그 4개",
+                        "릴리스가 없는 태그 14개", "비공개 취약점 제보"):
+            with self.subTest(bullet=literal):
+                self.assertIn(literal, bullet)
+        proofs = _section(text, "## 증명하는 것과 증명하지 않는 것")
+        rows = [line for line in proofs.splitlines() if line.startswith("| `v*` 태그 규칙 집합")]
+        self.assertEqual(len(rows), 1)
+        cells = [cell.strip() for cell in rows[0].strip().strip("|").split("|")]
+        self.assertEqual(len(cells), 3)
+        self.assertIn("옮기거나 지울 수 없다", cells[1])
+        for literal in ("누가 태그를 만들었는지", "꺼져 있던 기간", "관리자"):
+            with self.subTest(not_proved=literal):
+                self.assertIn(literal, cells[2])
+        after = _folded(proofs[proofs.index(rows[0]) + len(rows[0]):])
+        for literal in ("SLSA", "Source VSA", "L4", "두 사람", "Source 수준은 주장하지 않는다"):
+            with self.subTest(source_track=literal):
+                self.assertIn(literal, after)
