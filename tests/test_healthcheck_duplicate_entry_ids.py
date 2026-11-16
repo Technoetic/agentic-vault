@@ -128,12 +128,12 @@ class _EntryCase(unittest.TestCase):
         write(self.vault / MISTAKES, text)
         return text
 
-    def check(self, *arguments: str, vault: Path | None = None) -> tuple[int, str, str]:
+    def check(self, *arguments: str) -> tuple[int, str, str]:
         """Run the full check; returns (exit code, report text, stdout)."""
         if self.report.exists():
             self.report.unlink()
         code, stdout, stderr = run_healthcheck(
-            "--vault", str(vault or self.vault), "--output", str(self.report), *arguments)
+            "--vault", str(self.vault), "--output", str(self.report), *arguments)
         self.assertTrue(self.report.is_file(), stderr)
         return code, self.report.read_bytes().decode("utf-8"), stdout
 
