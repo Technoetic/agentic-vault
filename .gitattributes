@@ -1,3 +1,6 @@
+# Default LF in every text file (binary files untouched via text=auto) so root and generated antigravity/ match on Windows too.
+* text=auto eol=lf
+
 # git 훅(sh)은 어떤 플랫폼에서 체크아웃해도 LF 유지 — CRLF면 sh 파싱이 깨진다
 assets/git-hooks/* text eol=lf
 hooks/*.sh text eol=lf

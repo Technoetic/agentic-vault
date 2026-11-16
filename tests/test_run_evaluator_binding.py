@@ -8,7 +8,10 @@ import sys
 import unittest
 from unittest import mock
 
-import test_vault_runs as fixture_module
+try:
+    import test_vault_runs as fixture_module
+except ImportError:
+    from tests import test_vault_runs as fixture_module
 
 runs = fixture_module.runs
 

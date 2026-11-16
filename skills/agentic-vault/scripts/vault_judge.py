@@ -16,12 +16,11 @@ from vault_evidence import EvidenceError, Store, decode, encode, stable_read
 from vault_context_guard import ContextGuard
 from vault_healthcheck import HealthcheckError
 from vault_recall import _classified_skip
-import bizrouter_client
 from jev_client import JevError, MODEL, SENSITIVE, build_payload, contains_sensitive, request_judgments
 
 
 MAX_INPUT_BYTES = 64 * 1024
-BIZROUTER_MAX_INPUT_BYTES = bizrouter_client.MAX_PAYLOAD_BYTES
+BIZROUTER_MAX_INPUT_BYTES = 256 * 1024
 MAX_SOURCE_BYTES = 256 * 1024
 PROVIDERS = ('jev', 'bizrouter')
 SEMANTIC_TASKS = frozenset(('requirement', 'support', 'relevance', 'duplicate',
@@ -38,6 +37,17 @@ class JudgeError(Exception):
     """Only non-sensitive codes may cross the command boundary."""
 
 
+def _bizrouter():
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    try:
+        import bizrouter_client as client
+    except ImportError:
+        raise JudgeError('invalid_arguments') from None
+    return client
+
+
 def _resolve_provider_model(provider='jev', model=None):
     if provider not in PROVIDERS:
         raise JudgeError('invalid_arguments')
@@ -46,8 +56,9 @@ def _resolve_provider_model(provider='jev', model=None):
         if resolved != MODEL:
             raise JudgeError('invalid_arguments')
         return 'jev', resolved
-    resolved = bizrouter_client.DEFAULT_MODEL if model is None else model
-    if resolved not in bizrouter_client.MODELS:
+    br = _bizrouter()
+    resolved = br.DEFAULT_MODEL if model is None else model
+    if resolved not in br.MODELS:
         raise JudgeError('invalid_arguments')
     return 'bizrouter', resolved
 
@@ -71,7 +82,7 @@ def _keys(value, required, optional=()):
 
 def _request(value, *, provider='jev', model=MODEL):
     if provider == 'bizrouter':
-        max_q, max_choices, _ = bizrouter_client.model_limits(model)
+        max_q, max_choices, _ = _bizrouter().model_limits(model)
         max_bytes = BIZROUTER_MAX_INPUT_BYTES
     else:
         max_q, max_choices = 12, 12
@@ -176,7 +187,7 @@ def _prepare(vault, value, *, provider='jev', model=MODEL):
                            'instructions': BOUNDARY + 'Abstention choice: ' + q['abstain'] + '. ' + q['instructions'],
                            'criteria': q['choices']} for q in data['questions']}
     state = {'evidence': evidence}
-    outbound = (bizrouter_client.build_payload(state, questions, model=model)
+    outbound = (_bizrouter().build_payload(state, questions, model=model)
                 if provider == 'bizrouter' else build_payload(state, questions))
     # Check config and evidence once more before exposing a prepared request.
     store.fresh_policy()
@@ -229,14 +240,15 @@ def run(vault, request, *, allow_network=False, api_key=None, transport=None,
         prepared, context = _prepare(vault, request, provider=prov, model=resolved_model)
         if context is None:
             return prepared
-        env_var = bizrouter_client.ENV_KEY if prov == 'bizrouter' else 'TYPESAFE_API_KEY'
+        br = _bizrouter() if prov == 'bizrouter' else None
+        env_var = br.ENV_KEY if prov == 'bizrouter' else 'TYPESAFE_API_KEY'
         key = os.environ.get(env_var, '') if api_key is None else api_key
         if not key:
             return _failure('missing_api_key')
         store, data, state, questions, guard = context
         guard.recheck()
         if prov == 'bizrouter':
-            reply = bizrouter_client.request_judgments(
+            reply = br.request_judgments(
                 state, questions, api_key=key, model=resolved_model, transport=transport,
             )
         else:

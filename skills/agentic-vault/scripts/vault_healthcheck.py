@@ -2464,8 +2464,6 @@ def main() -> int:
         "complete": False, "extension_input_complete": False,
         "warning_promotion_active": False,
     }
-    if args.worktree_heads:
-        summary["unreachable_worktree_heads"] = 0
     rc = _main(args, summary)
     if args.json_summary:
         summary["exit_code"] = rc
@@ -2810,14 +2808,23 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
 
     # --- 고아 / 준고아 ---------------------------------------------------------
     # 못 읽은 노트는 본문(발신 링크)을 모르므로 고아·준고아 판정에서 제외한다 —
-    # 읽기 실패를 링크 부재로 오판하지 않는다.
+    # 읽기 실패를 링크 부재로 오판하지 않는다. 행동 계약 rules_dir 파일(§10 검사 대상)도
+    # 지식 그래프 노드가 아니므로 고아·인덱스 판정에서 제외한다.
+    def is_rule_doc(p: Path) -> bool:
+        if not rules_dir_rel:
+            return False
+        rel = rel_posix(p, vault)
+        return rel == rules_dir_rel or rel.startswith(rules_dir_rel + "/")
+
     unreadable_stems = {Path(rel).stem for rel, _ in unreadable}
     orphans = [p for p in targets
                if p.stem not in unreadable_stems
+               and not is_rule_doc(p)
                and not outgoing.get(p.stem) and incoming.get(p.stem, 0) == 0
                and p.stem not in hub_stems]
     semi_orphans = [p for p in targets
                     if p.stem not in unreadable_stems
+                    and not is_rule_doc(p)
                     and incoming.get(p.stem, 0) == 0 and p.stem not in hub_stems
                     and p not in orphans]
 
@@ -2842,7 +2849,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
         meta_top = index_rel.split("/")[0] if "/" in index_rel else ""
         for p in targets:
             rel = rel_posix(p, vault)
-            if rel in special_rels:
+            if rel in special_rels or is_rule_doc(p):
                 continue
             if scopes:
                 if not any(rel == s or rel.startswith(s + "/") for s in scopes):

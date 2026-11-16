@@ -71,7 +71,8 @@ class MemoryRecoveryTests(unittest.TestCase):
                 with self.subTest(client=client):
                     injection = subprocess.run(
                         [sys.executable, str(ROOT / "hooks/session_start.py"), *arguments],
-                        cwd=cwd, env=environment, capture_output=True, text=True,
+                        cwd=cwd, env=environment, stdin=subprocess.DEVNULL,
+                        capture_output=True, text=True,
                         encoding="utf-8", timeout=15, check=False,
                     )
                     self.assertEqual(injection.returncode, 0, injection.stderr)

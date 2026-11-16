@@ -67,7 +67,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 ### 보강 helper bundle과 선택 이행
 
 새 standalone 검사기 설치/교체 때 같은 플러그인의 `skills/agentic-vault/scripts/`에서
-`vault_*.py`·`jev_client.py`·`jev_ask.py`와 `resources/lint-benign-v1.json`을
+`vault_*.py`·`jev_client.py`·`jev_ask.py`·`bizrouter_client.py`와 `resources/lint-benign-v1.json`을
 같은 상대 구조로 `00-meta/scripts/`에 함께 설치하고 원본과 바이트를 대조한다.
 기존 helper도 사용자 편집·출처 불명을 자동 덮어쓰지 않는다. 이전 설치본 해시와
 일치하는 엔진 파일만 교체하며 불명확한 파일은 기존 유지/검토로 보고한다.

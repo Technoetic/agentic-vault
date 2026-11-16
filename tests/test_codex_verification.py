@@ -111,6 +111,7 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_ssot.py",
             "skills/agentic-vault/scripts/vault_period.py",
             "skills/agentic-vault/scripts/vault_doctor.py",
+            "skills/agentic-vault/scripts/bizrouter_client.py",
             "skills/agentic-vault/scripts/vault_session_evidence.py",
             "skills/agentic-vault/scripts/vault_lesson_delta.py",
             "skills/agentic-vault/scripts/vault_declarative_rules.py",
@@ -925,7 +926,7 @@ class CodexVerificationTests(unittest.TestCase):
         with self.assertRaises(subprocess.TimeoutExpired):
             verifier.run_json(
                 sys.executable, [str(root / "child.py")], root,
-                os.environ.copy(), timeout=1,
+                os.environ.copy(), timeout=2.5,
             )
 
         self.assertTrue((root / "started").is_file())

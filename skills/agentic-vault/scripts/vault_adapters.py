@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -29,7 +30,21 @@ from pathlib import Path
 from vault_paths import _is_link_or_reparse
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+def _resolve_repo_root() -> Path:
+    resolved = Path(__file__).resolve()
+    if len(resolved.parents) > 3:
+        candidate = resolved.parents[3]
+        if (candidate / "assets" / "adapters").is_dir():
+            return candidate
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env_root:
+        candidate = Path(env_root).resolve()
+        if (candidate / "assets" / "adapters").is_dir():
+            return candidate
+    return resolved.parents[3] if len(resolved.parents) > 3 else resolved.parent
+
+
+REPO_ROOT = _resolve_repo_root()
 ASIDE_ASSETS = REPO_ROOT / "assets" / "adapters" / "aside"
 BUNDLED_HELPER = ASIDE_ASSETS / "aside-up.ps1"
 GUARD_ASSETS = REPO_ROOT / "assets" / "adapters" / "deny-guard"

@@ -65,7 +65,7 @@ class ConfigAndGitIndexTests(unittest.TestCase):
     def write(self, relpath: str, text: str, *, encoding: str = "utf-8") -> Path:
         path = self.repo / relpath
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding=encoding)
+        path.write_text(text, encoding=encoding, newline="\n")
         return path
 
     def write_config(self, overrides: dict | None = None, *, bom: bool = False) -> Path:

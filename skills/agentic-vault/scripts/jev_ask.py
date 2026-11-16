@@ -7,15 +7,15 @@ import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import re
 import sys
 
-import bizrouter_client
 import jev_client
 
 
 MAX_BYTES = 64 * 1024
-BIZROUTER_MAX_BYTES = bizrouter_client.MAX_PAYLOAD_BYTES
+BIZROUTER_MAX_BYTES = 256 * 1024
 MODEL = jev_client.MODEL
 PROVIDERS = ("jev", "bizrouter")
 ID_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
@@ -40,6 +40,17 @@ class AskError(Exception):
         super().__init__(self.code)
 
 
+def _bizrouter():
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    try:
+        import bizrouter_client as client
+    except ImportError:
+        raise AskError("invalid_arguments") from None
+    return client
+
+
 def _resolve_provider_model(provider="jev", model=None):
     if provider not in PROVIDERS:
         raise AskError("invalid_arguments")
@@ -48,8 +59,9 @@ def _resolve_provider_model(provider="jev", model=None):
         if resolved != MODEL:
             raise AskError("invalid_arguments")
         return "jev", resolved
-    resolved = bizrouter_client.DEFAULT_MODEL if model is None else model
-    if resolved not in bizrouter_client.MODELS:
+    br = _bizrouter()
+    resolved = br.DEFAULT_MODEL if model is None else model
+    if resolved not in br.MODELS:
         raise AskError("invalid_arguments")
     return "bizrouter", resolved
 
@@ -121,7 +133,7 @@ def _number(value, low=0, high=1):
 
 def _validate_input(raw, api_key, *, provider="jev", model=MODEL):
     if provider == "bizrouter":
-        max_q, max_choices, max_levels = bizrouter_client.model_limits(model)
+        max_q, max_choices, max_levels = _bizrouter().model_limits(model)
         max_bytes = BIZROUTER_MAX_BYTES
     else:
         max_q, max_choices, max_levels = 12, 255, 10
@@ -306,7 +318,7 @@ def prepare(raw, *, api_key=None, provider="jev", model=None):
     """Validate bounded UTF-8 JSON bytes offline and expose only metadata/hashes."""
     try:
         prov, resolved_model = _resolve_provider_model(provider, model)
-        env_var = bizrouter_client.ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
+        env_var = _bizrouter().ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
         key = os.environ.get(env_var, "") if api_key is None else api_key
         return _prepare(raw, key, provider=prov, model=resolved_model)[0]
     except (AskError, ValueError, TypeError, UnicodeError, RecursionError, OverflowError) as error:
@@ -332,12 +344,13 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
     if allow_network is not True:
         return _failure("network_disabled", base)
     try:
-        env_var = bizrouter_client.ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
+        br = _bizrouter() if (prov == "bizrouter" or escalate_bizrouter) else None
+        env_var = br.ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
         key = os.environ.get(env_var, "") if api_key is None else api_key
         base, data, payload, wire_q = _prepare(raw, key, provider=prov, model=resolved_model)
         if key is None or key == "":
             return _failure("missing_api_key", base)
-        max_timeout = bizrouter_client.MAX_TIMEOUT if prov == "bizrouter" else jev_client.MAX_TIMEOUT
+        max_timeout = br.MAX_TIMEOUT if prov == "bizrouter" else jev_client.MAX_TIMEOUT
         if (not isinstance(key, str) or len(key) > 4096
                 or any(not 33 <= ord(char) <= 126 for char in key)
                 or not _number(timeout, 0, max_timeout) or timeout == 0
@@ -346,7 +359,7 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
         base["network_attempted"] = True
         if prov == "bizrouter":
             try:
-                reply = bizrouter_client.request_judgments(
+                reply = br.request_judgments(
                     {"context": data["context"]}, wire_q,
                     api_key=key, model=resolved_model, timeout=timeout, transport=transport,
                 )
@@ -372,11 +385,11 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
                 if item["reason"] in ("low_confidence", "low_decisiveness")
             ]
             if uncertain_ids:
-                br_key = os.environ.get(bizrouter_client.ENV_KEY, "") if bizrouter_api_key is None else bizrouter_api_key
+                br_key = os.environ.get(br.ENV_KEY, "") if bizrouter_api_key is None else bizrouter_api_key
                 if not br_key:
                     escalation_meta = {
                         "provider": "bizrouter",
-                        "model": bizrouter_client.DEFAULT_MODEL,
+                        "model": br.DEFAULT_MODEL,
                         "status": "unavailable",
                         "error_code": "missing_api_key",
                         "candidate_ids": uncertain_ids,
@@ -384,10 +397,10 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
                 else:
                     sub_wire = {qid: wire_q[qid] for qid in uncertain_ids}
                     try:
-                        esc_reply = bizrouter_client.request_judgments(
+                        esc_reply = br.request_judgments(
                             {"context": data["context"]}, sub_wire,
-                            api_key=br_key, model=bizrouter_client.DEFAULT_MODEL,
-                            timeout=min(max(timeout, 15.0), bizrouter_client.MAX_TIMEOUT),
+                            api_key=br_key, model=br.DEFAULT_MODEL,
+                            timeout=min(max(timeout, 15.0), br.MAX_TIMEOUT),
                             transport=bizrouter_transport,
                         )
                         for qid in uncertain_ids:
@@ -395,7 +408,7 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
                         reasons = _review_reasons(data["questions"], answers, data["min_confidence"])
                         escalation_meta = {
                             "provider": "bizrouter",
-                            "model": bizrouter_client.DEFAULT_MODEL,
+                            "model": br.DEFAULT_MODEL,
                             "status": "applied",
                             "escalated_ids": uncertain_ids,
                             "usage": esc_reply["usage"],
@@ -403,7 +416,7 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
                     except jev_client.JevError as esc_err:
                         escalation_meta = {
                             "provider": "bizrouter",
-                            "model": bizrouter_client.DEFAULT_MODEL,
+                            "model": br.DEFAULT_MODEL,
                             "status": "unavailable",
                             "error_code": esc_err.code,
                             "candidate_ids": uncertain_ids,
@@ -411,7 +424,7 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
             else:
                 escalation_meta = {
                     "provider": "bizrouter",
-                    "model": bizrouter_client.DEFAULT_MODEL,
+                    "model": br.DEFAULT_MODEL,
                     "status": "not_needed",
                     "escalated_ids": [],
                 }
