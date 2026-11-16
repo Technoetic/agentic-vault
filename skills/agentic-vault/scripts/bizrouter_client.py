@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Minimal standard-library client for opt-in BizRouter Decisions judgments.
 
-Supports google/gemini-decision-1 and typesafe/jev-* over BizRouter's unified
-fixed HTTPS endpoint without modifying jev_client.py (which is bound by warning
-promotion certificates). Reuses jev_client.SENSITIVE and JevError so secret
-blocking and content-free error codes remain identical across providers.
+Supports only google/gemini-decision-1 over BizRouter's fixed HTTPS endpoint
+without modifying jev_client.py (which is bound by warning promotion
+certificates). TypeSafe Jev models (typesafe/jev-*) are not reachable through
+this client: since v0.52.0 Jev is called only through the direct TypeSafe API
+(jev_client.py, TYPESAFE_API_KEY). Reuses jev_client.SENSITIVE and JevError so
+secret blocking and content-free error codes remain identical across providers.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ PATH = "/v1/decisions"
 ENDPOINT = f"https://{HOST}{PATH}"
 ENV_KEY = "BIZROUTER_API_KEY"
 DEFAULT_MODEL = "google/gemini-decision-1"
-MODELS = ("google/gemini-decision-1", "typesafe/jev-1.13.0", "typesafe/jev-latest")
+MODELS = ("google/gemini-decision-1",)
 
 MAX_PAYLOAD_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 512 * 1024
@@ -40,8 +42,6 @@ def model_limits(model: str) -> tuple[int, int, int]:
     """Return (max_questions, max_choices, max_score_levels) for an allowlisted model."""
     if model == "google/gemini-decision-1":
         return 1000, 255, 255
-    if model in ("typesafe/jev-1.13.0", "typesafe/jev-latest"):
-        return 12, 255, 10
     raise JevError("invalid_input")
 
 

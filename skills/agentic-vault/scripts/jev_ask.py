@@ -314,6 +314,19 @@ def _review_reasons(question_list, answers, min_confidence):
     return reasons
 
 
+def _agreement(kind, primary, escalated):
+    """Whether a BizRouter re-judgment agrees with the Jev answer: information, never a pass."""
+    if kind == "choice":
+        return escalated["choice"] == primary["choice"]
+    if kind == "noul":
+        # Both on the same side of 0.5; any probability equal to 0.5 is no agreement.
+        first, second = primary["noul"], escalated["noul"]
+        return (first > 0.5 and second > 0.5) or (first < 0.5 and second < 0.5)
+    # Score: at most one level apart on the same rubric. 1e-9 absorbs binary rounding of
+    # decimal scores (2.7 - 1.7 == 1.0000000000000002).
+    return abs(escalated["score"] - primary["score"]) <= 1 + 1e-9
+
+
 def prepare(raw, *, api_key=None, provider="jev", model=None):
     """Validate bounded UTF-8 JSON bytes offline and expose only metadata/hashes."""
     try:
@@ -403,14 +416,25 @@ def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
                             timeout=min(max(timeout, 15.0), br.MAX_TIMEOUT),
                             transport=bizrouter_transport,
                         )
+                        kinds = {question["id"]: question["type"] for question in data["questions"]}
+                        disagreed_ids = []
+                        # uncertain_ids follow question order, so disagreed_ids do too.
                         for qid in uncertain_ids:
-                            answers[qid] = {**esc_reply["answers"][qid], "escalated_from": MODEL}
+                            primary = answers[qid]
+                            agreement = _agreement(kinds[qid], primary, esc_reply["answers"][qid])
+                            answers[qid] = {**esc_reply["answers"][qid], "escalated_from": MODEL,
+                                            "primary": dict(primary), "agreement": agreement}
+                            if not agreement:
+                                disagreed_ids.append(qid)
+                        # Agreement never removes a reason; a disagreement always adds one.
                         reasons = _review_reasons(data["questions"], answers, data["min_confidence"])
+                        reasons += [{"id": qid, "reason": "provider_disagreement"} for qid in disagreed_ids]
                         escalation_meta = {
                             "provider": "bizrouter",
                             "model": br.DEFAULT_MODEL,
                             "status": "applied",
                             "escalated_ids": uncertain_ids,
+                            "disagreed_ids": disagreed_ids,
                             "usage": esc_reply["usage"],
                         }
                     except jev_client.JevError as esc_err:
