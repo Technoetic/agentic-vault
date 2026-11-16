@@ -11,9 +11,9 @@ if os.name == "nt":
     _orig_rmtree = tempfile.TemporaryDirectory._rmtree
 
     @classmethod
-    def _longpath_rmtree(cls, name, ignore_errors=False, repeated=False):
+    def _longpath_rmtree(cls, name, ignore_errors=False, **kwargs):
         try:
-            _orig_rmtree(name, ignore_errors=ignore_errors, repeated=repeated)
+            _orig_rmtree(name, ignore_errors=ignore_errors, **kwargs)
         except OSError:
             raw = os.fspath(name)
             if isinstance(raw, str) and not raw.startswith("\\\\?\\"):

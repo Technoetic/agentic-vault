@@ -148,6 +148,28 @@ class WindowsLongPathTests(unittest.TestCase):
                 vault_runs.inspect(self.vault, "b" * 64)
             self.assertEqual(str(r_ctx.exception), "path_too_long")
 
+    @unittest.skipUnless(os.name == "nt", "Windows TemporaryDirectory._rmtree wrapper test")
+    def test_longpath_rmtree_preserves_python310_and_python312_signatures(self) -> None:
+        import tests as tests_pkg
+
+        calls_310 = []
+
+        def fake_py310_rmtree(name, ignore_errors=False):
+            calls_310.append((name, ignore_errors))
+
+        calls_312 = []
+
+        def fake_py312_rmtree(name, ignore_errors=False, repeated=False):
+            calls_312.append((name, ignore_errors, repeated))
+
+        with mock.patch.object(tests_pkg, "_orig_rmtree", side_effect=fake_py310_rmtree):
+            tempfile.TemporaryDirectory._rmtree("dummy_310", ignore_errors=True)
+        self.assertEqual(calls_310, [("dummy_310", True)])
+
+        with mock.patch.object(tests_pkg, "_orig_rmtree", side_effect=fake_py312_rmtree):
+            tempfile.TemporaryDirectory._rmtree("dummy_312", ignore_errors=False, repeated=True)
+        self.assertEqual(calls_312, [("dummy_312", False, True)])
+
 
 if __name__ == "__main__":
     unittest.main()
