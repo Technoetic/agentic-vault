@@ -9,8 +9,8 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
 2026-10-20 API 조회에서 `"enabled": true`, `"enforced_by_owner": false`였다. v0.23.0과 v0.24.0은
 불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0도 2026-10-19
-게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.51.0의 최종 소스·CI·ZIP/blob 대조와
-재빌드 명세는 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/docs/verification/v0.51.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.52.0의 최종 소스·CI·ZIP/blob 대조와
+재빌드 명세는 [릴리스 검증](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/docs/verification/v0.52.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
 `post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산
@@ -42,6 +42,13 @@ v0.48.0부터 ZIP에는 커밋한 Antigravity CLI 생성 패키지 `antigravity/
 불변 설정은 켠 뒤에 게시하는 릴리스에만 적용되고 이미 게시한 릴리스에는 소급되지 않는다. 이 내용은 저장소 설정 안내
 [Preventing changes to your releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)가
 보고한 것이다.
+
+- **v0.52.0(2026-11-16):** 저장소에 `refs/tags/v*`를 대상으로 하는 태그 규칙 집합(ruleset)을 두었다. 갱신(`update`)과
+  삭제(`deletion`)를 막는 규칙을 켜고 생성 규칙은 넣지 않아 태그 생성은 막지 않으며, 우회 주체(bypass actor)는 없다. 불변 릴리스는 설정을 켠 뒤
+  게시한 릴리스의 태그만 잠근다. 같은 날 `git ls-remote --tags`와 `gh api repos/Technoetic/agentic-vault/releases`(초안은
+  쓰기 권한이 있는 인증 조회에서만 보인다)로 세면 v0.52.0 이전 태그 70개 가운데 41개가 불변 릴리스 밖에 있었다. 불변
+  설정 전에 게시한 릴리스 23개, 초안만 있는 태그 4개, 릴리스가 없는 태그 14개다. 규칙 집합은 켜져 있는 동안 이 태그들도
+  옮기거나 지우지 못하게 한다. 같은 날 비공개 취약점 제보도 켰다([보안 정책](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/SECURITY.md#reporting-a-vulnerability)).
 
 게시 순서(유지관리자):
 
@@ -175,7 +182,7 @@ try {
 - PowerShell 형식은 v0.25.0 태그로 실행해 아래 UTC0 측정과 같은 SHA-256을 얻었고, 실행 뒤 `$env:TZ`는 원래대로
   비어 있었다(2026-10-20, 1회).
 
-같은 일을 하는 선택형 스크립트 [`scripts/release_rebuild.py`](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/scripts/release_rebuild.py)도 있다. 표준
+같은 일을 하는 선택형 스크립트 [`scripts/release_rebuild.py`](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/scripts/release_rebuild.py)도 있다. 표준
 라이브러리만 쓰고 네트워크를 쓰지 않는다. 위 명령을 그대로 실행하되 `TZ`는 git 하위 프로세스의 환경 사본에만
 넣고, 이미 있는 출력 파일은 덮어쓰지 않는다. 끝나면 아래 `rebuild_spec` JSON을 출력한다.
 
@@ -276,7 +283,12 @@ python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0
 | `SHA256SUMS` 대조 | 내려받은 파일이 같은 릴리스의 `SHA256SUMS` 목록과 같다. 전송 중 손상을 찾는다 | 목록의 진위. 불변이 아닌 릴리스에서는 자산과 목록을 함께 바꿀 수 있다 |
 | 재빌드 확인(`release_rebuild.py check`) | L1 일치: 이 git으로 태그에서 다시 만든 ZIP과 바이트가 같다. L2 일치: 파일 목록과 각 파일 바이트가 태그 트리의 blob과 같고 위험한 항목 이름이 없으며 ZIP 구조가 한 가지로만 읽힌다 | 게시된 자산과 같은지, 누가 만들었는지, 다른 git 빌드에서도 같은 바이트가 나오는지, 항목 시각·권한·압축 방식(L2) |
 | 릴리스 증명(`verify`·`verify-asset`) | 파일이 GitHub가 그 태그로 게시한 자산과 같고, 태그가 증명에 적힌 커밋을 가리킨다 | 누가 어떤 환경에서 ZIP을 만들었는지(빌드 출처), ZIP이 태그 소스에서 재현되는지, 게시를 승인한 사람의 신원, 내용의 안전성 |
+| `v*` 태그 규칙 집합(2026-11-16부터) | 규칙 집합이 켜져 있는 동안 `v*` 태그를 다른 커밋으로 옮기거나 지울 수 없다(생성은 허용) | 누가 태그를 만들었는지, 규칙 집합이 꺼져 있던 기간에 일어난 일. 저장소 관리자는 규칙 집합을 끄거나 고칠 수 있다 |
 
+- **SLSA Source 트랙:** [SLSA v1.2 Source 요구사항](https://slsa.dev/spec/v1.2/source-requirements)은 소스 관리 시스템이
+  태그를 지원하면 태그를 옮기거나 지우지 못하게 설정하라고 요구한다(L2부터). 그러나 Source 수준은 소스 관리 시스템이
+  발급하는 Source VSA로 나타내는데 이 저장소의 리비전에는 Source VSA가 발급되지 않고, 유지관리자가 한 명이라 L4의 두
+  사람 검토를 만족할 수 없으므로 Source 수준은 주장하지 않는다.
 - **서명 주체:** 다른 저장소의 불변 릴리스 1건(zizmorcore/zizmor-action v0.7.1)을 `--format json`으로 보면 인증서
   발급자는 `CN=Fulcio Intermediate l1,O=GitHub\, Inc.`, 주체 대체 이름은 `https://dotcom.releases.github.com`이다
   (측정). 서명하는 쪽은 GitHub 릴리스 서비스이며 유지관리자나 CI 실행의 신원은 증명에 없다.
@@ -295,7 +307,7 @@ v0.22.1까지 게시한 GitHub 릴리스 23개는 불변 릴리스로 게시되�
 `No attestations for tag v0.22.1`과 함께 종료 코드 1로 끝났다(2026-10-17 측정). 이 릴리스들은 `SHA256SUMS`
 대조만 할 수 있다.
 
-이전 검증 기록([v0.20.0](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/docs/verification/v0.20.0.md)·[v0.21.0](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/docs/verification/v0.21.0.md)·[v0.22.0](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/docs/verification/v0.22.0.md)·[v0.22.1](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/docs/verification/v0.22.1.md))에
+이전 검증 기록([v0.20.0](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/docs/verification/v0.20.0.md)·[v0.21.0](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/docs/verification/v0.21.0.md)·[v0.22.0](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/docs/verification/v0.22.0.md)·[v0.22.1](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/docs/verification/v0.22.1.md))에
 쓴 "immutable"은 커밋·트리 해시와 `SHA256SUMS`로 고정한 소스·자산 내용을 뜻한다. GitHub 불변 릴리스
 기능을 뜻하지 않는다.
 
@@ -384,7 +396,7 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
   기본으로는 원격 변조를 확인하지 않고 배포본의 코드를 실행한다고 설명하고, 해시 확인 모드(`--require-hashes`)와
   소스 배포본 금지(`--only-binary :all:`)를 함께 쓰라고 안내한다. 이 모드에서는 모든 요구사항과 의존성에 해시가
   있어야 하고 버전을 `==` 등으로 고정해야 하며, 파일에 적히지 않은 의존성은 오류가 된다(2026-10-19에 읽은 pip 26.2.1
-  문서의 설명). [`ci/requirements-audit.txt`](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/ci/requirements-audit.txt)는 pip-audit 2.10.1과 그 의존성을 합친
+  문서의 설명). [`ci/requirements-audit.txt`](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/ci/requirements-audit.txt)는 pip-audit 2.10.1과 그 의존성을 합친
   29개 패키지를 고정하고, 각 고정 버전에 대해 PyPI에 올라온 파일 전체의 sha256 362개를 담는다. 해시가 맞지 않는
   파일, 목록에 없는 의존성, 소스 배포본은 설치하지 않는다. 설치가 실패하면 감사 단계를 건너뛰고 경고 두 개(설치,
   pip-audit)가 남는다.
@@ -435,7 +447,7 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
 
 1. **기준 시각을 정한다.** 갱신하는 날(UTC)의 14일 전 00:00Z를 `CUTOFF`로 쓴다. 지금 파일은 2026-10-18(UTC)에
    만들었고 `CUTOFF`는 `2026-10-04T00:00:00Z`다. 이보다 늦게 PyPI에 올라온 버전은 고르지 않는다(게시 14일 유예).
-   pip-audit을 올리려면 PyPI 게시일이 `CUTOFF`보다 앞선 버전으로 [`ci/requirements-audit.in`](https://github.com/Technoetic/agentic-vault/blob/v0.51.0/ci/requirements-audit.in)의
+   pip-audit을 올리려면 PyPI 게시일이 `CUTOFF`보다 앞선 버전으로 [`ci/requirements-audit.in`](https://github.com/Technoetic/agentic-vault/blob/v0.52.0/ci/requirements-audit.in)의
    고정값을 바꾼다.
 2. **저장소 밖 새 가상환경에 도구를 설치한다.** `VENV`는 저장소 밖 경로다. Windows에서는 `VENV/bin/` 대신
    `VENV\Scripts\`를 쓴다.
@@ -492,6 +504,12 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
   저장소 설정
 - [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity):
   `gh release verify`·`verify-asset`, 자동 생성 소스 압축본 제외
+- [About rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)·[Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets):
+  태그 규칙 집합, 우회 권한, 활성·비활성 상태, `Restrict updates`·`Restrict deletions`
+- [Configuring private vulnerability reporting for a repository](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository):
+  비공개 취약점 제보를 켜는 저장소 설정
+- [SLSA v1.2 Source requirements](https://slsa.dev/spec/v1.2/source-requirements): 태그 이동·삭제 금지(L2부터), Source VSA,
+  L4의 두 사람 검토
 - [GitHub CLI v2.93.0 릴리스 노트](https://github.com/cli/cli/releases/tag/v2.93.0): GHSA-8xvp-7hj6-mcj9
 - [Archive metadata](https://reproducible-builds.org/docs/archives/)(Reproducible Builds): ZIP 시각에 시간대가 없음,
   풀 때 `TZ=UTC` 권고, `git archive` 출력의 결정성 미보장

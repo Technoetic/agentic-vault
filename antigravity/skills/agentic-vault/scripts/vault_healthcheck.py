@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.51.0
+# agentic-vault:healthcheck engine=0.52.0
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -29,6 +29,8 @@ exit 2로 끝난다.
   14  읽기 실패 — 파일 단위 fail-soft: 못 읽은 노트만 건너뛰고 계속 (관리성, v0.8.4)
   14b 링크·정션 제외 — 따라가지 않은 링크 경로를 조용히 빼지 않고 보고 (관리성)
   14c 분기·태그 밖 HEAD를 가진 연결 작업 트리 — --worktree-heads 때만 (관리성, 선택, v0.50.0)
+  14d 같은 번호의 결정·실수 항목 — 한 노트의 ## 제목 둘 이상이 같은 ADR-<n>·M-<n>로 시작할 때만
+      (관리성, 리포트 전용, v0.52.0; --json-summary에 duplicate_entry_ids; 확장 모듈 없으면 생략)
       ※ 13은 결번 — 포크 볼트(NS)의 루트 allowlist 검사 번호와 충돌 회피.
   15  확장 경고 — 경고 전용 (관리성). 선택 키 sync_conflict_check·checkpoint_drift_check를
       켜면 동기화 충돌·임시 파일 이름과 마지막 checkpoint 이후 바뀐 엔진 노트도 여기에
@@ -57,6 +59,7 @@ exit 2로 끝난다.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 import difflib
@@ -85,6 +88,12 @@ except ModuleNotFoundError as _extension_import_error:
     # Existing vault upgrades may still have only the single legacy engine.
     # Keep original fatal gates usable and explicitly diagnose missing new checks.
     _EXTENSIONS_AVAILABLE = False
+try:
+    # Section 14d reads headings outside fenced code and HTML comments with the warning
+    # extensions' line rule. A legacy engine without that module leaves the section out.
+    from vault_lint_extensions import _clean_lines as _visible_note_lines
+except ImportError:
+    _visible_note_lines = None
 
 
 def _extension_unavailable_warning() -> dict:
@@ -100,7 +109,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.51.0"
+ENGINE_VERSION = "0.52.0"
 HEALTHCHECK_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
@@ -905,6 +914,96 @@ def scan_worktree_heads(vault: Path) -> tuple[int, list[str]]:
             count += 1
             lines.append(f"- {display} HEAD {sha[:12]} — 어느 분기·태그에도 없다. "
                          "작업 트리를 지우기 전에 `git branch <이름> <sha>`로 고정한다.")
+    return count, lines
+
+
+# §14d: two or more level-2 headings of one note that start with the same decision (ADR-<n>) or
+# mistake (M-<n>) number. Sessions that each add "the next" entry to a shared note can take one
+# number twice. Report only: nothing is renumbered, because a changed heading breaks its anchor.
+ENTRY_HEADING_RE = re.compile(r" {0,3}##\s+(ADR|M)-([0-9]+)")
+ENTRY_STATE_UNKNOWN = "커밋 여부를 확인하지 못했다. 번호를 바꾸기 전에 참조를 확인한다."
+
+
+def entry_headings(text: str) -> list[tuple[int, str, str, str]]:
+    """(line number, kind, digits, line) of each level-2 ATX heading (`## `, as the decision and
+    mistake templates write entries) whose text starts with `ADR-<digits>` or `M-<digits>`; the
+    digits end at the first non-digit. Lines in fenced code and HTML comments do not count (the
+    warning extensions' `_clean_lines`, which numbers lines as str.splitlines() does). Without
+    that module the list is empty."""
+    if _visible_note_lines is None or ("ADR-" not in text and "M-" not in text):
+        return []
+    lines = text.splitlines()
+    found: list[tuple[int, str, str, str]] = []
+    for index, visible in enumerate(_visible_note_lines(text)):
+        match = ENTRY_HEADING_RE.match(visible)
+        if match:
+            found.append((index + 1, match[1], match[2], lines[index]))
+    return found
+
+
+def duplicate_entry_groups(text: str) -> list[list[tuple[int, str, str]]]:
+    """Groups of two or more entry headings with one kind and number (leading zeros aside), in the
+    order of their first lines. Each member is (line number, label as written, line)."""
+    groups: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
+    for number, kind, digits, line in entry_headings(text):
+        groups.setdefault((kind, digits.lstrip("0") or "0"), []).append((number, f"{kind}-{digits}", line))
+    return [members for members in groups.values() if len(members) > 1]
+
+
+def _head_entry_lines(vault: Path, rel: str) -> Counter | None:
+    """How often each entry heading line (stripped) stands in the note at HEAD; empty for a
+    tracked note HEAD does not hold. None when git is missing or fails, the vault is no
+    repository or the note is untracked. Three bounded `_git` calls at most."""
+    spec = f":(literal){rel}"
+    try:
+        if _git(vault, "ls-files", "--error-unmatch", "--", spec) is None:
+            return None
+        listing = _git(vault, "ls-tree", "-z", "HEAD", "--", spec)
+        if listing is None:
+            return None
+        if not listing:
+            return Counter()
+        fields = listing.split("\0", 1)[0].partition("\t")[0].split(" ")
+        if (len(fields) != 3 or fields[1] != "blob"
+                or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", fields[2])):
+            return None
+        blob = _git(vault, "cat-file", "blob", fields[2])
+    except ValueError:  # an argument git cannot take (a NUL character)
+        return None
+    if blob is None:
+        return None
+    # read_text drops a UTF-8 byte order mark from the working note; the blob keeps it.
+    return Counter(line.strip() for _number, _kind, _digits, line
+                   in entry_headings(blob.removeprefix("\ufeff")))
+
+
+def _entry_state(members: list[tuple[int, str, str]], head: Counter | None) -> str:
+    """The advice for one group: committed headings stay, an uncommitted one is renumbered."""
+    if head is None:
+        return ENTRY_STATE_UNKNOWN
+    written = Counter(line.strip() for _number, _label, line in members)
+    if any(0 < head[line] < seen for line, seen in written.items()):
+        return ENTRY_STATE_UNKNOWN  # git cannot tell which of the identical lines is committed
+    new = [number for number, _label, line in members if not head[line.strip()]]
+    if new:
+        return f"커밋 안 된 제목이 있다({'·'.join(map(str, new))}행). 커밋 안 된 쪽 번호를 바꾼다."
+    both = "둘 다" if len(members) == 2 else "모두"
+    return f"{both} 커밋됐다. {both} 두고 참조에 제목을 함께 적는다(제목을 바꾸면 앵커가 깨진다)."
+
+
+def scan_duplicate_entry_ids(vault: Path,
+                             notes: list[tuple[str, list[list[tuple[int, str, str]]]]]
+                             ) -> tuple[int, list[str]]:
+    """§14d over (vault-relative path, groups) pairs, notes in path order: one finding and one
+    report line per group. Git is asked only about notes with a group; nothing is changed."""
+    count, lines = 0, []
+    for rel, groups in sorted(notes, key=lambda item: item[0]):
+        head = _head_entry_lines(vault, rel)
+        for members in groups:
+            count += 1
+            numbers = "·".join(str(number) for number, _label, _line in members)
+            lines.append(f"- {rel}: {members[0][1]} ×{len(members)} ({numbers}행) "
+                         f"— {_entry_state(members, head)}")
     return count, lines
 
 
@@ -2680,6 +2779,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
     note_types: dict[str, str] = {}
     fact_hits: dict[str, dict[str, list[str]]] = {label: {} for label, _ in fact_patterns}
     approved_note_texts: dict[str, str] = {}
+    duplicate_entry_notes: list[tuple[str, list[list[tuple[int, str, str]]]]] = []
 
     # 프런트매터 면제 구역 — 2026-08-05 신설.
     # 구 버전이 하드코딩하던 면제('10-inbox/*', '00-meta/scratch/*' 등)가
@@ -2716,6 +2816,9 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
             unreadable.append((rel, read_err or "읽기 실패"))
             continue
         approved_note_texts[rel] = text
+        entry_groups = duplicate_entry_groups(text)
+        if entry_groups:
+            duplicate_entry_notes.append((rel, entry_groups))
         fm, _body = split_frontmatter(text)
 
         exempt = is_fm_exempt(rel)
@@ -2978,6 +3081,9 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
     worktree_head_count, worktree_head_lines = (
         scan_worktree_heads(vault) if args.worktree_heads else (0, []))
 
+    # --- 섹션 14d: 같은 번호의 결정·실수 항목 (v0.52.0, 리포트 전용) ----------------
+    duplicate_entry_count, duplicate_entry_lines = scan_duplicate_entry_ids(vault, duplicate_entry_notes)
+
     # --- 집계 ------------------------------------------------------------------
     total_issues = (len(missing_fm) + len(missing_keys) + len(enum_violations)
                     + len(unquoted_links) + len(oversized_fm)
@@ -2990,6 +3096,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
                     + len(link_skipped) + len(linked_trees)
                     + len(extension_diagnostics)
                     + worktree_head_count
+                    + duplicate_entry_count
                     + (1 if drift_summary else 0))
     # fail-closed 종료 코드: '시스템을 깨뜨리는 치명 위반'만 non-zero.
     #   프런트매터 붕괴/필수키/따옴표 없는 링크 → Dataview·YAML 붕괴
@@ -3144,6 +3251,12 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
             *(worktree_head_lines or ["- 없음"]),
             "",
         ]
+    if duplicate_entry_count:
+        lines += [
+            f"## 14d. 같은 번호의 결정·실수 항목 — 관리성 ({duplicate_entry_count})",
+            *duplicate_entry_lines,
+            "",
+        ]
     if extension_diagnostics:
         lines += [
             f"## 15. Markdown warning extensions ({len(extension_diagnostics)})",
@@ -3196,6 +3309,8 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
     })
     if args.worktree_heads:
         summary["unreachable_worktree_heads"] = worktree_head_count
+    if duplicate_entry_count:
+        summary["duplicate_entry_ids"] = duplicate_entry_count
     return 1 if critical > 0 else 0
 
 
