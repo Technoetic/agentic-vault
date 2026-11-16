@@ -44,7 +44,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [codex.md](codex.md) | Claude Code · Codex 겸용 설치, 명령 대응, 훅 신뢰, 기존 설치 갱신 |
 | [antigravity.md](antigravity.md) | Antigravity CLI용 생성 패키지(`antigravity/`)의 설치·갱신, 스킬 17개와 훅 둘(SessionStart 인계 주입·Stop 체크포인트)의 동작, 사용자가 직접 하는 확인 절차, 하지 않는 것, 권한·데이터·약관 메모, 확인하지 않은 것, 권장 agy 판(v0.48.0) |
 | [webapp-principles.md](webapp-principles.md) | v0.35.1: 웹앱 생성 6원칙과 검증 기준. 모듈·CSS·클래스·비동기·화면별 URL·새 배포 감지/안전한 자동 갱신; 웹앱 전용 공통 스킬과 연결 |
-| [reliability.md](reliability.md) | 세션 주입 예산, 기억 주입 진단, Claude Code 권장 버전(2.1.295 이상)·선택형 호스트 버전 확인·SessionStart 실측 절차(미실행), 세션 기록으로 SessionStart 훅의 실행·실패·잘림 확인(`--session-evidence`, v0.31.0), 출처가 있는 로컬 검색, 세대별 백업의 보장 범위와 사용법, [이중 주입·깨진 출력·비동기 훅 실패 값과 선택형 `--plugin-scope`·`--plugin-scope-host`](reliability.md#double-injection-broken-output-and-plugin-scope-optional)(v0.43.0) |
+| [reliability.md](reliability.md) | 세션 주입 예산, 기억 주입 진단, Claude Code 권장 버전(2.1.295 이상)·선택형 호스트 버전 확인·SessionStart 실측 절차(미실행), 세션 기록으로 SessionStart 훅의 실행·실패·잘림 확인(`--session-evidence`, v0.31.0), 출처가 있는 로컬 검색, 세대별 백업의 보장 범위와 사용법, [이중 주입·깨진 출력·비동기 훅 실패 값과 선택형 `--plugin-scope`·`--plugin-scope-host`](reliability.md#double-injection-broken-output-and-plugin-scope-optional)(v0.43.0), SessionStart 머리글 줄 무력화(v0.52.0) |
 | [evidence.md](evidence.md) | 검증 근거·인계 CLI (v0.11.0+) |
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+), 선택형 유지 문구 확인 `preserve-check`(v0.29.0, 읽기 전용) |
 | [moai-diagnostics.md](moai-diagnostics.md) | 전체 지침량·원문 보존 인덱스 정리 미리보기·요구별 검증 누락 진단, 디렉터리 이름 목록 대조(v0.26.0) |
