@@ -3753,7 +3753,8 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
     def test_security_states_the_reporting_form_and_the_session_start_hygiene_limit(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
         reporting = _folded(_section(security, "## Reporting a vulnerability"))
-        self.assertIn("Private vulnerability reporting is enabled for this repository since 2026-11-16", reporting)
+        self.assertIn("Private vulnerability reporting has been enabled for this repository since 2026-11-16",
+                      reporting)
         self.assertIn("Security contact request", reporting)
         self.assertNotIn("Its current state could not be verified from the source tree.", reporting)
         limits = _folded(_section(security, "## Known limitations"))
