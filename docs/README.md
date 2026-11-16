@@ -28,7 +28,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [handoff-fold.md](handoff-fold.md) | 오래된 handoff 절의 바이트 보존 접기·복원 확인·미결 줄 끌어올리기, 오프라인 소실 경보 평가, 강제 종료 뒤 복구 절차; 기본 문턱·자동 실행 없음(v0.43.0) |
 | [lesson-recurrence.md](lesson-recurrence.md) | 실수 노트의 재발 부류를 읽기 전용으로 보고, 대장 없는 부류 표시, 보정 안 된 2-gram 후보(v0.43.0) |
 | [verifier-fidelity.md](verifier-fidelity.md) | 합성 변이로 재는 유지 문구 검사의 범주별 표와 환경 변이 시험 비교; 합성 수치이며 실제 안전의 증거가 아님(v0.43.0) |
-| [concurrent-commits.md](concurrent-commits.md) | 공유 작업 트리에서 해시를 선언한 파일만 커밋하는 `vault_commit.py`, `--own-lines`, 측정 조건과 일반 `git commit`을 막지 못하는 경계(v0.43.0), 연결 작업 트리 작업을 master에 반영하는 순서(v0.50.0) |
+| [concurrent-commits.md](concurrent-commits.md) | 공유 작업 트리에서 해시를 선언한 파일만 커밋하는 `vault_commit.py`, `--own-lines`, 측정 조건과 일반 `git commit`을 막지 못하는 경계(v0.43.0), 연결 작업 트리 작업을 master에 반영하는 순서(v0.50.0), 두 세션이 같은 결정·실수 번호를 쓰는 경우와 healthcheck 섹션 14d(v0.52.0) |
 | [recoverable-bundles.md](recoverable-bundles.md) | 선택한 Markdown 묶음의 명시적 해시 승인·저널·순방향 복구, 다중 파일 원자성 보장 없음 |
 | [review-planning.md](review-planning.md) | 기존 직접 변경 신호와 명시적 의존관계에 따른 읽기 전용 재검토 순서 |
 | [generated-memory-lifecycle.md](generated-memory-lifecycle.md) | 합성 체크섬 생성 기억의 실제 저장·새 실행 재사용·제한된 오염과 선택적 철회 대조군; 기본 오프라인 |
