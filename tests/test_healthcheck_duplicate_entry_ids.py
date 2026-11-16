@@ -3,12 +3,20 @@
 Sessions that each add "the next" entry to one decisions or mistakes note can give two
 entries the same number. Full mode lists, in section 14d, every group of two or more
 level-2 headings of one note whose text starts with the same `ADR-<n>` or `M-<n>` number
-(headings inside fenced code and HTML comments do not count, and the number ends at the
-first non-digit). Each group is one finding: it adds one to the 관리성 total and, with
-`--json-summary`, to `duplicate_entry_ids`, a key that is there only when a finding is.
-Each line says whether git has the headings at HEAD. The section is a report only: the
-exit code and `--staged` stay as they were, and nothing is renumbered, because a changed
-heading breaks its anchor.
+(`##` and a space or a tab open a heading; headings inside the front matter, fenced code
+and HTML comments do not count; the number ends at the first non-digit and leading zeros
+do not count). Line numbers count line feeds, as an editor does. Each group is one
+finding: it adds one to the 관리성 total and, with `--json-summary`, to
+`duplicate_entry_ids`, a key that is there only when a finding is.
+
+Each line says what git has at HEAD. A heading line the note repeats more often than HEAD
+does leaves git unable to tell which copy is committed. Otherwise a group with no more
+headings than HEAD holds with its number has no new entry: headings HEAD has are kept, and
+a heading HEAD does not have is a committed entry whose title was edited, which keeps its
+number. A group with k more headings names the k headings HEAD does not have when exactly
+k are missing there (all of them when HEAD has none: one keeps the number); otherwise git
+cannot tell. The section is a report only: the exit code and `--staged` stay as they
+were, and nothing is renumbered, because a changed heading breaks its anchor.
 
 Contract test (passes before and after the change): a vault without such headings gets
 no section and no summary key. Every other test also needs a finding that only the new
@@ -44,6 +52,8 @@ HEADER = "## 14d. 같은 번호의 결정·실수 항목 — 관리성 ({count})
 KEEP_BOTH = "— 둘 다 커밋됐다. 둘 다 두고 참조에 제목을 함께 적는다(제목을 바꾸면 앵커가 깨진다)."
 KEEP_ALL = "— 모두 커밋됐다. 모두 두고 참조에 제목을 함께 적는다(제목을 바꾸면 앵커가 깨진다)."
 CHANGE = "— 커밋 안 된 제목이 있다({lines}행). 커밋 안 된 쪽 번호를 바꾼다."
+ALL_NEW = "— 모두 커밋 안 됐다({lines}행). 하나만 두고 나머지 번호를 바꾼다."
+EDITED = "— HEAD와 제목이 다른 줄({lines}행)은 커밋된 항목을 고친 것이다. 번호를 바꾸지 않는다."
 UNKNOWN = "— 커밋 여부를 확인하지 못했다. 번호를 바꾸기 전에 참조를 확인한다."
 SUMMARY_KEY = "duplicate_entry_ids"
 
@@ -57,8 +67,9 @@ def entries(*headings: str) -> str:
 
 
 def line_numbers(text: str, heading: str) -> list[int]:
-    """The 1-based numbers of the lines of text that equal heading."""
-    return [index + 1 for index, line in enumerate(text.splitlines()) if line == heading]
+    """The 1-based numbers of the lines of text that equal heading, counting line feeds as an
+    editor does (a form feed or a line separator inside a line does not end it)."""
+    return [index + 1 for index, line in enumerate(text.split("\n")) if line == heading]
 
 
 def joined(numbers: list[int]) -> str:
@@ -241,6 +252,52 @@ class DuplicateEntryIdTests(_EntryCase):
         sixes = line_numbers(text, "   ## ADR-6 | 세 칸 들여씀") + line_numbers(text, "## ADR-6 | 들여쓰지 않음")
         self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-6", sixes, UNKNOWN)])
 
+    def test_only_a_space_or_a_tab_after_the_hashes_opens_a_heading(self) -> None:
+        # As in CommonMark: a no-break space or an ideographic space after the hashes leaves a
+        # paragraph line, not a heading.
+        no_break, ideographic = chr(0xA0), chr(0x3000)
+        tabbed, spaced = "##\tADR-6 | 탭", "## ADR-6 | 띄어 씀"
+        text = self.decisions(entries(f"##{no_break}ADR-5 | 줄바꿈 없는 공백", f"##{ideographic}ADR-5 | 전각 공백",
+                                      "## ADR-5 | 띄어 씀", tabbed, spaced))
+        _code, report, _stdout = self.check()
+        sixes = line_numbers(text, tabbed) + line_numbers(text, spaced)
+        self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-6", sixes, UNKNOWN)])
+
+    def test_yaml_comments_in_the_front_matter_are_not_headings(self) -> None:
+        # Front matter as sections 1 to 4 find it; a line there that starts with '#' is a YAML
+        # comment. The first body heading right after the closing line still counts.
+        text = "\n".join([
+            "---", 'title: "demo decisions"', "## ADR-7 | YAML 주석", "---", "",
+            "   ## ADR-9 | 하나", "",
+            "## ADR-9 | 둘", "",
+            "## ADR-7 | 본문의 결정", "",
+            "[[A]]", "",
+        ])
+        write(self.vault / DECISIONS, text)
+        _code, report, _stdout = self.check()
+        nines = line_numbers(text, "   ## ADR-9 | 하나") + line_numbers(text, "## ADR-9 | 둘")
+        self.assertEqual(nines, [6, 8])
+        self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-9", nines, UNKNOWN)])
+
+    def test_line_numbers_count_line_feeds_as_an_editor_does(self) -> None:
+        # str.splitlines() also breaks at a form feed and at a line separator, which an editor
+        # shows inside one line: such characters move no line number, and the text after one is
+        # inside a line, so it opens no heading.
+        form_feed, separator = chr(0x0C), chr(0x2028)
+        first, second = "## ADR-7 | 2026-01-01 | 하나", "## ADR-7 | 2026-01-02 | 둘"
+        text = self.decisions("\n".join([
+            "# 기록", "",
+            f"쪽 나눔{form_feed}뒤의 글", f"줄 구분{separator}뒤의 글", "",
+            first, "",
+            f"문단{form_feed}## ADR-7 | 줄 가운데", "",
+            second, "",
+            "[[A]]", "",
+        ]))
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, first) + line_numbers(text, second)
+        self.assertEqual(numbers, [9, 13])
+        self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-7", numbers, UNKNOWN)])
+
     def test_deny_zones_and_excluded_folders_are_not_scanned(self) -> None:
         twice = note("old decisions", entries("## ADR-4 | 하나", "## ADR-4 | 둘"))
         write(self.vault / "20-knowledge" / "_archive" / "old decisions.md", twice)
@@ -343,13 +400,30 @@ class DuplicateEntryCommitStateTests(_EntryCase):
             entry(MISTAKES, "M-3", new_line + old_line, CHANGE.format(lines=joined(new_line))),
         ])
 
-    def test_two_new_headings_are_both_named(self) -> None:
+    def test_a_new_heading_next_to_committed_ones_is_the_only_one_to_renumber(self) -> None:
+        # HEAD holds two headings with the number (counted as the note counts them, leading zeros
+        # aside) and the note three: the one heading HEAD does not have is the new entry.
+        first, second = "## ADR-007 | 하나", "## ADR-7 | 둘"
+        self.decisions(entries(first, second))
+        self.commit("two sevens")
+        new = "## ADR-07 | 셋"
+        text = self.decisions(entries(first, new, second))
+        _code, report, _stdout = self.check()
+        numbers = [line_numbers(text, heading)[0] for heading in (first, new, second)]
+        self.assertEqual(section(report), [
+            HEADER.format(count=1),
+            entry(DECISIONS, "ADR-007", numbers, CHANGE.format(lines=joined(line_numbers(text, new)))),
+        ])
+
+    def test_two_new_headings_keep_one_and_renumber_the_rest(self) -> None:
+        # HEAD has no heading with the number: one keeps it, so the line does not ask to
+        # renumber every heading it names.
         first, second = "## M-3 — 하나", "## M-3 — 둘"
         text = self.mistakes(entries("## M-1 — 처음 실수", first, second))
         _code, report, _stdout = self.check()
         numbers = line_numbers(text, first) + line_numbers(text, second)
         self.assertEqual(section(report), [
-            HEADER.format(count=1), entry(MISTAKES, "M-3", numbers, CHANGE.format(lines=joined(numbers))),
+            HEADER.format(count=1), entry(MISTAKES, "M-3", numbers, ALL_NEW.format(lines=joined(numbers))),
         ])
 
     def test_a_note_staged_but_never_committed_has_no_committed_heading(self) -> None:
@@ -361,7 +435,81 @@ class DuplicateEntryCommitStateTests(_EntryCase):
         _code, report, _stdout = self.check()
         numbers = line_numbers(text, first) + line_numbers(text, second)
         self.assertEqual(section(report), [
-            HEADER.format(count=1), entry(path, "ADR-2", numbers, CHANGE.format(lines=joined(numbers))),
+            HEADER.format(count=1), entry(path, "ADR-2", numbers, ALL_NEW.format(lines=joined(numbers))),
+        ])
+
+    def test_a_committed_heading_with_an_edited_title_keeps_its_number(self) -> None:
+        # HEAD holds as many headings with the number as the note: none is new, so a heading
+        # HEAD does not have is a committed entry whose title was edited, not one to renumber.
+        older, newer = "## ADR-7 | 2026-01-01 | 먼저 한 결정", "## ADR-7 | 2026-01-02 | 동시에 한 결정"
+        self.decisions(entries(older, newer))
+        self.commit("two sevens")
+        edited = older + " (대체됨 → ADR-9)"
+        text = self.decisions(entries(edited, newer))
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, edited) + line_numbers(text, newer)
+        self.assertEqual(section(report), [
+            HEADER.format(count=1),
+            entry(DECISIONS, "ADR-7", numbers, EDITED.format(lines=joined(line_numbers(text, edited)))),
+        ])
+
+        # HEAD may hold more: a third committed heading was dropped and both others were edited.
+        self.decisions(entries(older, newer, "## ADR-7 | 2026-01-03 | 세 번째 결정"))
+        self.commit("three sevens")
+        renamed = newer + " (고침)"
+        text = self.decisions(entries(edited, renamed))
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, edited) + line_numbers(text, renamed)
+        self.assertEqual(section(report), [
+            HEADER.format(count=1), entry(DECISIONS, "ADR-7", numbers, EDITED.format(lines=joined(numbers))),
+        ])
+
+    def test_an_edited_heading_next_to_a_new_one_says_the_state_is_unknown(self) -> None:
+        # One heading more than HEAD holds, but two headings HEAD does not have: git cannot tell
+        # the edited committed entry from the new one.
+        original = "## ADR-7 | 원래 제목"
+        self.decisions(entries(original))
+        self.commit("one seven")
+        edited, new = original + " (고침)", "## ADR-7 | 새 항목"
+        text = self.decisions(entries(edited, new))
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, edited) + line_numbers(text, new)
+        self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-7", numbers, UNKNOWN)])
+
+    def test_a_yaml_comment_at_head_is_no_committed_heading(self) -> None:
+        # The note at HEAD is read with the note's own rule, front matter included.
+        front = '---\ntitle: "demo decisions"\n## ADR-7 | YAML 주석\n---\n'
+        committed, new = "## ADR-7 | 커밋된 결정", "## ADR-7 | 새 결정"
+        write(self.vault / DECISIONS, front + entries(committed))
+        self.commit("one seven and a comment")
+        text = front + entries(committed, new)
+        write(self.vault / DECISIONS, text)
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, committed) + line_numbers(text, new)
+        self.assertEqual(section(report), [
+            HEADER.format(count=1),
+            entry(DECISIONS, "ADR-7", numbers, CHANGE.format(lines=joined(line_numbers(text, new)))),
+        ])
+
+    def test_the_note_at_head_is_read_with_its_leading_white_space(self) -> None:
+        # A first line indented by four spaces is code, and a note that starts with a blank line
+        # has no front matter, so a later '---' line opens none. Both stay so at HEAD.
+        indented, committed, new = "    ## ADR-7 | 들여쓴 코드", "## ADR-7 | 커밋된 결정", "## ADR-7 | 새 결정"
+        rules, between, added = "\n---\n{}\n---\n", "## M-2 — 구분선 사이의 실수", "## M-2 — 새 실수"
+        write(self.vault / DECISIONS, f"{indented}\n\n{committed}\n")
+        write(self.vault / MISTAKES, rules.format(between))
+        self.commit("notes that start with white space")
+        decisions = f"{indented}\n\n{committed}\n\n{new}\n"
+        mistakes = rules.format(between) + f"\n{added}\n"
+        write(self.vault / DECISIONS, decisions)
+        write(self.vault / MISTAKES, mistakes)
+        _code, report, _stdout = self.check()
+        self.assertEqual(section(report), [
+            HEADER.format(count=2),
+            entry(DECISIONS, "ADR-7", line_numbers(decisions, committed) + line_numbers(decisions, new),
+                  CHANGE.format(lines=joined(line_numbers(decisions, new)))),
+            entry(MISTAKES, "M-2", line_numbers(mistakes, between) + line_numbers(mistakes, added),
+                  CHANGE.format(lines=joined(line_numbers(mistakes, added)))),
         ])
 
     def test_an_untracked_note_says_the_state_is_unknown(self) -> None:
