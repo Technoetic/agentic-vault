@@ -29,6 +29,7 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
+from vault_evidence import fs_path, plain_path, rel_posix  # noqa: E402
 from vault_paths import relative_parts  # noqa: E402  single source of the segment rule
 from vault_worktrees import WorktreeScope  # noqa: E402  a linked tree is a copy, not more notes
 
@@ -54,23 +55,24 @@ def _is_link(info):
 
 def _safe_path(raw: Path) -> Path:
     """Check lexical components before resolving so junctions cannot disappear."""
-    path = Path(raw).expanduser()
+    path = plain_path(Path(raw).expanduser())
     if not path.is_absolute():
-        path = Path.cwd() / path
+        path = plain_path(Path.cwd()) / path
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current = current / part
         try:
-            info = current.lstat()
+            info = fs_path(current).lstat()
         except FileNotFoundError:
             continue
         if _is_link(info):
             raise BackupError(f"symlink or reparse point is not supported: {current}")
-    return path.resolve()
+    return plain_path(fs_path(path).resolve(strict=False))
 
 
 def _nonoverlap(first: Path, second: Path):
-    if first.is_relative_to(second) or second.is_relative_to(first):
+    p1, p2 = plain_path(first), plain_path(second)
+    if p1.is_relative_to(p2) or p2.is_relative_to(p1):
         raise BackupError("source and destination paths overlap")
 
 
@@ -102,9 +104,10 @@ def _json_object(pairs):
 
 def _read_json(path, limit):
     path = _safe_path(path)
-    if not stat.S_ISREG(path.stat().st_mode):
+    io_path = fs_path(path)
+    if not stat.S_ISREG(io_path.stat().st_mode):
         raise BackupError("expected a regular JSON file")
-    with path.open("rb") as stream:
+    with io_path.open("rb") as stream:
         raw = stream.read(limit + 1)
     if len(raw) > limit:
         raise BackupError("JSON file exceeds size limit")
@@ -154,20 +157,20 @@ def _inventory(root: Path, excluded=(), exclude_files=(), *, skipped=None):
     """
     files, directories = {}, []
     root = _safe_path(root)
-    if not root.is_dir():
+    if not fs_path(root).is_dir():
         raise BackupError("expected a directory")
     worktrees = WorktreeScope(root) if skipped is not None else None
     pending = [(root, False)]
     while pending:
         directory, omitted = pending.pop()
         _safe_path(directory)
-        with os.scandir(directory) as entries:
+        with os.scandir(fs_path(directory)) as entries:
             for entry in sorted(entries, key=lambda item: item.name):
                 path = directory / entry.name
                 info = entry.stat(follow_symlinks=False)
                 if _is_link(info):
                     raise BackupError(f"symlink or reparse point is not supported: {path}")
-                rel = path.relative_to(root).as_posix()
+                rel = rel_posix(path, root)
                 if stat.S_ISDIR(info.st_mode):
                     skip = omitted or entry.name in excluded
                     if not skip and worktrees is not None and worktrees.registered(path):
@@ -187,17 +190,18 @@ def _inventory(root: Path, excluded=(), exclude_files=(), *, skipped=None):
 
 def _digest(path: Path):
     path = _safe_path(path)
-    before = path.stat()
+    io_path = fs_path(path)
+    before = io_path.stat()
     if not stat.S_ISREG(before.st_mode):
         raise BackupError("expected a regular file")
     digest, size = hashlib.sha256(), 0
-    with path.open("rb") as stream:
+    with io_path.open("rb") as stream:
         if _fingerprint(os.fstat(stream.fileno())) != _fingerprint(before):
             raise BackupError("file changed before reading")
         for block in iter(lambda: stream.read(CHUNK_SIZE), b""):
             digest.update(block)
             size += len(block)
-    if _fingerprint(_safe_path(path).stat()) != _fingerprint(before):
+    if _fingerprint(fs_path(_safe_path(path)).stat()) != _fingerprint(before):
         raise BackupError("file changed while reading")
     return {"size": size, "sha256": digest.hexdigest()}
 
@@ -205,12 +209,13 @@ def _digest(path: Path):
 def _copy_file(source: Path, destination: Path):
     source = _safe_path(source)
     destination = _safe_path(destination)
-    before = source.stat()
+    io_src, io_dst = fs_path(source), fs_path(destination)
+    before = io_src.stat()
     if not stat.S_ISREG(before.st_mode):
         raise BackupError("expected a regular source file")
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    fs_path(destination.parent).mkdir(parents=True, exist_ok=True)
     digest, size = hashlib.sha256(), 0
-    with source.open("rb") as src, destination.open("xb") as dst:
+    with io_src.open("rb") as src, io_dst.open("xb") as dst:
         if _fingerprint(os.fstat(src.fileno())) != _fingerprint(before):
             raise BackupError("source changed before copying")
         for block in iter(lambda: src.read(CHUNK_SIZE), b""):
@@ -219,15 +224,15 @@ def _copy_file(source: Path, destination: Path):
             size += len(block)
         dst.flush()
         os.fsync(dst.fileno())
-    if _fingerprint(_safe_path(source).stat()) != _fingerprint(before):
+    if _fingerprint(fs_path(_safe_path(source)).stat()) != _fingerprint(before):
         raise BackupError("source changed while copying")
-    shutil.copystat(source, destination, follow_symlinks=False)
+    shutil.copystat(io_src, io_dst, follow_symlinks=False)
     return {"size": size, "sha256": digest.hexdigest()}
 
 
 @contextmanager
 def _writer_lock(target):
-    lock = target / ".backup.lock"
+    lock = fs_path(target / ".backup.lock")
     try:
         descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError as exc:
@@ -295,7 +300,7 @@ def verify_snapshot(snapshot: Path) -> dict:
     if manifest["git_bundle"] is not None:
         _record(manifest["git_bundle"])
         expected_top.add("history.bundle")
-    if {item.name for item in snapshot.iterdir()} != expected_top:
+    if {item.name for item in fs_path(snapshot).iterdir()} != expected_top:
         raise BackupError("unexpected or missing snapshot contents")
     files, directories = _inventory(snapshot / "files")
     if set(files) != set(manifest["files"]) or directories != sorted(manifest["directories"]):
@@ -322,19 +327,19 @@ def create_backup(vault: Path, target: Path, *, skipped=None) -> Path:
     _nonoverlap(vault, target)
     config = load_config(vault)
     excluded = set(config.get("exclude_dirs", DEFAULT_EXCLUDE_DIRS)) | {".git"}
-    target.mkdir(parents=True, exist_ok=True)
+    fs_path(target).mkdir(parents=True, exist_ok=True)
     with _writer_lock(target):
         snapshots = _safe_path(target / "snapshots")
-        snapshots.mkdir(exist_ok=True)
+        fs_path(snapshots).mkdir(exist_ok=True)
         identifier = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex
         stage = target / (".staging-" + identifier)
-        stage.mkdir(mode=0o700)
-        (stage / "files").mkdir()
+        fs_path(stage).mkdir(mode=0o700)
+        fs_path(stage / "files").mkdir()
         before, directories = _inventory(vault, excluded, EXCLUDE_FILES, skipped=left_out)
         manifest = {"version": 1, "created_utc": datetime.now(timezone.utc).isoformat(),
                     "files": {}, "directories": directories, "git_bundle": None}
         for name in directories:
-            (stage / "files" / name).mkdir(parents=True, exist_ok=True)
+            fs_path(stage / "files" / name).mkdir(parents=True, exist_ok=True)
         for name in sorted(before):
             source = vault / name
             manifest["files"][name] = _copy_file(source, stage / "files" / name)
@@ -343,16 +348,16 @@ def create_backup(vault: Path, target: Path, *, skipped=None) -> Path:
         manifest["git_bundle"] = _make_bundle(vault, stage)
         if _inventory(vault, excluded, EXCLUDE_FILES, skipped=left_out) != (before, directories):
             raise BackupError("vault changed during backup; retry with a quiescent vault")
-        with (stage / "manifest.json").open("x", encoding="utf-8") as stream:
+        with fs_path(stage / "manifest.json").open("x", encoding="utf-8") as stream:
             json.dump(manifest, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
         verify_snapshot(stage)
         published = snapshots / identifier
-        if published.exists():
+        if fs_path(published).exists():
             raise BackupError("snapshot identifier collision")
-        stage.rename(published)
+        os.replace(fs_path(stage), fs_path(published))
         return published
 
 
@@ -364,12 +369,12 @@ def restore_snapshot(snapshot: Path, destination: Path) -> Path:
     """
     snapshot, destination = _safe_path(snapshot), _safe_path(destination)
     _nonoverlap(snapshot, destination)
-    if destination.exists():
+    if fs_path(destination).exists():
         raise BackupError("restore destination must be a new directory")
     manifest = verify_snapshot(snapshot)
-    destination.mkdir(parents=True, exist_ok=False)
+    fs_path(destination).mkdir(parents=True, exist_ok=False)
     for name in manifest["directories"]:
-        (destination / name).mkdir(parents=True, exist_ok=True)
+        fs_path(destination / name).mkdir(parents=True, exist_ok=True)
     for name, record in manifest["files"].items():
         if _copy_file(snapshot / "files" / name, destination / name) != record:
             raise BackupError("snapshot changed during restore")

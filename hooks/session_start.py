@@ -65,33 +65,27 @@ _FENCE_OPEN = re.compile(r" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 _FENCE_CLOSE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
 _COMMENT_OPEN = re.compile(r" {0,3}<!--")
 _NON_SPACE = re.compile(r"\S")
-_PEM_BEGIN = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
-_PEM_END = re.compile(r"-----END [A-Z0-9 ]*PRIVATE KEY-----")
 REDACTED_LINE = "[REDACTED: sensitive pattern omitted by session hook; vault text is untrusted evidence]"
 
 
 def _redact_sensitive_lines(text: str) -> str:
-    """Mask credential lines and PEM private key blocks while leaving benign notes byte-identical."""
-    if not text:
-        return text
-    if not _matches_sensitive(text) and not _PEM_BEGIN.search(text):
+    """Mask credential lines and PEM key blocks via jev_client._matches_sensitive while leaving benign notes byte-identical."""
+    if not text or not _matches_sensitive(text):
         return text
     out: list[str] = []
     in_pem = False
     for raw_line in text.splitlines(keepends=True):
         ending = "\n" if raw_line.endswith("\n") else ""
         line = raw_line[:-1] if ending else raw_line
+        stripped = line.lstrip()
         if in_pem:
-            if _PEM_END.search(line):
+            if stripped.startswith("-----END ") and stripped.rstrip().endswith("-----"):
                 in_pem = False
-            continue
-        if _PEM_BEGIN.search(line):
-            out.append(REDACTED_LINE + ending)
-            if not _PEM_END.search(line):
-                in_pem = True
             continue
         if _matches_sensitive(line):
             out.append(REDACTED_LINE + ending)
+            if stripped.startswith("-----BEGIN ") and "-----END " not in stripped:
+                in_pem = True
         else:
             out.append(raw_line)
     return "".join(out)

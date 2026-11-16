@@ -60,9 +60,15 @@ def _public(function):
             return function(*args, **kwargs)
         except ContractError:
             raise
-        except (runs.RunError, state.StateError, evidence.EvidenceError, HealthcheckError,
+        except (runs.RunError, state.StateError) as exc:
+            if str(exc) == 'path_too_long':
+                raise ContractError('path_too_long') from exc
+            raise ContractError('unsafe_or_invalid_input') from exc
+        except (evidence.EvidenceError, HealthcheckError,
                 OSError, ValueError, UnicodeError, TypeError, RecursionError,
                 OverflowError, RuntimeError) as exc:
+            if evidence.is_path_too_long(exc):
+                raise ContractError('path_too_long') from exc
             raise ContractError('unsafe_or_invalid_input') from exc
     return call
 
@@ -95,7 +101,7 @@ def _path(store, value):
     # portable spelling in this new format rather than accepting backslash aliases.
     if not isinstance(value, str) or '\\' in value:
         raise ContractError('noncanonical_path')
-    canonical = store.path(value).relative_to(store.root).as_posix()
+    canonical = evidence.rel_posix(store.path(value), store.root)
     if canonical != value:
         raise ContractError('noncanonical_path')
     return canonical
@@ -236,7 +242,7 @@ def _parents(store, receipt):
 
 
 def _children(store, contract_id, *, adding=False):
-    directory = store.record_path('')
+    directory = evidence.fs_path(store.record_path(''))
     if not directory.exists():
         return []
     children, scanned, matched = [], 0, 0
@@ -328,7 +334,9 @@ def inspect(vault, contract_id):
         return result
     except (ContractError, runs.RunError, state.StateError, evidence.EvidenceError,
             HealthcheckError, OSError, ValueError, UnicodeError, TypeError,
-            RecursionError, OverflowError, RuntimeError):
+            RecursionError, OverflowError, RuntimeError) as exc:
+        if str(exc) == 'path_too_long' or evidence.is_path_too_long(exc):
+            raise ContractError('path_too_long') from exc
         return _result(contract_id, stale=True)
 
 

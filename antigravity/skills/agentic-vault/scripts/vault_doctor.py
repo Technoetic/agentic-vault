@@ -15,7 +15,21 @@ from pathlib import Path
 from types import ModuleType
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+def _resolve_repo_root() -> Path:
+    resolved = Path(__file__).resolve()
+    if len(resolved.parents) > 3:
+        candidate = resolved.parents[3]
+        if (candidate / "hooks" / "session_start.py").is_file():
+            return candidate
+    env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    if env_root:
+        candidate = Path(env_root).resolve()
+        if (candidate / "hooks" / "session_start.py").is_file():
+            return candidate
+    return resolved.parents[3] if len(resolved.parents) > 3 else resolved.parent
+
+
+REPO_ROOT = _resolve_repo_root()
 HOOK_PATH = REPO_ROOT / "hooks" / "session_start.py"
 TRUST_BOUNDARY = "diagnosis_only_host_hook_execution_unverified"
 
@@ -40,7 +54,9 @@ _HOST_NEXT_ACTIONS = {
 }
 
 
-def _load_hook() -> ModuleType:
+def _load_hook() -> ModuleType | None:
+    if not HOOK_PATH.is_file():
+        return None
     spec = importlib.util.spec_from_file_location("agentic_vault_session_hook", HOOK_PATH)
     if spec is None or spec.loader is None:  # pragma: no cover - installation guard
         raise RuntimeError("session hook unavailable")
@@ -60,8 +76,14 @@ from vault_worktrees import checked_note_path
 
 
 SECTION_SPECS = (
-    ("handoff", "handoff_note", "handoff_max_tokens", session_hook.HANDOFF_HEADER),
-    ("hot", "hot_note", "hot_max_tokens", session_hook.HOT_HEADER),
+    (
+        "handoff", "handoff_note", "handoff_max_tokens",
+        session_hook.HANDOFF_HEADER if session_hook is not None else "=== SESSION HANDOFF (직전 세션 인계) ===",
+    ),
+    (
+        "hot", "hot_note", "hot_max_tokens",
+        session_hook.HOT_HEADER if session_hook is not None else "=== HOT CONTEXT ===",
+    ),
 )
 WARNING_STATES = {"missing", "empty", "truncated", "budget_too_small"}
 FATAL_STATES = {"unreadable", "unsafe_path"}
@@ -91,7 +113,7 @@ def _hook_report(
         # UTF-16 units of the exact stdout, final newline included: the length
         # the host compares with its hook output limit.
         "estimated_emitted_chars": emitted_chars,
-        "host_char_cap": session_hook.HOST_MAX_OUTPUT_CHARS,
+        "host_char_cap": session_hook.HOST_MAX_OUTPUT_CHARS if session_hook is not None else 9500,
         "trust_boundary": TRUST_BOUNDARY,
     }
 
@@ -263,6 +285,11 @@ def _isolated_configs(raw: dict) -> tuple[dict, dict] | None:
 
 
 def diagnose(vault: Path, *, instructions: bool = False) -> tuple[dict, int]:
+    if session_hook is None:
+        return _terminal_report(
+            "unavailable", "session_hook_not_bundled",
+            "run_vault_doctor_from_installed_plugin_or_set_claude_plugin_root",
+        ), 2
     if not vault.is_dir():
         return _terminal_report(
             "invalid_vault", "vault_path_not_found", "pass_an_existing_vault_directory",

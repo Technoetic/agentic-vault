@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Additive inline Jev judgments; no workspace reads, writes, or action authority."""
+"""Additive inline Jev and opt-in BizRouter Decisions judgments; no workspace reads, writes, or action authority."""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import re
 import sys
 
@@ -14,7 +15,9 @@ import jev_client
 
 
 MAX_BYTES = 64 * 1024
+BIZROUTER_MAX_BYTES = 256 * 1024
 MODEL = jev_client.MODEL
+PROVIDERS = ("jev", "bizrouter")
 ID_PATTERN = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 # One secret filter for every Jev path; see jev_client.SENSITIVE.
 SENSITIVE = jev_client.SENSITIVE
@@ -37,15 +40,41 @@ class AskError(Exception):
         super().__init__(self.code)
 
 
+def _bizrouter():
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    try:
+        import bizrouter_client as client
+    except ImportError:
+        raise AskError("invalid_arguments") from None
+    return client
+
+
+def _resolve_provider_model(provider="jev", model=None):
+    if provider not in PROVIDERS:
+        raise AskError("invalid_arguments")
+    if provider == "jev":
+        resolved = MODEL if model is None else model
+        if resolved != MODEL:
+            raise AskError("invalid_arguments")
+        return "jev", resolved
+    br = _bizrouter()
+    resolved = br.DEFAULT_MODEL if model is None else model
+    if resolved not in br.MODELS:
+        raise AskError("invalid_arguments")
+    return "bizrouter", resolved
+
+
 def _encode(value, *, canonical=False):
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=canonical,
                       separators=(",", ":")).encode("utf-8")
 
 
-def _decode(raw, code):
+def _decode(raw, code, *, max_bytes=MAX_BYTES):
     if not isinstance(raw, bytes):
         raise AskError(code)
-    if len(raw) > MAX_BYTES:
+    if len(raw) > max_bytes:
         raise AskError("input_too_large" if code == "invalid_input" else code)
 
     def pairs(items):
@@ -102,8 +131,14 @@ def _number(value, low=0, high=1):
     return type(value) in (int, float) and low <= value <= high and math.isfinite(value)
 
 
-def _validate_input(raw, api_key):
-    data = _decode(raw, "invalid_input")
+def _validate_input(raw, api_key, *, provider="jev", model=MODEL):
+    if provider == "bizrouter":
+        max_q, max_choices, max_levels = _bizrouter().model_limits(model)
+        max_bytes = BIZROUTER_MAX_BYTES
+    else:
+        max_q, max_choices, max_levels = 12, 255, 10
+        max_bytes = MAX_BYTES
+    data = _decode(raw, "invalid_input", max_bytes=max_bytes)
     _keys(data, ("schema_version", "context", "questions"), ("min_confidence",))
     _sensitive(data, api_key)
     if type(data["schema_version"]) is not int or data["schema_version"] != 1:
@@ -117,7 +152,7 @@ def _validate_input(raw, api_key):
     if not _number(threshold):
         raise AskError("invalid_input")
     questions = data["questions"]
-    if not isinstance(questions, list) or not 1 <= len(questions) <= 12:
+    if not isinstance(questions, list) or not 1 <= len(questions) <= max_q:
         raise AskError("invalid_input")
     ids = set()
     for question in questions:
@@ -138,7 +173,7 @@ def _validate_input(raw, api_key):
                     _text(definition)
         elif kind == "choice":
             _keys(question, ("id", "type", "instructions", "criteria", "abstain"))
-            if not isinstance(criteria, dict) or not 2 <= len(criteria) <= 255:
+            if not isinstance(criteria, dict) or not 2 <= len(criteria) <= max_choices:
                 raise AskError("invalid_input")
             for label, definition in criteria.items():
                 _text(label, label=True)
@@ -147,7 +182,7 @@ def _validate_input(raw, api_key):
                 raise AskError("invalid_input")
         elif kind == "score":
             _keys(question, ("id", "type", "instructions", "criteria"))
-            if not isinstance(criteria, list) or not 2 <= len(criteria) <= 10:
+            if not isinstance(criteria, list) or not 2 <= len(criteria) <= max_levels:
                 raise AskError("invalid_input")
             for definition in criteria:
                 _text(definition)
@@ -160,10 +195,13 @@ def _hash(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def _base():
-    return {"schema_version": 1, "role": "advisory", "evidence_binding": "inline_not_file_verified",
-            "model": MODEL, "network_attempted": False,
+def _base(*, provider="jev", model=MODEL):
+    base = {"schema_version": 1, "role": "advisory", "evidence_binding": "inline_not_file_verified",
+            "model": model, "network_attempted": False,
             "input_hash": None, "request_hash": None, "policy_hash": None}
+    if provider != "jev":
+        base["provider"] = provider
+    return base
 
 
 def _failure(code, base=None):
@@ -172,10 +210,9 @@ def _failure(code, base=None):
     return {**result, "status": "unverified", "error_code": code if code in ERROR_CODES else "invalid_input"}
 
 
-def _prepare(raw, api_key):
-    data = _validate_input(raw, api_key)
+def _wire_questions(question_list):
     questions = {}
-    for question in data["questions"]:
+    for question in question_list:
         boundary = BOUNDARY
         if question["type"] == "choice":
             boundary += ("Abstention choice: " + question["abstain"]
@@ -184,17 +221,27 @@ def _prepare(raw, api_key):
         if "criteria" in question:
             wire["criteria"] = question["criteria"]
         questions[question["id"]] = wire
-    payload = _encode({"state": {"context": data["context"]}, "model": MODEL, "questions": questions})
-    if len(payload) > MAX_BYTES:
+    return questions
+
+
+def _prepare(raw, api_key, *, provider="jev", model=MODEL):
+    data = _validate_input(raw, api_key, provider=provider, model=model)
+    questions = _wire_questions(data["questions"])
+    max_bytes = BIZROUTER_MAX_BYTES if provider == "bizrouter" else MAX_BYTES
+    payload = _encode({"state": {"context": data["context"]}, "model": model, "questions": questions})
+    if len(payload) > max_bytes:
         raise AskError("input_too_large")
     policy = {"version": "jev-ask-1", "min_confidence": data["min_confidence"],
               "boundary": BOUNDARY, "sum_tolerance": SUM_TOLERANCE, "score_tolerance": SCORE_TOLERANCE,
               "abstain": {q["id"]: q["abstain"] for q in data["questions"] if q["type"] == "choice"}}
-    prepared = {**_base(), "status": "prepared", "question_count": len(questions),
+    if provider != "jev":
+        policy["provider"] = provider
+        policy["model"] = model
+    prepared = {**_base(provider=provider, model=model), "status": "prepared", "question_count": len(questions),
                 "min_confidence": data["min_confidence"], "network_required": True,
                 "input_hash": _hash(_encode(data, canonical=True)), "request_hash": _hash(payload),
                 "policy_hash": _hash(_encode(policy, canonical=True))}
-    return prepared, data, payload
+    return prepared, data, payload, questions
 
 
 def _probabilities(value, labels):
@@ -248,63 +295,147 @@ def _validate_response(raw, questions):
     return answers, usage
 
 
-def prepare(raw, *, api_key=None):
+def _review_reasons(question_list, answers, min_confidence):
+    reasons = []
+    for question in question_list:
+        identifier = question["id"]
+        answer = answers[identifier]
+        reason = None
+        if question["type"] == "noul":
+            probability = answer["noul"]
+            if probability == 0.5 or max(probability, 1 - probability) < min_confidence:
+                reason = "low_decisiveness"
+        elif question["type"] == "choice" and answer["choice"] == question["abstain"]:
+            reason = "abstained"
+        elif answer["confidence"] < min_confidence:
+            reason = "low_confidence"
+        if reason:
+            reasons.append({"id": identifier, "reason": reason})
+    return reasons
+
+
+def prepare(raw, *, api_key=None, provider="jev", model=None):
     """Validate bounded UTF-8 JSON bytes offline and expose only metadata/hashes."""
     try:
-        key = os.environ.get("TYPESAFE_API_KEY", "") if api_key is None else api_key
-        return _prepare(raw, key)[0]
+        prov, resolved_model = _resolve_provider_model(provider, model)
+        env_var = _bizrouter().ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
+        key = os.environ.get(env_var, "") if api_key is None else api_key
+        return _prepare(raw, key, provider=prov, model=resolved_model)[0]
     except (AskError, ValueError, TypeError, UnicodeError, RecursionError, OverflowError) as error:
-        return _failure(error.code if isinstance(error, AskError) else "invalid_input")
+        try:
+            prov, resolved_model = _resolve_provider_model(provider, model)
+            base = _base(provider=prov, model=resolved_model)
+        except AskError:
+            base = _base()
+        return _failure(error.code if isinstance(error, AskError) else "invalid_input", base)
 
 
-def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None):
-    """One explicitly authorized request; injected transports are for offline tests.
-
-    The host selects applicable questions and owns transmission authorization.
-    TYPESAFE_API_KEY is the only environment credential used by the CLI.
-    """
-    base = _base()
+def run(raw, *, allow_network=False, api_key=None, timeout=10.0, transport=None,
+        provider="jev", model=None, escalate_bizrouter=False,
+        bizrouter_api_key=None, bizrouter_transport=None):
+    """One explicitly authorized request; injected transports are for offline tests."""
+    try:
+        prov, resolved_model = _resolve_provider_model(provider, model)
+    except AskError as error:
+        return _failure(error.code, _base())
+    if escalate_bizrouter and prov != "jev":
+        return _failure("invalid_arguments", _base(provider=prov, model=resolved_model))
+    base = _base(provider=prov, model=resolved_model)
     if allow_network is not True:
         return _failure("network_disabled", base)
     try:
-        key = os.environ.get("TYPESAFE_API_KEY", "") if api_key is None else api_key
-        base, data, payload = _prepare(raw, key)
+        br = _bizrouter() if (prov == "bizrouter" or escalate_bizrouter) else None
+        env_var = br.ENV_KEY if prov == "bizrouter" else "TYPESAFE_API_KEY"
+        key = os.environ.get(env_var, "") if api_key is None else api_key
+        base, data, payload, wire_q = _prepare(raw, key, provider=prov, model=resolved_model)
         if key is None or key == "":
             return _failure("missing_api_key", base)
+        max_timeout = br.MAX_TIMEOUT if prov == "bizrouter" else jev_client.MAX_TIMEOUT
         if (not isinstance(key, str) or len(key) > 4096
                 or any(not 33 <= ord(char) <= 126 for char in key)
-                or not _number(timeout, 0, jev_client.MAX_TIMEOUT) or timeout == 0
+                or not _number(timeout, 0, max_timeout) or timeout == 0
                 or transport is not None and not callable(transport)):
             return _failure("invalid_input", base)
         base["network_attempted"] = True
-        try:
-            raw_response = (jev_client._send if transport is None else transport)(payload, key, timeout)
-        except jev_client.JevError as error:
-            return _failure(error.code, base)
-        except TimeoutError:
-            return _failure("timeout", base)
-        except Exception:
-            return _failure("transport", base)
-        answers, usage = _validate_response(raw_response, data["questions"])
-        reasons = []
-        for question in data["questions"]:
-            identifier = question["id"]
-            answer = answers[identifier]
-            reason = None
-            if question["type"] == "noul":
-                probability = answer["noul"]
-                if probability == 0.5 or max(probability, 1 - probability) < data["min_confidence"]:
-                    reason = "low_decisiveness"
-            elif question["type"] == "choice" and answer["choice"] == question["abstain"]:
-                reason = "abstained"
-            elif answer["confidence"] < data["min_confidence"]:
-                reason = "low_confidence"
-            if reason:
-                reasons.append({"id": identifier, "reason": reason})
+        if prov == "bizrouter":
+            try:
+                reply = br.request_judgments(
+                    {"context": data["context"]}, wire_q,
+                    api_key=key, model=resolved_model, timeout=timeout, transport=transport,
+                )
+            except jev_client.JevError as error:
+                return _failure(error.code, base)
+            answers, usage = reply["answers"], reply["usage"]
+        else:
+            try:
+                raw_response = (jev_client._send if transport is None else transport)(payload, key, timeout)
+            except jev_client.JevError as error:
+                return _failure(error.code, base)
+            except TimeoutError:
+                return _failure("timeout", base)
+            except Exception:
+                return _failure("transport", base)
+            answers, usage = _validate_response(raw_response, data["questions"])
+
+        reasons = _review_reasons(data["questions"], answers, data["min_confidence"])
+        escalation_meta = None
+        if escalate_bizrouter:
+            uncertain_ids = [
+                item["id"] for item in reasons
+                if item["reason"] in ("low_confidence", "low_decisiveness")
+            ]
+            if uncertain_ids:
+                br_key = os.environ.get(br.ENV_KEY, "") if bizrouter_api_key is None else bizrouter_api_key
+                if not br_key:
+                    escalation_meta = {
+                        "provider": "bizrouter",
+                        "model": br.DEFAULT_MODEL,
+                        "status": "unavailable",
+                        "error_code": "missing_api_key",
+                        "candidate_ids": uncertain_ids,
+                    }
+                else:
+                    sub_wire = {qid: wire_q[qid] for qid in uncertain_ids}
+                    try:
+                        esc_reply = br.request_judgments(
+                            {"context": data["context"]}, sub_wire,
+                            api_key=br_key, model=br.DEFAULT_MODEL,
+                            timeout=min(max(timeout, 15.0), br.MAX_TIMEOUT),
+                            transport=bizrouter_transport,
+                        )
+                        for qid in uncertain_ids:
+                            answers[qid] = {**esc_reply["answers"][qid], "escalated_from": MODEL}
+                        reasons = _review_reasons(data["questions"], answers, data["min_confidence"])
+                        escalation_meta = {
+                            "provider": "bizrouter",
+                            "model": br.DEFAULT_MODEL,
+                            "status": "applied",
+                            "escalated_ids": uncertain_ids,
+                            "usage": esc_reply["usage"],
+                        }
+                    except jev_client.JevError as esc_err:
+                        escalation_meta = {
+                            "provider": "bizrouter",
+                            "model": br.DEFAULT_MODEL,
+                            "status": "unavailable",
+                            "error_code": esc_err.code,
+                            "candidate_ids": uncertain_ids,
+                        }
+            else:
+                escalation_meta = {
+                    "provider": "bizrouter",
+                    "model": br.DEFAULT_MODEL,
+                    "status": "not_needed",
+                    "escalated_ids": [],
+                }
+
         base.pop("network_required", None)
-        return {**base, "status": "needs_review" if reasons else "reviewed",
-                "results": [{"id": identifier, **answer} for identifier, answer in answers.items()],
-                "usage": usage, "review_reasons": reasons}
+        out = {**base, "status": "needs_review" if reasons else "reviewed",
+               "results": [{"id": identifier, **answer} for identifier, answer in answers.items()],
+               "usage": usage, "review_reasons": reasons}
+        if escalation_meta is not None:
+            out["escalation"] = escalation_meta
+        return out
     except (AskError, ValueError, TypeError, UnicodeError, RecursionError, OverflowError) as error:
         return _failure(error.code if isinstance(error, AskError) else "invalid_input", base)
 
@@ -317,7 +448,7 @@ class _Parser(argparse.ArgumentParser):
 def main(argv=None):
     try:
         args = list(sys.argv[1:] if argv is None else argv)
-        for option in ("--input", "--allow-network"):
+        for option in ("--input", "--allow-network", "--provider", "--model", "--escalate-bizrouter"):
             if sum(item == option or item.startswith(option + "=") for item in args) > 1:
                 raise AskError("invalid_arguments")
         parser = _Parser(description=__doc__, allow_abbrev=False)
@@ -325,13 +456,23 @@ def main(argv=None):
         for command in ("prepare", "run"):
             command_parser = subparsers.add_parser(command, allow_abbrev=False)
             command_parser.add_argument("--input", required=True, choices=("-",))
+            command_parser.add_argument("--provider", choices=PROVIDERS, default="jev")
+            command_parser.add_argument("--model", default=None)
             if command == "run":
                 command_parser.add_argument("--allow-network", action="store_true")
+                command_parser.add_argument("--escalate-bizrouter", action="store_true")
         options = parser.parse_args(args)
         if options.command == "run" and not options.allow_network:
             raise AskError("network_disabled")
-        raw = sys.stdin.buffer.read(MAX_BYTES + 1)
-        result = prepare(raw) if options.command == "prepare" else run(raw, allow_network=True)
+        limit = BIZROUTER_MAX_BYTES if options.provider == "bizrouter" else MAX_BYTES
+        raw = sys.stdin.buffer.read(limit + 1)
+        if options.command == "prepare":
+            result = prepare(raw, provider=options.provider, model=options.model)
+        else:
+            result = run(
+                raw, allow_network=True, provider=options.provider,
+                model=options.model, escalate_bizrouter=options.escalate_bizrouter,
+            )
     except (AskError, OSError, ValueError, TypeError, RecursionError, OverflowError) as error:
         result = _failure(error.code if isinstance(error, AskError) else "invalid_input")
     print(json.dumps(result, ensure_ascii=True, allow_nan=False))

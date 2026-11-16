@@ -57,8 +57,14 @@ def _public(function):
             return function(*args, **kwargs)
         except RunError:
             raise
-        except (state.StateError, evidence.EvidenceError, HealthcheckError, ValueError,
+        except state.StateError as exc:
+            if str(exc) == 'path_too_long':
+                raise RunError('path_too_long') from exc
+            raise RunError('unsafe_or_invalid_input') from exc
+        except (evidence.EvidenceError, HealthcheckError, ValueError,
                 OSError, UnicodeError, RecursionError, OverflowError, TypeError) as exc:
+            if evidence.is_path_too_long(exc):
+                raise RunError('path_too_long') from exc
             raise RunError('unsafe_or_invalid_input') from exc
     return call
 
@@ -181,7 +187,7 @@ class Store:
 
     def fingerprint(self, relative, *, limit=MAX_SOURCE_BYTES, markdown=False):
         path = self.path(relative, markdown=markdown)
-        canonical = path.relative_to(self.root).as_posix()
+        canonical = evidence.rel_posix(path, self.root)
         info, _, raw = evidence.stable_read(
             lambda: self.path(canonical, markdown=markdown), limit, contents=True)
         # Only hashes are retained for user files. Still reject selected secrets
@@ -245,11 +251,11 @@ class Store:
                 state._check_lease(current, lease)
                 recheck()
                 checked = current.runtime(name)
-                if checked.exists():
+                if evidence.fs_path(checked).exists():
                     raise RunError('immutable_receipt_exists')
-                evidence.regular(temporary.lstat())
+                evidence.regular(evidence.fs_path(temporary).lstat())
                 self.policy.fresh()
-                os.replace(temporary, checked)
+                os.replace(evidence.fs_path(temporary), evidence.fs_path(checked))
         state._atomic(path, raw, replace, cleanup_guard=lambda temporary:
             state._cleanup_temporary(self.policy, name, temporary, runtime=True))
         return value
@@ -260,7 +266,7 @@ def _fingerprint_record(store, value, *, limit=MAX_SOURCE_BYTES, markdown=False)
     _hash(value['sha256'])
     if type(value['size']) is not int or not 0 <= value['size'] <= limit:
         raise RunError('invalid_file_binding')
-    canonical = store.path(value['path'], markdown=markdown).relative_to(store.root).as_posix()
+    canonical = evidence.rel_posix(store.path(value['path'], markdown=markdown), store.root)
     if canonical != value['path']:
         raise RunError('noncanonical_path')
 

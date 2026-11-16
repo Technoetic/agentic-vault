@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.50.0"
-EXPECTED_PUBLIC_REF = "0.50.0"
+EXPECTED = "0.51.0"
+EXPECTED_PUBLIC_REF = "0.51.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.50.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.50.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.51.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.51.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.50.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.51.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -3211,7 +3211,8 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
         self.assertIn(self.ENGLISH, headings)
         self.assertIn("## v0.49.0 — source-aware task workflows", headings)
-        self.assertEqual(headings[0], "## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs")
+        self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
+        self.assertEqual(headings[0], "## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter")
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3224,7 +3225,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3256,7 +3257,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.49.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.50.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3438,7 +3439,7 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
                     head = path.read_text(encoding="utf-8-sig").splitlines()[:5]
                 except UnicodeDecodeError:
                     continue
-                if any("engine=0.50.0" in line for line in head):
+                if any(f"engine={EXPECTED}" in line for line in head):
                     stamped.add(path.relative_to(REPO_ROOT).as_posix())
         self.assertEqual(stamped, self.DECLARED_STAMPS)
 
@@ -3491,8 +3492,9 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
     def test_codex_long_description_carries_the_checker_range_to_v0500(self) -> None:
         codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         long_description = codex["interface"]["longDescription"]
-        self.assertIn("unchanged from v0.46.0 through v0.50.0.", long_description)
+        self.assertIn(f"unchanged from v0.46.0 through v{EXPECTED}.", long_description)
         self.assertNotIn("through v0.49.0", long_description)
+        self.assertNotIn("through v0.50.0", long_description)
 
     def test_release_note_states_that_remote_tracking_refs_are_not_consulted(self) -> None:
         boundaries = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 알려진 경계"))
@@ -3527,3 +3529,37 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertNotIn("detached HEAD no branch or tag contains", text)
                 self.assertIn("detached HEAD no local branch or tag contains", text)
+
+
+class V0510ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.51.0.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.51.0.md"
+
+    def test_english_overview_is_unbroken_and_precedes_folded_history(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        overview = readme[readme.index("## 🌐 English overview"):readme.index("<details>", readme.index("## 🌐 English overview"))]
+        self.assertIn("**Core commands** (all 15 are in [commands/](commands/)):\n\n- `/vault-init <name>`", overview)
+        self.assertNotIn("**v0.32.0:**", overview)
+        self.assertLess(readme.index("## 🌐 English overview"), readme.index("📜 이전 버전 변경 이력"))
+
+    def test_active_install_and_stamp_lines_have_no_stale_versions(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        active_readme = readme[:readme.index("📜 이전 버전 변경 이력")]
+        self.assertIn("git 볼트의 healthcheck 스탬프는 `engine=0.51.0`이다.", active_readme)
+        self.assertNotIn("engine=0.48.0", active_readme)
+        self.assertNotIn("releases/tag/v0.48.0", active_readme)
+        self.assertNotIn("docs/verification/v0.48.0.md", active_readme)
+        antigravity_doc = (REPO_ROOT / "docs/antigravity.md").read_text(encoding="utf-8")
+        self.assertIn("`version`이 `0.51.0`이고", antigravity_doc)
+        self.assertNotIn("`version`이 `0.48.0`이고", antigravity_doc)
+
+    def test_release_note_uses_absolute_links_for_github_release_paste(self) -> None:
+        import re
+        text = self.RELEASE.read_text(encoding="utf-8")
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            self.assertTrue(
+                target.startswith(("https://", "http://", "#")),
+                f"relative link would break on GitHub Release web page: {target}",
+            )
+        self.assertIn(CHECKER_SHA256_V0460, text)
+        self.assertIn(CHECKER_SHA256_V0460, self.VERIFICATION.read_text(encoding="utf-8"))

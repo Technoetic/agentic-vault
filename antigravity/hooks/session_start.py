@@ -20,6 +20,7 @@ SCRIPTS_DIR = PLUGIN_ROOT / "skills" / "agentic-vault" / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from jev_client import _matches_sensitive
 from vault_healthcheck import HealthcheckError, estimate_tokens, split_frontmatter, validate_config
 from vault_paths import resolve_note_path
 from vault_revocation import RevocationError, RevocationPolicy
@@ -64,6 +65,30 @@ _FENCE_OPEN = re.compile(r" {0,3}(?:(`{3,})[^`]*|(~{3,}).*)")
 _FENCE_CLOSE = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
 _COMMENT_OPEN = re.compile(r" {0,3}<!--")
 _NON_SPACE = re.compile(r"\S")
+REDACTED_LINE = "[REDACTED: sensitive pattern omitted by session hook; vault text is untrusted evidence]"
+
+
+def _redact_sensitive_lines(text: str) -> str:
+    """Mask credential lines and PEM key blocks via jev_client._matches_sensitive while leaving benign notes byte-identical."""
+    if not text or not _matches_sensitive(text):
+        return text
+    out: list[str] = []
+    in_pem = False
+    for raw_line in text.splitlines(keepends=True):
+        ending = "\n" if raw_line.endswith("\n") else ""
+        line = raw_line[:-1] if ending else raw_line
+        stripped = line.lstrip()
+        if in_pem:
+            if stripped.startswith("-----END ") and stripped.rstrip().endswith("-----"):
+                in_pem = False
+            continue
+        if _matches_sensitive(line):
+            out.append(REDACTED_LINE + ending)
+            if stripped.startswith("-----BEGIN ") and "-----END " not in stripped:
+                in_pem = True
+        else:
+            out.append(raw_line)
+    return "".join(out)
 
 
 class SectionSource(NamedTuple):
@@ -583,7 +608,7 @@ def _compact_extra_source(vault: Path, config: dict, key: str, fallback: str = '
         raise ValueError('runtime_is_not_context')
     path = checked_note_path(vault, value, (*config['deny_zones'], '.git'))
     text, truncated = _revocation_note(path, value, revocations)
-    return None if text is None else SectionSource(key, text, 0, truncated, value)
+    return None if text is None else SectionSource(key, _redact_sensitive_lines(text), 0, truncated, value)
 
 
 def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSource | None], *, revocations=None) -> SectionSource | None:
@@ -709,7 +734,7 @@ def _configured_source(
     text, source_truncated = _revocation_note(path, rel_path, revocations)
     if text is None:
         return None
-    return SectionSource(header, text, budget, source_truncated, rel_path)
+    return SectionSource(header, _redact_sensitive_lines(text), budget, source_truncated, rel_path)
 
 
 def _write_stdout(text: str) -> None:

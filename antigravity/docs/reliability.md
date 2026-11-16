@@ -367,7 +367,7 @@ what its runs did. That record is what `--session-evidence` reads.
 ### SessionStart 훅 실측 절차 (아직 실행하지 않음)
 
 > 이 절차는 작성만 했고 아직 실행하지 않았다. 이 절차의 측정값(훅 소요 시간·resume 재주입)은 아직 없다.
-> 실행하면 결과를 날짜·버전과 함께 [검증 기록](https://github.com/Technoetic/agentic-vault/tree/v0.50.0/docs/verification)에 따로 남긴다.
+> 실행하면 결과를 날짜·버전과 함께 [검증 기록](https://github.com/Technoetic/agentic-vault/tree/v0.51.0/docs/verification)에 따로 남긴다.
 
 훅별 소요 시간은 Claude Code 2.1.296 이상의 디버그 로그에 남는다. 같은 변경 기록의 2.1.296 항목:
 "Improved `--debug` output for hooks: command hooks on tool calls, prompts, SessionStart and
@@ -480,5 +480,5 @@ Claude CLI의 `plugin validate`는 정적 manifest·컴포넌트 검증이다. �
 
 CI는 Linux/Windows/macOS의 지원 Python 조합을 실행하도록 구성한다. 로컬에서
 CI 파일을 추가한 것과 원격 CI가 실제 통과한 것은 구분한다. 실제 모델의 규칙
-상속 테스트는 별도 `test_rules_inheritance.py`가 있으며 API를 호출할 수 있다.
+상속 테스트는 별도 `scripts/manual_rules_inheritance_probe.py`가 있으며 API를 호출할 수 있다.
 Telegram 송수신과 실제 Claude 실세션 검증도 별도다.

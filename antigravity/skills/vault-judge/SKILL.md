@@ -57,8 +57,11 @@ disable-model-invocation: true
 ```text
 python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_judge.py" --vault "<볼트 절대 경로>" prepare
 python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_judge.py" --vault "<볼트 절대 경로>" run --allow-network
+# 선택형 BizRouter Decisions (google/gemini-decision-1, BIZROUTER_API_KEY 필요):
+python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_judge.py" --vault "<볼트 절대 경로>" --provider bizrouter run --allow-network
 ```
 
 두 명령 모두 UTF-8 JSON을 stdin으로 받는다. 사용자 질문은 셸 코드가 아니다. Codex는
 `references/codex.md`의 설치 경로 규칙으로 `<PLUGIN_ROOT>` 자리표시자를 해석한다.
+기본 공급자는 TypeSafe Jev(`TYPESAFE_API_KEY`)이며, 명시적으로 `--provider bizrouter`(기본 모델 `google/gemini-decision-1`, `BIZROUTER_API_KEY`)를 넘겼을 때만 고정 주소 `https://api.bizrouter.ai/v1/decisions`를 사용한다. 원문 바인딩·금지 구역·비밀 필터(`jev_client.SENSITIVE`)·TOCTOU 재확인은 두 공급자에 동일하게 적용된다.
 stdout JSON과 종료 코드를 함께 확인한다. 자동 노트·index·log 기록이나 설정 마이그레이션은 없다.

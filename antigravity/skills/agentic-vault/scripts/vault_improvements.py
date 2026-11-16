@@ -34,9 +34,15 @@ def _public(function):
             raise
         except runs.RunError as exc:
             raise ImprovementError(str(exc)) from exc
-        except (state.StateError, evidence.EvidenceError, runs.HealthcheckError,
+        except state.StateError as exc:
+            if str(exc) == 'path_too_long':
+                raise ImprovementError('path_too_long') from exc
+            raise ImprovementError('unsafe_or_invalid_input') from exc
+        except (evidence.EvidenceError, runs.HealthcheckError,
                 OSError, UnicodeError, ValueError, TypeError, RuntimeError,
                 OverflowError) as exc:
+            if evidence.is_path_too_long(exc):
+                raise ImprovementError('path_too_long') from exc
             raise ImprovementError('unsafe_or_invalid_input') from exc
     return call
 

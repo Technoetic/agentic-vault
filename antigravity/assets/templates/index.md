@@ -23,6 +23,7 @@ updated: {{DATE}}
 ## 시스템 (00-meta)
 
 - [[frontmatter]] — 표준 프런트매터 스키마 (00-meta/schemas)
+- [[lessons]] — 반복 교훈과 승격 후보·기각 이력을 기록하는 자기개선 대장 (00-meta)
 
 ## 프로젝트 (50-projects)
 
