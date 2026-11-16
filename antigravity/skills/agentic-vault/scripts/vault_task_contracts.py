@@ -365,12 +365,12 @@ def _capture(vault, input_path, parent_id=None):
             raise ContractError('parent_receipt_changed')
         candidate = dict(id=contract_id, payload=payload)
         _current(store, candidate, supersession=False)
-        _children(store, contract_id, adding=not store.record_path(name).exists())
+        _children(store, contract_id, adding=not evidence.fs_path(store.record_path(name)).exists())
         if parent_id is not None and any(child != contract_id for child in _children(store, parent_id)):
             raise ContractError('superseded_contract')
     with state.advisory_lock(vault, resource, wait_seconds=1) as lease:
         recheck()
-        if store.record_path(name).exists():
+        if evidence.fs_path(store.record_path(name)).exists():
             receipt = _load(store, contract_id)
             _current(store, receipt)
         else:

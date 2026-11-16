@@ -441,7 +441,7 @@ def _outcomes(store, report, manifest, run_id):
 def _load_completion(store, prepared):
     run_id = prepared['id']
     _, name = _names(run_id)
-    if not store.record_path(name).exists():
+    if not evidence.fs_path(store.record_path(name)).exists():
         return None
     receipt = store.read_record(name)
     if receipt['kind'] != 'completed' or receipt['id'] != run_id:
@@ -511,7 +511,7 @@ vault-relative JSON files with the strict v1 schema. No source text executes.
     run_id = evidence.digest(evidence.encode(manifest))
     name, _ = _names(run_id)
     with state.advisory_lock(vault, 'run:' + run_id, wait_seconds=1) as lease:
-        if store.record_path(name).exists():
+        if evidence.fs_path(store.record_path(name)).exists():
             _load_prepared(store, run_id)
         else:
             store.publish(name, 'prepared', run_id, manifest,
@@ -528,7 +528,7 @@ def record(vault, run_id, report):
     _, name = _names(run_id)
     with state.advisory_lock(vault, 'run:' + run_id, wait_seconds=1) as lease:
         prepared = _load_prepared(store, run_id)
-        if store.record_path(name).exists():
+        if evidence.fs_path(store.record_path(name)).exists():
             raise RunError('immutable_receipt_exists')
         report_info, report_value = store.json_file(report)
         input_paths = {item['path'].casefold() for item in _input_files(prepared['payload'])}
@@ -613,7 +613,7 @@ Repeated coverage is required, but these observations are not statistical proof.
                 raise RunError('run_receipt_changed')
     with state.advisory_lock(vault, 'run-compare:' + comparison_id, wait_seconds=1) as lease:
         recheck()
-        if store.record_path(name).exists():
+        if evidence.fs_path(store.record_path(name)).exists():
             existing = store.read_record(name)
             if existing['kind'] != 'comparison' or existing['id'] != comparison_id or existing['payload'] != payload:
                 raise RunError('comparison_receipt_changed')

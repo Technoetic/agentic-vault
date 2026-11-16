@@ -32,7 +32,7 @@ import stat
 import sys
 from typing import Mapping, NamedTuple
 
-from vault_evidence import EvidenceError, decode, regular, stable_read
+from vault_evidence import EvidenceError, decode, fs_path, regular, stable_read
 from vault_healthcheck import HealthcheckError
 from vault_state import (BEGIN, END, StateError, _Policy, _atomic, _check_lease,
                          _cleanup_temporary, _hash, _lease_guard, _remove_file, advisory_lock)
@@ -593,7 +593,7 @@ def _archive_layout(policy, relative):
 
 def _next_archive_number(policy, folder, stem):
     pattern = re.compile(re.escape(stem.casefold()) + r' archive (\d{4,9})\.md')
-    path = policy.vault.joinpath(*folder.split('/'))
+    path = fs_path(policy.vault.joinpath(*folder.split('/')))
     if not path.is_dir():
         return 1
     with os.scandir(path) as entries:
@@ -656,9 +656,9 @@ def _write_note(policy, lease, relative, target, data, check):
             if checked != target:
                 raise StateError('unsafe_path')
             check(current, checked)
-            regular(temporary.lstat())
+            regular(fs_path(temporary).lstat())
             policy.fresh()
-            os.replace(temporary, checked)
+            os.replace(fs_path(temporary), fs_path(checked))
     _atomic(target, data, replace,
             cleanup_guard=lambda temporary: _cleanup_temporary(policy, relative, temporary))
 
@@ -737,7 +737,7 @@ def apply(vault, *, expected_sha256=None, threshold_bytes=None, protect_sections
             raise StateError('restore_mismatch')
 
         def absent(_current, checked):
-            if os.path.lexists(checked):
+            if os.path.lexists(fs_path(checked)):
                 raise StateError('archive_exists')
 
         replacing = False
@@ -750,18 +750,18 @@ def apply(vault, *, expected_sha256=None, threshold_bytes=None, protect_sections
             replacing = True
 
         folder_path = policy.vault.joinpath(*folder.split('/'))
-        made_folder = None if folder_path.exists() else folder_path
+        made_folder = None if fs_path(folder_path).exists() else folder_path
         created = []
         reported = []
-        mode = stat.S_IMODE(target.lstat().st_mode)
+        mode = stat.S_IMODE(fs_path(target).lstat().st_mode)
         try:
-            folder_path.mkdir(exist_ok=True)
+            fs_path(folder_path).mkdir(exist_ok=True)
             for note in plan.archives:
                 path = f'{folder}/{note.name}.md'
                 note_target = policy.note(path)
                 created.append((note_target, note.raw))
                 _write_note(policy, lease, path, note_target, note.raw, absent)
-                os.chmod(note_target, mode)
+                os.chmod(fs_path(note_target), mode)
                 reported.append({'path': path, 'sha256': _sha(note.raw), 'bytes': len(note.raw),
                                  'sections': note.sections})
             _sync_folder(folder_path)

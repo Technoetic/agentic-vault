@@ -7,7 +7,7 @@ import os
 import uuid
 
 import vault_state as state
-from vault_evidence import EvidenceError, decode, regular
+from vault_evidence import EvidenceError, decode, fs_path, regular
 from vault_paths import relative_parts
 
 MAX_JOURNAL_BYTES = 1024 * 1024
@@ -216,8 +216,8 @@ def _write_receipt(policy, journal, observation, leases):
             if journal['progress'] != expected_progress: _fail('state_changed','conflict')
             checked = policy.fresh().runtime(name)
             if checked != path or _parent(checked) != parent: _fail('unsafe_parent')
-            regular(temporary.lstat()); policy.fresh()
-            os.replace(temporary,checked)
+            regular(fs_path(temporary).lstat()); policy.fresh()
+            os.replace(fs_path(temporary),fs_path(checked))
     data = state._encode(journal)+b'\n'
     if len(data)>MAX_JOURNAL_BYTES: _fail('journal_bounds')
     state._atomic(path,data,replace,cleanup_guard=lambda t:state._cleanup_temporary(policy,name,t,runtime=True))
@@ -252,7 +252,7 @@ def _prepare(vault, request, apply, expected, *, input_check=None):
             policy.fresh()
             for lease in leases: state._check_lease(policy,lease)
             flags = os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0)|getattr(os,'O_NOFOLLOW',0)
-            fd = os.open(path,flags,0o600)
+            fd = os.open(fs_path(path),flags,0o600)
             with os.fdopen(fd,'wb') as stream:
                 regular(os.fstat(stream.fileno()))
                 if policy.fresh().runtime(name) != path or _parent(path)!=parent: _fail('unsafe_parent')
@@ -281,8 +281,8 @@ def _run(vault,bundle_id,expected,apply):
                         if actual[index]['state']!='pending': _fail('state_changed','conflict')
                         checked=policy.fresh().note(target['path'])
                         if checked != path or _parent(checked)!=parent: _fail('unsafe_parent')
-                        regular(temporary.lstat()); policy.fresh()
-                        os.replace(temporary,checked)
+                        regular(fs_path(temporary).lstat()); policy.fresh()
+                        os.replace(fs_path(temporary),fs_path(checked))
                 state._atomic(path,target['after_text'].encode('utf-8'),replace,
                     cleanup_guard=lambda t:state._cleanup_temporary(policy,target['path'],t))
             # Derive receipt from ALL actual hashes, never a stored progress flag.

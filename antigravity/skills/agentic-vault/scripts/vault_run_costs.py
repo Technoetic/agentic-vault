@@ -162,7 +162,7 @@ def record(vault, run_id, report):
         if info != report_info or _payload(store, current, info, value) != payload:
             raise RunError('cost_sources_changed')
     with state.advisory_lock(vault, 'run-cost:' + cost_id, wait_seconds=1) as lease:
-        if store.record_path(name).exists():
+        if evidence.fs_path(store.record_path(name)).exists():
             raise RunError('immutable_receipt_exists')
         receipt = store.publish(name, 'run_cost', cost_id, payload, recheck, lease)
     return dict(ok=True, id=cost_id, run_id=run_id, path=runs.RUNTIME_DIR + '/' + name,

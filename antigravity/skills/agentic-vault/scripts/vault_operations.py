@@ -22,7 +22,7 @@ import time
 import uuid
 
 from jev_client import contains_sensitive
-from vault_evidence import EvidenceError, decode, stable_read
+from vault_evidence import EvidenceError, decode, fs_path, plain_path, stable_read
 from vault_healthcheck import HealthcheckError
 from vault_state import (RUNTIME_DIR, StateError, _Policy, _atomic, _check_lease,
                          _cleanup_temporary, _encode, _ensure_runtime, _lease_guard,
@@ -287,13 +287,14 @@ def _save(policy, lease, record, previous_sha=None):
             current = _fresh(policy, record)
             _check_lease(current, lease)
             checked = current.runtime(name)
-            staged = current.runtime(temporary.name)
-            info, _, raw = stable_read(lambda: current.runtime(temporary.name),
+            plain_temp = plain_path(temporary)
+            staged = current.runtime(plain_temp.name)
+            info, _, raw = stable_read(lambda: current.runtime(plain_temp.name),
                                        MAX_RECEIPT_BYTES + 1, contents=True)
-            if staged != temporary or checked != path or raw != data:
+            if staged != plain_temp or checked != path or raw != data:
                 raise OperationError('prepared_record_changed')
             if previous_sha is None:
-                if checked.exists():
+                if fs_path(checked).exists():
                     raise OperationError('record_already_exists')
             else:
                 info, _, _ = _read(current, name)
@@ -307,7 +308,7 @@ def _save(policy, lease, record, previous_sha=None):
                 # Preserve the durable pending claim if the owner expired while
                 # its completion was staged. Next begin fences it as uncertain.
                 raise OperationError('operation_uncertain')
-            os.replace(temporary, checked)
+            os.replace(fs_path(temporary), fs_path(checked))
     try:
         _atomic(path, data, replace, cleanup_guard=lambda temporary:
                 _cleanup_temporary(policy, name, temporary, runtime=True))
@@ -366,7 +367,7 @@ def begin(vault, intent, action, parameters, *, ttl_seconds=300, wait_seconds=2)
         with advisory_lock(vault, 'operation:' + operation_id, wait_seconds=wait_seconds) as lease:
             _fresh(policy)
             name = 'operation-' + operation_id + '.json'
-            if policy.runtime(name).exists():
+            if fs_path(policy.runtime(name)).exists():
                 record, previous = _load(policy, operation_id)
                 _fresh(policy, record)
                 if record['parameters_sha256'] != parameters_sha:

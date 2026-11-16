@@ -186,7 +186,7 @@ def prepare(vault, input_path):
             raise ImprovementError('run_receipt_changed')
     with state.advisory_lock(vault, 'improvement-plan:' + plan_id, wait_seconds=1) as lease:
         recheck()
-        if store.record_path(name).exists():
+        if runs.evidence.fs_path(store.record_path(name)).exists():
             existing, actual = _load_plan(store, plan_id)
             if existing['payload'] != payload or actual != values:
                 raise ImprovementError('plan_or_run_receipt_changed')
@@ -371,7 +371,7 @@ def record(vault, plan_id, report_path):
         _validate_reflection(store, payload)
     with state.advisory_lock(vault, 'improvement-record:' + record_id, wait_seconds=1) as lease:
         recheck()
-        if store.record_path(name).exists():
+        if runs.evidence.fs_path(store.record_path(name)).exists():
             _load_reflection(store, record_id)
         else:
             store.publish(name, 'improvement_record', record_id, payload, recheck, lease)
