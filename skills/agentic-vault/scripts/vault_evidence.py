@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import math
@@ -23,6 +24,53 @@ import uuid
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import resolve_note_path
 from vault_worktrees import WorktreeScope
+
+
+def fs_path(path: Path) -> Path:
+    """Return a Windows extended-length path when near or beyond MAX_PATH."""
+    p = Path(path)
+    if os.name != 'nt':
+        return p
+    s = str(p)
+    if s.startswith('\\\\?\\') or len(s) < 240:
+        return p
+    if re.match(r'^[A-Za-z]:\\', s):
+        return Path('\\\\?\\' + s)
+    if s.startswith('\\\\'):
+        return Path('\\\\?\\UNC\\' + s[2:])
+    return p
+
+
+def plain_path(path: Path) -> Path:
+    """Strip Windows extended-length prefix for lexical/containment comparisons."""
+    p = Path(path)
+    if os.name != 'nt':
+        return p
+    s = str(p)
+    if s.startswith('\\\\?\\UNC\\'):
+        return Path('\\\\' + s[8:])
+    if s.startswith('\\\\?\\') and re.match(r'^[A-Za-z]:\\', s[4:]):
+        return Path(s[4:])
+    return p
+
+
+def rel_posix(path: Path, root: Path) -> str:
+    return plain_path(path).relative_to(plain_path(root)).as_posix()
+
+
+def is_path_too_long(exc: BaseException) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    if exc.errno == errno.ENAMETOOLONG:
+        return True
+    if os.name == 'nt':
+        winerr = getattr(exc, 'winerror', None)
+        if winerr in (206, 111):
+            return True
+        fname = getattr(exc, 'filename', None) or getattr(exc, 'filename2', None)
+        if winerr == 3 and isinstance(fname, str) and not fname.startswith('\\\\?\\') and len(fname) >= 259:
+            return True
+    return False
 
 
 STORE_DIR = '00-meta/evidence'
@@ -112,13 +160,14 @@ def regular(metadata):
 def stable_read(resolver, limit, *, contents=False):
     """Read from a checked descriptor, then re-resolve and compare file identity."""
     path = resolver()
-    before = path.lstat()
+    io_path = fs_path(path)
+    before = io_path.lstat()
     regular(before)
     if before.st_size > limit:
         raise EvidenceError('input_too_large')
     flags = os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NONBLOCK', 0)
     flags |= getattr(os, 'O_NOFOLLOW', 0)
-    fd = os.open(path, flags)
+    fd = os.open(io_path, flags)
     chunks = []
     hasher = hashlib.sha256()
     size = 0
@@ -139,9 +188,9 @@ def stable_read(resolver, limit, *, contents=False):
                 chunks.append(chunk)
         after = os.fstat(stream.fileno())
     current = resolver()
-    last = current.lstat()
+    last = fs_path(current).lstat()
     regular(last)
-    if current != path or stamp(before) != stamp(after) or stamp(after) != stamp(last):
+    if plain_path(current) != plain_path(path) or stamp(before) != stamp(after) or stamp(after) != stamp(last):
         raise EvidenceError('file_changed_during_read')
     if size != last.st_size:
         raise EvidenceError('file_changed_during_read')
@@ -150,8 +199,8 @@ def stable_read(resolver, limit, *, contents=False):
 
 class Store:
     def __init__(self, vault):
-        self.vault = Path(vault)
-        self.root = self.vault.resolve(strict=True)
+        self.vault = plain_path(Path(vault))
+        self.root = plain_path(fs_path(self.vault).resolve(strict=True))
         self.worktrees = WorktreeScope(self.root)
         info, _mark, data = stable_read(
             lambda: resolve_note_path(self.vault, CONFIG_PATH, ('.git',)),
@@ -163,10 +212,10 @@ class Store:
 
     def path(self, relative, *, internal=False):
         try:
-            resolved = resolve_note_path(self.vault, relative, self.denied)
+            resolved = plain_path(resolve_note_path(self.vault, relative, self.denied))
         except ValueError as exc:
             raise EvidenceError('unsafe_path') from exc
-        canonical = resolved.relative_to(self.root).as_posix()
+        canonical = rel_posix(resolved, self.root)
         if self.worktrees.denied(canonical.split('/'), self.denied):
             raise EvidenceError('unsafe_path')
         if not internal and (canonical.casefold() == STORE_DIR
@@ -181,14 +230,14 @@ class Store:
 
     def fingerprint(self, relative, *, limit=MAX_FILE_BYTES, contents=False, internal=False):
         path = self.path(relative, internal=internal)
-        canonical = path.relative_to(self.root).as_posix()
+        canonical = rel_posix(path, self.root)
         info, mark, data = stable_read(
             lambda: self.path(canonical, internal=internal), limit, contents=contents)
         return {'path': canonical, **info}, mark, data
 
     def sweep(self, marks, *, internal=False):
         for relative, expected in marks.items():
-            metadata = self.path(relative, internal=internal).lstat()
+            metadata = fs_path(self.path(relative, internal=internal)).lstat()
             regular(metadata)
             if stamp(metadata) != expected:
                 raise EvidenceError('file_changed_during_read')
@@ -221,10 +270,11 @@ class Store:
     @contextmanager
     def lock(self):
         directory = self.path(STORE_DIR, internal=True)
-        directory.mkdir(exist_ok=True)
+        fs_path(directory).mkdir(exist_ok=True)
         lock_path = self.path(f'{STORE_DIR}/.lock', internal=True)
+        io_lock = fs_path(lock_path)
         try:
-            fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = os.open(io_lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError as exc:
             raise EvidenceError('locked_manual_recovery_required') from exc
         interrupted = False
@@ -239,16 +289,17 @@ class Store:
             raise
         finally:
             if not interrupted:
-                lock_path.unlink()
+                io_lock.unlink()
 
     def load(self, record_id):
         path = self.receipt_path(record_id)
-        _info, mark, data = self.fingerprint(path.relative_to(self.root).as_posix(),
+        rel = rel_posix(path, self.root)
+        _info, mark, data = self.fingerprint(rel,
                                             limit=MAX_RECEIPT_BYTES, contents=True,
                                             internal=True)
         receipt = decode(data)
         validate_receipt(self, receipt, record_id)
-        return receipt, {path.relative_to(self.root).as_posix(): mark}
+        return receipt, {rel: mark}
 
     def save(self, receipt):
         path = self.receipt_path(receipt['id'])
@@ -257,17 +308,19 @@ class Store:
         data = encode(receipt)
         if len(data) > MAX_RECEIPT_BYTES:
             raise EvidenceError('receipt_too_large')
-        fd, temporary = tempfile.mkstemp(prefix='.evidence-', suffix='.tmp', dir=path.parent)
+        io_parent = fs_path(path.parent)
+        fd, temporary = tempfile.mkstemp(prefix='.evidence-', suffix='.tmp', dir=str(io_parent))
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
             self.receipt_path(receipt['id'])
-            os.replace(temporary, path)
+            os.replace(fs_path(Path(temporary)), fs_path(path))
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            temp_io = fs_path(Path(temporary))
+            if temp_io.exists():
+                temp_io.unlink()
 
 
 def validate_report(store, report):
@@ -311,7 +364,7 @@ def validate_files(store, records, *, allow_empty=False, limit=MAX_FILE_BYTES):
         if not isinstance(info, dict) or set(info) != {'path', 'sha256', 'size'}:
             raise EvidenceError('invalid_file_record')
         path = store.path(info['path'])
-        key = path.relative_to(store.root).as_posix()
+        key = rel_posix(path, store.root)
         if key in seen:
             raise EvidenceError('duplicate_file')
         seen.add(key)

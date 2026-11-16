@@ -23,7 +23,10 @@ import tempfile
 import time
 import uuid
 
-from vault_evidence import MAX_FILE_BYTES, EvidenceError, decode, regular, stable_read
+from vault_evidence import (
+    MAX_FILE_BYTES, EvidenceError, decode, fs_path, is_path_too_long,
+    plain_path, regular, rel_posix, stable_read,
+)
 from vault_healthcheck import HealthcheckError, validate_config
 from vault_paths import relative_parts, resolve_note_path, zone_matches
 from vault_worktrees import checked_note_path
@@ -84,6 +87,8 @@ def _stable(resolver, limit, *, contents):
         code = str(exc)
         raise StateError(code if code in READ_FAILURE_CODES else 'unsafe_or_changed_source') from exc
     except (ValueError, OSError, RuntimeError) as exc:
+        if is_path_too_long(exc):
+            raise StateError('path_too_long') from exc
         raise StateError('unsafe_or_changed_source') from exc
 
 
@@ -93,21 +98,25 @@ def _read(resolver, limit=MAX_BYTES):
 
 class _Policy:
     def __init__(self, vault):
-        self.vault = Path(vault)
+        self.vault = plain_path(Path(vault))
         try:
-            self.root = self.vault.resolve(strict=True)
+            self.root = plain_path(fs_path(self.vault).resolve(strict=True))
             info, _, raw = _read(lambda: resolve_note_path(self.vault, CONFIG_PATH, ('.git',)))
             self.config = validate_config(decode(raw))
             self.config_sha256 = info['sha256']
             self.denied = (*self.config['deny_zones'], '.git')
             self.rules = (*self.denied, *self.config['exclude_dirs'], RUNTIME_DIR)
             resolve_note_path(self.vault, CONFIG_PATH, self.rules)
+        except StateError:
+            raise
         except (EvidenceError, HealthcheckError, ValueError, OSError, RuntimeError) as exc:
+            if is_path_too_long(exc):
+                raise StateError('path_too_long') from exc
             raise StateError('unsafe_configuration') from exc
 
     def checked(self, relative, rules=None):
         """The check for any path a caller names: the rules, also from inside a linked tree."""
-        return checked_note_path(self.vault, relative, self.rules if rules is None else rules)
+        return plain_path(checked_note_path(self.vault, relative, self.rules if rules is None else rules))
 
     def note(self, relative):
         try:
@@ -118,16 +127,24 @@ class _Policy:
             if path.suffix.casefold() != '.md':
                 raise StateError('invalid_markdown_path')
             return path
+        except StateError:
+            raise
         except (ValueError, OSError, RuntimeError) as exc:
+            if is_path_too_long(exc):
+                raise StateError('path_too_long') from exc
             raise StateError('unsafe_path') from exc
 
     def runtime(self, name=''):
         try:
             if name and (len(relative_parts(name, 'runtime file')) != 1 or len(name) > 120):
                 raise StateError('unsafe_runtime_path')
-            return resolve_note_path(self.vault, RUNTIME_DIR + ('/' + name if name else ''),
-                                     self.denied)
+            return plain_path(resolve_note_path(self.vault, RUNTIME_DIR + ('/' + name if name else ''),
+                                                self.denied))
+        except StateError:
+            raise
         except (ValueError, OSError, RuntimeError) as exc:
+            if is_path_too_long(exc):
+                raise StateError('path_too_long') from exc
             raise StateError('unsafe_runtime_path') from exc
 
     def fresh(self):
@@ -138,13 +155,13 @@ class _Policy:
 
     def read_note(self, relative):
         info, mark, raw = _read(lambda: self.note(relative))
-        return {'path': self.note(relative).relative_to(self.root).as_posix(), **info}, mark, raw
+        return {'path': rel_posix(self.note(relative), self.root), **info}, mark, raw
 
     def hash_note(self, relative):
         """Fingerprint a note under the checkpoint bound without keeping its bytes."""
         info, mark, raw = _stable(lambda: self.note(relative), MAX_CHECKPOINT_SOURCE_BYTES,
                                   contents=False)
-        return {'path': self.note(relative).relative_to(self.root).as_posix(), **info}, mark, raw
+        return {'path': rel_posix(self.note(relative), self.root), **info}, mark, raw
 
 
 def _ensure_runtime(policy):
@@ -152,11 +169,15 @@ def _ensure_runtime(policy):
         relative = '/'.join(RUNTIME_DIR.split('/')[:count])
         try:
             path = resolve_note_path(policy.vault, relative, policy.denied)
-            path.mkdir(exist_ok=True)
+            fs_path(path).mkdir(exist_ok=True)
             checked = resolve_note_path(policy.vault, relative, policy.denied)
-            if not stat.S_ISDIR(checked.lstat().st_mode):
+            if not stat.S_ISDIR(fs_path(checked).lstat().st_mode):
                 raise StateError('unsafe_runtime_path')
+        except StateError:
+            raise
         except (ValueError, OSError, RuntimeError) as exc:
+            if is_path_too_long(exc):
+                raise StateError('path_too_long') from exc
             raise StateError('unsafe_runtime_path') from exc
     return policy.runtime()
 
@@ -166,7 +187,7 @@ def _exclusive(policy, name, record):
     path = policy.runtime(name)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0)
     flags |= getattr(os, 'O_NOFOLLOW', 0)
-    fd = os.open(path, flags, 0o600)
+    fd = os.open(fs_path(path), flags, 0o600)
     try:
         with os.fdopen(fd, 'wb') as stream:
             regular(os.fstat(stream.fileno()))
@@ -233,7 +254,7 @@ def _cleanup_owner(policy, name, token):
     current = policy.fresh()
     path = current.runtime(name)
     policy.fresh()
-    path.unlink()
+    fs_path(path).unlink()
 
 
 @contextmanager
@@ -253,16 +274,22 @@ def _guard(policy, name, deadline):
         except FileExistsError:
             path = policy.runtime(guard_name)
             try:
-                regular(path.lstat())
+                regular(fs_path(path).lstat())
             except FileNotFoundError:
                 # Another cooperating holder may release its short guard
                 # between the O_EXCL collision and this identity check.
                 _pause(deadline)
                 continue
             except (EvidenceError, OSError) as exc:
+                if is_path_too_long(exc):
+                    raise StateError('path_too_long') from exc
                 raise StateError('unsafe_lock') from exc
             _pause(deadline)
+        except StateError:
+            raise
         except (EvidenceError, ValueError, OSError) as exc:
+            if is_path_too_long(exc):
+                raise StateError('path_too_long') from exc
             raise StateError('unsafe_lock') from exc
     try:
         yield
@@ -312,20 +339,27 @@ def advisory_lock(vault, key, *, ttl_seconds=300, wait_seconds=0):
     while True:
         with _guard(policy, name, deadline):
             path = policy.runtime(name)
-            if path.exists():
+            io_path = fs_path(path)
+            if io_path.exists():
                 try:
-                    regular(path.lstat())
+                    regular(io_path.lstat())
                 except (EvidenceError, OSError) as exc:
+                    if is_path_too_long(exc):
+                        raise StateError('path_too_long') from exc
                     raise StateError('unsafe_lock') from exc
                 if _expired(policy, name):
-                    path.unlink()
+                    io_path.unlink()
             try:
                 record['created_at'] = _now()
                 path = _exclusive(policy, name, record)
                 break
             except FileExistsError:
                 pass
+            except StateError:
+                raise
             except (EvidenceError, ValueError, OSError) as exc:
+                if is_path_too_long(exc):
+                    raise StateError('path_too_long') from exc
                 raise StateError('unsafe_lock') from exc
         _pause(deadline)
     lease = dict(record, lock_path=str(path))
@@ -408,32 +442,38 @@ def _cleanup_temporary(policy, relative, temporary, *, runtime=False):
     """Check current policy before cleanup metadata or deletion of our temporary."""
     current = policy.fresh()
     try:
+        plain_temp = plain_path(temporary)
         if runtime:
             target = current.runtime(relative)
-            checked = current.runtime(temporary.name)
+            checked = current.runtime(plain_temp.name)
         else:
             target = current.note(relative)
-            selected = temporary.relative_to(current.root).as_posix()
+            selected = rel_posix(plain_temp, current.root)
             checked = current.checked(selected)
-        if checked != temporary or checked.parent != target.parent:
+        if plain_path(checked) != plain_temp or plain_path(checked.parent) != plain_path(target.parent):
             raise StateError('unsafe_temporary')
-        regular(checked.lstat())
+        regular(fs_path(checked).lstat())
     except FileNotFoundError:
         raise
+    except StateError:
+        raise
     except (EvidenceError, ValueError, OSError, RuntimeError) as exc:
+        if is_path_too_long(exc):
+            raise StateError('path_too_long') from exc
         raise StateError('unsafe_temporary') from exc
     policy.fresh()
 
 
 def _remove_file(path):
     """Delete a file this run made; Windows refuses while its read-only bit is set."""
+    io_path = fs_path(path)
     try:
-        path.unlink()
+        io_path.unlink()
     except PermissionError:
         if os.name != 'nt':
             raise
-        os.chmod(path, stat.S_IWRITE)
-        path.unlink()
+        os.chmod(io_path, stat.S_IWRITE)
+        io_path.unlink()
 
 
 def _atomic(path, data, before_replace, *, cleanup_guard=None):
@@ -443,10 +483,11 @@ def _atomic(path, data, before_replace, *, cleanup_guard=None):
     replacement itself. Retrying os.replace alone would authorize a lost update.
     Keep staged evidence when current policy refuses its cleanup, as before.
     """
-    mode = stat.S_IMODE(path.lstat().st_mode) if path.exists() else 0o600
+    io_target = fs_path(path)
+    mode = stat.S_IMODE(io_target.lstat().st_mode) if io_target.exists() else 0o600
     for attempt in range(len(REPLACE_RETRY_DELAYS) + 1):
-        fd, name = tempfile.mkstemp(prefix='.vault-state-', dir=path.parent)
-        temporary = Path(name)
+        fd, name = tempfile.mkstemp(prefix='.vault-state-', dir=str(fs_path(path.parent)))
+        temporary = plain_path(Path(name))
         cleanup_error = None
         try:
             with os.fdopen(fd, 'wb') as stream:
@@ -454,11 +495,13 @@ def _atomic(path, data, before_replace, *, cleanup_guard=None):
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.chmod(temporary, mode)
+            os.chmod(fs_path(temporary), mode)
             try:
                 before_replace(temporary)
                 return
             except OSError as exc:
+                if is_path_too_long(exc):
+                    raise StateError('path_too_long') from exc
                 if os.name != 'nt':
                     raise
                 winerror = getattr(exc, 'winerror', None)
@@ -500,7 +543,7 @@ def patch_note(vault, path, expected_sha256, edits, *, source_hashes=None,
     if expected_config_sha256 is not None and policy.config_sha256 != expected_config_sha256:
         raise StateError('expected_configuration_changed')
     target = policy.note(path)
-    canonical = target.relative_to(policy.root).as_posix()
+    canonical = rel_posix(target, policy.root)
     if source_hashes is None:
         source_hashes = {}
     if not isinstance(source_hashes, dict) or len(source_hashes) > MAX_ITEMS:
@@ -525,14 +568,14 @@ def patch_note(vault, path, expected_sha256, edits, *, source_hashes=None,
                     if source['sha256'] != expected:
                         raise StateError('source_changed')
                 checked = current.note(canonical)
-                if checked != target:
+                if plain_path(checked) != plain_path(target):
                     raise StateError('unsafe_path')
-                regular(temporary.lstat())
+                regular(fs_path(temporary).lstat())
                 # Source/target reads may have outlasted the earlier policy
                 # observation. Close that observation before this replace;
                 # this remains a point-in-time check, not a filesystem freeze.
                 policy.fresh()
-                os.replace(temporary, checked)
+                os.replace(fs_path(temporary), fs_path(checked))
         if candidate != original:
             _atomic(target, candidate, replace,
                     cleanup_guard=lambda temporary: _cleanup_temporary(policy, canonical, temporary))
@@ -815,14 +858,14 @@ def write_checkpoint(vault, event, *, session_id=None, pending_references=None):
             if not relative:
                 continue
             path = policy.note(relative)
-            if not path.exists():
+            if not fs_path(path).exists():
                 continue
             info, _, _ = policy.hash_note(relative)
             if info['path'] not in {source['path'] for source in sources}:
                 sources.append(info)
         target = policy.runtime(name)
         previous, base_sha = None, None
-        if target.exists():
+        if fs_path(target).exists():
             info, _, raw = _read(lambda: policy.runtime(name), MAX_RUNTIME_BYTES)
             try:
                 previous = _checkpoint_record(decode(raw), session_sha)
@@ -846,15 +889,15 @@ def write_checkpoint(vault, event, *, session_id=None, pending_references=None):
                         raise StateError('source_changed')
                 checked = current.runtime(name)
                 if base_sha is None:
-                    if checked.exists():
+                    if fs_path(checked).exists():
                         raise StateError('checkpoint_changed')
                 else:
                     info, _, _ = _read(lambda: current.runtime(name), MAX_RUNTIME_BYTES)
                     if info['sha256'] != base_sha:
                         raise StateError('checkpoint_changed')
-                regular(temporary.lstat())
+                regular(fs_path(temporary).lstat())
                 policy.fresh()
-                os.replace(temporary, checked)
+                os.replace(fs_path(temporary), fs_path(checked))
         _atomic(target, raw, replace,
                 cleanup_guard=lambda temporary: _cleanup_temporary(policy, name, temporary, runtime=True))
         return dict(path=RUNTIME_DIR + '/' + name, sha256=_sha(raw), event=event)
