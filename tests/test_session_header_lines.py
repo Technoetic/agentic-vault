@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,6 +55,21 @@ def _load_hook():
 
 
 hook = _load_hook()
+
+
+def _load_doctor():
+    """Load vault_doctor.py (it loads the repository hook) and leave sys.path as it was."""
+    saved = list(sys.path)
+    try:
+        spec = importlib.util.spec_from_file_location("header_lines_doctor", SCRIPTS / "vault_doctor.py")
+        if spec is None or spec.loader is None:  # pragma: no cover - import guard
+            raise RuntimeError("cannot load vault_doctor.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = saved
+    return module
 
 
 def defused(text: str) -> str:
@@ -314,6 +330,32 @@ class HeaderLineHookTests(unittest.TestCase):
         sections = report["sections"]
         self.assertEqual(sections["handoff"]["estimated_emitted_chars"] + len("\n\n")
                          + sections["hot"]["estimated_emitted_chars"] + 1, units)
+
+    def test_doctor_with_an_older_hook_counts_what_that_hook_emits(self) -> None:
+        # A vault copy of the doctor can load the hook of an older plugin (CLAUDE_PLUGIN_ROOT).
+        doctor = _load_doctor()
+        current = doctor.session_hook
+
+        class OlderHook:
+            """The hook module without the v0.52.0 step."""
+
+            def __getattr__(self, name: str):
+                if name in ("_neutralize_header_lines", "NEUTRALIZED_PREFIX"):
+                    raise AttributeError(name)
+                return getattr(current, name)
+
+        self.make_vault(handoff="Continue.\n", hot="Current.\n" + HOT_HEADER + "\n")
+        config = current._load_config(self.vault / "00-meta" / "vault-config.json")
+        arguments = {"path_key": "hot_note", "budget_key": "hot_max_tokens", "header": HOT_HEADER}
+        with mock.patch.object(doctor, "session_hook", OlderHook()):
+            older_section, older_source = doctor._diagnose_section(self.vault, config, **arguments)
+        section, source = doctor._diagnose_section(self.vault, config, **arguments)
+
+        self.assertEqual(older_source.text, "Current.\n" + HOT_HEADER)
+        self.assertEqual(older_section["estimated_emitted_chars"], len(HOT_HEADER + "\nCurrent.\n" + HOT_HEADER))
+        self.assertEqual(source.text, "Current.\n" + PREFIX + HOT_HEADER)
+        self.assertEqual(section["estimated_emitted_chars"],
+                         len(HOT_HEADER + "\nCurrent.\n" + PREFIX + HOT_HEADER))
 
 
 if __name__ == "__main__":
