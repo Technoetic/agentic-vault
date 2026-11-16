@@ -576,15 +576,19 @@ class AntigravityStopTests(AntigravityHookCase):
         self.assertEqual(self.claims(), sorted([claim_name("Stop", "conversation-stop", "3"),
                                                 claim_name("Stop", "conversation-stop", "4")]))
 
-    def test_stop_without_an_integer_execution_number_is_not_claimed(self) -> None:
+    def test_stop_without_an_integer_execution_number_claims_by_raw_event_digest(self) -> None:
+        expected_claims = []
         for value in (ABSENT, "5", True, 5.0):
             with self.subTest(executionNum=value):
-                result = self.stop(self.stop_event(executionNum=value))
+                raw = self.stop_event(executionNum=value)
+                expected_claims.append(claim_name("Stop", "conversation-stop", "raw",
+                                                  hashlib.sha256(raw).hexdigest()))
+                result = self.stop(raw)
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (0, EMPTY, b""))
         [record] = self.records()
         saved = json.loads(record.read_text(encoding="utf-8"))
         self.assertEqual(len(saved["events"]), 4)
-        self.assertEqual(self.claims(), [])
+        self.assertEqual(self.claims(), sorted(expected_claims))
 
     def test_three_handlers_for_one_stop_record_once(self) -> None:
         raw = self.stop_event(executionNum=9)

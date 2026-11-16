@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -129,19 +131,24 @@ def _write_empty_object():
         _discard_output(stream)
 
 
-def record_antigravity_stop(helpers, explicit_vault=None):
-    """Record a Stop checkpoint for a fully idle Antigravity CLI conversation.
+def _zero_execution_turn_digest(event: dict) -> str | None:
+    parts = [
+        f"{k}={json.dumps(event[k], ensure_ascii=False, sort_keys=True)}"
+        for k in ("turnId", "lastUserInput", "lastAssistantMessage")
+        if k in event and event[k] is not None
+    ]
+    if not parts:
+        return None
+    return hashlib.sha256("\0".join(parts).encode("utf-8", "surrogatepass")).hexdigest()[:32]
 
-    Only an object event whose hookEventName is absent or Stop, whose
-    fullyIdle is true and whose conversationId is a valid id counts, in a
-    vault resolved as for SessionStart. The record keeps the SHA-256 of the
-    conversation id, never the user input, the transcript path or a workspace
-    path (vault-relative note paths stay, as in Claude Code checkpoints). The
-    package runs several handlers per event; with an integer executionNum the
-    claim lets one of them write, and the same conversation and executionNum
-    again within 120 seconds writes nothing.
-    """
-    event = helpers.read_event()
+
+def record_antigravity_stop(helpers, explicit_vault=None):
+    """Record a Stop checkpoint for a fully idle Antigravity CLI conversation."""
+    reader = getattr(helpers, 'read_event_with_digest', None)
+    if callable(reader):
+        event, raw_digest = reader()
+    else:
+        event, raw_digest = helpers.read_event(), None
     if (not isinstance(event, dict) or event.get('hookEventName', STOP_EVENT) != STOP_EVENT
             or event.get('fullyIdle') is not True):
         return
@@ -152,8 +159,17 @@ def record_antigravity_stop(helpers, explicit_vault=None):
     if vault is None:
         return
     execution = event.get('executionNum')
-    if type(execution) is int and not helpers.claim_once(STOP_EVENT, conversation, str(execution)):
-        return
+    if type(execution) is int:
+        if execution == 0:
+            turn_digest = _zero_execution_turn_digest(event)
+            claim_parts = (STOP_EVENT, conversation, '0', turn_digest) if turn_digest else (STOP_EVENT, conversation, '0')
+        else:
+            claim_parts = (STOP_EVENT, conversation, str(execution))
+        if not helpers.claim_once(*claim_parts):
+            return
+    elif raw_digest is not None:
+        if not helpers.claim_once(STOP_EVENT, conversation, 'raw', raw_digest):
+            return
     try:
         write_checkpoint(vault, STOP_EVENT, session_id=conversation, pending_references=None)
     except (StateError, EvidenceError, HealthcheckError, ValueError, OSError, UnicodeError, RuntimeError) as error:

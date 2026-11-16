@@ -56,6 +56,27 @@ def _no_constant(value: str) -> object:
     raise ValueError("invalid_constant")
 
 
+def read_event_with_digest(stream=None) -> tuple[dict | None, str | None]:
+    """Return (event_dict, raw_sha256) or (None, None) when input is unusable."""
+    try:
+        stream = sys.stdin if stream is None else stream
+        if stream is None or stream.isatty():
+            return None, None
+        binary = getattr(stream, "buffer", stream)
+        raw = binary.read(MAX_EVENT_BYTES + 1)
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        if len(raw) > MAX_EVENT_BYTES:
+            return None, None
+        event = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_unique_keys,
+                           parse_constant=_no_constant)
+    except Exception:  # any input, any failure: no event rather than no answer
+        return None, None
+    if not isinstance(event, dict):
+        return None, None
+    return event, hashlib.sha256(raw).hexdigest()
+
+
 def read_event(stream=None) -> dict | None:
     """Return the hook event object, or None when there is none to use.
 
@@ -64,21 +85,7 @@ def read_event(stream=None) -> dict | None:
     value that is not an object. Never raises: the hook still has to answer
     with a JSON object.
     """
-    try:
-        stream = sys.stdin if stream is None else stream
-        if stream is None or stream.isatty():
-            return None
-        binary = getattr(stream, "buffer", stream)
-        raw = binary.read(MAX_EVENT_BYTES + 1)
-        if isinstance(raw, str):
-            raw = raw.encode("utf-8")
-        if len(raw) > MAX_EVENT_BYTES:
-            return None
-        event = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_unique_keys,
-                           parse_constant=_no_constant)
-    except Exception:  # any input, any failure: no event rather than no answer
-        return None
-    return event if isinstance(event, dict) else None
+    return read_event_with_digest(stream)[0]
 
 
 def _has_config(folder: Path) -> bool:
