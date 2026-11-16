@@ -10,8 +10,12 @@
 대화를 가로채거나 전역 호출 수를 강제하는 훅은 아니다.
 
 Python 3.10+ 표준 라이브러리만 사용한다. SDK 설치, 볼트 설정 마이그레이션, 시작 시 API
-호출은 필요 없다. 기본 공급자(TypeSafe Jev, `https://api.typesafe.ai/v1/systemone`)의 키는 실행 프로세스의 `TYPESAFE_API_KEY` 환경변수로만 제공한다. v0.51.0부터 선택형 공급자 `--provider bizrouter`(`https://api.bizrouter.ai/v1/decisions`, 기본 모델 `google/gemini-decision-1`, `typesafe/jev-1.13.0`도 선택 가능)와 `jev_ask.py`의 선택형 저확신 재평가 플래그 `--escalate-bizrouter`를 지원하며, 이때는 `BIZROUTER_API_KEY` 환경변수를 사용한다. BizRouter Decisions 게이트웨이는 텍스트·JSON 문맥만 받으며(이미지·미디어 미지원), `google/gemini-decision-1`에서는 요청당 최대 1,000개 질문과 2~255개 Choice/Score 단계(요청 최대 256 KiB·응답 최대 512 KiB)를 처리한다. `--escalate-bizrouter`는 기본 Jev 배치 응답 중 보류(`abstained`)가 아닌 `low_confidence`·`low_decisiveness` 문항만 추려 `google/gemini-decision-1`로 1회 추가 평가하며, `BIZROUTER_API_KEY`가 없거나 추가 호출이 실패해도 Jev 원응답을 보존하고 `escalation.status: "unavailable"`만 기록한다.
+호출은 필요 없다. 기본 공급자(TypeSafe Jev, `https://api.typesafe.ai/v1/systemone`)의 키는 실행 프로세스의 `TYPESAFE_API_KEY` 환경변수로만, 선택형 BizRouter 경로의 키는 `BIZROUTER_API_KEY` 환경변수로만 제공한다.
 키를 노트·명령 인자·요청 JSON에 넣거나 `.env` 내용을 읽어 출력하지 않는다.
+
+v0.51.0부터 선택형 공급자 `--provider bizrouter`(`https://api.bizrouter.ai/v1/decisions`)를 지원한다. 이 경로의 모델은 `google/gemini-decision-1` 하나다. v0.52.0부터 TypeSafe Jev는 기본 공급자의 직접 API(`https://api.typesafe.ai/v1/systemone`, `TYPESAFE_API_KEY`)로만 호출하고 BizRouter를 거치지 않는다. v0.51.0에서 BizRouter로 고를 수 있던 `typesafe/jev-1.13.0`·`typesafe/jev-latest`는 이제 목록에 없는 다른 모델처럼 기존 모델 검사에서 `invalid_arguments`(종료 코드 2)로 거부되며 아무것도 보내지 않는다. BizRouter Decisions 게이트웨이는 텍스트·JSON 문맥만 받으며(이미지·미디어 미지원), `google/gemini-decision-1`에서는 요청당 최대 1,000개 질문과 2~255개 Choice/Score 단계(요청 최대 256 KiB·응답 최대 512 KiB)를 처리한다.
+
+`jev_ask.py`의 선택형 저확신 재평가 플래그 `--escalate-bizrouter`는 기본 Jev 배치 응답 중 보류(`abstained`)가 아닌 `low_confidence`·`low_decisiveness` 문항만 추려 `google/gemini-decision-1`로 1회 추가 평가한다. 재평가가 적용되면(`escalation.status: "applied"`) 그 문항의 결과는 BizRouter 답에 `escalated_from`(Jev 모델), `primary`(재평가가 없을 때 나오는 것과 같은 키·값의 Jev 원답, `id` 제외), `agreement`(두 답의 일치 여부, 불리언)를 더한 것이다. 일치 기준은 Choice가 같은 label, Noul이 두 확률 모두 0.5보다 크거나 모두 작은 경우(어느 하나라도 정확히 0.5면 불일치), Score가 같은 단계 척도에서 두 `score` 값의 차이가 1 이하인 경우다(이진 부동소수점 반올림 오차 `1e-9` 허용). `review_reasons`는 재평가 답으로 전처럼 다시 계산한 뒤, 일치하지 않은 문항마다 `{"id": ..., "reason": "provider_disagreement"}`를 질문 순서대로 덧붙인다. `escalation`에는 불일치 문항 ID를 재평가 순서로 담은 `disagreed_ids`가 더해지며, 불일치가 없으면 빈 배열이다. 불일치가 하나라도 있으면 결과는 `needs_review`다. 일치는 참고 정보이지 통과가 아니다. 두 모델이 같은 답을 냈다고 정답이 보증되지 않으며, 일치해도 다시 계산한 검토 사유는 지워지지 않는다. `BIZROUTER_API_KEY`가 없거나 추가 호출이 실패하면 Jev 원응답을 그대로 두고 `escalation.status: "unavailable"`만 기록하며, 재평가할 문항이 없으면 `not_needed`다. 이 두 상태와 플래그 없는 실행의 출력은 v0.51.0과 같다.
 
 ## 직접 질문: native Noul·Choice·Score
 
@@ -77,7 +81,8 @@ stdin·전송 payload·응답은 각각 최대 64 KiB다.
 `input_hash`, `request_hash`, `policy_hash`, `network_attempted`, 정규화된 native 결과와
 정제된 오류 상태가 포함된다. 결과는 `results` 배열, 실패 코드는 `error_code` 문자열이며,
 `review_reasons`의 `{id, reason}`은 `abstained`·`low_confidence`·`low_decisiveness`를
-구분한다. 문맥·질문·자유형 provider 설명은 되돌려 출력하지 않는다.
+구분하고, `--escalate-bizrouter` 재평가가 적용된 실행에서는 두 공급자의 답이 엇갈린 문항에
+`provider_disagreement`를 더한다. 문맥·질문·자유형 provider 설명은 되돌려 출력하지 않는다.
 파일을 자동으로 읽거나 쓰지 않으며 자동 노트·index·log 갱신도 없다.
 
 같은 질문에 답하는 현재 파일 보고서가 있으면 먼저 재사용한다. 직접 요청도 정확히
