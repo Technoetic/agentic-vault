@@ -91,6 +91,8 @@ Differences from the default mode:
 
 **Hooks can pull shared notes in.** A stricter vault-local hook may require the index or handoff in the same commit as a new note. A path commit would then sweep those files, which this tool refuses. `--own-lines` carries them with only the caller's lines.
 
+**Two sessions can take one entry number.** Sessions that each add the next decision or mistake to one note can give two entries the same number; neither this command nor the commit gate reads entry numbers. The health check's full report lists, in section 14d, every note in which two or more level-2 headings start with the same `ADR-<n>` or `M-<n>` number, and says whether the headings are committed at HEAD. It renames nothing. Keep committed headings and add the title wherever the number is referenced, because a changed heading breaks its anchor; give an uncommitted heading the next unused number.
+
 **Not an isolation tool.** Sessions that need separate working files should use separate worktrees. Each linked worktree has its own index and its own lock, and this command works inside one when `--vault` names that tree.
 
 **No automatic fallback.** A failed commit is reported and left for the caller.
