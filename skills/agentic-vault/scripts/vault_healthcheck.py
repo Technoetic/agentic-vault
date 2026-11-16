@@ -858,16 +858,19 @@ HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 ANCHOR_RE = re.compile(r"\*\*기준 커밋\(anchor\):\*\*\s*`(?:([0-9a-fA-F]{7,40})|\(없음\))`")
 
 
-def _git(vault: Path, *args: str) -> str | None:
+def _git(vault: Path, *args: str, strip: bool = True) -> str | None:
     """git 명령 1회 실행. 실패(비리포·미설치·해석불가·타임아웃)면 None —
-    조용히 넘기지 않고 호출부가 리포트에 사유를 남긴다."""
+    조용히 넘기지 않고 호출부가 리포트에 사유를 남긴다. strip=False면 출력의 앞뒤 공백을
+    남긴다(파일 내용을 그대로 읽을 때)."""
     try:
         r = subprocess.run(["git", "-c", "core.quotepath=false", *args],
                            cwd=vault, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=15)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return r.stdout.strip() if r.returncode == 0 else None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() if strip else r.stdout
 
 
 def _worktree_display(vault: Path, raw: str) -> str:
@@ -920,24 +923,49 @@ def scan_worktree_heads(vault: Path) -> tuple[int, list[str]]:
 # §14d: two or more level-2 headings of one note that start with the same decision (ADR-<n>) or
 # mistake (M-<n>) number. Sessions that each add "the next" entry to a shared note can take one
 # number twice. Report only: nothing is renumbered, because a changed heading breaks its anchor.
-ENTRY_HEADING_RE = re.compile(r" {0,3}##\s+(ADR|M)-([0-9]+)")
+# As in CommonMark, only a space or a tab after the hashes opens the heading.
+ENTRY_HEADING_RE = re.compile(r" {0,3}##[ \t]+(ADR|M)-([0-9]+)")
 ENTRY_STATE_UNKNOWN = "커밋 여부를 확인하지 못했다. 번호를 바꾸기 전에 참조를 확인한다."
 
 
+def _entry_key(kind: str, digits: str) -> tuple[str, str]:
+    """The number an entry heading takes: its kind and its digits without leading zeros."""
+    return kind, digits.lstrip("0") or "0"
+
+
+def _frontmatter_line_count(text: str) -> int:
+    """How many lines the front matter takes, both `---` lines included, as split_frontmatter
+    (sections 1-4) finds it; 0 without front matter."""
+    frontmatter, body = split_frontmatter(text)
+    if frontmatter is None:
+        return 0
+    # The body starts after the closing '---' and the white space (\s, which str.rstrip strips)
+    # that follows it, so the closing line ends where that white space starts.
+    closing_end = len(text[:len(text) - len(body)].rstrip())
+    return text.count("\n", 0, closing_end) + 1
+
+
 def entry_headings(text: str) -> list[tuple[int, str, str, str]]:
-    """(line number, kind, digits, line) of each level-2 ATX heading (`## `, as the decision and
-    mistake templates write entries) whose text starts with `ADR-<digits>` or `M-<digits>`; the
-    digits end at the first non-digit. Lines in fenced code and HTML comments do not count (the
-    warning extensions' `_clean_lines`, which numbers lines as str.splitlines() does). Without
-    that module the list is empty."""
+    """(line number, kind, digits, line) of each level-2 ATX heading (`##` and a space or a tab, as
+    the decision and mistake templates write entries) whose text starts with `ADR-<digits>` or
+    `M-<digits>`; the digits end at the first non-digit. Line numbers count line feeds, as an
+    editor does: str.splitlines() also breaks at a form feed, U+2028 and the like, and the text
+    after such a character is inside its line, so it opens no heading. Lines of the front matter
+    (split_frontmatter), of fenced code and of HTML comments do not count (the warning extensions'
+    `_clean_lines`, one entry per str.splitlines() line). Without that module the list is empty."""
     if _visible_note_lines is None or ("ADR-" not in text and "M-" not in text):
         return []
-    lines = text.splitlines()
+    skipped = _frontmatter_line_count(text)
     found: list[tuple[int, str, str, str]] = []
-    for index, visible in enumerate(_visible_note_lines(text)):
-        match = ENTRY_HEADING_RE.match(visible)
+    number, line_start = 1, True
+    for piece, line, visible in zip(text.splitlines(keepends=True), text.splitlines(),
+                                    _visible_note_lines(text)):
+        match = ENTRY_HEADING_RE.match(visible) if line_start and number > skipped else None
         if match:
-            found.append((index + 1, match[1], match[2], lines[index]))
+            found.append((number, match[1], match[2], line))
+        line_start = piece.endswith("\n")  # full mode reads text mode: no CR is left
+        if line_start:
+            number += 1
     return found
 
 
@@ -946,14 +974,15 @@ def duplicate_entry_groups(text: str) -> list[list[tuple[int, str, str]]]:
     order of their first lines. Each member is (line number, label as written, line)."""
     groups: dict[tuple[str, str], list[tuple[int, str, str]]] = {}
     for number, kind, digits, line in entry_headings(text):
-        groups.setdefault((kind, digits.lstrip("0") or "0"), []).append((number, f"{kind}-{digits}", line))
+        groups.setdefault(_entry_key(kind, digits), []).append((number, f"{kind}-{digits}", line))
     return [members for members in groups.values() if len(members) > 1]
 
 
-def _head_entry_lines(vault: Path, rel: str) -> Counter | None:
-    """How often each entry heading line (stripped) stands in the note at HEAD; empty for a
-    tracked note HEAD does not hold. None when git is missing or fails, the vault is no
-    repository or the note is untracked. Three bounded `_git` calls at most."""
+def _head_entry_lines(vault: Path, rel: str) -> dict[tuple[str, str], Counter] | None:
+    """For each entry number (`_entry_key`), how often each of its heading lines (stripped) stands
+    in the note at HEAD, read with the note's own rule (entry_headings); empty for a tracked note
+    HEAD does not hold. None when git is missing or fails, the vault is no repository or the note
+    is untracked. Three bounded `_git` calls at most."""
     spec = f":(literal){rel}"
     try:
         if _git(vault, "ls-files", "--error-unmatch", "--", spec) is None:
@@ -962,33 +991,51 @@ def _head_entry_lines(vault: Path, rel: str) -> Counter | None:
         if listing is None:
             return None
         if not listing:
-            return Counter()
+            return {}
         fields = listing.split("\0", 1)[0].partition("\t")[0].split(" ")
         if (len(fields) != 3 or fields[1] != "blob"
                 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", fields[2])):
             return None
-        blob = _git(vault, "cat-file", "blob", fields[2])
+        # Unstripped: white space at the start of the note decides its first lines there too.
+        blob = _git(vault, "cat-file", "blob", fields[2], strip=False)
     except ValueError:  # an argument git cannot take (a NUL character)
         return None
     if blob is None:
         return None
     # read_text drops a UTF-8 byte order mark from the working note; the blob keeps it.
-    return Counter(line.strip() for _number, _kind, _digits, line
-                   in entry_headings(blob.removeprefix("\ufeff")))
+    head: dict[tuple[str, str], Counter] = {}
+    for _number, kind, digits, line in entry_headings(blob.removeprefix("\ufeff")):
+        head.setdefault(_entry_key(kind, digits), Counter())[line.strip()] += 1
+    return head
 
 
-def _entry_state(members: list[tuple[int, str, str]], head: Counter | None) -> str:
-    """The advice for one group: committed headings stay, an uncommitted one is renumbered."""
+def _entry_state(members: list[tuple[int, str, str]],
+                 head: dict[tuple[str, str], Counter] | None) -> str:
+    """The advice for one group, from the headings with its number at HEAD. Committed headings
+    stay. When the note has no more such headings than HEAD (new <= 0) none is a new entry, and a
+    heading HEAD does not have is a committed entry whose title was edited: it keeps its number.
+    With new >= 1 more, the new headings are known only when exactly that many are absent from
+    HEAD (all of them when HEAD has none: one keeps the number). Otherwise git cannot tell."""
     if head is None:
         return ENTRY_STATE_UNKNOWN
+    kind, _hyphen, digits = members[0][1].partition("-")
+    committed = head.get(_entry_key(kind, digits), Counter())
     written = Counter(line.strip() for _number, _label, line in members)
-    if any(0 < head[line] < seen for line, seen in written.items()):
+    if any(0 < committed[line] < seen for line, seen in written.items()):
         return ENTRY_STATE_UNKNOWN  # git cannot tell which of the identical lines is committed
-    new = [number for number, _label, line in members if not head[line.strip()]]
-    if new:
-        return f"커밋 안 된 제목이 있다({'·'.join(map(str, new))}행). 커밋 안 된 쪽 번호를 바꾼다."
-    both = "둘 다" if len(members) == 2 else "모두"
-    return f"{both} 커밋됐다. {both} 두고 참조에 제목을 함께 적는다(제목을 바꾸면 앵커가 깨진다)."
+    absent = [number for number, _label, line in members if not committed[line.strip()]]
+    lines = "·".join(map(str, absent))
+    new = len(members) - sum(committed.values())
+    if new <= 0:
+        if absent:
+            return f"HEAD와 제목이 다른 줄({lines}행)은 커밋된 항목을 고친 것이다. 번호를 바꾸지 않는다."
+        both = "둘 다" if len(members) == 2 else "모두"
+        return f"{both} 커밋됐다. {both} 두고 참조에 제목을 함께 적는다(제목을 바꾸면 앵커가 깨진다)."
+    if len(absent) != new:
+        return ENTRY_STATE_UNKNOWN  # an edited committed heading cannot be told from a new one
+    if new == len(members):
+        return f"모두 커밋 안 됐다({lines}행). 하나만 두고 나머지 번호를 바꾼다."
+    return f"커밋 안 된 제목이 있다({lines}행). 커밋 안 된 쪽 번호를 바꾼다."
 
 
 def scan_duplicate_entry_ids(vault: Path,
