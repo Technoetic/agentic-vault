@@ -10,7 +10,7 @@
 대화를 가로채거나 전역 호출 수를 강제하는 훅은 아니다.
 
 Python 3.10+ 표준 라이브러리만 사용한다. SDK 설치, 볼트 설정 마이그레이션, 시작 시 API
-호출은 필요 없다. 기본 공급자(TypeSafe Jev, `https://api.typesafe.ai/v1/systemone`)의 키는 실행 프로세스의 `TYPESAFE_API_KEY` 환경변수로만 제공한다. v0.51.0부터 선택형 공급자 `--provider bizrouter`(`https://api.bizrouter.ai/v1/decisions`, 기본 모델 `google/gemini-decision-1`, `typesafe/jev-1.13.0`도 선택 가능)와 `jev_ask.py`의 선택형 저확신 재평가 플래그 `--escalate-bizrouter`를 지원하며, 이때는 `BIZROUTER_API_KEY` 환경변수를 사용한다. BizRouter Decisions 게이트웨이는 텍스트·JSON 문맥만 받으며(이미지·미디어 미지원), `google/gemini-decision-1`에서는 요청당 최대 1,000개 질문과 2~255개 Choice/Score 단계(입력·출력 최대 256 KiB)를 처리한다. `--escalate-bizrouter`는 기본 Jev 배치 응답 중 보류(`abstained`)가 아닌 `low_confidence`·`low_decisiveness` 문항만 추려 `google/gemini-decision-1`로 1회 추가 평가하며, `BIZROUTER_API_KEY`가 없거나 추가 호출이 실패해도 Jev 원응답을 보존하고 `escalation.status: "unavailable"`만 기록한다.
+호출은 필요 없다. 기본 공급자(TypeSafe Jev, `https://api.typesafe.ai/v1/systemone`)의 키는 실행 프로세스의 `TYPESAFE_API_KEY` 환경변수로만 제공한다. v0.51.0부터 선택형 공급자 `--provider bizrouter`(`https://api.bizrouter.ai/v1/decisions`, 기본 모델 `google/gemini-decision-1`, `typesafe/jev-1.13.0`도 선택 가능)와 `jev_ask.py`의 선택형 저확신 재평가 플래그 `--escalate-bizrouter`를 지원하며, 이때는 `BIZROUTER_API_KEY` 환경변수를 사용한다. BizRouter Decisions 게이트웨이는 텍스트·JSON 문맥만 받으며(이미지·미디어 미지원), `google/gemini-decision-1`에서는 요청당 최대 1,000개 질문과 2~255개 Choice/Score 단계(요청 최대 256 KiB·응답 최대 512 KiB)를 처리한다. `--escalate-bizrouter`는 기본 Jev 배치 응답 중 보류(`abstained`)가 아닌 `low_confidence`·`low_decisiveness` 문항만 추려 `google/gemini-decision-1`로 1회 추가 평가하며, `BIZROUTER_API_KEY`가 없거나 추가 호출이 실패해도 Jev 원응답을 보존하고 `escalation.status: "unavailable"`만 기록한다.
 키를 노트·명령 인자·요청 JSON에 넣거나 `.env` 내용을 읽어 출력하지 않는다.
 
 ## 직접 질문: native Noul·Choice·Score

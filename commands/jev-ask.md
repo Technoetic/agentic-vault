@@ -52,6 +52,6 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/jev_ask.py" run --inp
 
 두 명령 모두 UTF-8 JSON을 stdin으로 전달한다. 사용자 입력을 셸 코드에 보간하지 않는다.
 Codex는 [경로 규약](../skills/agentic-vault/references/codex.md)으로 설치 루트를 구한다.
-기본 Jev 경로(`--provider jev`, 기본값)의 stdin·전송·응답은 각각 최대 64 KiB(질문 1~12개, Score 2~10단계)이며, 선택형 `--provider bizrouter`(기본 모델 `google/gemini-decision-1`, 환경변수 `BIZROUTER_API_KEY`)는 최대 256 KiB(질문 1~1,000개, Choice/Score 2~255단계, 이미지·첨부 미지원)다. stdout JSON과 종료 코드를 함께 확인한다.
+기본 Jev 경로(`--provider jev`, 기본값)의 stdin·전송·응답은 각각 최대 64 KiB(질문 1~12개, Score 2~10단계)이며, 선택형 `--provider bizrouter`(기본 모델 `google/gemini-decision-1`, 환경변수 `BIZROUTER_API_KEY`)는 요청 최대 256 KiB·응답 최대 512 KiB(질문 1~1,000개, Choice/Score 2~255단계, 이미지·첨부 미지원)다. stdout JSON과 종료 코드를 함께 확인한다.
 고정 endpoint/model을 사용하며 redirect·자동 재시도·파일 읽기/쓰기·자동 로그 갱신은 없다.
 기존 권한·워크플로우 상태 기록기·완료 기록은 유지한다.
