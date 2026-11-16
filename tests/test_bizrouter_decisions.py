@@ -651,6 +651,12 @@ class EscalationAgreementTests(unittest.TestCase):
             (score, _score_answer(1.7, {"1": 0.3, "2": 0.7}, 0.5),
              _score_answer(2.7, {"2": 0.3, "3": 0.7}, 0.9), True),
             (score, _score_answer(1.0, {"1": 1}, 0.5), _score_answer(2.02, {"2": 0.98, "3": 0.02}, 0.9), False),
+            # The slack is 1e-9, for binary rounding only: 1.000001 levels apart is a disagreement,
+            # while 1.0000000005 levels apart still agrees.
+            (score, _score_answer(1.0, {"1": 1}, 0.5),
+             _score_answer(2.000001, {"2": 0.999999, "3": 0.000001}, 0.9), False),
+            (score, _score_answer(1.0, {"1": 1}, 0.5),
+             _score_answer(2.0000000005, {"2": 0.9999999995, "3": 5e-10}, 0.9), True),
         )
         for value, jev_answer, bizrouter_answer, agreed in cases:
             with self.subTest(jev=jev_answer, bizrouter=bizrouter_answer):
