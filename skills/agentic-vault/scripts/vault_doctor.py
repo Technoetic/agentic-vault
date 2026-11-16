@@ -234,6 +234,12 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
+    # The hook prefixes note lines that open like its section headers (v0.52.0)
+    # before rendering, so the counts follow the same text. An older hook has
+    # no such step, and its output is reproduced as it is.
+    neutralize = getattr(session_hook, "_neutralize_header_lines", None)
+    if neutralize is not None:
+        text = neutralize(text)
     source = session_hook.SectionSource(header, text, budget, source_truncated, rel_path)
     # This section alone, under the same token budget and host output cap.
     rendered = session_hook.compose_context([source]).sections[0]
