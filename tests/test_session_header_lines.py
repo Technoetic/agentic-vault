@@ -107,7 +107,7 @@ class NeutralizeHeaderLinesTests(unittest.TestCase):
 
     def test_lines_are_split_where_str_splitlines_splits_them(self) -> None:
         # The same line boundaries as _redact_sensitive_lines, which runs first.
-        for separator in ("\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", " ", " "):
+        for separator in ("\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
             with self.subTest(separator=repr(separator)):
                 text = "Intro" + separator + "=== HOT CONTEXT ==="
                 self.assertEqual(hook._neutralize_header_lines(text),
