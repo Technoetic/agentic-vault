@@ -389,6 +389,17 @@ class DuplicateEntryCommitStateTests(_EntryCase):
             HEADER.format(count=1), entry(MISTAKES, "M-3", line_numbers(text, same), KEEP_BOTH),
         ])
 
+    def test_a_note_with_a_byte_order_mark_reads_alike_at_head(self) -> None:
+        # Full mode drops a UTF-8 byte order mark when it reads a note; the blob at HEAD keeps it.
+        first, second = "## ADR-7 | 첫 줄의 결정", "## ADR-7 | 다음 결정"
+        text = entries(first, second).removeprefix("# 기록\n\n")
+        (self.vault / DECISIONS).write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
+        self.commit("a note with a byte order mark")
+        _code, report, _stdout = self.check()
+        numbers = line_numbers(text, first) + line_numbers(text, second)
+        self.assertEqual(numbers[0], 1)
+        self.assertEqual(section(report), [HEADER.format(count=1), entry(DECISIONS, "ADR-7", numbers, KEEP_BOTH)])
+
     def test_a_vault_in_a_repository_subfolder_reads_its_notes_at_head(self) -> None:
         repository = self.root / "repository"
         repository.mkdir()
