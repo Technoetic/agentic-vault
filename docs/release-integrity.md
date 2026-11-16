@@ -43,6 +43,13 @@ v0.48.0부터 ZIP에는 커밋한 Antigravity CLI 생성 패키지 `antigravity/
 [Preventing changes to your releases](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)가
 보고한 것이다.
 
+- **v0.52.0(2026-11-16):** 저장소에 `refs/tags/v*`를 대상으로 하는 태그 규칙 집합(ruleset)을 두었다. 갱신(`update`)과
+  삭제(`deletion`) 규칙만 켜서 태그 생성은 막지 않으며, 우회 주체(bypass actor)는 없다. 불변 릴리스는 설정을 켠 뒤
+  게시한 릴리스의 태그만 잠근다. 같은 날 `git ls-remote --tags`와 `gh api repos/Technoetic/agentic-vault/releases`(초안은
+  쓰기 권한이 있는 인증 조회에서만 보인다)로 세면 v0.52.0 이전 태그 70개 가운데 41개가 불변 릴리스 밖에 있었다. 불변
+  설정 전에 게시한 릴리스 23개, 초안만 있는 태그 4개, 릴리스가 없는 태그 14개다. 규칙 집합은 켜져 있는 동안 이 태그들도
+  옮기거나 지우지 못하게 한다. 같은 날 비공개 취약점 제보도 켰다([보안 정책](../SECURITY.md#reporting-a-vulnerability)).
+
 게시 순서(유지관리자):
 
 1. 저장소 Settings의 Releases 섹션에서 **Enable release immutability**가 켜져 있는지 확인한다.
@@ -276,7 +283,12 @@ python scripts/release_rebuild.py check --tag v0.25.0 --zip agentic-vault-0.25.0
 | `SHA256SUMS` 대조 | 내려받은 파일이 같은 릴리스의 `SHA256SUMS` 목록과 같다. 전송 중 손상을 찾는다 | 목록의 진위. 불변이 아닌 릴리스에서는 자산과 목록을 함께 바꿀 수 있다 |
 | 재빌드 확인(`release_rebuild.py check`) | L1 일치: 이 git으로 태그에서 다시 만든 ZIP과 바이트가 같다. L2 일치: 파일 목록과 각 파일 바이트가 태그 트리의 blob과 같고 위험한 항목 이름이 없으며 ZIP 구조가 한 가지로만 읽힌다 | 게시된 자산과 같은지, 누가 만들었는지, 다른 git 빌드에서도 같은 바이트가 나오는지, 항목 시각·권한·압축 방식(L2) |
 | 릴리스 증명(`verify`·`verify-asset`) | 파일이 GitHub가 그 태그로 게시한 자산과 같고, 태그가 증명에 적힌 커밋을 가리킨다 | 누가 어떤 환경에서 ZIP을 만들었는지(빌드 출처), ZIP이 태그 소스에서 재현되는지, 게시를 승인한 사람의 신원, 내용의 안전성 |
+| `v*` 태그 규칙 집합(2026-11-16부터) | 규칙 집합이 켜져 있는 동안 `v*` 태그를 다른 커밋으로 옮기거나 지울 수 없다(생성은 허용) | 누가 태그를 만들었는지, 규칙 집합이 꺼져 있던 기간에 일어난 일. 저장소 관리자는 규칙 집합을 끄거나 고칠 수 있다 |
 
+- **SLSA Source 트랙:** [SLSA v1.2 Source 요구사항](https://slsa.dev/spec/v1.2/source-requirements)은 소스 관리 시스템이
+  태그를 지원하면 태그를 옮기거나 지우지 못하게 설정하라고 요구한다(L2부터). 그러나 Source 수준은 소스 관리 시스템이
+  발급하는 Source VSA로 나타내는데 이 저장소의 리비전에는 Source VSA가 발급되지 않고, 유지관리자가 한 명이라 L4의 두
+  사람 검토를 만족할 수 없으므로 Source 수준은 주장하지 않는다.
 - **서명 주체:** 다른 저장소의 불변 릴리스 1건(zizmorcore/zizmor-action v0.7.1)을 `--format json`으로 보면 인증서
   발급자는 `CN=Fulcio Intermediate l1,O=GitHub\, Inc.`, 주체 대체 이름은 `https://dotcom.releases.github.com`이다
   (측정). 서명하는 쪽은 GitHub 릴리스 서비스이며 유지관리자나 CI 실행의 신원은 증명에 없다.
@@ -492,6 +504,12 @@ python -m pip_audit --no-deps --disable-pip --progress-spinner off -r requiremen
   저장소 설정
 - [Verifying the integrity of a release](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/verify-release-integrity):
   `gh release verify`·`verify-asset`, 자동 생성 소스 압축본 제외
+- [About rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)·[Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets):
+  태그 규칙 집합, 우회 권한, 활성·비활성 상태, `Restrict updates`·`Restrict deletions`
+- [Configuring private vulnerability reporting for a repository](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository):
+  비공개 취약점 제보를 켜는 저장소 설정
+- [SLSA v1.2 Source requirements](https://slsa.dev/spec/v1.2/source-requirements): 태그 이동·삭제 금지(L2부터), Source VSA,
+  L4의 두 사람 검토
 - [GitHub CLI v2.93.0 릴리스 노트](https://github.com/cli/cli/releases/tag/v2.93.0): GHSA-8xvp-7hj6-mcj9
 - [Archive metadata](https://reproducible-builds.org/docs/archives/)(Reproducible Builds): ZIP 시각에 시간대가 없음,
   풀 때 `TZ=UTC` 권고, `git archive` 출력의 결정성 미보장
