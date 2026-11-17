@@ -12,11 +12,15 @@ import unittest
 from unittest import mock
 
 try:
-    from _winfs import make_junction
+    from _winfs import deep_path, make_junction
 except ImportError:  # run as tests.<module> from the repository root
-    from tests._winfs import make_junction
+    from tests._winfs import deep_path, make_junction
 
-TESTS = Path(__file__).resolve().parent
+# A receipt below the runtime folder can lie beyond the plain Windows path limit under a long
+# temporary folder. The runtime reaches it through vault_evidence.fs_path; these tests read, write
+# and tamper with it through deep_path, which leaves a path below the limit unchanged.
+
+TESTS =Path(__file__).resolve().parent
 SCRIPTS = TESTS.parent / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 if str(TESTS) not in sys.path:
@@ -181,7 +185,7 @@ class VaultRunsTests(unittest.TestCase):
         self.assertEqual(comparison['score_delta'], 0.5)
         self.assertEqual(comparison['outcome_count'], 10)
         self.assertEqual(comparison['authority'], 'advisory_host_observations_only')
-        self.assertTrue((self.vault / comparison['path']).is_file())
+        self.assertTrue(deep_path(self.vault / comparison['path']).is_file())
 
     def test_changed_candidate_and_treatment_prompt_remain_comparable(self):
         baseline = self.prepare('notes/baseline.md', candidate_version='v1')
@@ -197,13 +201,13 @@ class VaultRunsTests(unittest.TestCase):
 
     def test_prepare_and_record_are_immutable_and_identical_prepare_is_reused(self):
         prepared = self.prepare()
-        before = (self.vault / prepared['path']).read_bytes()
+        before = deep_path(self.vault / prepared['path']).read_bytes()
         self.assertEqual(self.prepare()['id'], prepared['id'])
         completed = self.complete(prepared)
-        self.assertEqual((self.vault / prepared['path']).read_bytes(), before)
-        completion_before = (self.vault / completed['path']).read_bytes()
+        self.assertEqual(deep_path(self.vault / prepared['path']).read_bytes(), before)
+        completion_before = deep_path(self.vault / completed['path']).read_bytes()
         self.error(runs.record, self.vault, prepared['id'], 'input/report.json')
-        self.assertEqual((self.vault / completed['path']).read_bytes(), completion_before)
+        self.assertEqual(deep_path(self.vault / completed['path']).read_bytes(), completion_before)
         inspected = runs.inspect(self.vault, prepared['id'])
         self.assertEqual(inspected['status'], 'complete')
         self.assertEqual(inspected['completion']['manifest_sha256'], prepared['manifest_sha256'])
@@ -351,7 +355,7 @@ class VaultRunsTests(unittest.TestCase):
         self.write_json('input/report.json', self.report(prepared))
         self.error(runs.record, self.vault, prepared['id'], 'input/report.json')
         for path in (self.vault / runs.RUNTIME_DIR).glob('*.json'):
-            self.assertNotIn(secret, path.read_text())
+            self.assertNotIn(secret, deep_path(path).read_text())
 
     def test_denied_excluded_reserved_traversal_env_and_hardlink_paths_are_rejected(self):
         for relative in ('../candidate.md', 'private/candidate.md', 'excluded/candidate.md',
@@ -429,7 +433,7 @@ class VaultRunsTests(unittest.TestCase):
 
     def test_tampered_receipt_and_wrong_id_are_rejected(self):
         prepared = self.prepare()
-        path = self.vault / prepared['path']
+        path = deep_path(self.vault / prepared['path'])
         value = json.loads(path.read_text())
         value['payload']['model'] = 'tampered'
         path.write_text(json.dumps(value))
@@ -439,7 +443,7 @@ class VaultRunsTests(unittest.TestCase):
     def test_recomputed_checksums_cannot_break_source_and_completion_links(self):
         prepared = self.prepare()
         completed = self.complete(prepared)
-        path = self.vault / completed['path']
+        path = deep_path(self.vault / completed['path'])
         original = path.read_bytes()
         for field in ('outcomes', 'prepared_receipt_sha256'):
             value = json.loads(original)
@@ -452,7 +456,7 @@ class VaultRunsTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.error(runs.inspect, self.vault, prepared['id'])
         path.write_bytes(original)
-        path = self.vault / prepared['path']
+        path = deep_path(self.vault / prepared['path'])
         value = json.loads(path.read_bytes())
         value['payload']['fixture']['cases'][0]['prompt'] = 'Altered rubric without source change'
         value['id'] = runs.evidence.digest(runs.evidence.encode(value['payload']))
@@ -466,14 +470,14 @@ class VaultRunsTests(unittest.TestCase):
         # Availability under contention is bounded; serial idempotency is tested separately.
         prepared = self.prepare()
         runtime = self.vault / runs.RUNTIME_DIR
-        original = (self.vault / prepared['path']).read_bytes()
+        original = deep_path(self.vault / prepared['path']).read_bytes()
         for result in self.run_children('prepare'):
             if result['ok']:
                 self.assertEqual(result['result']['id'], prepared['id'])
             else:
                 self.assertEqual(result, {'ok': False, 'error': 'lock_busy'})
         self.assertEqual(len(list(runtime.glob('*prepared.json'))), 1)
-        self.assertEqual((self.vault / prepared['path']).read_bytes(), original)
+        self.assertEqual(deep_path(self.vault / prepared['path']).read_bytes(), original)
         self.write_json('input/report.json', self.report(prepared))
         results = self.run_children('record', prepared['id'])
         completed = [result['result'] for result in results if result['ok']]
@@ -490,7 +494,7 @@ class VaultRunsTests(unittest.TestCase):
         inspected = runs.inspect(self.vault, prepared['id'])
         self.assertEqual(inspected['status'], 'complete' if receipts else 'prepared')
         self.assertEqual(len(list(runtime.glob('*prepared.json'))), 1)
-        self.assertEqual((self.vault / prepared['path']).read_bytes(), original)
+        self.assertEqual(deep_path(self.vault / prepared['path']).read_bytes(), original)
 
     def test_child_failures_are_classified_without_raw_paths(self):
         # Deterministic stand-in for the unmeasured Windows failure: os.open on
@@ -521,7 +525,7 @@ class VaultRunsTests(unittest.TestCase):
 
     def test_held_run_lease_refuses_without_receipt_change_then_serial_reuse_succeeds(self):
         prepared = self.prepare()
-        path = self.vault / prepared['path']
+        path = deep_path(self.vault / prepared['path'])
         original = path.read_bytes()
         self.write_json('input/report.json', self.report(prepared))
         with runs.state.advisory_lock(self.vault, 'run:' + prepared['id'], wait_seconds=1):
