@@ -15,6 +15,12 @@ import unittest
 from unittest import mock
 
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/agentic-vault/scripts'
 SCRIPT = SCRIPTS / 'vault_lesson_metrics.py'
 
@@ -97,11 +103,17 @@ class LessonMetricsTests(unittest.TestCase):
         return record['id'], output
 
     def observation_path(self, result):
-        return self.vault / result['path']
+        # An observation lies 102 characters below the vault: beyond the plain Windows path limit
+        # under a long temporary folder.
+        return deep_path(self.vault / result['path'])
+
+    def files(self):
+        """Every file of the vault as (vault-relative name, path to read it through)."""
+        return [(p.relative_to(self.vault).as_posix(), deep_path(p))
+                for p in self.vault.rglob('*') if deep_path(p).is_file()]
 
     def inventory(self):
-        return {p.relative_to(self.vault).as_posix(): p.read_bytes()
-                for p in self.vault.rglob('*') if p.is_file()}
+        return {name: path.read_bytes() for name, path in self.files()}
 
     def test_cli_explicit_synthetic_input_records_without_changing_receipt_or_target(self):
         self.apply()
@@ -221,11 +233,9 @@ class LessonMetricsTests(unittest.TestCase):
         self.apply()
         current, _output = self.evidence_id()
         self.observe(verification_status='verified', evidence_ids=[current])
-        before = {p.relative_to(self.vault).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
-                  for p in self.vault.rglob('*') if p.is_file()}
+        before = {name: (p.read_bytes(), p.stat().st_mtime_ns) for name, p in self.files()}
         self.assertEqual(self.summary()['counts']['verified_attempts'], 1)
-        after = {p.relative_to(self.vault).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
-                 for p in self.vault.rglob('*') if p.is_file()}
+        after = {name: (p.read_bytes(), p.stat().st_mtime_ns) for name, p in self.files()}
         self.assertEqual(before, after)
 
     def test_drifted_applied_target_cannot_credit_a_new_attempt(self):
@@ -435,7 +445,7 @@ class LessonMetricsTests(unittest.TestCase):
             result = real_mkstemp(*args, **kwargs)
             directory = Path(kwargs['dir'])
             for index in range(module.MAX_OBSERVATIONS + 1):
-                (directory / f'{index:032x}.json').write_bytes(b'{}')
+                deep_path(directory / f'{index:032x}.json').write_bytes(b'{}')
             return result
 
         with mock.patch.object(module.tempfile, 'mkstemp', side_effect=concurrent_entries):
