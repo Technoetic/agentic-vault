@@ -19,6 +19,7 @@ from collections.abc import Sequence
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import stat
@@ -48,10 +49,56 @@ DROPPED_NAMES = frozenset({"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
                            "CLAUDE_PROJECT_DIR"})
 # Bytecode next to the package sources is not part of the package.
 COPY_IGNORE = ("__pycache__", "*.pyc")
+# Where agy installs the package inside its home; these files are the deepest entries of a run.
+INSTALLED = Path(".gemini", "config", "plugins", PLUGIN_NAME)
 CALL_TIMEOUT = 180.0
 COUNT_KEYS = ("errors", "warnings", "notes")
 NOTE_SEVERITIES = frozenset({"note", "info"})
 NOT_RUN = "not run because an earlier agy call timed out"
+
+
+# --- long-path helpers (keep this block identical in the standalone tools that carry it) ---
+PLAIN_PATH_LIMIT = 240  # the margin below Windows MAX_PATH (260) that vault_evidence.fs_path uses
+
+
+def _extended(path) -> Path:
+    """The Windows extended-length form of an absolute path; any other path, and any other system, unchanged."""
+    text = str(path)
+    if os.name != "nt" or text.startswith("\\\\?\\"):
+        return Path(path)
+    if re.match(r"^[A-Za-z]:\\", text):
+        return Path("\\\\?\\" + text)
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path(path)
+
+
+def _plain(path) -> Path:
+    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    text = str(path)
+    if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + text[8:])
+    if os.name == "nt" and text.startswith("\\\\?\\"):
+        return Path(text[4:])
+    return Path(path)
+
+
+def _workspace(root, reserve: int) -> Path:
+    """root, in extended-length form when root plus `reserve` more characters reaches the plain limit."""
+    return _extended(root) if len(str(root)) + reserve >= PLAIN_PATH_LIMIT else Path(root)
+# --- end of long-path helpers ---
+
+
+# The extended-length prefix inside a message: as it is, or with every backslash doubled once or more
+# (an OSError quotes its file name with repr, and a shutil.Error quotes such messages again).
+EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(UNC\1)?")
+
+
+def _plain_text(text: str) -> str:
+    """text with the paths it names in their plain form (no extended-length prefix)."""
+    if os.name != "nt":
+        return text
+    return EXTENDED_PREFIX.sub(lambda found: found.group(1) * 2 if found.group(2) else "", text)
 
 
 class UsageError(Exception):
@@ -287,6 +334,31 @@ def skill_folders(package: Path) -> list[str]:
     return sorted(entry.name for entry in skills.iterdir() if entry.is_dir()) if skills.is_dir() else []
 
 
+def copied_length(package: Path) -> int:
+    """Characters of the longest relative path the copy of package holds (COPY_IGNORE names left out)."""
+    ignored = shutil.ignore_patterns(*COPY_IGNORE)
+    base = len(os.path.join(package, ""))
+    longest = 0
+    for current, directories, files in os.walk(package):
+        skipped = ignored(current, [*directories, *files])
+        directories[:] = [name for name in directories if name not in skipped]
+        names = [*directories, *(name for name in files if name not in skipped)]
+        offset = len(os.path.join(current, "")) - base
+        longest = max([longest, *(offset + len(name) for name in names)])
+    return longest
+
+
+def workspace_reserve(package: Path) -> int:
+    """Upper bound of the characters a run adds below its workspace root.
+
+    The deepest entries are the files agy installs: a separator, home/.gemini/config/plugins/agentic-vault,
+    a separator and the longest relative path of the package copy. The copy itself (package/agentic-vault)
+    and the other folders (home/AppData, home/tmp, work) are shallower. What agy writes elsewhere in its
+    home is not known and not counted.
+    """
+    return len(str(Path("home") / INSTALLED)) + 2 + copied_length(package)
+
+
 def files_under(folder: Path) -> set[str]:
     """Relative POSIX paths of every file under folder."""
     return {Path(current, name).relative_to(folder).as_posix()
@@ -345,7 +417,10 @@ def _excerpt(text: str, root: Path) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return ""
-    line = lines[-1].replace(str(root), "<temp>")
+    line = lines[-1]
+    # agy may name the folder in either form; the extended-length form holds the plain one, so it goes first.
+    for folder in (_extended(root), _plain(root)):
+        line = line.replace(str(folder), "<temp>")
     return ": " + (line if len(line) <= 200 else line[:197] + "...")
 
 
@@ -356,6 +431,9 @@ def _verify_in(root: Path, command: list[str], package: Path, timeout: float) ->
     home = root / "home"
     work = root / "work"
     work.mkdir()
+    # A process cannot start in an extended-length folder that nears the plain limit, and work lies just
+    # below the root: agy starts in the plain form of work unless that form itself reaches the limit.
+    start = _workspace(_plain(work), 0)
     environment = isolated_environment(home)
     failures: list[str] = []
     package_version, problem = manifest_version(copy)
@@ -369,7 +447,7 @@ def _verify_in(root: Path, command: list[str], package: Path, timeout: float) ->
         if stalled:
             failures.append(f"{check}: {NOT_RUN}")
             return None
-        returncode, stdout, stderr = run_agy(command, args, environment, work, timeout)
+        returncode, stdout, stderr = run_agy(command, args, environment, start, timeout)
         if returncode is None:
             stalled = True
             failures.append(f"{check}: agy {' '.join(args[:2])} timed out after {timeout:g} s")
@@ -429,7 +507,7 @@ def _verify_in(root: Path, command: list[str], package: Path, timeout: float) ->
         if problems:
             failures.append("listed: " + "; ".join(problems))
 
-    mismatches = compare_trees(home / ".gemini" / "config" / "plugins" / PLUGIN_NAME, copy)
+    mismatches = compare_trees(home / INSTALLED, copy)
     if mismatches:
         shown = ", ".join(f"{item['path']} ({item['problem']})" for item in mismatches[:5])
         more = f" and {len(mismatches) - 5} more" if len(mismatches) > 5 else ""
@@ -441,25 +519,64 @@ def _verify_in(root: Path, command: list[str], package: Path, timeout: float) ->
             "failures": failures}
 
 
+def _reachable(package: Path) -> Path:
+    """package as given, or its absolute extended-length form when the files to copy reach the plain limit.
+
+    The names are listed through the plain form: an entry too deep to be listed that way lies below one
+    that already reaches the limit, so the decision is the same.
+    """
+    absolute = Path(os.path.abspath(package))
+    deep = _workspace(absolute, 1 + copied_length(package))
+    return package if deep == absolute else deep
+
+
+def _remove_tree(root: Path) -> None:
+    """Remove root and everything below it, as the temporary folder's own cleanup does: errors are
+    ignored, and a read-only entry (agy installs read-only copies) is made writable and removed again."""
+    def retry(function, path, _error) -> None:
+        if function in (os.unlink, os.rmdir):
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                function(path)
+            except OSError:
+                pass
+
+    # shutil.rmtree takes its error handler as onexc from Python 3.12 and as onerror before.
+    shutil.rmtree(root, **{"onexc" if sys.version_info >= (3, 12) else "onerror": retry})
+
+
 def verify(agy: str, package: Path, *, keep: bool = False,
            timeout: float = CALL_TIMEOUT) -> tuple[dict, Path | None]:
     """Check package in a disposable agy home: (report, the kept temporary folder or None)."""
     command = agy_command(agy)
     package = Path(package)
-    if not package.is_dir():
+    source = _reachable(package)
+    if not source.is_dir():
         raise UsageError(f"package folder not found: {package}")
+    # The workspace root takes the extended-length form when the root and what a run adds below it
+    # (workspace_reserve) reach the plain limit; below that every path stays as it was.
+    reserve = workspace_reserve(source)
     real_config = Path.home() / ".gemini" / "config"
     before = fingerprint(real_config)
     kept = None
     if keep:
-        kept = Path(tempfile.mkdtemp(prefix="agentic-vault-agy-")).resolve()
+        kept = _plain(Path(tempfile.mkdtemp(prefix="agentic-vault-agy-")).resolve())
         print(f"kept: {kept}", file=sys.stderr)  # before the checks, so an error still names it
-        report = _verify_in(kept, command, package, timeout)
+        report = _verify_in(_workspace(kept, reserve), command, source, timeout)
     else:
         with tempfile.TemporaryDirectory(prefix="agentic-vault-agy-", ignore_cleanup_errors=True) as temporary:
-            report = _verify_in(Path(temporary).resolve(), command, package, timeout)
+            shallow = _plain(Path(temporary).resolve())
+            root = _workspace(shallow, reserve)
+            try:
+                report = _verify_in(root, command, source, timeout)
+            finally:
+                if root != shallow:
+                    # Entries beyond the plain limit are removed through the extended-length form; the
+                    # context manager then finds nothing left under the plain name.
+                    _remove_tree(root)
         if os.path.exists(temporary):
-            print(f"agentic-vault Antigravity verification: could not remove {temporary}", file=sys.stderr)
+            print(f"agentic-vault Antigravity verification: could not remove {_plain_text(temporary)}",
+                  file=sys.stderr)
     report["real_home_unchanged"] = fingerprint(real_config) == before
     if not report["real_home_unchanged"]:
         report["failures"].append("real_home_unchanged: the real ~/.gemini/config changed during verification")
@@ -481,10 +598,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         report, kept = verify(args.agy, args.package or ROOT / "antigravity", keep=args.keep)
     except UsageError as error:
-        print(f"agentic-vault Antigravity verification: {error}", file=sys.stderr)
+        print(f"agentic-vault Antigravity verification: {_plain_text(str(error))}", file=sys.stderr)
         return 2
     except OSError as error:
-        print(f"agentic-vault Antigravity verification failed: {error}", file=sys.stderr)
+        print(f"agentic-vault Antigravity verification failed: {_plain_text(str(error))}", file=sys.stderr)
         return 1
     text = json.dumps(report, indent=2)
     if args.json_out is not None:
