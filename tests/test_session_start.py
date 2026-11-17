@@ -264,7 +264,13 @@ class SessionStartTests(unittest.TestCase):
     def test_compact_default_budget_retains_all_selected_items_and_source_hashes(self):
         for body in ('x' * 102, '\uac00' * 102):
             with self.subTest(body=body[:1]):
-                path_prefix = '00-meta/' + ('p' * 95 + '-' if body.startswith('x') else '')
+                # A 95-character prefix makes the four source lines long. On Windows the prefix is
+                # shortened to the room that a long temporary folder leaves below the plain path limit
+                # (the hook reads notes through plain paths); it stays 95 under an ordinary folder.
+                room = 259 - len(str(self.vault)) - len('/00-meta/') - len('-handoff.md')
+                prefix_length = min(95, room) if os.name == 'nt' else 95
+                self.assertGreater(prefix_length, 0)
+                path_prefix = '00-meta/' + ('p' * prefix_length + '-' if body.startswith('x') else '')
                 handoff_path, hot_path, tasks_path, rules_path = (
                     path_prefix + name + '.md' for name in ('handoff', 'hot', 'tasks', 'rules')
                 )
