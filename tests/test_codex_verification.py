@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import errno
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -30,9 +33,40 @@ SPEC.loader.exec_module(verifier)
 
 WINDOWS = os.name == "nt"
 PREFIX = "\\\\?\\"  # the extended-length prefix; only Windows adds it
+# Room for the longest path below a fixture package or its installed copy. A fixture folder takes
+# the extended-length form only when it plus this room reaches the plain limit, so nothing changes
+# under an ordinary TEMP.
+FIXTURE_ROOM = 100
+# What verify() reports for the fixture plugin, whatever the length of the workspace.
+FIXTURE_REPORT = {"version": "0.11.0", "installed_resources": "verified", "isolated_home": True,
+                  "model_turns": 0, "host": "fixture"}
+
+
+def handed(path: Path) -> str:
+    """What the host is expected to receive for path: plain, unless path itself reaches the plain limit."""
+    return str(deep_path(plain(path)))
 
 
 class CodexVerificationTests(unittest.TestCase):
+    def temporary_directory(self, room: int) -> tempfile.TemporaryDirectory:
+        """tempfile.TemporaryDirectory(), in extended-length form when `room` characters below it reach the plain limit.
+
+        Created in the extended-length form of the temporary folder, the directory holds entries
+        beyond the plain limit of Windows without long-path support and tempfile removes them with
+        it. Under an ordinary TEMP, and on every other system, it is the plain call.
+        """
+        parent = Path(tempfile.gettempdir()).resolve()
+        chosen = deep_path(parent, len(os.sep) + len("tmp") + 8 + room)
+        return tempfile.TemporaryDirectory(dir=None if chosen == parent else str(chosen))
+
+    def long_folder(self, base: Path, length: int) -> Path:
+        """Create an empty folder below base whose plain path has at least `length` characters; return it plain."""
+        folder = plain(Path(base).resolve()) / "long"
+        while len(str(folder)) < length:
+            folder = folder / ("w" * min(100, max(1, length - len(str(folder)) - len(os.sep))))
+        extended(folder).mkdir(parents=True)
+        return folder
+
     def make_plugin_fixture(self, root: Path) -> Path:
         source = root / "source"
         resources = (
@@ -157,6 +191,7 @@ class CodexVerificationTests(unittest.TestCase):
             "assets/adapters/aside/aside-up.ps1",
             "assets/adapters/aside/aside-repl-command.md",
         )
+        self.assertLess(max(map(len, resources)), FIXTURE_ROOM)
         for relative in resources:
             resource = source / relative
             resource.parent.mkdir(parents=True, exist_ok=True)
@@ -167,23 +202,29 @@ class CodexVerificationTests(unittest.TestCase):
         return source
 
     def inspect_discovery_fixture(
-        self, mutate_skills=None, mutate_hooks=None, *, bind_installed_root=True,
+        self, mutate_skills=None, mutate_hooks=None, *, bind_installed_root=True, deep_as=None,
     ) -> dict:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+        # deep_as (plain or extended) installs the skills beyond the plain limit and has the host
+        # report their paths, and its home, in that spelling; the home and the working folder stay
+        # as short as verify() hands them over.
+        with self.temporary_directory(0 if deep_as is None else 2 * PLAIN_PATH_LIMIT) as temporary:
+            root = plain(Path(temporary))
             home = root / "codex-home"
             home.mkdir()
             vault = root / "vault"
             vault.mkdir()
+            installed = root / "installed"
+            if deep_as is not None:
+                installed = extended(self.long_folder(root, PLAIN_PATH_LIMIT)) / "installed"
             skills = []
             for directory, name in (
                 ("agentic-vault", "agentic-vault:agentic-vault"),
                 ("webapp-principles", "agentic-vault:webapp-principles"),
             ):
-                resource = root / "installed/skills" / directory / "SKILL.md"
+                resource = installed / "skills" / directory / "SKILL.md"
                 resource.parent.mkdir(parents=True)
                 resource.write_text(f"Fixture skill: {name}\n", encoding="utf-8")
-                skills.append({"name": name, "enabled": True, "path": str(resource),
+                skills.append({"name": name, "enabled": True, "path": str((deep_as or Path)(resource)),
                                "pluginId": "agentic-vault@agentic-vault-local"})
             hooks = [{"eventName": event, "trustStatus": "untrusted",
                       "pluginId": "agentic-vault@agentic-vault-local"}
@@ -214,8 +255,8 @@ class CodexVerificationTests(unittest.TestCase):
                 "    print(json.dumps({'id': request['id'], 'result': result}), flush=True)\n",
                 encoding="utf-8",
             )
-            environment = {**os.environ, "CODEX_HOME": str(home)}
-            options = {"installed_root": root / "installed"} if bind_installed_root else {}
+            environment = {**os.environ, "CODEX_HOME": str((deep_as or Path)(home))}
+            options = {"installed_root": plain(installed)} if bind_installed_root else {}
             return verifier.inspect_host(sys.executable, vault, environment, home.resolve(), **options)
 
     def test_required_native_skills_preserve_primary_report_and_allow_other_owned_skills(self) -> None:
@@ -553,26 +594,54 @@ class CodexVerificationTests(unittest.TestCase):
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 
-    def verify_fixture(self, source: Path, inspect_package=None, mutate_cache=None) -> dict:
+    def verify_fixture(self, source: Path, inspect_package=None, mutate_cache=None, *,
+                       seen: list | None = None, reported=plain) -> dict:
+        # seen collects what verify() did: ("workspace", keywords, plain root) for the temporary
+        # directory it created, ("run_json", args, cwd, environment) for each host command,
+        # ("installed", length of the longest plain path of the installed copy) and
+        # ("inspect_host", vault, home, installed_root) for the inspection.
+        # reported (plain or extended) is the spelling the stand-in host answers the install in.
         package = None
+        make_directory = tempfile.TemporaryDirectory
+
+        def temporary_directory(**keywords):
+            made = make_directory(**keywords)
+            seen.append(("workspace", keywords, plain(Path(made.name).resolve())))
+            return made
 
         def run_json(codex, args, cwd, environment):
             nonlocal package
+            if seen is not None:
+                seen.append(("run_json", list(args), cwd, dict(environment)))
             if args[:3] == ["plugin", "marketplace", "add"]:
-                package = Path(args[3])
+                # Like a host that copes with long paths, the stand-in reaches what it was handed
+                # through the extended-length form once the copies below would pass the plain limit.
+                package = deep_path(Path(args[3]), FIXTURE_ROOM)
                 if inspect_package is not None:
                     inspect_package(package)
                 return {"marketplaceName": "agentic-vault-local"}
             self.assertEqual(args[:2], ["plugin", "add"])
-            cached = Path(environment["CODEX_HOME"]) / "plugins/cache/fixture"
+            cached = deep_path(Path(environment["CODEX_HOME"]) / "plugins/cache/fixture", FIXTURE_ROOM)
             shutil.copytree(package, cached)
+            if seen is not None:
+                seen.append(("installed", max(
+                    len(str(plain(os.path.join(current, name))))
+                    for current, folders, files in os.walk(cached) for name in folders + files)))
             if mutate_cache is not None:
                 mutate_cache(cached)
-            return {"installedPath": str(cached), "version": "0.11.0"}
+            return {"installedPath": str(reported(cached)), "version": "0.11.0"}
 
-        with patch.object(verifier, "ROOT", source), \
-             patch.object(verifier, "run_json", side_effect=run_json), \
-             patch.object(verifier, "inspect_host", return_value={"host": "fixture"}):
+        def inspect_host(codex, vault, environment, home, *, installed_root=None):
+            if seen is not None:
+                seen.append(("inspect_host", vault, home, installed_root))
+            return {"host": "fixture"}
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(verifier, "ROOT", source))
+            stack.enter_context(patch.object(verifier, "run_json", side_effect=run_json))
+            stack.enter_context(patch.object(verifier, "inspect_host", side_effect=inspect_host))
+            if seen is not None:
+                stack.enter_context(patch.object(tempfile, "TemporaryDirectory", side_effect=temporary_directory))
             return verifier.verify("unused-fixture-executable")
 
     def test_installed_doctor_resources_must_exist_and_match(self) -> None:
@@ -970,6 +1039,9 @@ class CodexVerificationTests(unittest.TestCase):
     # Long paths: Windows without long-path support refuses a plain path of 260 characters. The
     # tests below hold on every system; the extended-length form they expect exists on Windows only.
 
+    def events(self, seen: list, kind: str) -> list:
+        return [event[1:] for event in seen if event[0] == kind]
+
     def test_long_path_helpers_keep_short_paths_and_switch_at_the_plain_limit(self) -> None:
         self.assertEqual(verifier.PLAIN_PATH_LIMIT, PLAIN_PATH_LIMIT)
         base = "C:\\t" if WINDOWS else "/t"
@@ -1007,6 +1079,232 @@ class CodexVerificationTests(unittest.TestCase):
                 self.assertEqual(verifier._plain(sample), plain(sample))
                 for reserve in (0, room):
                     self.assertEqual(verifier._workspace(sample, reserve), deep_path(sample, reserve))
+
+    def test_fitted_path_takes_the_form_its_own_length_calls_for(self) -> None:
+        base = "C:\\t" if WINDOWS else "/t"
+        below = base + os.sep + "n" * (PLAIN_PATH_LIMIT - 1 - len(base) - 1)
+        at_limit = below + "n"
+        for spelled in (plain, extended):  # whichever spelling it is given
+            with self.subTest(spelled=spelled.__name__):
+                self.assertEqual(str(verifier._fitted(spelled(below))), below)
+                self.assertEqual(str(verifier._fitted(spelled(at_limit))), str(extended(at_limit)))
+
+    def test_resolved_locates_a_deep_file_in_plain_form_from_either_spelling(self) -> None:
+        with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary:
+            target = self.long_folder(Path(temporary), PLAIN_PATH_LIMIT + 30) / "SKILL.md"
+            extended(target).write_text("Deep fixture skill\n", encoding="utf-8")
+            for spelled in (plain, extended):
+                with self.subTest(spelled=spelled.__name__):
+                    self.assertEqual(str(verifier._resolved(str(spelled(target)))), str(target))
+                    self.assertTrue(verifier._fitted(str(spelled(target))).is_file())
+        # a short path is resolved the way it always was
+        self.assertEqual(verifier._resolved(os.curdir), Path(os.curdir).resolve())
+
+    def test_workspace_reserve_is_the_cache_nesting_plus_the_longest_copied_path(self) -> None:
+        with self.temporary_directory(FIXTURE_ROOM) as temporary:
+            source = Path(temporary) / "source"
+            longest = os.path.join("skills", "agentic-vault", "references", "codex.md")
+            for relative in (os.path.join(".codex-plugin", "plugin.json"), os.path.join("docs", "guide.md"), longest):
+                (source / relative).parent.mkdir(parents=True, exist_ok=True)
+                (source / relative).write_text('{"version": "1.2.3"}', encoding="utf-8")
+            nesting = os.path.join("codex-home", "plugins", "cache", "agentic-vault-local", "agentic-vault", "1.2.3")
+            reserve = len(os.sep) + len(nesting) + len(os.sep) + len(longest)
+            self.assertEqual(verifier._workspace_reserve(source), reserve)
+            # what the copy leaves out does not count, however long its name
+            left_out = source / ".git" / ("g" * len(longest)) / "config"
+            left_out.parent.mkdir(parents=True)
+            left_out.write_text("[core]\n", encoding="utf-8")
+            (source / ("c" * len(longest) + ".pyc")).write_bytes(b"")
+            self.assertEqual(verifier._workspace_reserve(source), reserve)
+            # a longer file and a longer empty folder count in full
+            grown = len("docs") + len(os.sep)
+            (source / "docs" / ("n" * len(longest))).write_text("A longer path\n", encoding="utf-8")
+            self.assertEqual(verifier._workspace_reserve(source), reserve + grown)
+            (source / "docs" / ("f" * (len(longest) + 3))).mkdir()
+            self.assertEqual(verifier._workspace_reserve(source), reserve + grown + 3)
+            # an unreadable manifest only takes the version out of the bound; verify() reports it itself
+            (source / ".codex-plugin" / "plugin.json").write_text("not JSON", encoding="utf-8")
+            self.assertEqual(verifier._workspace_reserve(source), reserve + grown + 3 - len("1.2.3"))
+
+    def test_workspace_parent_is_the_default_until_the_workspace_reaches_the_plain_limit(self) -> None:
+        # Made-up temporary folders of exact lengths; nothing is created.
+        anchor = plain(Path(tempfile.gettempdir()).resolve()).anchor
+        reserve = 100
+        name = len(os.sep) + len("agentic-vault-codex-") + 8  # the workspace folder tempfile names
+        below = anchor + "f" * (PLAIN_PATH_LIMIT - 1 - reserve - name - len(anchor))
+        at_limit = below + "f"
+        with patch.object(tempfile, "tempdir", below):
+            self.assertIsNone(verifier._workspace_parent(reserve))
+        with patch.object(tempfile, "tempdir", at_limit):
+            self.assertEqual(verifier._workspace_parent(reserve), PREFIX + at_limit if WINDOWS else None)
+            self.assertIsNone(verifier._workspace_parent(reserve - 1))
+
+    def test_host_receives_the_plain_workspace_paths_it_always_did_below_the_plain_limit(self) -> None:
+        seen: list = []
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self.make_plugin_fixture(Path(temporary))
+            reserve = verifier._workspace_reserve(source)
+            self.assertEqual(self.verify_fixture(source, seen=seen), FIXTURE_REPORT)
+            # The installed copy is located by its plain path, whichever spelling the host answers in.
+            self.assertEqual(self.verify_fixture(source, reported=extended), FIXTURE_REPORT)
+        (keywords, root), = self.events(seen, "workspace")
+        # A workspace that stays below the plain limit is created by the call verify() always made.
+        short = not WINDOWS or len(str(root)) + reserve < PLAIN_PATH_LIMIT
+        self.assertEqual(keywords, {"prefix": "agentic-vault-codex-",
+                                    "dir": None if short else PREFIX + str(root.parent)})
+        (added, add_cwd, add_environment), (installed, install_cwd, install_environment) = self.events(seen, "run_json")
+        self.assertEqual(added, ["plugin", "marketplace", "add", handed(root / "agentic-vault"), "--json"])
+        self.assertEqual(installed, ["plugin", "add", "agentic-vault@agentic-vault-local", "--json"])
+        for cwd, environment in ((add_cwd, add_environment), (install_cwd, install_environment)):
+            self.assertEqual(str(cwd), handed(root / "test vault"))
+            self.assertEqual(environment["CODEX_HOME"], handed(root / "codex-home"))
+            self.assertEqual(environment["PYTHONUTF8"], "1")
+        (vault, home, installed_root), = self.events(seen, "inspect_host")
+        self.assertEqual((str(vault), str(home)), (handed(root / "test vault"), handed(root / "codex-home")))
+        self.assertEqual(str(installed_root), str(root / "codex-home" / "plugins" / "cache" / "fixture"))
+        # Nothing the host receives carries the extended-length prefix below the plain limit.
+        for text in (added[3], str(add_cwd), add_environment["CODEX_HOME"]):
+            plain_length = len(text) - (len(PREFIX) if text.startswith(PREFIX) else 0)
+            self.assertEqual(text.startswith(PREFIX), WINDOWS and plain_length >= PLAIN_PATH_LIMIT, text)
+
+    def test_long_workspace_is_verified_and_removed_whatever_the_temp_length(self) -> None:
+        # The workspace is created below a folder of at least 170 characters, so its copies pass
+        # MAX_PATH under any TEMP: on Windows this run always takes the extended-length form.
+        with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary, \
+             tempfile.TemporaryDirectory() as fixture:
+            source = self.make_plugin_fixture(Path(fixture))
+            reserve = verifier._workspace_reserve(source)
+            folder = self.long_folder(Path(temporary), 170)
+            for reported in (plain, extended):
+                with self.subTest(reported=reported.__name__):
+                    seen: list = []
+                    with patch.object(tempfile, "tempdir", str(folder)):
+                        report = self.verify_fixture(source, seen=seen, reported=reported)
+                    self.assertEqual(report, FIXTURE_REPORT)
+                    self.assertEqual(os.listdir(extended(folder)), [])
+                    (keywords, root), = self.events(seen, "workspace")
+                    self.assertEqual(root.parent, folder)
+                    self.assertEqual(keywords, {"prefix": "agentic-vault-codex-",
+                                                "dir": PREFIX + str(folder) if WINDOWS else None})
+                    (added, cwd, environment), _ = self.events(seen, "run_json")
+                    self.assertEqual(
+                        (added[3], str(cwd), environment["CODEX_HOME"]),
+                        (handed(root / "agentic-vault"), handed(root / "test vault"), handed(root / "codex-home")))
+                    (_, _, installed_root), = self.events(seen, "inspect_host")
+                    self.assertEqual(str(installed_root), str(root / "codex-home" / "plugins" / "cache" / "fixture"))
+                    (longest,), = self.events(seen, "installed")
+                    self.assertGreater(longest, 260)  # beyond MAX_PATH, out of reach of the plain form
+                    self.assertLessEqual(longest, len(str(root)) + reserve)  # and within the reserve
+            with self.subTest(installed="missing"):
+                seen = []
+
+                def remove_resource(cached):
+                    (cached / "hooks" / "hooks.json").unlink()
+
+                with patch.object(tempfile, "tempdir", str(folder)), self.assertRaises(FileNotFoundError) as raised:
+                    self.verify_fixture(source, mutate_cache=remove_resource, seen=seen)
+                self.assertEqual(os.listdir(extended(folder)), [])
+                (_, root), = self.events(seen, "workspace")
+                missing = root / "codex-home" / "plugins" / "cache" / "fixture" / "hooks" / "hooks.json"
+                self.assertEqual(
+                    verifier._shown(raised.exception),
+                    str(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(missing))))
+
+    def test_workspace_that_cannot_be_removed_is_reported_whatever_its_length(self) -> None:
+        # An open file blocks the removal on Windows only. verify() then raises, as it always did,
+        # for the workspace below the ambient TEMP and for one that needs the extended-length form.
+        with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary, \
+             tempfile.TemporaryDirectory() as fixture:
+            source = self.make_plugin_fixture(Path(fixture))
+            long_parent = self.long_folder(Path(temporary), 170)
+            for label, folder in (("ambient", tempfile.gettempdir()), ("long", str(long_parent))):
+                with self.subTest(workspace=label):
+                    seen: list = []
+                    held: list = []
+
+                    def hold_open(cached):
+                        held.append((cached / "hooks" / "hooks.json").open("rb"))
+
+                    try:
+                        with patch.object(tempfile, "tempdir", folder):
+                            if WINDOWS:
+                                with self.assertRaises(OSError):
+                                    self.verify_fixture(source, mutate_cache=hold_open, seen=seen)
+                            else:
+                                self.assertEqual(
+                                    self.verify_fixture(source, mutate_cache=hold_open, seen=seen), FIXTURE_REPORT)
+                    finally:
+                        for handle in held:
+                            handle.close()
+                    (_, root), = self.events(seen, "workspace")
+                    self.assertEqual(extended(root).exists(), WINDOWS)
+                    if WINDOWS:
+                        shutil.rmtree(extended(root))
+
+    def test_workspace_at_the_plain_limit_reaches_the_host_in_extended_form(self) -> None:
+        # Only a workspace whose own folders reach the plain limit is handed over in extended-length form.
+        with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary, \
+             tempfile.TemporaryDirectory() as fixture:
+            source = self.make_plugin_fixture(Path(fixture))
+            folder = self.long_folder(
+                Path(temporary), PLAIN_PATH_LIMIT - len(os.sep) - len("agentic-vault-codex-") - 8)
+            seen: list = []
+            with patch.object(tempfile, "tempdir", str(folder)):
+                self.assertEqual(self.verify_fixture(source, seen=seen), FIXTURE_REPORT)
+            self.assertEqual(os.listdir(extended(folder)), [])
+        (_, root), = self.events(seen, "workspace")
+        self.assertGreaterEqual(len(str(root)), PLAIN_PATH_LIMIT)
+        (added, cwd, environment), _ = self.events(seen, "run_json")
+        self.assertEqual(
+            (added[3], str(cwd), environment["CODEX_HOME"]),
+            tuple(str(extended(root / name)) for name in ("agentic-vault", "test vault", "codex-home")))
+        self.assertEqual(added[3].startswith(PREFIX), WINDOWS)
+        (vault, home, installed_root), = self.events(seen, "inspect_host")
+        self.assertEqual((vault, home), (cwd, Path(environment["CODEX_HOME"])))
+        self.assertEqual(str(installed_root), str(root / "codex-home" / "plugins" / "cache" / "fixture"))
+
+    def test_deep_skill_paths_are_checked_in_whichever_form_the_host_reports_them(self) -> None:
+        for deep_as in (plain, extended):
+            for bind_installed_root in (True, False):
+                with self.subTest(reported=deep_as.__name__, bind_installed_root=bind_installed_root):
+                    report = self.inspect_discovery_fixture(deep_as=deep_as, bind_installed_root=bind_installed_root)
+                    self.assertEqual(report["skills"],
+                                     ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"])
+            with self.subTest(reported=deep_as.__name__, mutation="other-package"):
+                def move_to_another_package(skills):
+                    expected = extended(skills[1]["path"])
+                    wrong = expected.parents[2].with_name("other-package") / "skills/webapp-principles/SKILL.md"
+                    wrong.parent.mkdir(parents=True)
+                    wrong.write_bytes(expected.read_bytes())
+                    skills[1]["path"] = str(deep_as(wrong))
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=move_to_another_package, deep_as=deep_as)
+            with self.subTest(reported=deep_as.__name__, mutation="missing"):
+                def remove_skill_file(skills):
+                    extended(skills[0]["path"]).unlink()
+
+                with self.assertRaisesRegex(RuntimeError, "skill"):
+                    self.inspect_discovery_fixture(mutate_skills=remove_skill_file, deep_as=deep_as)
+
+    def test_failure_message_names_a_file_in_plain_form(self) -> None:
+        location = os.path.join(os.path.abspath(os.sep), "work", "n" * PLAIN_PATH_LIMIT, "hooks.json")
+        reason = os.strerror(errno.ENOENT)
+        cases = [(FileNotFoundError(errno.ENOENT, reason, str(spelled(location))),
+                  str(FileNotFoundError(errno.ENOENT, reason, location))) for spelled in (plain, extended)]
+        # any other message is printed as it is
+        cases.append((FileNotFoundError(errno.ENOENT, reason, "missing/resource.json"),
+                      f"[Errno {errno.ENOENT}] {reason}: 'missing/resource.json'"))
+        cases.append((RuntimeError("Installed resource differs: hooks/hooks.json"),
+                      "Installed resource differs: hooks/hooks.json"))
+        for error, message in cases:
+            with self.subTest(error=repr(error)[:60]):
+                printed = io.StringIO()
+                with patch.object(verifier, "verify", side_effect=error), \
+                     patch.object(sys, "argv", ["verify_codex_plugin.py", "--codex", "codex"]), \
+                     contextlib.redirect_stderr(printed):
+                    self.assertEqual(verifier.main(), 1)
+                self.assertEqual(printed.getvalue(), f"Codex plugin verification failed: {message}\n")
 
 
 if __name__ == "__main__":
