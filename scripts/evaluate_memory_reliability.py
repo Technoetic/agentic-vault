@@ -7,14 +7,56 @@ No external command, model, network, user vault or proposed procedure executes.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
+import re
+import shutil
 import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills' / 'agentic-vault' / 'scripts'))
 sys.path.insert(0, str(ROOT / 'scripts'))
+
+PLAIN_PATH_LIMIT = 240  # the margin below Windows MAX_PATH (260) that vault_evidence.fs_path uses
+# What the deepest entries of the synthetic vault, its run records, add to the path of the vault.
+RUN_RECORD_LENGTH = len('/00-meta/.agentic-vault/runtime/run-') + 64 + len('-completed.json')
+
+
+def _extended(path):
+    """The Windows extended-length form of an absolute path; any other path, and any other system, unchanged."""
+    text = str(path)
+    if os.name != 'nt' or text.startswith('\\\\?\\'):
+        return text
+    if re.match(r'^[A-Za-z]:\\', text):
+        return '\\\\?\\' + text
+    if text.startswith('\\\\'):
+        return '\\\\?\\UNC\\' + text[2:]
+    return text
+
+
+@contextmanager
+def _temporary_vault():
+    """A fresh temporary folder for the synthetic vault, removed afterwards.
+
+    On Windows without long-path support the run records pass the plain path limit when the
+    temporary folder is long: tempfile leaves them in place and fails on the folder that holds
+    them. The folder is then removed through its extended-length form. Where no run record can
+    reach the limit, and on other systems, a failed cleanup raises as before.
+    """
+    holder = tempfile.TemporaryDirectory(prefix='av-memory-reliability-')
+    try:
+        yield holder.name
+    finally:
+        try:
+            holder.cleanup()
+        except OSError:
+            deep = _extended(holder.name)
+            if deep == holder.name or len(holder.name) + RUN_RECORD_LENGTH < PLAIN_PATH_LIMIT:
+                raise
+            shutil.rmtree(deep)
 
 
 def evaluate_reliability():
@@ -24,7 +66,8 @@ def evaluate_reliability():
     from evaluate_memory_workflows import execute
 
     cases = []
-    with tempfile.TemporaryDirectory(prefix='av-memory-reliability-') as temporary:
+    fs_path = runs.evidence.fs_path  # a run record can lie beyond the plain Windows path limit
+    with _temporary_vault() as temporary:
         vault = Path(temporary)
 
         def write(relative, content):
@@ -114,14 +157,18 @@ def evaluate_reliability():
                 raise AssertionError('lookup must remain advisory and read-only')
             return [item['id'] for item in result['matches']]
 
-        before = {p.relative_to(vault).as_posix(): p.read_bytes() for p in vault.rglob('*') if p.is_file()}
+        def inventory():
+            return {p.relative_to(vault).as_posix(): fs_path(p).read_bytes()
+                    for p in vault.rglob('*') if fs_path(p).is_file()}
+
+        before = inventory()
         ids = lookup()
         cases.append({'id': 'procedure_match', 'passed': ids == ['startup'], 'ids': ids})
         no_match = lookup('orchid telescope')
         cases.append({'id': 'procedure_no_match', 'passed': no_match == [], 'ids': no_match})
         mismatched = lookup(reuse_conditions={**conditions, 'model': 'different-control'})
         cases.append({'id': 'procedure_conditions_mismatch', 'passed': mismatched == [], 'ids': mismatched})
-        after = {p.relative_to(vault).as_posix(): p.read_bytes() for p in vault.rglob('*') if p.is_file()}
+        after = inventory()
         cases.append({'id': 'read_only_lookup', 'passed': before == after})
         write('notes/startup.md', '# Changed after observations\nStart without a reset.\n')
         stale = lookup()
