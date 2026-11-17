@@ -136,7 +136,7 @@ class Store:
 
     def read(self, relative, *, limit, contents=False, internal=False, capture=True):
         path = self.path(relative, internal=internal)
-        size = path.lstat().st_size
+        size = evidence.fs_path(path).lstat().st_size
         if size > limit:
             raise LessonMetricsError('input_too_large')
         if size > MAX_READ_BYTES - self.read_bytes:
@@ -162,12 +162,12 @@ class Store:
 
     def sweep(self):
         for relative, (_info, expected, _limit, internal) in self.marks.items():
-            metadata = self.path(relative, internal=internal).lstat()
+            metadata = evidence.fs_path(self.path(relative, internal=internal)).lstat()
             evidence.regular(metadata)
             if evidence.stamp(metadata) != expected:
                 raise LessonMetricsError('source_changed')
         for relative in self.absent:
-            if self.path(relative, internal=True).exists():
+            if evidence.fs_path(self.path(relative, internal=True)).exists():
                 raise LessonMetricsError('source_changed')
 
     def recheck(self):
@@ -243,7 +243,7 @@ class Store:
     def names(self, proposal_id, *, ignore=None):
         directory = self.path(f'{STORE_DIR}/{proposal_id}', internal=True)
         try:
-            with os.scandir(directory) as entries:
+            with os.scandir(evidence.fs_path(directory)) as entries:
                 result = []
                 for entry in entries:
                     if entry.name == ignore:
@@ -282,9 +282,9 @@ class Store:
 
     def _mkdir(self, relative):
         path = self.path(relative, internal=True)
-        path.mkdir(exist_ok=True)
+        evidence.fs_path(path).mkdir(exist_ok=True)
         current = self.path(relative, internal=True)
-        if current != path or not current.is_dir():
+        if current != path or not evidence.fs_path(current).is_dir():
             raise LessonMetricsError('unsafe_store')
         return current
 
@@ -295,7 +295,7 @@ class Store:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0)
         flags |= getattr(os, 'O_NOFOLLOW', 0)
         try:
-            descriptor = os.open(path, flags, 0o600)
+            descriptor = os.open(evidence.fs_path(path), flags, 0o600)
         except FileExistsError as exc:
             raise LessonMetricsError('locked_manual_recovery_required') from exc
         interrupted = False
@@ -314,7 +314,7 @@ class Store:
         finally:
             if not interrupted:
                 # Never delete another writer's substituted lock or traverse a new link.
-                current = self.path(f'{STORE_DIR}/.lock', internal=True)
+                current = evidence.fs_path(self.path(f'{STORE_DIR}/.lock', internal=True))
                 if identity is not None and evidence.stamp(current.lstat())[:2] == identity:
                     current.unlink()
 
@@ -325,8 +325,11 @@ class Store:
         directory = self._mkdir(f"{STORE_DIR}/{record['proposal_id']}")
         relative = f"{STORE_DIR}/{record['proposal_id']}/{record['id']}.json"
         path = self.path(relative, internal=True)
-        fd, temporary = tempfile.mkstemp(prefix='.observation-', suffix='.tmp', dir=directory)
-        temporary = Path(temporary)
+        # A mkstemp name is 25 characters. The temporary's own path decides the form in which its
+        # folder is handed over: a folder below the plain Windows limit can hold a file beyond it.
+        io_directory = evidence.fs_path(directory / ('.observation-' + '0' * 8 + '.tmp')).parent
+        fd, temporary = tempfile.mkstemp(prefix='.observation-', suffix='.tmp', dir=io_directory)
+        temporary = evidence.plain_path(Path(temporary))
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(data)
@@ -352,11 +355,11 @@ class Store:
             # link() publishes complete bytes atomically and refuses to overwrite on all
             # supported platforms. Removing the temporary leaves one regular-file link.
             try:
-                os.link(checked_temporary, path, follow_symlinks=False)
+                os.link(evidence.fs_path(checked_temporary), evidence.fs_path(path), follow_symlinks=False)
             except FileExistsError as exc:
                 raise LessonMetricsError('observation_already_exists') from exc
         finally:
-            checked = self.path(temporary.relative_to(self.root).as_posix(), internal=True)
+            checked = evidence.fs_path(self.path(temporary.relative_to(self.root).as_posix(), internal=True))
             if checked.exists():
                 checked.unlink()
 
