@@ -130,6 +130,8 @@ def remove_folder(folder: Path) -> bool:
 
 def run_suite(arguments: list[str], environment: dict[str, str]) -> int:
     """python -m unittest with the caller's interpreter flags, from the repository root."""
+    # _args_from_interpreter_flags is the helper multiprocessing uses to start a child like its parent
+    # (-B, -X utf8, -W ...), so the suite runs under the flags this tool was started with.
     command = [sys.executable, *subprocess._args_from_interpreter_flags(), "-m", "unittest", *arguments]
     return subprocess.run(command, cwd=ROOT, env=environment, check=False).returncode
 
