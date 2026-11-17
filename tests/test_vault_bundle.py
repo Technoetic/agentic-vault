@@ -9,6 +9,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/agentic-vault/scripts'
 sys.path.insert(0, str(SCRIPTS))
 try:
@@ -193,7 +198,8 @@ class BundleAdversarialTests(BundleFixture, unittest.TestCase):
         with mock.patch.object(state,'_check_lease',side_effect=state.StateError('lock_expired')):
             result=bundle.apply_bundle(self.vault,prepared['bundle_id'],expected_plan_sha256=prepared['plan_sha256'],apply=True)
         self.assertEqual(result['status'],'interrupted')
-        key='note:notes/a.md'; guard=self.vault/state.RUNTIME_DIR/('lock-'+sha(key.encode())+'.json.guard')
+        # The guard can lie beyond the plain Windows path limit under a long temporary folder.
+        key='note:notes/a.md'; guard=deep_path(self.vault/state.RUNTIME_DIR/('lock-'+sha(key.encode())+'.json.guard'))
         guard.write_text('{}',encoding='utf-8')
         result=bundle.apply_bundle(self.vault,prepared['bundle_id'],expected_plan_sha256=prepared['plan_sha256'],apply=True)
         self.assertEqual(result['status'],'interrupted')
