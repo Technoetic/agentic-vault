@@ -14,6 +14,11 @@ try:
 except ImportError:
     import test_vault_runs as native
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 runs = native.runs
 improvements = importlib.import_module('vault_improvements')
 
@@ -82,7 +87,10 @@ class RunFlipsTests(unittest.TestCase):
 
     def files(self):
         # Directories map to None so a new lock, cache or temporary directory is not missed.
-        return {path.relative_to(self.vault).as_posix(): path.read_bytes() if path.is_file() else None
+        # Each entry is opened through deep_path: under a long temporary folder a receipt lies beyond
+        # the plain Windows path limit, where is_file() on the plain path would be False.
+        return {path.relative_to(self.vault).as_posix():
+                deep_path(path).read_bytes() if deep_path(path).is_file() else None
                 for path in self.vault.rglob('*')}
 
     def refused(self, code, function, *args):
@@ -144,12 +152,12 @@ class RunFlipsTests(unittest.TestCase):
         # No receipt, lock, cache or temporary file: the vault bytes are untouched.
         self.assertEqual(self.files(), before)
         first = runs.compare(self.vault, baseline, candidate)
-        receipt = (self.vault / first['path']).read_bytes()
+        receipt = deep_path(self.vault / first['path']).read_bytes()
         self.assertEqual(runs.flips(self.vault, baseline, candidate), result)
         second = runs.compare(self.vault, baseline, candidate)
         self.assertEqual(second, first)
         self.assertEqual(set(first), COMPARE_KEYS)
-        self.assertEqual((self.vault / first['path']).read_bytes(), receipt)
+        self.assertEqual(deep_path(self.vault / first['path']).read_bytes(), receipt)
         self.assertEqual(set(json.loads(receipt)['payload']), COMPARE_KEYS - {'ok', 'id', 'path'})
         self.assertEqual(len(list((self.vault / runs.RUNTIME_DIR).glob('run-compare-*.json'))), 1)
 
