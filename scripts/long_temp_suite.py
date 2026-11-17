@@ -21,7 +21,10 @@ written after a passing suite (after a failing suite the suite's code stays),
 and 3 means that the folder is not the one ``tempfile`` uses (nothing was
 run). A Windows status code of 2**31 or more (for example 0xC000013A after
 Ctrl+C) is passed on unchanged as the process status; the summary records it as
-the unsigned number the suite process returned.
+the unsigned number the suite process returned. When the suite has not ended
+30 seconds after Ctrl+C, or at a second Ctrl+C, the tool kills it and uses the
+status of an interrupted console program instead (0xC000013A on Windows, 130
+elsewhere).
 
 Usage:
     python -B scripts/long_temp_suite.py [--length N] [--parent DIR] [--keep] [--summary OUT] [-- ARG ...]

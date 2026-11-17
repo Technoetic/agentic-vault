@@ -85,9 +85,10 @@ def _answer(path) -> Path:
 
     An extended-length spelling is used as given, so its names stay literal (Windows does not drop a
     trailing dot or space there); a plain spelling takes the form its own length calls for. A plain
-    spelling that reaches the switch is normalized first, so that its '.' and '..' collapse as they do
-    when a plain path is resolved (Python 3.10 keeps them in an extended-length path); the result then
-    takes the form its own length calls for.
+    spelling that would take the extended-length form (on Windows, a drive or UNC path that reaches the
+    switch) is normalized first, so that its '.' and '..' collapse as they do when a plain path is
+    resolved (Python 3.10 keeps them in an extended-length path); the result then takes the form its own
+    length calls for.
     """
     text = str(path)
     if os.name == "nt" and text.startswith("\\\\?\\"):
@@ -101,9 +102,9 @@ def _answer(path) -> Path:
 def _resolved(path) -> Path:
     """Where path leads, for comparisons with the workspace paths; resolved in the form _answer gives it.
 
-    A plain answer comes back in plain form, also when its spelling reaches the switch, so that the tool
-    normalized it and may have read it through the extended-length form (it can lead to a shorter folder
-    through '..' or a link). An extended-length answer is shown in plain form from the switch on; below
+    A plain answer comes back in plain form, also when it would take the extended-length form, so that the
+    tool normalized it and may have read it in that form (it can lead to a shorter folder through '..' or
+    a link). An extended-length answer is shown in plain form from the switch on; below
     it, it is compared as it always was: it stays extended and so does not match a plain workspace path.
     """
     answer = _answer(path)
