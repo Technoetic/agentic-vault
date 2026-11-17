@@ -14,10 +14,13 @@ import time
 import unittest
 from unittest import mock
 
+# A runtime file (lock-<64 hex>.json, its .guard, a checkpoint) can lie beyond the plain Windows
+# path limit under a long temporary folder. The module reaches it through fs_path; the tests read,
+# tamper with and check it through deep_path, which leaves a short path as it is.
 try:
-    from _winfs import make_junction
+    from _winfs import deep_path, make_junction, plain
 except ImportError:  # run as tests.<module> from the repository root
-    from tests._winfs import make_junction
+    from tests._winfs import deep_path, make_junction, plain
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -62,7 +65,8 @@ class VaultStateTests(unittest.TestCase):
         real_read, real_unlink = state._read, Path.unlink
         def relative(path):
             try:
-                value = path.relative_to(self.vault).as_posix()
+                # plain(): an unlink of a long runtime file arrives in extended-length form.
+                value = plain(path).relative_to(self.vault).as_posix()
             except ValueError:
                 return None
             return value if value.startswith(state.RUNTIME_DIR + '/') else None
@@ -175,7 +179,7 @@ class VaultStateTests(unittest.TestCase):
 
     def test_lock_has_token_pid_utc_and_bounded_wait(self):
         with state.advisory_lock(self.vault, 'shared', ttl_seconds=60, wait_seconds=0) as lease:
-            saved = json.loads(Path(lease['lock_path']).read_text())
+            saved = json.loads(deep_path(lease['lock_path']).read_text())
             self.assertEqual(saved['token'], lease['token'])
             self.assertEqual(saved['pid'], os.getpid())
             self.assertTrue(saved['created_at'].endswith('+00:00'))
@@ -184,11 +188,11 @@ class VaultStateTests(unittest.TestCase):
                 with state.advisory_lock(self.vault, 'shared', ttl_seconds=60, wait_seconds=.06):
                     self.fail('second writer entered')
             self.assertLess(time.monotonic() - started, .5)
-        self.assertFalse(Path(lease['lock_path']).exists())
+        self.assertFalse(deep_path(lease['lock_path']).exists())
 
     def test_release_never_removes_replacement_owner(self):
         with state.advisory_lock(self.vault, 'shared') as lease:
-            path = Path(lease['lock_path'])
+            path = deep_path(lease['lock_path'])
             replacement = json.loads(path.read_text())
             replacement['token'] = 'a' * 32
             path.write_text(json.dumps(replacement))
@@ -201,7 +205,7 @@ class VaultStateTests(unittest.TestCase):
                 time.sleep(.05)
                 replacement_context = state.advisory_lock(self.vault, 'shared', ttl_seconds=60)
                 replacement = replacement_context.__enter__()
-            path = Path(replacement['lock_path'])
+            path = deep_path(replacement['lock_path'])
             self.assertEqual(json.loads(path.read_text())['token'], replacement['token'])
             self.assertNotEqual(first['token'], replacement['token'])
         finally:
@@ -221,12 +225,12 @@ class VaultStateTests(unittest.TestCase):
                     mock.patch.object(state, '_pause', side_effect=release_after_collision):
                 with state.advisory_lock(self.vault, 'shared', ttl_seconds=.1, wait_seconds=.5) as lease:
                     self.assertEqual(lease['created_at'], '2000-01-01T00:00:02+00:00')
-                    saved = json.loads(Path(lease['lock_path']).read_text())
+                    saved = json.loads(deep_path(lease['lock_path']).read_text())
                     self.assertEqual(saved['created_at'], '2000-01-01T00:00:02+00:00')
 
     def test_expiry_requires_both_utc_and_old_mtime(self):
         with state.advisory_lock(self.vault, 'shared', ttl_seconds=.02) as first:
-            path = Path(first['lock_path'])
+            path = deep_path(first['lock_path'])
             time.sleep(.035)
             # A future/fresh mtime is conservatively non-expired independent
             # of filesystem timing and fsync latency on Windows.
@@ -255,22 +259,22 @@ class VaultStateTests(unittest.TestCase):
             return real_exclusive(policy, name, record)
         with mock.patch.object(state, '_exclusive', side_effect=guard_race):
             with state.advisory_lock(self.vault, 'shared', wait_seconds=.2) as lease:
-                self.assertEqual(json.loads(Path(lease['lock_path']).read_text())['token'], lease['token'])
+                self.assertEqual(json.loads(deep_path(lease['lock_path']).read_text())['token'], lease['token'])
 
     def test_invalid_lock_and_hardlink_are_not_recovered(self):
         with state.advisory_lock(self.vault, 'shared') as lease:
-            path = Path(lease['lock_path'])
+            path = deep_path(lease['lock_path'])
             path.write_bytes(b'{broken')
             with self.assertRaisesRegex(state.StateError, 'lock_busy'):
                 with state.advisory_lock(self.vault, 'shared', wait_seconds=.01):
                     self.fail('invalid lock recovered')
         path.unlink()
         with state.advisory_lock(self.vault, 'linked') as lease:
-            os.link(lease['lock_path'], self.vault / 'notes/lock-copy.json')
+            os.link(deep_path(lease['lock_path']), self.vault / 'notes/lock-copy.json')
             with self.assertRaises(state.StateError):
                 with state.advisory_lock(self.vault, 'linked'):
                     self.fail('hardlinked lock acquired')
-        self.assertTrue(Path(lease['lock_path']).exists())
+        self.assertTrue(deep_path(lease['lock_path']).exists())
 
     def test_invalid_and_unbounded_timing_rejected(self):
         for ttl, wait in ((0, 0), (float('nan'), 0), (1, float('inf')), (1, -1), (1, 61)):
@@ -496,7 +500,7 @@ except StateError as e: print(str(e))
                     # Every subcase has a distinct lease and target; preserved
                     # malformed locks from earlier subcases remain untouched.
                     lock_key = 'note:' + relative.casefold()
-                    lock = self.vault / state.RUNTIME_DIR / ('lock-' + sha(lock_key.encode()) + '.json')
+                    lock = deep_path(self.vault / state.RUNTIME_DIR / ('lock-' + sha(lock_key.encode()) + '.json'))
                     record = json.loads(lock.read_bytes())
                     record[field] = invalid
                     lock.write_bytes(json.dumps(record).encode())
@@ -564,14 +568,14 @@ except StateError as e: print(str(e))
         state.write_checkpoint(self.vault, 'PreCompact', session_id='conversation-1')
         last = state.write_checkpoint(self.vault, 'Stop', session_id='conversation-1')
         self.assertEqual(last['path'], first['path'])
-        saved = json.loads((self.vault / last['path']).read_bytes())
+        saved = json.loads(deep_path(self.vault / last['path']).read_bytes())
         self.assertEqual([event['event'] for event in saved['events']], ['Stop', 'PreCompact', 'Stop'])
         self.assertEqual(saved['session_sha256'], sha(b'conversation-1'))
         for other in ('SessionStart', 'stop', 'STOP', ''):
             with self.subTest(event=other):
                 with self.assertRaisesRegex(state.StateError, '^invalid_checkpoint_event$'):
                     state.write_checkpoint(self.vault, other, session_id='conversation-1')
-        self.assertEqual(json.loads((self.vault / last['path']).read_bytes()), saved)
+        self.assertEqual(json.loads(deep_path(self.vault / last['path']).read_bytes()), saved)
 
     def test_fix3_policy_change_during_last_target_or_source_read_blocks_replace(self):
         original_config = (self.vault / state.CONFIG_PATH).read_bytes()
@@ -690,11 +694,11 @@ except StateError as e: print(str(e))
                 with self.observe_runtime_cleanup(changed, reads, unlinks), \
                      mock.patch.object(state, '_exclusive', side_effect=revoke):
                     with state.advisory_lock(self.vault, 'release-' + reason) as lease:
-                        path = Path(lease['lock_path'])
+                        path = deep_path(lease['lock_path'])
                 self.assertEqual(reads, [])
                 self.assertEqual(unlinks, [])
                 self.assertTrue(path.exists())
-                self.assertTrue(Path(str(path) + '.guard').exists())
+                self.assertTrue(deep_path(lease['lock_path'] + '.guard').exists())
 
     def test_fix4_cleanup_rechecks_policy_after_guard_or_lease_owner_read(self):
         original = (self.vault / state.CONFIG_PATH).read_bytes()
@@ -714,12 +718,12 @@ except StateError as e: print(str(e))
                      mock.patch.object(state, '_owned', side_effect=revoke):
                     if kind == 'guard':
                         policy = state._Policy(self.vault)
-                        path = self.vault / state.RUNTIME_DIR / 'after-owner.json.guard'
+                        path = deep_path(self.vault / state.RUNTIME_DIR / 'after-owner.json.guard')
                         with state._guard(policy, 'after-owner.json', time.monotonic() + 1):
                             releasing.append(True)
                     else:
                         with state.advisory_lock(self.vault, 'after-lease-owner') as lease:
-                            path = Path(lease['lock_path'])
+                            path = deep_path(lease['lock_path'])
                             releasing.append(True)
                 self.assertEqual(changed, [True])
                 self.assertEqual(reads, [])
