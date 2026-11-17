@@ -88,8 +88,9 @@ class TemporaryParentTests(unittest.TestCase):
 
 
 class LongTemporaryFolderTests(unittest.TestCase):
-    """Both examples end with exit code 0 as commands under a temporary folder that puts their receipts
-    beyond the plain Windows path limit, and leave nothing behind in it."""
+    """The accounting example ends with exit code 0 as a command under a temporary folder that puts its
+    receipts beyond the plain Windows path limit, and leaves nothing behind in it. TemporaryParentTests pins
+    the folder decision that both improvement examples share."""
 
     FOLDER_LENGTH = 170
 
