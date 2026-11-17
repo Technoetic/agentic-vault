@@ -14,6 +14,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
@@ -887,7 +892,8 @@ class ManualRecoveryTests(Base):
         name = 'lock-' + sha(('note:' + HANDOFF.casefold()).encode('utf-8')) + '.json'
         runtime = self.vault / self.state.RUNTIME_DIR
         runtime.mkdir(parents=True)
-        guard = runtime / (name + '.guard')
+        # The guard can lie beyond the plain Windows path limit under a long temporary folder.
+        guard = deep_path(runtime / (name + '.guard'))
         guard.write_text('{}', encoding='utf-8')
         self.assertCode('lock_busy', self.apply)
         guard.unlink()
