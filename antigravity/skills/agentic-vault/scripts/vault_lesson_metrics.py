@@ -105,6 +105,8 @@ def _extended_root(path):
     text = str(path)
     if text.startswith('\\\\?\\'):
         return Path(text)
+    if text.startswith('\\\\.\\'):  # the Win32 device namespace names the same path
+        return Path('\\\\?\\' + text[4:])
     if text.startswith('\\\\'):
         return Path('\\\\?\\UNC\\' + text[2:])
     return Path('\\\\?\\' + text)
