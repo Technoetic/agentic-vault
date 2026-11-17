@@ -19,6 +19,11 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "agentic-vault@agentic-vault-local"
+WORKSPACE_PREFIX = "agentic-vault-codex-"
+WORKSPACE_RANDOM_LENGTH = 8  # the characters tempfile adds to the prefix
+PACKAGE_FOLDER = "agentic-vault"
+HOME_FOLDER = "codex-home"
+COPY_IGNORE = shutil.ignore_patterns(".git", ".worktrees", "worktrees", ".superpowers", "__pycache__", "*.pyc")
 
 
 # --- long-path helpers (keep this block identical in the standalone tools that carry it) ---
@@ -51,6 +56,77 @@ def _workspace(root, reserve: int) -> Path:
     """root, in extended-length form when root plus `reserve` more characters reaches the plain limit."""
     return _extended(root) if len(str(root)) + reserve >= PLAIN_PATH_LIMIT else Path(root)
 # --- end of long-path helpers ---
+
+
+def _fitted(path) -> Path:
+    """path in the form its own length calls for: plain below the plain limit, extended-length from there on."""
+    return _workspace(_plain(path), 0)
+
+
+def _resolved(path) -> Path:
+    """Where path leads, in plain form; resolved through the form its length calls for."""
+    return _plain(_fitted(path).resolve())
+
+
+def _longest_copied_path(source: Path) -> int:
+    """The characters of the longest path, relative to source, that copytree with COPY_IGNORE creates."""
+    start = len(os.path.join(source, ""))
+    longest = 0
+    for current, folders, files in os.walk(source, followlinks=True):  # copytree copies what a link leads to
+        ignored = COPY_IGNORE(current, folders + files)
+        folders[:] = [name for name in folders if name not in ignored]
+        for name in folders + files:
+            if name not in ignored:
+                longest = max(longest, len(os.path.join(current, name)) - start)
+    return longest
+
+
+def _declared_version(source: Path) -> str:
+    """The version in the plugin manifest of source; "" when unreadable, which verify() reports where it always did."""
+    try:
+        return str(json.loads((source / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))["version"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def _workspace_reserve(source: Path) -> int:
+    """An upper bound of the characters that follow the workspace root in a path created below it.
+
+    The deepest entries are the files of the plugin in the cache of the host,
+    <root>/codex-home/plugins/cache/<marketplace>/<plugin>/<version>/<path>, where <path> is a path
+    of the copied tree; the copy the marketplace is added from, <root>/agentic-vault/<path>, is
+    shorter. The names come from PLUGIN_ID and the manifest and the longest <path> is measured on
+    the tree about to be copied, so the bound is as tight as the layout allows and a workspace
+    below an ordinary temporary folder keeps the plain form.
+    """
+    plugin, _, marketplace = PLUGIN_ID.partition("@")
+    cache = os.path.join(HOME_FOLDER, "plugins", "cache", marketplace, plugin, _declared_version(source))
+    return len(os.sep) + max(len(PACKAGE_FOLDER), len(cache)) + len(os.sep) + _longest_copied_path(source)
+
+
+def _workspace_parent(reserve: int) -> str | None:
+    """The `dir` tempfile creates the workspace in: None, its default, unless the workspace needs the extended form.
+
+    The workspace is <temporary folder>/<WORKSPACE_PREFIX><random name>, and `reserve` is what is
+    created below it. Created in an extended-length parent the workspace carries that form itself,
+    so what is written below it, and its removal by tempfile, go through that form too.
+    """
+    parent = Path(tempfile.gettempdir()).resolve()
+    name = len(os.sep) + len(WORKSPACE_PREFIX) + WORKSPACE_RANDOM_LENGTH
+    chosen = _workspace(parent, name + reserve)
+    return None if chosen == parent else str(chosen)
+
+
+def _shown(error: BaseException) -> str:
+    """The message of error; a file name an OSError carries in extended-length form is shown in plain form."""
+    if isinstance(error, OSError):
+        for name in ("filename", "filename2"):
+            value = getattr(error, name, None)
+            if isinstance(value, (str, Path)):
+                plain = str(_plain(value))
+                if plain != str(value) and str(_extended(plain)) == str(value):  # value is the extended form of plain
+                    setattr(error, name, type(value)(plain))
+    return str(error)
 
 
 def resolve_codex_executable(codex: str) -> str:
@@ -161,7 +237,9 @@ def inspect_host(
                 "clientInfo": {"name": "agentic-vault-verification", "version": "1.0"},
                 "capabilities": {"experimentalApi": True},
             })
-            if Path(initialized["codexHome"]).resolve() != home:
+            # The host may answer in either form: what it reports is located by its plain path,
+            # and a reported file is reached in the form the length of its path calls for.
+            if _resolved(initialized["codexHome"]) != _plain(home):
                 raise RuntimeError("Codex did not use the isolated test home")
             send({"method": "initialized", "params": {}})
             skills = request(2, "skills/list", {"cwds": [str(vault)], "forceReload": True})
@@ -176,19 +254,19 @@ def inspect_host(
                 "agentic-vault:agentic-vault": "skills/agentic-vault/SKILL.md",
                 "agentic-vault:webapp-principles": "skills/webapp-principles/SKILL.md",
             }
-            resource_root = installed_root.resolve() if installed_root is not None else None
+            resource_root = _resolved(installed_root) if installed_root is not None else None
             discovered_paths = set()
             for name, relative in required_skills.items():
                 matches = [skill for skill in owned_skills if skill["name"] == name]
                 if (len(matches) != 1 or not matches[0]["enabled"]
-                        or not Path(matches[0]["path"]).is_file()):
+                        or not _fitted(matches[0]["path"]).is_file()):
                     raise RuntimeError(f"Required enabled skill was not discovered exactly once: {name}")
-                skill_path = Path(matches[0]["path"]).resolve()
+                skill_path = _resolved(matches[0]["path"])
                 if resource_root is None:
                     if skill_path.parts[-3:] != Path(relative).parts:
                         raise RuntimeError(f"Required skill has the wrong resource path: {name}")
                     resource_root = skill_path.parents[2]
-                if (skill_path != (resource_root / relative).resolve()
+                if (skill_path != _resolved(resource_root / relative)
                         or skill_path in discovered_paths):
                     raise RuntimeError(f"Required skill has the wrong resource path: {name}")
                 discovered_paths.add(skill_path)
@@ -218,26 +296,36 @@ def inspect_host(
 
 
 def verify(codex: str) -> dict:
-    with tempfile.TemporaryDirectory(prefix="agentic-vault-codex-") as temporary:
+    # Below the plain limit this is the call it always was (dir=None). A workspace that would reach
+    # the limit is created in the extended-length form of the temporary folder: what is copied into
+    # it goes through that form, and so does its removal by tempfile, which reports a failed removal
+    # as before.
+    with tempfile.TemporaryDirectory(
+        prefix=WORKSPACE_PREFIX, dir=_workspace_parent(_workspace_reserve(ROOT)),
+    ) as temporary:
         root = Path(temporary).resolve()
-        package = root / "agentic-vault"
-        shutil.copytree(ROOT, package, ignore=shutil.ignore_patterns(
-            ".git", ".worktrees", "worktrees", ".superpowers", "__pycache__", "*.pyc"))
-        home = root / "codex-home"
+        package = root / PACKAGE_FOLDER
+        shutil.copytree(ROOT, package, ignore=COPY_IGNORE)
+        # The host receives each path in the form the length of that path calls for: the plain
+        # paths it always received, unless one of them reaches the plain limit itself.
+        home = _fitted(root / HOME_FOLDER)
         home.mkdir()
-        vault = root / "test vault"
+        vault = _fitted(root / "test vault")
         vault.mkdir()
         environment = os.environ.copy()
         environment.update(CODEX_HOME=str(home), PYTHONUTF8="1")
         for name in ("OPENAI_API_KEY", "CODEX_API_KEY", "CLAUDE_PROJECT_DIR"):
             environment.pop(name, None)
-        market = run_json(codex, ["plugin", "marketplace", "add", str(package), "--json"], vault, environment)
+        market = run_json(
+            codex, ["plugin", "marketplace", "add", str(_fitted(package)), "--json"], vault, environment)
         if market["marketplaceName"] != "agentic-vault-local":
             raise RuntimeError("Unexpected marketplace identity")
         installed = run_json(codex, ["plugin", "add", PLUGIN_ID, "--json"], vault, environment)
         expected = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        cached = Path(installed["installedPath"]).resolve()
-        cached.relative_to(home)
+        # The host may answer in either form. The installed copy is located by its plain path and
+        # each of its files is read in the form the length of that file's path calls for.
+        cached = _resolved(installed["installedPath"])
+        cached.relative_to(_plain(home))
         if installed["version"] != expected["version"]:
             raise RuntimeError("Codex installed a different version")
         report = inspect_host(codex, vault, environment, home, installed_root=cached)
@@ -372,7 +460,7 @@ def verify(codex: str) -> dict:
                          "assets/adapters/lesson-cues/guide.md",
                          "assets/adapters/aside/aside-up.ps1",
                          "assets/adapters/aside/aside-repl-command.md"):
-            if (cached / relative).read_bytes() != (ROOT / relative).read_bytes():
+            if _fitted(cached / relative).read_bytes() != (ROOT / relative).read_bytes():
                 raise RuntimeError(f"Installed resource differs: {relative}")
         return {"version": installed["version"], "installed_resources": "verified",
                 "isolated_home": True, "model_turns": 0, **report}
@@ -390,7 +478,7 @@ def main() -> int:
     try:
         report = verify(args.codex)
     except (OSError, RuntimeError, ValueError, KeyError, queue.Empty, subprocess.TimeoutExpired) as error:
-        print(f"Codex plugin verification failed: {error}", file=sys.stderr)
+        print(f"Codex plugin verification failed: {_shown(error)}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
