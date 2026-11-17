@@ -32,6 +32,11 @@ if str(SCRIPTS) not in sys.path:
 import vault_healthcheck as healthcheck  # noqa: E402
 import vault_state  # noqa: E402
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "v0240_healthcheck_sync_default.json"
 RUNTIME = "00-meta/.agentic-vault/runtime"
 SYNC_CODES = {"sync-conflict-copy", "sync-temp-file", "sync-user-pattern", "checkpoint-drift"}
@@ -425,7 +430,8 @@ class CheckpointDriftTests(unittest.TestCase):
         self.write("20-knowledge/A.md", '---\ntitle: "A"\n---\n[[hot]] [[log]] [[handoff]]\n')
 
     def write(self, relative: str, text: str) -> Path:
-        path = self.vault / relative
+        # A runtime file can lie beyond the plain Windows path limit under a long temporary folder.
+        path = deep_path(self.vault / relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(text.encode("utf-8"))
         return path
