@@ -4,6 +4,11 @@ A fake agy (a .py file the verifier runs with this Python) logs every call with 
 environment it saw, then acts as `control.json` next to it says. These tests never read
 the user's real home: every verifier run points USERPROFILE and HOME at a temporary
 "real home", whose `.gemini/config` the verifier fingerprints before and after.
+
+On Windows without long-path support a path of 260 characters or more is reached only
+in its extended-length form. The verifier takes that form for its workspace when the
+root and what a run adds below it reach 240 characters, and for nothing else; the
+fixtures here read and remove such folders through `tests/_winfs.py`.
 """
 from __future__ import annotations
 
@@ -14,12 +19,18 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+try:
+    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+except ImportError:  # run as tests.test_antigravity_verification from the repository root
+    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +47,15 @@ REPORT_FIELDS = ["agy_version", "package_version", "validate", "install_rc", "li
                  "mismatches", "real_home_unchanged", "passed", "failures"]
 # Set by the caller of the verifier; agy must not see any of them.
 DROPPED = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "XDG_CONFIG_HOME", "CLAUDE_PROJECT_DIR")
+WINDOWS = os.name == "nt"
+PREFIX = "\\\\?\\"  # starts the extended-length form of a Windows path
+# What a run adds below its workspace root for PACKAGE_FILES: a separator, the folder agy installs into,
+# a separator and the longest path of the copy (the bytecode paths are longer, but stay out of the copy).
+INSTALL_FOLDER = "home/.gemini/config/plugins/agentic-vault"
+LONGEST_COPIED = "skills/agentic-vault/scripts/vault_recall.py"
+FIXTURE_RESERVE = len(INSTALL_FOLDER) + 2 + len(LONGEST_COPIED)
+# The name tempfile gives the verifier's workspace: the prefix and eight more characters.
+WORKSPACE_NAME_LENGTH = len("agentic-vault-agy-") + 8
 
 FAKE_AGY = r'''"""Fake agy: logs each call with the environment it saw, then acts as control.json says."""
 import json
@@ -178,6 +198,20 @@ def strings_in(value) -> list[str]:
     if isinstance(value, list):
         return [text for item in value for text in strings_in(item)]
     return []
+
+
+def remove_tree(folder: Path) -> None:
+    """Remove a fixture folder with the read-only files a fake agy installed; nothing happens when it is gone.
+
+    A folder that holds entries beyond the plain path limit of Windows is given in its extended-length form.
+    """
+    def retry(function, path, _error) -> None:
+        os.chmod(path, stat.S_IWRITE)
+        function(path)
+
+    if os.path.lexists(folder):
+        # shutil.rmtree takes its error handler as onexc from Python 3.12 and as onerror before.
+        shutil.rmtree(folder, **{"onexc" if sys.version_info >= (3, 12) else "onerror": retry})
 
 
 class AgyCallContractTests(unittest.TestCase):
@@ -387,7 +421,99 @@ class FingerprintTests(unittest.TestCase):
                 self.assertIsNotNone(verifier.fingerprint(config))
 
 
-class VerificationTests(unittest.TestCase):
+class LongPathHelperTests(unittest.TestCase):
+    """The helper block the standalone tools share, and what the verifier builds on it."""
+
+    def test_extended_plain_and_workspace_forms(self) -> None:
+        self.assertEqual(verifier.PLAIN_PATH_LIMIT, PLAIN_PATH_LIMIT)
+        relative = Path("package") / "plugin.json"
+        for convert in (verifier._extended, verifier._plain):
+            self.assertEqual(str(convert(relative)), str(relative))
+        self.assertEqual(str(verifier._workspace(relative, 10_000)), str(relative))
+        if WINDOWS:
+            drive, share = "C:\\t\\work", "\\\\server\\share\\work"
+            self.assertEqual(str(verifier._extended(drive)), PREFIX + drive)
+            self.assertEqual(str(verifier._extended(share)), PREFIX + "UNC\\server\\share\\work")
+            self.assertEqual(str(verifier._extended(PREFIX + drive)), PREFIX + drive)
+            self.assertEqual(str(verifier._plain(PREFIX + drive)), drive)
+            self.assertEqual(str(verifier._plain(PREFIX + "UNC\\server\\share\\work")), share)
+            self.assertEqual(str(verifier._plain(drive)), drive)
+            # The form changes exactly where the root and the reserve reach the limit together.
+            reserve = PLAIN_PATH_LIMIT - len(drive)
+            self.assertEqual(str(verifier._workspace(drive, reserve - 1)), drive)
+            self.assertEqual(str(verifier._workspace(drive, reserve)), PREFIX + drive)
+            self.assertEqual(str(verifier._workspace(Path(PREFIX + drive), 0)), PREFIX + drive)
+        else:
+            absolute = Path("/t/work")
+            for converted in (verifier._extended(absolute), verifier._plain(absolute),
+                              verifier._workspace(absolute, 10_000)):
+                self.assertEqual(converted, absolute)
+        for converted in (verifier._extended("x"), verifier._plain("x"), verifier._workspace("x", 0)):
+            self.assertIsInstance(converted, Path)
+
+    def test_messages_name_paths_without_the_extended_prefix(self) -> None:
+        self.assertEqual(verifier._plain_text("validate: 1 error(s)"), "validate: 1 error(s)")
+        if WINDOWS:
+            path = "C:\\t\\work"
+            error = FileNotFoundError(2, "No such file or directory", PREFIX + path)
+            self.assertIn(repr(PREFIX + path), str(error))
+            # An OSError quotes its file name with repr, and shutil.Error quotes such messages once more.
+            cases = {
+                PREFIX + path: path,
+                str(error): str(FileNotFoundError(2, "No such file or directory", path)),
+                str(shutil.Error([(PREFIX + path, PREFIX + path + "2", str(error))])):
+                    str(shutil.Error([(path, path + "2", str(FileNotFoundError(2, "No such file or directory", path)))])),
+                PREFIX + "UNC\\server\\share\\work": "\\\\server\\share\\work",
+                repr(PREFIX + "UNC\\server\\share\\work"): repr("\\\\server\\share\\work"),
+                f"kept: {PREFIX}{path} and {PREFIX}{path}2": f"kept: {path} and {path}2",
+            }
+            for text, expected in cases.items():
+                with self.subTest(text=text):
+                    self.assertEqual(verifier._plain_text(text), expected)
+        else:
+            text = "cannot read " + PREFIX + "C:\\t\\work"
+            self.assertEqual(verifier._plain_text(text), text)
+
+    def test_excerpt_shows_temp_for_both_forms_of_the_folder(self) -> None:
+        root = Path("C:\\t\\agentic-vault-agy-abcdefgh") if WINDOWS else Path("/t/agentic-vault-agy-abcdefgh")
+        text = f"first line\ncannot read {extended(root) / 'home'} or {root / 'work'}\n\n"
+        for given in (root, extended(root)):
+            with self.subTest(given=str(given)):
+                self.assertEqual(verifier._excerpt(text, given),
+                                 f": cannot read <temp>{os.sep}home or <temp>{os.sep}work")
+        self.assertEqual(verifier._excerpt(" \n", root), "")
+
+    def test_reserve_is_the_install_folder_and_the_longest_copied_path(self) -> None:
+        self.assertEqual(verifier.INSTALLED, Path(".gemini", "config", "plugins", "agentic-vault"))
+        self.assertEqual(FIXTURE_RESERVE, 87)
+        with tempfile.TemporaryDirectory() as temporary:
+            package = make_package(Path(temporary).resolve() / "p")
+            self.assertEqual(verifier.copied_length(package), len(LONGEST_COPIED))
+            self.assertEqual(verifier.workspace_reserve(package), FIXTURE_RESERVE)
+            # Bytecode is not copied, so its longer paths do not count; a folder without files does.
+            self.assertGreater(max(len(relative) for relative in PACKAGE_FILES if "__pycache__" in relative),
+                               len(LONGEST_COPIED))
+            (package / "docs" / ("e" * 50)).mkdir()
+            self.assertEqual(verifier.copied_length(package), len("docs/") + 50)
+            self.assertEqual(verifier.workspace_reserve(package), len(INSTALL_FOLDER) + 2 + len("docs/") + 50)
+            self.assertEqual(verifier.copied_length(package / "absent"), 0)
+            # The package is read as it was given (a relative one too) until its longest copied path
+            # reaches the limit; from there Windows reads it through the extended-length form.
+            reach = len(str(package)) + 1 + len("docs/") + 50
+            relative = Path("no-such-package-folder")
+            with patch.object(verifier, "PLAIN_PATH_LIMIT", max(reach, len(os.path.abspath(relative))) + 2):
+                self.assertIs(verifier._reachable(package), package)
+                self.assertIs(verifier._reachable(relative), relative)
+            with patch.object(verifier, "PLAIN_PATH_LIMIT", reach):
+                reached = verifier._reachable(package)
+            self.assertEqual(str(reached), (PREFIX if WINDOWS else "") + str(package))
+            if not WINDOWS:
+                self.assertIs(reached, package)
+
+
+class VerifierRuns(unittest.TestCase):
+    """A fixture package, a fake agy, a simulated real home and a scratch folder for the verifier's workspace."""
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -430,6 +556,37 @@ class VerificationTests(unittest.TestCase):
             for path in (str(self.root), self.root.as_posix()):
                 self.assertNotIn(path.lower(), text.lower())
 
+    def workspace_of(self, outcome: SimpleNamespace) -> Path:
+        """The plain form of the workspace root a run used, taken from the copy it handed to agy."""
+        root = plain(outcome.calls[1]["args"][-1]).parents[1]
+        self.assertEqual(root.parent, plain(self.scratch))
+        self.assertEqual(len(root.name), WORKSPACE_NAME_LENGTH)
+        return root
+
+    def assert_agy_paths(self, outcome: SimpleNamespace, root: Path, deep: bool) -> None:
+        """agy got the workspace in its extended-length form exactly when it is deep, and started in work."""
+        shown = extended(root) if deep else root
+        copy = str(shown / "package" / "agentic-vault")
+        self.assertEqual(copy.startswith(PREFIX), deep)
+        self.assertEqual([call["args"] for call in outcome.calls], [
+            ["--version"],
+            ["plugin", "validate", "--strict", "--json", copy],
+            ["plugin", "install", copy],
+            ["plugin", "list", "--json"],
+        ])
+        home = shown / "home"
+        for call in outcome.calls:
+            with self.subTest(args=call["args"][:2]):
+                self.assertEqual({name: call["env"][name] for name in verifier.HOME_VARIABLES}, {
+                    "USERPROFILE": str(home), "HOME": str(home),
+                    "APPDATA": str(home / "AppData" / "Roaming"), "LOCALAPPDATA": str(home / "AppData" / "Local"),
+                    "TMP": str(home / "tmp"), "TEMP": str(home / "tmp"),
+                })
+                # A process starts in the plain form of its folder while that form is below the limit.
+                self.assertEqual(Path(call["cwd"]), deep_path(root / "work"))
+
+
+class VerificationTests(VerifierRuns):
     def test_clean_package_passes_with_exactly_the_four_allowed_calls(self) -> None:
         with patch.object(verifier, "fingerprint", wraps=verifier.fingerprint) as fingerprint:
             outcome = self.run_verifier()
@@ -455,7 +612,7 @@ class VerificationTests(unittest.TestCase):
         ])
         self.assertTrue(os.path.isabs(copy))
         self.assertEqual(Path(copy).name, "agentic-vault")
-        self.assertTrue(Path(copy).resolve().is_relative_to(self.scratch))
+        self.assertTrue(plain(Path(copy).resolve()).is_relative_to(self.scratch))
         # Only the simulated real home is read, before and after the agy calls, and it is untouched.
         self.assertEqual([call.args[0] for call in fingerprint.call_args_list], [self.real_config] * 2)
         self.assertEqual(sorted(path.name for path in self.real_config.iterdir()), ["settings.json"])
@@ -467,8 +624,8 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(outcome.code, 0, outcome.stderr)
         self.assertEqual(len(outcome.calls), 4)
         home = Path(outcome.calls[0]["env"]["USERPROFILE"])
-        self.assertTrue(home.resolve().is_relative_to(self.scratch))
-        self.assertNotEqual(home.resolve(), self.real_home)
+        self.assertTrue(plain(home.resolve()).is_relative_to(self.scratch))
+        self.assertNotEqual(plain(home.resolve()), self.real_home)
         for call in outcome.calls:
             with self.subTest(args=call["args"][:2]):
                 environment = call["env"]
@@ -599,10 +756,15 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(outcome.code, 0, outcome.stderr)
         kept = [line[len("kept: "):] for line in outcome.stderr.splitlines() if line.startswith("kept: ")]
         self.assertEqual(len(kept), 1)
+        self.assertFalse(kept[0].startswith(PREFIX))
         root = Path(kept[0])
         self.assertTrue(root.resolve().is_relative_to(self.scratch))
-        copy = root / "package" / "agentic-vault"
-        installed = root / "home" / ".gemini" / "config" / "plugins" / "agentic-vault"
+        # Under a long TEMP the kept files lie beyond the plain limit: they are read, and removed before
+        # the fixture's own cleanup, through the extended-length form. deep_path changes nothing otherwise.
+        tree = deep_path(root, FIXTURE_RESERVE)
+        self.addCleanup(remove_tree, tree)
+        copy = tree / "package" / "agentic-vault"
+        installed = tree / "home" / ".gemini" / "config" / "plugins" / "agentic-vault"
         self.assertEqual((copy / "assets" / "sample.bin").read_bytes(), PACKAGE_FILES["assets/sample.bin"])
         self.assertEqual((installed / "plugin.json").read_bytes(), (self.package / "plugin.json").read_bytes())
         self.assertFalse((copy / "hooks" / "__pycache__").exists())
@@ -653,6 +815,199 @@ class VerificationTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()):
             verifier.main(["--package", str(self.package)])
         self.assertEqual(raised.exception.code, 2)
+
+    def test_agy_gets_plain_paths_until_the_workspace_reaches_the_plain_limit(self) -> None:
+        outcome = self.run_verifier()
+        self.assertEqual(outcome.code, 0, outcome.stderr)
+        root = self.workspace_of(outcome)
+        # A run adds FIXTURE_RESERVE characters below its root. While the root stays below the plain limit
+        # with them (any default TEMP), every path agy gets is the plain one, as before; from the limit on
+        # (a long TEMP on Windows) agy gets the extended-length form. Other systems never change the form.
+        deep = WINDOWS and len(str(root)) + FIXTURE_RESERVE >= PLAIN_PATH_LIMIT
+        self.assert_agy_paths(outcome, root, deep)
+        self.assertEqual(outcome.stderr, "")
+        self.assertEqual(list(self.scratch.iterdir()), [])
+
+    def test_the_workspace_takes_the_extended_form_exactly_at_the_plain_limit(self) -> None:
+        roots = []
+
+        def stop(root, _command, _package, _timeout):
+            roots.append(root)
+            raise OSError("stopped before the first agy call")
+
+        write_fake(self.fake_folder)
+        length = len(str(self.scratch)) + 1 + WORKSPACE_NAME_LENGTH
+        # The limit is moved to the workspace instead of the workspace to the limit, so the case does not
+        # depend on the length of TEMP: one character of room keeps the plain form, none takes the other.
+        for room, deep in ((FIXTURE_RESERVE + 1, False), (FIXTURE_RESERVE, WINDOWS)):
+            with self.subTest(room=room), self.simulated_home(), \
+                 patch.object(verifier, "PLAIN_PATH_LIMIT", length + room), \
+                 patch.object(verifier, "_verify_in", side_effect=stop):
+                for keep in (False, True):
+                    stderr = io.StringIO()
+                    with self.assertRaises(OSError), contextlib.redirect_stderr(stderr):
+                        verifier.verify(str(self.fake), self.package, keep=keep)
+                    root = roots.pop()
+                    self.assertEqual(len(str(plain(root))), length)
+                    self.assertEqual(plain(root).parent, self.scratch)
+                    self.assertEqual(str(root).startswith(PREFIX), deep)
+                    self.assertEqual(str(root), str(extended(plain(root)) if deep else plain(root)))
+                    # The kept folder is always named in its plain form.
+                    self.assertEqual(stderr.getvalue(), f"kept: {plain(root)}\n" if keep else "")
+        self.assertEqual(roots, [])
+        self.assertEqual(logged_calls(self.fake_folder), [])
+        # Only the two kept (empty) workspaces are left.
+        self.assertEqual([len(entry.name) for entry in self.scratch.iterdir()], [WORKSPACE_NAME_LENGTH] * 2)
+
+    def test_a_package_beyond_the_plain_limit_is_copied(self) -> None:
+        # The package folder itself is as long as the plain limit, so its files lie beyond it and, on Windows
+        # without long-path support, plain names cannot even list the folder under skills/agentic-vault.
+        padding = max(1, PLAIN_PATH_LIMIT - len(str(self.root)) - len("source package") - 2)
+        holder = self.root / ("p" * padding)
+        package = holder / "source package"
+        self.addCleanup(remove_tree, extended(holder))
+        make_package(extended(package))
+        self.assertGreaterEqual(len(str(package)), PLAIN_PATH_LIMIT)
+        outcome = self.run_verifier(argv=["--agy", str(self.fake), "--package", str(package),
+                                          "--json", str(self.report_path)])
+        self.assertEqual(outcome.code, 0, outcome.stderr)
+        self.assertEqual(outcome.report["listed"], LISTED)
+        self.assertEqual(outcome.report["package_version"], VERSION)
+        self.assertTrue(outcome.report["bytes_equal"])
+        self.assert_no_paths(outcome.report)
+        # The form of the workspace follows the workspace alone, not the package it copies.
+        root = self.workspace_of(outcome)
+        self.assert_agy_paths(outcome, root, WINDOWS and len(str(root)) + FIXTURE_RESERVE >= PLAIN_PATH_LIMIT)
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        # A package folder that is absent is reported with the name it was given.
+        absent = holder / "absent package"
+        outcome = self.run_verifier(argv=["--agy", str(self.fake), "--package", str(absent)])
+        self.assertEqual(outcome.code, 2)
+        self.assertEqual(outcome.stderr,
+                         f"agentic-vault Antigravity verification: package folder not found: {absent}\n")
+
+
+class LongWorkspaceTests(VerifierRuns):
+    """Runs whose workspace reaches the plain path limit of Windows whatever the length of TEMP is.
+
+    The scratch folder is padded until the workspace root is ROOT_LENGTH characters long (longer when
+    TEMP leaves no room for that). With the copy and the installed files below it, most entries then lie
+    beyond 260 characters, where Windows without long-path support needs the extended-length form.
+    Other systems have no such limit and no such form: there these are ordinary runs in a deep folder.
+    """
+
+    ROOT_LENGTH = 225
+
+    def setUp(self) -> None:
+        super().setUp()
+        padding = max(1, self.ROOT_LENGTH - len(str(self.root)) - WORKSPACE_NAME_LENGTH - 2)
+        self.scratch = self.root / ("d" * padding)
+        self.scratch.mkdir()
+        # Runs last in, first out: before the fixture's own cleanup, which uses plain names.
+        self.addCleanup(remove_tree, extended(self.scratch))
+
+    def assert_long_workspace(self, outcome: SimpleNamespace) -> Path:
+        root = self.workspace_of(outcome)
+        self.assertGreaterEqual(len(str(root)), self.ROOT_LENGTH)
+        self.assertGreater(len(str(root / INSTALL_FOLDER / LONGEST_COPIED)), 260)
+        self.assert_agy_paths(outcome, root, WINDOWS)
+        return root
+
+    def test_a_long_workspace_passes_and_is_removed(self) -> None:
+        outcome = self.run_verifier()
+        self.assertEqual(outcome.code, 0, outcome.stderr)
+        self.assertEqual(outcome.report, {
+            "agy_version": "1.5.7", "package_version": VERSION,
+            "validate": {"errors": 0, "warnings": 0, "notes": 0, "components": None},
+            "install_rc": 0, "listed": LISTED, "bytes_equal": True, "mismatches": [],
+            "real_home_unchanged": True, "passed": True, "failures": [],
+        })
+        self.assertEqual(json.loads(self.report_path.read_bytes().decode("utf-8")), outcome.report)
+        self.assert_no_paths(outcome.report)
+        self.assert_long_workspace(outcome)
+        # The copy and the read-only files agy installed beyond the plain limit are gone, without a word.
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assertEqual(outcome.stderr, "")
+
+    def test_mismatches_in_a_long_workspace_are_found(self) -> None:
+        outcome = self.run_verifier({"change": {LONGEST_COPIED: "rewritten", "install-state.json": "{}",
+                                                "skills/vault-day/SKILL.md": None}})
+        self.assertEqual(outcome.code, 1)
+        self.assertEqual(outcome.report["mismatches"], [
+            {"path": "install-state.json", "problem": "extra"},
+            {"path": LONGEST_COPIED, "problem": "differs"},
+            {"path": "skills/vault-day/SKILL.md", "problem": "missing"},
+        ])
+        self.assertEqual(outcome.report["failures"], [
+            f"bytes_equal: 3 mismatch(es): install-state.json (extra), {LONGEST_COPIED} (differs), "
+            "skills/vault-day/SKILL.md (missing)"])
+        self.assert_long_workspace(outcome)
+        self.assertEqual(list(self.scratch.iterdir()), [])
+
+    def test_a_failed_install_in_a_long_workspace_names_temp(self) -> None:
+        outcome = self.run_verifier({"install_rc": 3})
+        self.assertEqual(outcome.code, 1)
+        install = [failure for failure in outcome.report["failures"] if failure.startswith("install_rc: ")]
+        # The fake agy names the copy as it got it: in the extended-length form on Windows.
+        self.assertEqual(install, ["install_rc: agy plugin install exited 3: cannot install "
+                                   + os.path.join("<temp>", "package", "agentic-vault")])
+        self.assertEqual(outcome.report["mismatches"], [{"path": ".", "problem": "missing"}])
+        self.assert_no_paths(outcome.report)
+        self.assert_long_workspace(outcome)
+        self.assertEqual(list(self.scratch.iterdir()), [])
+
+    def test_keep_names_the_plain_folder_of_a_long_workspace(self) -> None:
+        outcome = self.run_verifier(argv=["--agy", str(self.fake), "--package", str(self.package), "--keep"])
+        self.assertEqual(outcome.code, 0, outcome.stderr)
+        root = self.assert_long_workspace(outcome)
+        self.assertEqual(outcome.stderr, f"kept: {root}\n")
+        tree = extended(root)
+        copy = tree / "package" / "agentic-vault"
+        installed = tree / "home" / ".gemini" / "config" / "plugins" / "agentic-vault"
+        self.assertEqual(verifier.compare_trees(installed, copy), [])
+        self.assertEqual(verifier.files_under(copy),
+                         {relative for relative in PACKAGE_FILES if "__pycache__" not in relative})
+        self.assertEqual((installed / LONGEST_COPIED).read_bytes(), b"# fixture\n")
+        self.assertEqual((copy / "assets" / "sample.bin").read_bytes(), PACKAGE_FILES["assets/sample.bin"])
+
+    def test_an_error_in_a_long_workspace_names_plain_paths_and_leaves_nothing(self) -> None:
+        reached = []
+
+        def fail(root, _command, _package, _timeout):
+            # What a failed copy raises: the error names the file in the form the verifier reached it by.
+            deep = root / "package" / "agentic-vault" / LONGEST_COPIED
+            deep.parent.mkdir(parents=True)
+            deep.write_bytes(b"# fixture\n")
+            deep.chmod(stat.S_IREAD)
+            reached.append(deep)
+            raise FileNotFoundError(2, "No such file or directory", str(deep))
+
+        with patch.object(verifier, "_verify_in", side_effect=fail):
+            outcome = self.run_verifier()
+        self.assertEqual(outcome.code, 1)
+        self.assertEqual(outcome.stdout, "")
+        self.assertEqual(str(reached[0]).startswith(PREFIX), WINDOWS)
+        self.assertGreater(len(str(plain(reached[0]))), 260)
+        self.assertEqual(outcome.stderr, "agentic-vault Antigravity verification failed: [Errno 2] No such file or "
+                                         f"directory: {str(plain(reached[0]))!r}\n")
+        # The read-only file beyond the plain limit went with the workspace.
+        self.assertEqual(list(self.scratch.iterdir()), [])
+
+    def test_a_workspace_that_stays_is_named_in_its_plain_form(self) -> None:
+        # Nothing is removed while shutil.rmtree does nothing; the folder is then named once, as before, and
+        # in its plain form also when the temporary folder itself was given in the extended-length form.
+        for scratch in (self.scratch, extended(self.scratch)):
+            with self.subTest(scratch=str(scratch)[:8]):
+                self.scratch = scratch
+                with patch.object(shutil, "rmtree") as rmtree:
+                    outcome = self.run_verifier()
+                self.assertEqual(outcome.code, 0, outcome.stderr)
+                self.assertGreaterEqual(rmtree.call_count, 1)
+                root = self.assert_long_workspace(outcome)
+                self.assertEqual(outcome.stderr,
+                                 f"agentic-vault Antigravity verification: could not remove {root}\n")
+                self.assertTrue(extended(root / "home").is_dir())
+                remove_tree(extended(root))
 
 
 class CommandLineTests(unittest.TestCase):
