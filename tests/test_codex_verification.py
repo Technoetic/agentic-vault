@@ -1321,11 +1321,15 @@ class CodexVerificationTests(unittest.TestCase):
         self.assertEqual(verifier._resolved(str(short)), short.resolve())
 
     def test_a_long_plain_answer_that_leads_to_a_short_folder_is_compared_plainly(self) -> None:
-        # The tool reads a plain spelling of 240 or more characters through the extended-length form; where
-        # '..' leads back to a short folder, the answer is still located by its plain path, as v0.52.0 did.
+        # The tool collapses the '..' of a plain spelling of 240 or more characters as resolving a plain path
+        # does, before it would read the spelling in the extended-length form (Python 3.10 keeps '..' in an
+        # extended-length path); where '..' leads back to a short folder, the answer is read and located by
+        # its plain path, as v0.52.0 did.
         short = ROOT / "docs"
         spelling = os.path.join(str(short), "d" * 130, "e" * 130, os.pardir, os.pardir)
         self.assertGreaterEqual(len(spelling), PLAIN_PATH_LIMIT)
+        if WINDOWS:
+            self.assertEqual(verifier._answer(spelling), short)
         self.assertEqual(verifier._resolved(spelling), short.resolve())
 
     def test_an_extended_answer_keeps_its_literal_names(self) -> None:

@@ -17,8 +17,9 @@ long TEMP can be an ordinary run. This tool
 
 The exit code is that of the suite; 2 is a usage error (the summary is not
 printed then, since no folder was made) or a ``--summary`` file that cannot be
-written, and 3 means that the folder is not the one ``tempfile`` uses (nothing
-was run). A Windows status code of 2**31 or more (for example 0xC000013A after
+written after a passing suite (after a failing suite the suite's code stays),
+and 3 means that the folder is not the one ``tempfile`` uses (nothing was
+run). A Windows status code of 2**31 or more (for example 0xC000013A after
 Ctrl+C) is passed on unchanged as the process status; the summary records it as
 the unsigned number the suite process returned.
 

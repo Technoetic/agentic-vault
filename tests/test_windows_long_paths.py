@@ -241,8 +241,9 @@ class LessonMetricsLongPathTests(unittest.TestCase):
 
     def test_a_vault_named_in_the_extended_form_records_and_leaves_nothing_behind(self) -> None:
         # A caller may name the vault in the extended-length form, or on Windows in the Win32 device
-        # namespace, at any length; the store then works in that form throughout, as it did before (on
-        # other systems extended() returns the same path).
+        # namespace, at any length; either spelling records an observation and leaves nothing behind (the
+        # store resolves the vault, so the device spelling is read as the same path; on other systems
+        # extended() returns the same path).
         spellings = [("extended", extended)]
         if os.name == "nt":
             spellings.append(("device", lambda path: Path("\\\\.\\" + str(path))))
