@@ -12,9 +12,13 @@ import unittest
 from unittest import mock
 
 try:
-    from _winfs import make_junction
+    from _winfs import deep_path, make_junction
 except ImportError:
-    from tests._winfs import make_junction
+    from tests._winfs import deep_path, make_junction
+
+# A receipt below the runtime folder can lie beyond the plain Windows path limit under a long
+# temporary folder. The runtime reaches it through vault_evidence.fs_path; these tests read, write
+# and remove it through deep_path, which leaves a path below the limit unchanged.
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -43,7 +47,7 @@ class TaskContractTests(unittest.TestCase):
         self.write_json('input/task.json', self.definition)
 
     def write(self, relative, content):
-        path = self.vault / relative
+        path = deep_path(self.vault / relative)  # some tests rewrite a receipt of the runtime folder
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content.encode('utf-8') if isinstance(content, str) else content)
         return path
@@ -66,7 +70,7 @@ class TaskContractTests(unittest.TestCase):
         self.assertEqual(captured['acceptance_ids'], ['ac-title'])
         self.assertEqual(captured['authority'], 'data_only')
         self.assertEqual(len(captured['accepted_fields']), 3)
-        record = self.vault / captured['path']
+        record = deep_path(self.vault / captured['path'])
         before = record.read_bytes()
         names = sorted(str(p.relative_to(self.vault)) for p in self.vault.rglob('*'))
         self.assertEqual(contracts.inspect(self.vault, captured['contract_id']), captured)
@@ -100,7 +104,7 @@ class TaskContractTests(unittest.TestCase):
 
     def test_revision_binds_parent_and_preserves_immutable_old_receipt(self):
         first = self.capture()
-        old = (self.vault / first['path']).read_bytes()
+        old = deep_path(self.vault / first['path']).read_bytes()
         definition = copy.deepcopy(self.definition)
         definition['fields'][2]['origin'] = 'user_confirmation'
         self.write_json('input/revision.json', definition)
@@ -108,7 +112,7 @@ class TaskContractTests(unittest.TestCase):
         self.assertNotEqual(revised['contract_id'], first['contract_id'])
         self.assertEqual(revised['parent'], {'contract_id': first['contract_id'],
                                            'receipt_sha256': first['receipt_sha256']})
-        self.assertEqual((self.vault / first['path']).read_bytes(), old)
+        self.assertEqual(deep_path(self.vault / first['path']).read_bytes(), old)
         self.assertEqual(contracts.inspect(self.vault, revised['contract_id']), revised)
         self.assertEqual(contracts.inspect(self.vault, first['contract_id'])['status'], 'stale')
         self.assertEqual(contracts.revise(self.vault, first['contract_id'], 'input/revision.json'), revised)
@@ -137,7 +141,7 @@ class TaskContractTests(unittest.TestCase):
                 path = {'source': 'notes/request.md', 'input': 'input/task.json',
                         'config': '00-meta/vault-config.json', 'receipt': first['path'],
                         'parent': first['path']}[target]
-                original = (self.vault / path).read_bytes()
+                original = deep_path(self.vault / path).read_bytes()
                 try:
                     self.write(path, original + b' ')
                     if target in ('receipt', 'parent'):
@@ -245,7 +249,7 @@ class TaskContractTests(unittest.TestCase):
 
     def test_forged_credential_receipt_bindings_are_stale_without_read_or_history(self):
         first = self.capture()
-        original = json.loads((self.vault / first['path']).read_bytes())
+        original = json.loads(deep_path(self.vault / first['path']).read_bytes())
         for path in self.credential_paths:
             for binding in ('input', 'source', 'declaration_only'):
                 with self.subTest(path=path, binding=binding):
@@ -282,7 +286,7 @@ class TaskContractTests(unittest.TestCase):
                         self.assertEqual(result['accepted_fields'], [])
                         self.assertIsNone(result['historical_metadata'])
                     finally:
-                        (self.vault / relative).unlink()
+                        deep_path(self.vault / relative).unlink()
 
     def test_changed_config_deny_policy_prevents_old_bindings_from_being_read(self):
         captured = self.capture()
@@ -312,7 +316,7 @@ class TaskContractTests(unittest.TestCase):
 
     def test_recomputed_receipt_checksum_cannot_change_definition_or_binding(self):
         captured = self.capture()
-        path = self.vault / captured['path']
+        path = deep_path(self.vault / captured['path'])
         receipt = json.loads(path.read_bytes())
         receipt['payload']['definition']['fields'][0]['text'] = 'A changed acceptance condition.'
         receipt['receipt_sha256'] = contracts.evidence.digest(contracts.evidence.encode(
