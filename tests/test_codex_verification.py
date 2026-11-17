@@ -209,8 +209,8 @@ class CodexVerificationTests(unittest.TestCase):
         self, mutate_skills=None, mutate_hooks=None, *, bind_installed_root=True, deep_as=None,
     ) -> dict:
         # deep_as (plain or extended) installs the skills beyond the plain limit and has the host
-        # report their paths, and its home, in that spelling; the home and the working folder stay
-        # as short as verify() hands them over.
+        # report their paths in that spelling; the home and the working folder stay as short as
+        # verify() hands them over, and the host reports the home as it received it.
         with self.temporary_directory(0 if deep_as is None else 2 * PLAIN_PATH_LIMIT) as temporary:
             root = plain(Path(temporary))
             home = root / "codex-home"
@@ -259,7 +259,7 @@ class CodexVerificationTests(unittest.TestCase):
                 "    print(json.dumps({'id': request['id'], 'result': result}), flush=True)\n",
                 encoding="utf-8",
             )
-            environment = {**os.environ, "CODEX_HOME": str((deep_as or Path)(home))}
+            environment = {**os.environ, "CODEX_HOME": handed(home)}
             options = {"installed_root": plain(installed)} if bind_installed_root else {}
             return verifier.inspect_host(sys.executable, vault, environment, home.resolve(), **options)
 
@@ -1161,8 +1161,13 @@ class CodexVerificationTests(unittest.TestCase):
             source = self.make_plugin_fixture(Path(temporary))
             reserve = verifier._workspace_reserve(source)
             self.assertEqual(self.verify_fixture(source, seen=seen), FIXTURE_REPORT)
-            # The installed copy is located by its plain path, whichever spelling the host answers in.
-            self.assertEqual(self.verify_fixture(source, reported=extended), FIXTURE_REPORT)
+            # Below the plain limit a host answer is compared as it always was: the extended-length
+            # spelling of a short installed path does not lie in the plain home (v0.52.0 refused it too).
+            if WINDOWS:
+                with self.assertRaises(ValueError):
+                    self.verify_fixture(source, reported=extended)
+            else:  # no other system has that spelling
+                self.assertEqual(self.verify_fixture(source, reported=extended), FIXTURE_REPORT)
         (keywords, root), = self.events(seen, "workspace")
         # A workspace that stays below the plain limit is created by the call verify() always made.
         short = not WINDOWS or len(str(root)) + reserve < PLAIN_PATH_LIMIT
@@ -1184,13 +1189,15 @@ class CodexVerificationTests(unittest.TestCase):
             self.assertEqual(text.startswith(PREFIX), WINDOWS and plain_length >= PLAIN_PATH_LIMIT, text)
 
     def test_long_workspace_is_verified_and_removed_whatever_the_temp_length(self) -> None:
-        # The workspace is created below a folder of at least 170 characters, so its copies pass
-        # MAX_PATH under any TEMP: on Windows this run always takes the extended-length form.
+        # The workspace is created below a folder of at least 190 characters, so its copies pass
+        # MAX_PATH under any TEMP: on Windows this run always takes the extended-length form. The
+        # installed path the host reports then reaches the plain limit itself, so it is located by
+        # its plain path in either spelling.
         with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary, \
              tempfile.TemporaryDirectory() as fixture:
             source = self.make_plugin_fixture(Path(fixture))
             reserve = verifier._workspace_reserve(source)
-            folder = self.long_folder(Path(temporary), 170)
+            folder = self.long_folder(Path(temporary), 190)
             for reported in (plain, extended):
                 with self.subTest(reported=reported.__name__):
                     seen: list = []
@@ -1208,6 +1215,7 @@ class CodexVerificationTests(unittest.TestCase):
                         (handed(root / "agentic-vault"), handed(root / "test vault"), handed(root / "codex-home")))
                     (_, _, installed_root), = self.events(seen, "inspect_host")
                     self.assertEqual(str(installed_root), str(root / "codex-home" / "plugins" / "cache" / "fixture"))
+                    self.assertGreaterEqual(len(str(installed_root)), PLAIN_PATH_LIMIT)
                     (longest,), = self.events(seen, "installed")
                     self.assertGreater(longest, 260)  # beyond MAX_PATH, out of reach of the plain form
                     self.assertLessEqual(longest, len(str(root)) + reserve)  # and within the reserve
@@ -1302,6 +1310,49 @@ class CodexVerificationTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(RuntimeError, "skill"):
                     self.inspect_discovery_fixture(mutate_skills=remove_skill_file, deep_as=deep_as)
+
+    def test_a_short_answer_in_the_extended_spelling_is_compared_as_before(self) -> None:
+        short = ROOT / "docs"
+        self.assertLess(len(str(short)), PLAIN_PATH_LIMIT)
+        answer = verifier._resolved(str(extended(short)))
+        # v0.52.0 compared Path(answer).resolve(), which keeps the prefix of the spelling
+        self.assertEqual(answer, Path(str(extended(short))).resolve())
+        self.assertEqual(answer == plain(short.resolve()), not WINDOWS)
+        self.assertEqual(verifier._resolved(str(short)), short.resolve())
+
+    def test_an_extended_answer_keeps_its_literal_names(self) -> None:
+        # Windows drops a trailing dot or space from a plain name but not from an extended-length one,
+        # so a sibling such as 'codex-home.' must not be taken for the home, nor 'SKILL.md.' for SKILL.md.
+        with self.temporary_directory(2 * PLAIN_PATH_LIMIT) as temporary:
+            folder = self.long_folder(Path(temporary), PLAIN_PATH_LIMIT + 10)
+            home = folder / "codex-home"
+            extended(home).mkdir()
+            (extended(home) / "SKILL.md").write_text("skill\n", encoding="utf-8")
+            for name in ("codex-home.", "codex-home "):
+                with self.subTest(name=name):
+                    sibling = extended(folder) / name
+                    sibling.mkdir()
+                    self.assertNotEqual(verifier._resolved(str(sibling)), plain(home))
+            self.assertEqual(verifier._resolved(str(extended(home))), plain(home))
+            self.assertEqual(verifier._resolved(str(home)), plain(home))
+            self.assertTrue(verifier._answer(str(extended(home) / "SKILL.md")).is_file())
+            self.assertFalse(verifier._answer(str(extended(home) / "SKILL.md.")).is_file())
+
+    def test_a_copy_failure_names_its_files_in_plain_form(self) -> None:
+        destination = os.path.join(os.path.abspath(os.sep), "work", "n" * PLAIN_PATH_LIMIT, "hooks.json")
+        source = os.path.join(os.path.abspath(os.sep), "src", "hooks.json")
+
+        def failure(spelled):
+            reason = str(PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(spelled(destination))))
+            return shutil.Error([(source, str(spelled(destination)), reason)])
+
+        for spelled in (plain, extended):
+            with self.subTest(spelled=spelled.__name__), \
+                 patch.object(verifier.shutil, "copytree", side_effect=failure(spelled)), \
+                 self.assertRaises(shutil.Error) as raised:
+                verifier.verify("unused-fixture-executable")
+            self.assertEqual(str(raised.exception), str(failure(plain)))
+            self.assertNotIn(PREFIX, str(raised.exception))
 
     def test_failure_message_names_a_file_in_plain_form(self) -> None:
         location = os.path.join(os.path.abspath(os.sep), "work", "n" * PLAIN_PATH_LIMIT, "hooks.json")

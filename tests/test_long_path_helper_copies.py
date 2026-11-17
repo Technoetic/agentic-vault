@@ -18,6 +18,8 @@ TOOLS = ("scripts/verify_codex_plugin.py", "scripts/verify_antigravity_plugin.py
          "scripts/build_antigravity_package.py")
 START = "# --- long-path helpers (keep this block identical in the standalone tools that carry it) ---\n"
 END = "# --- end of long-path helpers ---\n"
+MESSAGE_START = "# The extended-length prefix of a drive or UNC path inside a message:"
+MESSAGE_END = '    return EXTENDED_PREFIX.sub(lambda found: found.group(1) * 2 if found.group(2) else "", text)\n'
 WINDOWS = os.name == "nt"
 PREFIX = "\\\\?\\"
 
@@ -40,6 +42,28 @@ class LongPathHelperCopiesTests(unittest.TestCase):
                      "def _workspace(root, reserve: int) -> Path:"):
             self.assertIn(name, first)
 
+    def test_the_message_helper_is_byte_identical_in_the_three_tools(self) -> None:
+        copies = {}
+        for relative in TOOLS:
+            text = (ROOT / relative).read_bytes().decode("utf-8")
+            self.assertEqual((text.count(MESSAGE_START), text.count(MESSAGE_END)), (1, 1), relative)
+            copies[relative] = text[text.index(MESSAGE_START):text.index(MESSAGE_END) + len(MESSAGE_END)]
+        for relative, copy in copies.items():
+            with self.subTest(tool=relative):
+                self.assertEqual(copy, copies[TOOLS[0]])
+        namespace = {"os": os, "re": re}
+        exec(compile(copies[TOOLS[0]], "message-helper", "exec"), namespace)
+        plain_text = namespace["_plain_text"]
+        self.assertEqual(plain_text("no path here"), "no path here")
+        if WINDOWS:
+            self.assertEqual(plain_text("copy " + PREFIX + "C:\\a failed"), "copy C:\\a failed")
+            self.assertEqual(plain_text(repr(PREFIX + "C:\\a")), repr("C:\\a"))
+            self.assertEqual(plain_text(PREFIX + "UNC\\server\\share"), "\\\\server\\share")
+            # a path with no plain form keeps its spelling
+            volume = PREFIX + "Volume{0b1c}\\x"
+            self.assertEqual(plain_text("copy " + volume), "copy " + volume)
+            self.assertEqual(plain_text(repr(volume)), repr(volume))
+
     def test_the_block_changes_nothing_on_short_paths_and_other_systems(self) -> None:
         namespace = {"os": os, "re": re, "Path": Path}
         exec(compile(block_of(TOOLS[0]), "long-path-helpers", "exec"), namespace)
@@ -60,6 +84,8 @@ class LongPathHelperCopiesTests(unittest.TestCase):
             self.assertEqual(str(extended(PREFIX + "C:\\a\\b")), PREFIX + "C:\\a\\b")
             self.assertEqual(str(plain(PREFIX + "C:\\a\\b")), "C:\\a\\b")
             self.assertEqual(str(plain(PREFIX + "UNC\\server\\share\\b")), "\\\\server\\share\\b")
+            for other in (PREFIX + "Volume{0b1c}\\x", PREFIX + "ContainerMappedDirectories\\x"):
+                self.assertEqual(str(plain(other)), other)
         else:
             self.assertEqual(workspace(short, room), short)
             self.assertEqual(workspace(short, 10_000), short)

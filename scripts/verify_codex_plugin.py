@@ -43,11 +43,15 @@ def _extended(path) -> Path:
 
 
 def _plain(path) -> Path:
-    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    """The path without the extended-length prefix, for messages, reports and comparisons.
+
+    Only a drive or UNC path loses the prefix; another extended-length path (a volume GUID or a
+    container mapping, which Path.resolve() can return) has no plain form and is kept as it is.
+    """
     text = str(path)
     if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
         return Path("\\\\" + text[8:])
-    if os.name == "nt" and text.startswith("\\\\?\\"):
+    if os.name == "nt" and re.match(r"^\\\\\?\\[A-Za-z]:\\", text):
         return Path(text[4:])
     return Path(path)
 
@@ -58,14 +62,46 @@ def _workspace(root, reserve: int) -> Path:
 # --- end of long-path helpers ---
 
 
+# The extended-length prefix of a drive or UNC path inside a message: as it is, or with every backslash
+# doubled once or more (an OSError quotes its file name with repr, and a shutil.Error quotes such
+# messages again). Another extended-length path has no plain form and is left as it is.
+EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(?:(UNC\1)|(?=[A-Za-z]:))")
+
+
+def _plain_text(text: str) -> str:
+    """text with the paths it names in their plain form (no extended-length prefix)."""
+    if os.name != "nt":
+        return text
+    return EXTENDED_PREFIX.sub(lambda found: found.group(1) * 2 if found.group(2) else "", text)
+
+
 def _fitted(path) -> Path:
     """path in the form its own length calls for: plain below the plain limit, extended-length from there on."""
     return _workspace(_plain(path), 0)
 
 
+def _answer(path) -> Path:
+    """A path the host reported, in the form it is read in.
+
+    An extended-length spelling is used as given, so its names stay literal (Windows does not drop a
+    trailing dot or space there); a plain spelling takes the form its own length calls for.
+    """
+    text = str(path)
+    if os.name == "nt" and text.startswith("\\\\?\\"):
+        return Path(text)
+    return _fitted(path)
+
+
 def _resolved(path) -> Path:
-    """Where path leads, in plain form; resolved through the form its length calls for."""
-    return _plain(_fitted(path).resolve())
+    """Where path leads, for comparisons with the workspace paths; resolved in the form _answer gives it.
+
+    From the plain limit on, the result is shown in plain form, whichever spelling the host answered
+    in. Below the limit it is compared as it always was: an extended-length spelling stays extended
+    and so does not match a plain workspace path.
+    """
+    resolved = _answer(path).resolve()
+    shown = _plain(resolved)
+    return shown if len(str(shown)) >= PLAIN_PATH_LIMIT else resolved
 
 
 def _longest_copied_path(source: Path) -> int:
@@ -237,8 +273,8 @@ def inspect_host(
                 "clientInfo": {"name": "agentic-vault-verification", "version": "1.0"},
                 "capabilities": {"experimentalApi": True},
             })
-            # The host may answer in either form: what it reports is located by its plain path,
-            # and a reported file is reached in the form the length of its path calls for.
+            # A host answer that reaches the plain limit is located by its plain path in either
+            # spelling; a shorter one is compared as it always was (see _resolved and _answer).
             if _resolved(initialized["codexHome"]) != _plain(home):
                 raise RuntimeError("Codex did not use the isolated test home")
             send({"method": "initialized", "params": {}})
@@ -259,7 +295,7 @@ def inspect_host(
             for name, relative in required_skills.items():
                 matches = [skill for skill in owned_skills if skill["name"] == name]
                 if (len(matches) != 1 or not matches[0]["enabled"]
-                        or not _fitted(matches[0]["path"]).is_file()):
+                        or not _answer(matches[0]["path"]).is_file()):
                     raise RuntimeError(f"Required enabled skill was not discovered exactly once: {name}")
                 skill_path = _resolved(matches[0]["path"])
                 if resource_root is None:
@@ -305,7 +341,12 @@ def verify(codex: str) -> dict:
     ) as temporary:
         root = Path(temporary).resolve()
         package = root / PACKAGE_FOLDER
-        shutil.copytree(ROOT, package, ignore=COPY_IGNORE)
+        try:
+            shutil.copytree(ROOT, package, ignore=COPY_IGNORE)
+        except shutil.Error as error:
+            # copytree lists the files it could not copy with their destinations in the form of the
+            # workspace; the message names them in plain form, as the rest of the output does.
+            raise shutil.Error(_plain_text(str(error))) from None
         # The host receives each path in the form the length of that path calls for: the plain
         # paths it always received, unless one of them reaches the plain limit itself.
         home = _fitted(root / HOME_FOLDER)
@@ -322,8 +363,8 @@ def verify(codex: str) -> dict:
             raise RuntimeError("Unexpected marketplace identity")
         installed = run_json(codex, ["plugin", "add", PLUGIN_ID, "--json"], vault, environment)
         expected = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        # The host may answer in either form. The installed copy is located by its plain path and
-        # each of its files is read in the form the length of that file's path calls for.
+        # The installed copy is located as _resolved locates a host answer, and each of its files is
+        # read in the form the length of that file's path calls for.
         cached = _resolved(installed["installedPath"])
         cached.relative_to(_plain(home))
         if installed["version"] != expected["version"]:

@@ -74,11 +74,15 @@ def _extended(path) -> Path:
 
 
 def _plain(path) -> Path:
-    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    """The path without the extended-length prefix, for messages, reports and comparisons.
+
+    Only a drive or UNC path loses the prefix; another extended-length path (a volume GUID or a
+    container mapping, which Path.resolve() can return) has no plain form and is kept as it is.
+    """
     text = str(path)
     if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
         return Path("\\\\" + text[8:])
-    if os.name == "nt" and text.startswith("\\\\?\\"):
+    if os.name == "nt" and re.match(r"^\\\\\?\\[A-Za-z]:\\", text):
         return Path(text[4:])
     return Path(path)
 
@@ -89,9 +93,10 @@ def _workspace(root, reserve: int) -> Path:
 # --- end of long-path helpers ---
 
 
-# The extended-length prefix inside a message: as it is, or with every backslash doubled once or more
-# (an OSError quotes its file name with repr, and a shutil.Error quotes such messages again).
-EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(UNC\1)?")
+# The extended-length prefix of a drive or UNC path inside a message: as it is, or with every backslash
+# doubled once or more (an OSError quotes its file name with repr, and a shutil.Error quotes such
+# messages again). Another extended-length path has no plain form and is left as it is.
+EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(?:(UNC\1)|(?=[A-Za-z]:))")
 
 
 def _plain_text(text: str) -> str:
@@ -431,9 +436,10 @@ def _verify_in(root: Path, command: list[str], package: Path, timeout: float) ->
     home = root / "home"
     work = root / "work"
     work.mkdir()
-    # A process cannot start in an extended-length folder that nears the plain limit, and work lies just
-    # below the root: agy starts in the plain form of work unless that form itself reaches the limit.
-    start = _workspace(_plain(work), 0)
+    # agy always starts in the plain form of work. A process cannot start in an extended-length folder that
+    # nears the plain limit, and a workspace that tempfile can create under a plain name keeps work short
+    # enough for the plain form (measured: a plain start folder works up to 258 characters).
+    start = _plain(work)
     environment = isolated_environment(home)
     failures: list[str] = []
     package_version, problem = manifest_version(copy)

@@ -36,6 +36,9 @@ class ExtendedPathHelperTests(unittest.TestCase):
             self.assertEqual(str(extended(PREFIX + "C:\\a\\b.md")), PREFIX + "C:\\a\\b.md")
             self.assertEqual(str(plain(PREFIX + "C:\\a\\b.md")), "C:\\a\\b.md")
             self.assertEqual(str(plain(PREFIX + "UNC\\server\\share\\b.md")), "\\\\server\\share\\b.md")
+            # a path with no plain form (a volume GUID, a container mapping) keeps its spelling
+            for other in (PREFIX + "Volume{0b1c}\\x", PREFIX + "ContainerMappedDirectories\\x"):
+                self.assertEqual(str(plain(other)), other)
             self.assertEqual(str(plain("C:\\a\\b.md")), "C:\\a\\b.md")
         else:
             absolute = Path(tempfile.gettempdir()) / "a" / "b.md"
@@ -78,9 +81,8 @@ class ExtendedPathHelperTests(unittest.TestCase):
         shutil.rmtree(extended(base))
         self.assertFalse(extended(base).exists())
 
+    @unittest.skipUnless(WINDOWS, "junctions exist only on Windows")
     def test_a_junction_link_beyond_the_plain_limit_is_created(self) -> None:
-        if not WINDOWS:
-            return  # junctions are a Windows form; there is nothing to check on another system
         base = Path(tempfile.mkdtemp(prefix="av-winfs-")).resolve()
         self.addCleanup(lambda: shutil.rmtree(extended(base), ignore_errors=True))
         outside = base / "outside"

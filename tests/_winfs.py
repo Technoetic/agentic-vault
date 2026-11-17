@@ -8,7 +8,7 @@ path calls the Win32 API directly and produces no console output at all.
 ``extended``, ``plain`` and ``deep_path`` let a fixture create, read or remove
 entries beyond the plain 260-character limit of Windows without long-path
 support. They change nothing on other systems, and ``deep_path`` changes
-nothing for a path that stays below the limit.
+nothing for a path that stays below ``PLAIN_PATH_LIMIT`` (240 characters).
 """
 from __future__ import annotations
 
@@ -39,11 +39,14 @@ def extended(path: str | os.PathLike[str]) -> Path:
 
 
 def plain(path: str | os.PathLike[str]) -> Path:
-    """The path without the extended-length prefix, for messages and comparisons."""
+    """The path without the extended-length prefix, for messages and comparisons.
+
+    Only a drive or UNC path loses the prefix; another extended-length path has no plain form.
+    """
     text = str(path)
     if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
         return Path("\\\\" + text[8:])
-    if os.name == "nt" and text.startswith("\\\\?\\"):
+    if os.name == "nt" and re.match(r"^\\\\\?\\[A-Za-z]:\\", text):
         return Path(text[4:])
     return Path(path)
 
@@ -63,9 +66,10 @@ def make_junction(link: str | os.PathLike[str], target: str | os.PathLike[str]) 
     decodes it, and raises ``OSError`` with a content-free message on failure.
 
     A link whose path reaches the plain limit is created through its
-    extended-length form. The target is always given in plain form because it
-    is written into the reparse point as given, and an extended-length target
-    is refused by the system.
+    extended-length form. The target is always given in plain form: it is
+    written into the reparse point as given, and an extended-length target
+    would be stored as ``\\??\\\\\\?\\...`` and give a junction that cannot be
+    followed (WinError 123), without any error when it is created.
     """
     create = getattr(_winapi, "CreateJunction", None)
     if create is not None:

@@ -238,11 +238,15 @@ def _extended(path) -> Path:
 
 
 def _plain(path) -> Path:
-    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    """The path without the extended-length prefix, for messages, reports and comparisons.
+
+    Only a drive or UNC path loses the prefix; another extended-length path (a volume GUID or a
+    container mapping, which Path.resolve() can return) has no plain form and is kept as it is.
+    """
     text = str(path)
     if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
         return Path("\\\\" + text[8:])
-    if os.name == "nt" and text.startswith("\\\\?\\"):
+    if os.name == "nt" and re.match(r"^\\\\\?\\[A-Za-z]:\\", text):
         return Path(text[4:])
     return Path(path)
 
@@ -253,9 +257,10 @@ def _workspace(root, reserve: int) -> Path:
 # --- end of long-path helpers ---
 
 
-# The extended-length prefix inside a message: as it is, or with every backslash doubled once or more
-# (an OSError quotes its file name with repr, and a shutil.Error quotes such messages again).
-EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(UNC\1)?")
+# The extended-length prefix of a drive or UNC path inside a message: as it is, or with every backslash
+# doubled once or more (an OSError quotes its file name with repr, and a shutil.Error quotes such
+# messages again). Another extended-length path has no plain form and is left as it is.
+EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(?:(UNC\1)|(?=[A-Za-z]:))")
 
 
 def _plain_text(text: str) -> str:

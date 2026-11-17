@@ -582,8 +582,8 @@ class VerifierRuns(unittest.TestCase):
                     "APPDATA": str(home / "AppData" / "Roaming"), "LOCALAPPDATA": str(home / "AppData" / "Local"),
                     "TMP": str(home / "tmp"), "TEMP": str(home / "tmp"),
                 })
-                # A process starts in the plain form of its folder while that form is below the limit.
-                self.assertEqual(Path(call["cwd"]), deep_path(root / "work"))
+                # agy always starts in the plain form of work.
+                self.assertEqual(Path(call["cwd"]), root / "work")
 
 
 class VerificationTests(VerifierRuns):
@@ -959,18 +959,26 @@ class LongWorkspaceTests(VerifierRuns):
         self.assertEqual(list(self.scratch.iterdir()), [])
 
     def test_keep_names_the_plain_folder_of_a_long_workspace(self) -> None:
-        outcome = self.run_verifier(argv=["--agy", str(self.fake), "--package", str(self.package), "--keep"])
-        self.assertEqual(outcome.code, 0, outcome.stderr)
-        root = self.assert_long_workspace(outcome)
-        self.assertEqual(outcome.stderr, f"kept: {root}\n")
-        tree = extended(root)
-        copy = tree / "package" / "agentic-vault"
-        installed = tree / "home" / ".gemini" / "config" / "plugins" / "agentic-vault"
-        self.assertEqual(verifier.compare_trees(installed, copy), [])
-        self.assertEqual(verifier.files_under(copy),
-                         {relative for relative in PACKAGE_FILES if "__pycache__" not in relative})
-        self.assertEqual((installed / LONGEST_COPIED).read_bytes(), b"# fixture\n")
-        self.assertEqual((copy / "assets" / "sample.bin").read_bytes(), PACKAGE_FILES["assets/sample.bin"])
+        # Also when the temporary folder itself is spelled in the extended-length form.
+        for scratch in (self.scratch, extended(self.scratch)):
+            with self.subTest(scratch=str(scratch)[:8]):
+                self.scratch = scratch
+                outcome = self.run_verifier(
+                    argv=["--agy", str(self.fake), "--package", str(self.package), "--keep"])
+                self.assertEqual(outcome.code, 0, outcome.stderr)
+                root = self.assert_long_workspace(outcome)
+                self.assertEqual(outcome.stderr, f"kept: {root}\n")
+                self.assertFalse(str(root).startswith(PREFIX))
+                tree = extended(root)
+                copy = tree / "package" / "agentic-vault"
+                installed = tree / "home" / ".gemini" / "config" / "plugins" / "agentic-vault"
+                self.assertEqual(verifier.compare_trees(installed, copy), [])
+                self.assertEqual(verifier.files_under(copy),
+                                 {relative for relative in PACKAGE_FILES if "__pycache__" not in relative})
+                self.assertEqual((installed / LONGEST_COPIED).read_bytes(), b"# fixture\n")
+                self.assertEqual((copy / "assets" / "sample.bin").read_bytes(),
+                                 PACKAGE_FILES["assets/sample.bin"])
+                remove_tree(tree)
 
     def test_an_error_in_a_long_workspace_names_plain_paths_and_leaves_nothing(self) -> None:
         reached = []
