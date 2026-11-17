@@ -143,8 +143,10 @@ class Base(unittest.TestCase):
         return {path.stem: path.read_bytes() for path in sorted(folder.iterdir())}
 
     def tree(self):
-        return {path.relative_to(self.vault).as_posix(): path.read_bytes()
-                for path in sorted(self.vault.rglob('*')) if path.is_file()}
+        # deep_path: a plain is_file() answers False for a file beyond the plain Windows path limit
+        # (a runtime lock under a long temporary folder), which would leave it out of the listing.
+        return {path.relative_to(self.vault).as_posix(): deep_path(path).read_bytes()
+                for path in sorted(self.vault.rglob('*')) if deep_path(path).is_file()}
 
     def analyze(self, **kwargs):
         settings = {'threshold_bytes': 1, 'protect_sections': 2}
