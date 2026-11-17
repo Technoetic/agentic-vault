@@ -1436,7 +1436,7 @@ def _hermetic_env() -> dict:
 
 
 def _browser_running() -> bool:
-    # Evaluated when the class is defined, also on hosts without PowerShell.
+    # Asked when a launch-path test starts (see HelperScriptTests.require_no_browser).
     if _powershell() is None:
         return False
     script = ("@(Get-Process -Name Aside -ErrorAction SilentlyContinue | Where-Object { "
@@ -1478,6 +1478,16 @@ class HelperScriptTests(unittest.TestCase):
     def payload(command: str, tool: str = "Bash") -> str:
         return json.dumps({"tool_name": tool, "tool_input": {"command": command}})
 
+    def require_no_browser(self) -> None:
+        """Skip a launch-path test while an Aside browser is running.
+
+        The helper then answers for that browser and never reaches the launch path. The state is
+        read when the test starts, not when the module is loaded: a full run loads every module
+        before the first test, and a browser opened in between made these tests fail.
+        """
+        if _browser_running():
+            self.skipTest("an Aside browser is running on this machine")
+
     def test_script_parses(self) -> None:
         check = ("$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile("
                  f"'{HELPER}', [ref]$null, [ref]$e); $e.Count")
@@ -1518,14 +1528,14 @@ class HelperScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("[aside] started", result.stdout)
 
-    @unittest.skipIf(_browser_running(), "an Aside browser is running on this machine")
     def test_interactive_call_reports_missing_app(self) -> None:
+        self.require_no_browser()
         result = self.run_helper("-AsideExe", MISSING_EXE, "-TimeoutSec", "3")
         self.assertEqual(result.returncode, 1)
         self.assertIn("[aside] Aside.exe not found", result.stdout)
 
-    @unittest.skipIf(_browser_running(), "an Aside browser is running on this machine")
     def test_cli_named_aside_is_not_taken_for_the_browser(self) -> None:
+        self.require_no_browser()
         ping = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "PING.EXE"
         if not ping.exists():
             self.skipTest("PING.EXE is not available")
@@ -1543,8 +1553,8 @@ class HelperScriptTests(unittest.TestCase):
         self.assertIn("[aside] Aside.exe not found", result.stdout)
         self.assertNotIn("browser", result.stdout)
 
-    @unittest.skipIf(_browser_running(), "an Aside browser is running on this machine")
     def test_explicit_path_to_the_cli_is_refused(self) -> None:
+        self.require_no_browser()
         cli = shutil.which("aside")
         if not cli or not cli.lower().endswith(".exe"):
             self.skipTest("the Aside CLI is not installed")
