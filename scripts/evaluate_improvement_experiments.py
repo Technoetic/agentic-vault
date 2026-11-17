@@ -143,7 +143,9 @@ class SyntheticVault:
                 'manifest_sha256': prepared['manifest_sha256'], 'outcomes': outcomes,
             })
             completion = self.runs.record(self.root, prepared['id'], report_path)
-            _check((self.root / completion['path']).is_file(), 'native completion must be persisted')
+            # The record can lie beyond the plain Windows path limit under a long temporary folder.
+            fs_path = importlib.import_module('vault_evidence').fs_path
+            _check(fs_path(self.root / completion['path']).is_file(), 'native completion must be persisted')
             inspected = self.runs.inspect(self.root, prepared['id'])
             _check(inspected['status'] == 'complete', 'native completion must inspect successfully')
             _check(len(inspected['completion']['outcomes']) == 10,
