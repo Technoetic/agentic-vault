@@ -197,11 +197,12 @@ class LessonMetricsLongPathTests(unittest.TestCase):
         self.addCleanup(lambda: _rmtree_long(base))
         padding = length - len(str(base)) - len(os.sep + "vault") - 1
         vault = base / ("p" * max(padding, 1)) / "vault"
-        (vault / "00-meta").mkdir(parents=True)
-        (vault / "00-meta" / "vault-config.json").write_text(
+        fs = vault_evidence.fs_path  # a very long vault holds files beyond the plain limit
+        fs(vault / "00-meta").mkdir(parents=True)
+        fs(vault / "00-meta" / "vault-config.json").write_text(
             json.dumps({"required_keys": ["title"], "enums": {}}), encoding="utf-8")
-        (vault / "CLAUDE.md").write_bytes(b"# Rules\nBefore\n")
-        (vault / "00-meta" / "candidate.md").write_bytes(b"# Rules\nAfter: retry once\n")
+        fs(vault / "CLAUDE.md").write_bytes(b"# Rules\nBefore\n")
+        fs(vault / "00-meta" / "candidate.md").write_bytes(b"# Rules\nAfter: retry once\n")
         return vault
 
     def call(self, module, *arguments: str, vault: Path | None = None) -> dict:
@@ -239,19 +240,40 @@ class LessonMetricsLongPathTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), "duplicate_attempt")
 
     def test_a_vault_named_in_the_extended_form_records_and_leaves_nothing_behind(self) -> None:
-        # A caller may name the vault in the extended-length form, at any length; the store then works
-        # in that form throughout, as it did before (on other systems extended() returns the same path).
-        short = self.make_vault(1)
-        for vault in (short, self.vault):
-            with self.subTest(length=len(str(vault))):
-                proposal_id = self.applied_proposal(vault)
-                spelled = extended(vault)
-                recorded = vault_lesson_metrics.record_observation(spelled, proposal_id, dict(self.OBSERVATION))
-                summary = vault_lesson_metrics.summarize(spelled, proposal_id)
-                self.assertEqual(summary["counts"]["eligible_attempts"], 1)
-                folder = vault_evidence.fs_path(vault / recorded["path"]).parent
-                self.assertEqual(os.listdir(folder), [Path(recorded["path"]).name])
-                self.assertFalse(vault_evidence.fs_path(folder.parent / ".lock").exists())
+        # A caller may name the vault in the extended-length form, or on Windows in the Win32 device
+        # namespace, at any length; the store then works in that form throughout, as it did before (on
+        # other systems extended() returns the same path).
+        spellings = [("extended", extended)]
+        if os.name == "nt":
+            spellings.append(("device", lambda path: Path("\\\\.\\" + str(path))))
+        for length in (1, self.ROOT_LENGTH):
+            for name, spell in spellings:
+                vault = self.make_vault(length)
+                with self.subTest(length=len(str(vault)), spelled=name):
+                    proposal_id = self.applied_proposal(vault)
+                    spelled = spell(vault)
+                    recorded = vault_lesson_metrics.record_observation(spelled, proposal_id,
+                                                                       dict(self.OBSERVATION))
+                    summary = vault_lesson_metrics.summarize(spelled, proposal_id)
+                    self.assertEqual(summary["counts"]["eligible_attempts"], 1)
+                    folder = vault_evidence.fs_path(vault / recorded["path"]).parent
+                    self.assertEqual(os.listdir(folder), [Path(recorded["path"]).name])
+                    self.assertFalse(vault_evidence.fs_path(folder.parent / ".lock").exists())
+
+    @unittest.skipUnless(os.name == "nt", "junctions exist only on Windows")
+    def test_a_vault_reached_through_a_junction_is_refused_on_the_long_branch_too(self) -> None:
+        # From a root of about 230 characters every store path takes the long branch; the vault folder must
+        # still be checked as the caller named it, so a junction that leads to the vault is refused.
+        vault = self.make_vault(235)
+        alias_parent = Path(tempfile.mkdtemp(prefix="av-lp-alias-")).resolve()
+        self.addCleanup(lambda: _rmtree_long(alias_parent))
+        alias = alias_parent / "alias"
+        make_junction(alias, vault)
+        for call in (lambda: vault_lesson_metrics.record_observation(alias, "0" * 32, dict(self.OBSERVATION)),
+                     lambda: vault_lesson_metrics.summarize(alias, "0" * 32)):
+            with self.assertRaises(vault_lesson_metrics.LessonMetricsError) as caught:
+                call()
+            self.assertEqual(str(caught.exception), "unsafe_path")
 
     @unittest.skipUnless(os.name == "nt", "junctions exist only on Windows")
     def test_a_junction_beyond_260_chars_is_refused_like_a_short_one(self) -> None:
