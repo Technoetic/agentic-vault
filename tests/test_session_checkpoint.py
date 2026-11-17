@@ -19,6 +19,11 @@ SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 
 class CheckpointTests(unittest.TestCase):
     def setUp(self):
@@ -282,7 +287,8 @@ class CheckpointTests(unittest.TestCase):
         real_atomic = state._atomic
         originals = {p: p.read_bytes() for p in (self.vault / 'notes').glob('*.md')}
         def tamper(path, data, before_replace, **kwargs):
-            lock = next((self.vault / RUNTIME).glob('lock-*.json'))
+            # The lock file can lie beyond the plain Windows path limit under a long temporary folder.
+            lock = deep_path(next((self.vault / RUNTIME).glob('lock-*.json')))
             record = json.loads(lock.read_bytes())
             record['created_at'] = []
             lock.write_bytes(json.dumps(record).encode())
