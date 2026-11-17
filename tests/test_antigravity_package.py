@@ -1187,6 +1187,18 @@ class DeepFolderTests(unittest.TestCase):
         missing = _run("check", "--repo", str(self.base), "--against", str(nowhere))
         self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
         self.assertEqual(missing.stderr, f"build_antigravity_package: error: package folder not found: {nowhere}\n")
+        # A caller of the functions gets the same plain names in the exceptions, also for a folder it names
+        # in the extended-length form.
+        prefix = "build_antigravity_package: error: "
+        for given in (folder, extended(folder)):
+            with self.subTest(given=str(given)[:8]):
+                with self.assertRaises(self.module.BuildError) as raised:
+                    self.module.write_package(self.files, given)
+                self.assertEqual(prefix + str(raised.exception) + "\n", refused.stderr)
+                with self.assertRaises(self.module.BuildError) as raised:
+                    self.module.compare(self.files, given.parent / "nowhere")
+                self.assertEqual(prefix + str(raised.exception) + "\n", missing.stderr)
+        self.assertEqual(kept.read_bytes(), b"keep\n")
 
     def test_a_repository_beyond_the_plain_limit_builds_the_same_package(self) -> None:
         repo = self.folder() / "repo"
@@ -1212,6 +1224,9 @@ class DeepFolderTests(unittest.TestCase):
         self.assertEqual(unreadable.returncode, 1, unreadable.stdout + unreadable.stderr)
         self.assertEqual(unreadable.stderr, "build_antigravity_package: error: .claude-plugin/plugin.json cannot be "
                                             f"read: [Errno 2] No such file or directory: {str(manifest)!r}\n")
+        with self.assertRaises(self.module.BuildError) as raised:
+            self.module.build_package(repo)
+        self.assertEqual("build_antigravity_package: error: " + str(raised.exception) + "\n", unreadable.stderr)
 
     def test_check_builds_in_a_long_temporary_folder_and_leaves_it_empty(self) -> None:
         module = self.module
@@ -1220,13 +1235,25 @@ class DeepFolderTests(unittest.TestCase):
         temporary = self.folder()
         temporary.mkdir()
         with patch.object(tempfile, "tempdir", str(temporary)), \
-             patch.object(module, "_write_tree", wraps=module._write_tree) as write:
+             patch.object(module, "_write_tree", wraps=module._write_tree) as write, \
+             patch.object(shutil, "rmtree", wraps=shutil.rmtree) as rmtree:
             self.assertEqual(module.compare(self.files, out), [])
         fresh = write.call_args.args[1]
         self.assertEqual(plain(fresh).parent.parent, temporary)
         self.assertEqual(fresh.name, "antigravity")
         self.assert_beyond_the_plain_limit(plain(fresh))
         self.assertEqual(str(fresh).startswith(PREFIX), WINDOWS)
+        # The folder is removed in the form it was used in, before any cleanup under the plain name.
+        self.assertEqual(str(rmtree.call_args_list[0].args[0]), str(fresh.parent))
+        self.assertEqual(list(temporary.iterdir()), [])
+        # The same as a command, in a process whose TEMP is that folder.
+        environment = dict(os.environ, TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary))
+        used = subprocess.run([sys.executable, "-X", "utf8", "-c", "import tempfile; print(tempfile.gettempdir())"],
+                              capture_output=True, text=True, encoding="utf-8", env=environment, timeout=120)
+        self.assertEqual(used.stdout.strip(), str(temporary), used.stderr)
+        same = _run("check", "--repo", str(self.base), "--against", str(out), env=environment)
+        self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+        self.assertEqual(same.stdout.splitlines()[0], f"identical: {len(self.files)} files in {out}")
         self.assertEqual(list(temporary.iterdir()), [])
         # A difference is found there too, and an error while the fresh build is read leaves nothing either.
         changed = dict(self.files, **{"hooks.json": self.files["hooks.json"] + b" "})
@@ -1236,6 +1263,52 @@ class DeepFolderTests(unittest.TestCase):
              patch.object(module, "_read_tree", side_effect=OSError("stopped")), self.assertRaises(OSError):
             module.compare(self.files, out)
         self.assertEqual(list(temporary.iterdir()), [])
+
+    def test_a_link_target_beyond_the_plain_limit_is_still_looked_up(self) -> None:
+        # The repository root is given in its plain form, as build_package leaves it while the source folders
+        # are shallow; a link may still point at a deeper path elsewhere in the repository.
+        repo = self.folder()
+        target = "tests/fixtures/" + "a-folder-with-a-long-name-" * 2 + "/notes"
+        self.assertGreater(len(str(repo / target)), 260)
+        (extended(repo) / target).mkdir(parents=True)
+        (extended(repo) / target / "kept.md").write_bytes(b"kept\n")
+        linker = self.module._Linker(repo, "1.2.3", [], set(), set())
+        text = f"[folder](../{target}) [file](../{target}/kept.md) [gone](../{target}/gone.md)\n"
+        self.assertEqual(linker.rewrite(text, "docs/guide.md", "docs/guide.md"), (
+            f"[folder]({REPO_URL}/tree/v1.2.3/{target}) [file]({REPO_URL}/blob/v1.2.3/{target}/kept.md) "
+            f"[gone]({REPO_URL}/blob/v1.2.3/{target}/gone.md)\n"))
+        self.assertEqual(linker.missing, {f"docs/guide.md: ../{target}/gone.md"})
+
+    def test_the_staging_folders_take_the_form_while_the_output_stays_plain(self) -> None:
+        module = self.module
+        manifest = json.dumps({"$schema": SCHEMA_URL, "name": "agentic-vault"}).encode("utf-8")
+        files = {"plugin.json": manifest, "skills/vault-day/SKILL.md": b"body\n"}
+        out = self.temp / "mixed forms" / "antigravity"
+        forms = []
+
+        def record(root, reserve: int) -> Path:
+            folder = workspace(root, reserve)
+            name = plain(folder).name
+            # (the name without the eight characters tempfile adds, whether the extended-length form is taken)
+            forms.append((name[:-8] if name.startswith(".") else name, str(folder).startswith(PREFIX)))
+            return folder
+
+        # The limit is moved to the folders instead of the folders to the limit, so the case does not depend
+        # on the length of TEMP: with its longest file the output folder stays one character below the limit,
+        # and the names tempfile gives the two folders next to it are longer than that.
+        limit = len(str(out)) + 1 + len("skills/vault-day/SKILL.md") + 1
+        workspace = module._workspace
+        with patch.object(module, "PLAIN_PATH_LIMIT", limit), patch.object(module, "_workspace", side_effect=record):
+            module.write_package(files, out)
+            self.assertEqual(forms, [("antigravity", False), ("antigravity", False), (".antigravity-build-", WINDOWS)])
+            self.assertEqual(_tree(out), files)
+            (out / "stale.txt").write_bytes(b"left over\n")
+            del forms[:]
+            module.write_package(files, out)
+            self.assertEqual(forms, [("antigravity", False), ("antigravity", False), (".antigravity-build-", WINDOWS),
+                                     (".antigravity-previous-", WINDOWS)])
+        self.assertEqual(_tree(out), files)
+        self.assertEqual([entry.name for entry in out.parent.iterdir()], ["antigravity"])
 
     def test_reserves_follow_the_trees_that_are_written_and_read(self) -> None:
         module = self.module

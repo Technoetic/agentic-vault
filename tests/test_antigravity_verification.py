@@ -831,9 +831,9 @@ class VerificationTests(VerifierRuns):
     def test_the_workspace_takes_the_extended_form_exactly_at_the_plain_limit(self) -> None:
         roots = []
 
-        def stop(root, _command, _package, _timeout):
+        def record(root, _command, _package, _timeout) -> dict:
             roots.append(root)
-            raise OSError("stopped before the first agy call")
+            return {"failures": []}  # no agy call is made
 
         write_fake(self.fake_folder)
         length = len(str(self.scratch)) + 1 + WORKSPACE_NAME_LENGTH
@@ -842,18 +842,20 @@ class VerificationTests(VerifierRuns):
         for room, deep in ((FIXTURE_RESERVE + 1, False), (FIXTURE_RESERVE, WINDOWS)):
             with self.subTest(room=room), self.simulated_home(), \
                  patch.object(verifier, "PLAIN_PATH_LIMIT", length + room), \
-                 patch.object(verifier, "_verify_in", side_effect=stop):
+                 patch.object(verifier, "_verify_in", side_effect=record):
                 for keep in (False, True):
                     stderr = io.StringIO()
-                    with self.assertRaises(OSError), contextlib.redirect_stderr(stderr):
-                        verifier.verify(str(self.fake), self.package, keep=keep)
+                    with contextlib.redirect_stderr(stderr):
+                        report, kept = verifier.verify(str(self.fake), self.package, keep=keep)
+                    self.assertTrue(report["passed"])
                     root = roots.pop()
                     self.assertEqual(len(str(plain(root))), length)
                     self.assertEqual(plain(root).parent, self.scratch)
                     self.assertEqual(str(root).startswith(PREFIX), deep)
                     self.assertEqual(str(root), str(extended(plain(root)) if deep else plain(root)))
-                    # The kept folder is always named in its plain form.
+                    # The kept folder is always named, and returned, in its plain form.
                     self.assertEqual(stderr.getvalue(), f"kept: {plain(root)}\n" if keep else "")
+                    self.assertEqual(None if kept is None else str(kept), str(plain(root)) if keep else None)
         self.assertEqual(roots, [])
         self.assertEqual(logged_calls(self.fake_folder), [])
         # Only the two kept (empty) workspaces are left.
