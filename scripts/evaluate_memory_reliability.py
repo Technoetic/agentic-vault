@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
-import os
 from pathlib import Path
-import re
-import shutil
 import sys
 import tempfile
 
@@ -20,43 +17,28 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills' / 'agentic-vault' / 'scripts'))
 sys.path.insert(0, str(ROOT / 'scripts'))
 
-PLAIN_PATH_LIMIT = 240  # the margin below Windows MAX_PATH (260) that vault_evidence.fs_path uses
-# What the deepest entries of the synthetic vault, its run records, add to the path of the vault.
-RUN_RECORD_LENGTH = len('/00-meta/.agentic-vault/runtime/run-') + 64 + len('-completed.json')
-
-
-def _extended(path):
-    """The Windows extended-length form of an absolute path; any other path, and any other system, unchanged."""
-    text = str(path)
-    if os.name != 'nt' or text.startswith('\\\\?\\'):
-        return text
-    if re.match(r'^[A-Za-z]:\\', text):
-        return '\\\\?\\' + text
-    if text.startswith('\\\\'):
-        return '\\\\?\\UNC\\' + text[2:]
-    return text
+# The deepest entry the example creates below the temporary folder: a run record of the synthetic vault,
+# which is the temporary folder itself.
+DEEPEST_RECORD = Path('av-memory-reliability-' + 8 * '0', '00-meta', '.agentic-vault', 'runtime',
+                      'run-' + 64 * '0' + '-completed.json')
 
 
 @contextmanager
 def _temporary_vault():
-    """A fresh temporary folder for the synthetic vault, removed afterwards.
+    """A fresh temporary folder for the synthetic vault, removed afterwards; yields its plain path.
 
-    On Windows without long-path support the run records pass the plain path limit when the
-    temporary folder is long: tempfile leaves them in place and fails on the folder that holds
-    them. The folder is then removed through its extended-length form. Where no run record can
-    reach the limit, and on other systems, a failed cleanup raises as before.
+    On Windows without long-path support the run records pass the plain path limit when the temporary
+    folder is long, and tempfile could not remove them through a plain path. When vault_evidence.fs_path
+    gives the deepest record the extended-length form, the folder is created in that form of tempfile's
+    folder, so tempfile removes it through that form and reports a failed removal as before. Otherwise
+    this is the call the example always made. The runtime modules receive the vault as a plain path.
     """
-    holder = tempfile.TemporaryDirectory(prefix='av-memory-reliability-')
-    try:
-        yield holder.name
-    finally:
-        try:
-            holder.cleanup()
-        except OSError:
-            deep = _extended(holder.name)
-            if deep == holder.name or len(holder.name) + RUN_RECORD_LENGTH < PLAIN_PATH_LIMIT:
-                raise
-            shutil.rmtree(deep)
+    import vault_evidence as evidence
+    parent = Path(tempfile.gettempdir())
+    chosen = evidence.fs_path(parent / DEEPEST_RECORD).parents[len(DEEPEST_RECORD.parts) - 1]
+    with tempfile.TemporaryDirectory(prefix='av-memory-reliability-',
+                                     dir=None if chosen == parent else str(chosen)) as name:
+        yield str(evidence.plain_path(Path(name)))
 
 
 def evaluate_reliability():
