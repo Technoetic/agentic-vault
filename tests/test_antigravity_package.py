@@ -11,27 +11,40 @@ checkout is never written. While `hooks/antigravity_hook.py` does not exist yet
 in the checkout, the copy gets a stand-in file marked "P2 test fixture"; the
 generator itself refuses to build without that module. The sync test compares a
 committed `antigravity/` folder with a fresh build once the folder exists.
+
+On Windows without long-path support a path of 260 characters or more is reached
+only in its extended-length form. The generator takes that form for a folder it
+reads or writes when the folder and the longest path below it reach 240
+characters, and for nothing else. The fixtures give the generator plain paths
+and read, write and remove their own deep folders through `tests/_winfs.py`.
 """
 from __future__ import annotations
 
+import functools
 import importlib.util
 import json
 import os
 import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import unquote
 
 try:
     from _git_env import git_environment
 except ImportError:  # pragma: no cover - imported as tests.test_antigravity_package
     from tests._git_env import git_environment
+try:
+    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+except ImportError:  # pragma: no cover - imported as tests.test_antigravity_package
+    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +127,11 @@ BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".pdf", ".z
 # The copied trees whose git mode (100644 or 100755) the package copy keeps.
 COPIED_PREFIXES = ("assets/", "skills/agentic-vault/scripts/", "hooks/")
 README_UNCONFIRMED = ("실제 agy 대화 세션으로는 확인하지 않았다", "not yet confirmed in a real agy conversation")
+WINDOWS = os.name == "nt"
+PREFIX = "\\\\?\\"  # starts the extended-length form of a Windows path
+# Room for the longest path inside a generated package, its leading separator included (59 characters
+# today; test_layout_is_exact fails when a path outgrows the room).
+PACKAGE_ROOM = 100
 
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 HEADING = re.compile(r"^(#{1,6})(?:[ \t]|$)")
@@ -145,21 +163,83 @@ def _ignore_root_extras(root: Path):
     return ignore
 
 
+@functools.lru_cache(maxsize=None)
+def _checkout_room() -> int:
+    """Room for the longest path of a checkout copy below the copy's root, its leading separator included."""
+    ignore = _ignore_root_extras(ROOT)
+    longest = 0
+    for directory, dirnames, filenames in os.walk(ROOT):
+        skipped = ignore(directory, [*dirnames, *filenames])
+        dirnames[:] = [name for name in dirnames if name not in skipped]
+        for name in (*dirnames, *filenames):
+            if name not in skipped:
+                longest = max(longest, len(Path(directory, name).relative_to(ROOT).as_posix()))
+    return longest + 1
+
+
+def _deep(folder: Path) -> Path:
+    """A checkout copy (or a folder that holds one or a package directly) in the form its files are reached by.
+
+    The plain path while that path and the longest path of a checkout copy stay below the plain limit of
+    Windows (any default TEMP), else the extended-length form. The generator itself always gets plain paths.
+    """
+    return deep_path(folder, _checkout_room())
+
+
+def _class_folder(folder: Path) -> Path:
+    """The temporary folder of a test class in the form everything below it is reached by.
+
+    A checkout copy, or a package in a staging folder, lies up to two folders below it; with that room the
+    path stays plain under any default TEMP and takes the extended-length form under a long one.
+    """
+    return deep_path(folder, _checkout_room() + 40)
+
+
+def _remove_tree(folder: Path) -> None:
+    """Remove a fixture folder; errors are ignored, as shutil.rmtree(ignore_errors=True) did.
+
+    The read-only files git writes under .git/objects are made writable and removed again. A folder that
+    holds entries beyond the plain limit of Windows is given in its extended-length form.
+    """
+    def retry(function, path, _error) -> None:
+        if function in (os.unlink, os.rmdir):
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                function(path)
+            except OSError:
+                pass
+
+    # shutil.rmtree takes its error handler as onexc from Python 3.12 and as onerror before.
+    shutil.rmtree(folder, **{"onexc" if sys.version_info >= (3, 12) else "onerror": retry})
+
+
+def _load_generator(name: str):
+    """The generator as a module that is not registered in sys.modules."""
+    spec = importlib.util.spec_from_file_location(name, SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _copy_repo(dest: Path, *, minimal: bool = False) -> Path:
-    """Copy the checkout (no .git, no generated package) and supply the hook module stand-in if needed."""
+    """Copy the checkout (no .git, no generated package) and supply the hook module stand-in if needed.
+
+    Returns dest as it was given, the plain path the generator gets; the copy is written through _deep(dest).
+    """
+    target = _deep(dest)
     if minimal:
-        dest.mkdir(parents=True)
+        target.mkdir(parents=True)
         for name in (".claude-plugin", "commands", "skills", "assets", "hooks"):
-            shutil.copytree(ROOT / name, dest / name, ignore=_ignore_root_extras(ROOT / name))
-        docs = dest / "docs"
+            shutil.copytree(ROOT / name, target / name, ignore=_ignore_root_extras(ROOT / name))
+        docs = target / "docs"
         (docs / "security").mkdir(parents=True)
         for path in (ROOT / "docs").glob("*.md"):
             shutil.copy2(path, docs / path.name)
         for path in (ROOT / "docs" / "security").glob("*.md"):
             shutil.copy2(path, docs / "security" / path.name)
     else:
-        shutil.copytree(ROOT, dest, ignore=_ignore_root_extras(ROOT))
-    hook = dest / HOOK_MODULE
+        shutil.copytree(ROOT, target, ignore=_ignore_root_extras(ROOT))
+    hook = target / HOOK_MODULE
     if not hook.exists():
         hook.write_bytes(
             f'"""{FIXTURE_MARKER}: stands in for {HOOK_MODULE} until that module exists."""\n'.encode("utf-8"))
@@ -197,6 +277,7 @@ def _git_modes(repo: Path, environment: dict) -> dict[str, str] | None:
 
 
 def _tree(root: Path) -> dict[str, bytes]:
+    root = deep_path(root, PACKAGE_ROOM)  # a package under a long TEMP holds files beyond the plain limit
     files: dict[str, bytes] = {}
     for directory, dirnames, filenames in os.walk(root):
         dirnames.sort()
@@ -336,7 +417,7 @@ class PackageBuildTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        shutil.rmtree(cls.temp, ignore_errors=True)
+        _remove_tree(_class_folder(cls.temp))
 
     def setUp(self) -> None:
         for run in self.runs:
@@ -384,6 +465,7 @@ class PackageBuildTests(unittest.TestCase):
                  and not path.startswith(("skills/agentic-vault/references/", "skills/agentic-vault/scripts/"))}
         self.assertEqual(extra, {"skills/vault-init/references/claude-code-hooks.md",
                                  "skills/vault-upgrade/references/helper-bundle.md"})
+        self.assertLess(max(map(len, self.files)) + 1, PACKAGE_ROOM, "raise PACKAGE_ROOM")
         for path in self.files:
             with self.subTest(path=path):
                 self.assertNotIn("__pycache__", path)
@@ -619,7 +701,8 @@ class PackageBuildTests(unittest.TestCase):
                     self.assertNotIn("$ARGUMENTS", text)
 
     def test_relative_links_resolve_inside_the_package(self) -> None:
-        package = self.out.resolve()
+        out = deep_path(self.out, PACKAGE_ROOM)
+        package = out.resolve()
         checked = 0
         for path, text in self.markdown().items():
             for target in _link_targets(text):
@@ -627,7 +710,7 @@ class PackageBuildTests(unittest.TestCase):
                     continue
                 checked += 1
                 with self.subTest(path=path, target=target):
-                    resolved = (self.out / posixpath.dirname(path) / unquote(target.split("#", 1)[0])).resolve()
+                    resolved = (out / posixpath.dirname(path) / unquote(target.split("#", 1)[0])).resolve()
                     self.assertTrue(resolved.exists(), target)
                     resolved.relative_to(package)
         self.assertGreater(checked, 100)
@@ -674,6 +757,7 @@ class PackageBuildTests(unittest.TestCase):
                         self.assertFalse(joined.startswith(f"docs/{folder}"), (path, target))
 
     def test_plugin_root_paths_exist_in_the_package(self) -> None:
+        out = deep_path(self.out, PACKAGE_ROOM)
         checked = 0
         for path, text in self.markdown().items():
             if not path.startswith("skills/"):
@@ -684,7 +768,7 @@ class PackageBuildTests(unittest.TestCase):
                     continue
                 checked += 1
                 with self.subTest(path=path, target=relative):
-                    self.assertTrue((self.out / relative).exists(), relative)
+                    self.assertTrue((out / relative).exists(), relative)
         self.assertGreater(checked, 20)
 
 
@@ -699,12 +783,12 @@ class GeneratorRefusalTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        shutil.rmtree(cls.temp, ignore_errors=True)
+        _remove_tree(_class_folder(cls.temp))
 
     def variant(self) -> Path:
         type(self).count += 1
         repo = self.temp / f"variant{self.count}"
-        shutil.copytree(self.base, repo)
+        shutil.copytree(_deep(self.base), _deep(repo))
         return repo
 
     def assertRefused(self, result: subprocess.CompletedProcess, *fragments: str) -> None:
@@ -744,7 +828,7 @@ class GeneratorRefusalTests(unittest.TestCase):
 
     def test_leftover_claude_placeholder_fails(self) -> None:
         repo = self.variant()
-        (repo / "skills/agentic-vault/scripts/resources/notes.md").write_bytes(
+        (_deep(repo) / "skills/agentic-vault/scripts/resources/notes.md").write_bytes(
             b"Run ${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\n")
         out = repo.parent / f"{repo.name}-out"
         self.assertRefused(_run("build", "--repo", str(repo), "--out", str(out)),
@@ -862,6 +946,14 @@ class GeneratorRefusalTests(unittest.TestCase):
         self.assertEqual(code, 0, lines)
         self.assertTrue(lines[-1].startswith("git modes: not compared ("), lines)
         self.assertIn("is outside the git work tree", lines[-1])
+        # Named in the extended-length form of Windows, the repository and its package folder are compared
+        # in the same git index, and every line still shows plain paths (git itself gets the plain folder).
+        code, named_plain = check()
+        self.assertEqual(code, 0, named_plain)
+        self.assertTrue(named_plain[-1].startswith("git modes: compared "), named_plain)
+        named = extended(repo.resolve())
+        code, lines = check("--repo", str(named), "--against", str(named / "antigravity"))
+        self.assertEqual((code, lines), (0, named_plain))
 
     def test_build_replaces_only_a_previous_package(self) -> None:
         repo = self.variant()
@@ -919,6 +1011,292 @@ class GeneratorRefusalTests(unittest.TestCase):
     def test_usage_errors_exit_2(self) -> None:
         self.assertEqual(_run().returncode, 2)
         self.assertEqual(_run("publish").returncode, 2)
+
+
+class LongPathHelperTests(unittest.TestCase):
+    """The helper block the standalone tools share, and what the generator measures for it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.module = _load_generator("antigravity_package_long_paths")
+
+    def test_extended_plain_and_workspace_forms(self) -> None:
+        module = self.module
+        self.assertEqual(module.PLAIN_PATH_LIMIT, PLAIN_PATH_LIMIT)
+        relative = Path("antigravity") / "plugin.json"
+        for convert in (module._extended, module._plain):
+            self.assertEqual(str(convert(relative)), str(relative))
+        self.assertEqual(str(module._workspace(relative, 10_000)), str(relative))
+        if WINDOWS:
+            drive, share = "C:\\t\\out", "\\\\server\\share\\out"
+            self.assertEqual(str(module._extended(drive)), PREFIX + drive)
+            self.assertEqual(str(module._extended(share)), PREFIX + "UNC\\server\\share\\out")
+            self.assertEqual(str(module._extended(PREFIX + drive)), PREFIX + drive)
+            self.assertEqual(str(module._plain(PREFIX + drive)), drive)
+            self.assertEqual(str(module._plain(PREFIX + "UNC\\server\\share\\out")), share)
+            self.assertEqual(str(module._plain(drive)), drive)
+            # The form changes exactly where the root and the reserve reach the limit together.
+            reserve = PLAIN_PATH_LIMIT - len(drive)
+            self.assertEqual(str(module._workspace(drive, reserve - 1)), drive)
+            self.assertEqual(str(module._workspace(drive, reserve)), PREFIX + drive)
+            self.assertEqual(str(module._workspace(Path(PREFIX + drive), 0)), PREFIX + drive)
+        else:
+            absolute = Path("/t/out")
+            for converted in (module._extended(absolute), module._plain(absolute),
+                              module._workspace(absolute, 10_000)):
+                self.assertEqual(converted, absolute)
+        for converted in (module._extended("x"), module._plain("x"), module._workspace("x", 0)):
+            self.assertIsInstance(converted, Path)
+
+    def test_messages_name_paths_without_the_extended_prefix(self) -> None:
+        plain_text = self.module._plain_text
+        self.assertEqual(plain_text("differs: hooks.json"), "differs: hooks.json")
+        if WINDOWS:
+            path = "C:\\t\\out"
+            error = FileNotFoundError(2, "No such file or directory", PREFIX + path)
+            cases = {
+                PREFIX + path: path,
+                # An OSError quotes its file name with repr; the doubled backslashes go with the prefix.
+                str(error): str(FileNotFoundError(2, "No such file or directory", path)),
+                PREFIX + "UNC\\server\\share\\out": "\\\\server\\share\\out",
+                repr(PREFIX + "UNC\\server\\share\\out"): repr("\\\\server\\share\\out"),
+                f"refusing to replace {PREFIX}{path}: it is not a folder": f"refusing to replace {path}: it is "
+                                                                         "not a folder",
+            }
+            for text, expected in cases.items():
+                with self.subTest(text=text):
+                    self.assertEqual(plain_text(text), expected)
+        else:
+            text = "cannot read " + PREFIX + "C:\\t\\out"
+            self.assertEqual(plain_text(text), text)
+
+    def test_the_longest_path_below_a_folder_is_measured_from_names(self) -> None:
+        module = self.module
+        self.assertEqual(module._longest([]), 0)
+        self.assertEqual(module._longest({"plugin.json": b"", "skills/vault-day/SKILL.md": b""}),
+                         len("skills/vault-day/SKILL.md"))
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve() / "f"
+            self.assertEqual(module._longest_below(folder), 0)
+            cache = folder / "a" / "__pycache__"
+            for made in (folder / "a" / "bb", cache, folder / "empty-folder"):
+                made.mkdir(parents=True)
+            (folder / "a" / "bb" / "c.txt").write_bytes(b"")
+            (cache / "module.cpython-312.pyc").write_bytes(b"")
+            # A folder without files counts; a cache folder counts only when nothing is left out.
+            self.assertEqual(module._longest_below(folder), len("empty-folder"))
+            self.assertEqual(module._longest_below(folder / "a"), len("bb/c.txt"))
+            self.assertEqual(module._longest_below(folder, frozenset()),
+                             len("a/__pycache__/module.cpython-312.pyc"))
+            self.assertEqual(module._longest_below(folder / "a" / "bb" / "c.txt"), 0)
+            # A folder is read as it was given (a relative one too) until its longest path reaches the
+            # limit; from there Windows reads it through the extended-length form.
+            reach = len(str(folder)) + 1 + len("empty-folder")
+            relative = Path("no-such-package-folder")
+            with patch.object(module, "PLAIN_PATH_LIMIT", max(reach, len(os.path.abspath(relative))) + 2):
+                self.assertIs(module._reachable(folder), folder)
+                self.assertIs(module._reachable(relative), relative)
+            with patch.object(module, "PLAIN_PATH_LIMIT", reach):
+                reached = module._reachable(folder)
+            self.assertEqual(str(reached), (PREFIX if WINDOWS else "") + str(folder))
+            if not WINDOWS:
+                self.assertIs(reached, folder)
+
+
+class DeepFolderTests(unittest.TestCase):
+    """The generator on folders that reach the plain path limit of Windows whatever the length of TEMP is.
+
+    `deep` is DEEP_LENGTH characters long (longer when TEMP leaves no room for that): a package, a repository
+    copy or a temporary folder below it holds files beyond 260 characters, which Windows without long-path
+    support reaches only through the extended-length form. The generator gets plain paths throughout.
+    Other systems have no such limit and no such form: there these are ordinary runs in a deep folder.
+    """
+
+    DEEP_LENGTH = 200
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.module = _load_generator("antigravity_package_deep_folders")
+        cls.temp = Path(tempfile.mkdtemp(prefix="av-agy-deep-")).resolve()
+        cls.base = _copy_repo(cls.temp / "base", minimal=True)
+        cls.files = cls.module.build_package(cls.base).files
+        cls.longest = max(map(len, cls.files))
+        cls.deep = cls.temp / ("d" * max(1, cls.DEEP_LENGTH - len(str(cls.temp)) - 1))
+        cls.deep.mkdir()
+        cls.count = 0
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        _remove_tree(extended(cls.temp))
+
+    def folder(self) -> Path:
+        """A new folder name below `deep` (the plain path; nothing is created)."""
+        type(self).count += 1
+        return self.deep / f"t{self.count}"
+
+    def assert_beyond_the_plain_limit(self, package: Path) -> None:
+        self.assertGreaterEqual(len(str(package)), self.DEEP_LENGTH)
+        self.assertGreater(len(str(package)) + 1 + self.longest, 260)
+
+    def test_a_package_beyond_the_plain_limit_is_written_checked_and_replaced(self) -> None:
+        out = self.folder() / "antigravity"
+        self.assert_beyond_the_plain_limit(out)
+        built = _run("build", "--repo", str(self.base), "--out", str(out))
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        self.assertEqual(built.stderr, "")
+        # The folder is named in its plain form.
+        self.assertTrue(built.stdout.endswith(f" docs -> {out}\n"), built.stdout)
+        self.assertEqual(_tree(out), self.files)
+        self.assertEqual([entry.name for entry in out.parent.iterdir()], ["antigravity"])
+        same = _run("check", "--repo", str(self.base), "--against", str(out))
+        self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+        self.assertEqual(same.stdout.splitlines()[0], f"identical: {len(self.files)} files in {out}")
+        # A stale file and a cache beyond the limit: check sees the file, and a second build replaces the
+        # folder with everything in it and leaves no other folder next to it.
+        resources = extended(out) / "skills" / "agentic-vault" / "scripts" / "resources"
+        (resources / "a stale file that is generated no longer.json").write_bytes(b"{}")
+        cache = resources.parent / "__pycache__"
+        cache.mkdir()
+        (cache / "vault_instruction_budget.cpython-312.pyc").write_bytes(b"\0cache")
+        different = _run("check", "--repo", str(self.base), "--against", str(out))
+        self.assertEqual(different.returncode, 1, different.stdout + different.stderr)
+        self.assertEqual(different.stdout.splitlines()[:2], [
+            "only in package folder: skills/agentic-vault/scripts/resources/a stale file that is generated no "
+            "longer.json",
+            f"1 difference(s) between a fresh build and {out}"])
+        again = _run("build", "--repo", str(self.base), "--out", str(out))
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertEqual(_tree(out), self.files)
+        self.assertFalse(cache.exists())
+        self.assertEqual([entry.name for entry in out.parent.iterdir()], ["antigravity"])
+
+    def test_a_foreign_folder_beyond_the_plain_limit_is_not_replaced(self) -> None:
+        folder = self.folder() / "antigravity"
+        kept = extended(folder) / ("k" * 60) / "keep.txt"
+        kept.parent.mkdir(parents=True)
+        kept.write_bytes(b"keep\n")
+        self.assertGreater(len(str(plain(kept))), 260)
+        refused = _run("build", "--repo", str(self.base), "--out", str(folder))
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertEqual(refused.stderr, (
+            f"build_antigravity_package: error: refusing to replace {folder}: only an absent folder or an earlier "
+            'generated package (plugin.json with name "agentic-vault" and the Antigravity $schema) is replaced\n'))
+        self.assertEqual(kept.read_bytes(), b"keep\n")
+        self.assertEqual([entry.name for entry in folder.parent.iterdir()], ["antigravity"])
+        nowhere = folder.parent / "nowhere"
+        missing = _run("check", "--repo", str(self.base), "--against", str(nowhere))
+        self.assertEqual(missing.returncode, 1, missing.stdout + missing.stderr)
+        self.assertEqual(missing.stderr, f"build_antigravity_package: error: package folder not found: {nowhere}\n")
+
+    def test_a_repository_beyond_the_plain_limit_builds_the_same_package(self) -> None:
+        repo = self.folder() / "repo"
+        self.assert_beyond_the_plain_limit(repo)  # the copied sources keep their paths in the package
+        shutil.copytree(_deep(self.base), extended(repo))
+        out = self.temp / "from a deep repository" / "antigravity"
+        built = _run("build", "--repo", str(repo), "--out", str(out))
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        self.assertEqual(_tree(out), self.files)
+        self.assertEqual(self.module.build_package(repo).files, self.files)
+        # The default output and package folder lie inside the repository.
+        inside = _run("build", "--repo", str(repo))
+        self.assertEqual(inside.returncode, 0, inside.stdout + inside.stderr)
+        self.assertTrue(inside.stdout.endswith(f" docs -> {repo / 'antigravity'}\n"), inside.stdout)
+        same = _run("check", "--repo", str(repo))
+        self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+        self.assertEqual(same.stdout.splitlines()[0],
+                         f"identical: {len(self.files)} files in {repo / 'antigravity'}")
+        # A file the generator cannot read is named in its plain form.
+        manifest = repo / ".claude-plugin" / "plugin.json"
+        extended(manifest).unlink()
+        unreadable = _run("check", "--repo", str(repo))
+        self.assertEqual(unreadable.returncode, 1, unreadable.stdout + unreadable.stderr)
+        self.assertEqual(unreadable.stderr, "build_antigravity_package: error: .claude-plugin/plugin.json cannot be "
+                                            f"read: [Errno 2] No such file or directory: {str(manifest)!r}\n")
+
+    def test_check_builds_in_a_long_temporary_folder_and_leaves_it_empty(self) -> None:
+        module = self.module
+        out = self.temp / "checked" / "antigravity"
+        module.write_package(self.files, out)
+        temporary = self.folder()
+        temporary.mkdir()
+        with patch.object(tempfile, "tempdir", str(temporary)), \
+             patch.object(module, "_write_tree", wraps=module._write_tree) as write:
+            self.assertEqual(module.compare(self.files, out), [])
+        fresh = write.call_args.args[1]
+        self.assertEqual(plain(fresh).parent.parent, temporary)
+        self.assertEqual(fresh.name, "antigravity")
+        self.assert_beyond_the_plain_limit(plain(fresh))
+        self.assertEqual(str(fresh).startswith(PREFIX), WINDOWS)
+        self.assertEqual(list(temporary.iterdir()), [])
+        # A difference is found there too, and an error while the fresh build is read leaves nothing either.
+        changed = dict(self.files, **{"hooks.json": self.files["hooks.json"] + b" "})
+        with patch.object(tempfile, "tempdir", str(temporary)):
+            self.assertEqual(module.compare(changed, out), ["differs: hooks.json"])
+        with patch.object(tempfile, "tempdir", str(temporary)), \
+             patch.object(module, "_read_tree", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            module.compare(self.files, out)
+        self.assertEqual(list(temporary.iterdir()), [])
+
+    def test_reserves_follow_the_trees_that_are_written_and_read(self) -> None:
+        module = self.module
+
+        def reserved(call, *args) -> list[tuple[str, int]]:
+            """(folder name without tempfile's eight characters, reserve) of every _workspace call."""
+            with patch.object(module, "_workspace", wraps=module._workspace) as workspace:
+                call(*args)
+            names = [plain(found.args[0]).name for found in workspace.call_args_list]
+            return [(name[:-8] if name.startswith((".", "agentic-vault-")) else name, found.args[1])
+                    for name, found in zip(names, workspace.call_args_list)]
+
+        manifest = json.dumps({"$schema": SCHEMA_URL, "name": "agentic-vault"}).encode("utf-8")
+        files = {"plugin.json": manifest, "skills/vault-day/SKILL.md": b"body\n"}
+        new = 1 + len("skills/vault-day/SKILL.md")
+        out = self.temp / "reserves" / "antigravity"
+        # An absent output folder: the folder (looked at, then measured: nothing there) and the staging
+        # folder hold the new files.
+        self.assertEqual(reserved(module.write_package, files, out),
+                         [("antigravity", new), ("antigravity", new), (".antigravity-build-", new)])
+        # A replaced folder: `previous` holds what was there, a cache included; out holds both in turn.
+        old = 1 + len("skills/vault-day/__pycache__/a module with a long name.cpython-312.pyc")
+        self.assertGreater(old, new)
+        cache = deep_path(out, old) / "skills" / "vault-day" / "__pycache__"
+        cache.mkdir()
+        (cache / "a module with a long name.cpython-312.pyc").write_bytes(b"\0")
+        self.assertEqual(reserved(module.write_package, files, out), [
+            ("antigravity", new), ("antigravity", old), (".antigravity-build-", new), (".antigravity-previous-", old)])
+        self.assertFalse(cache.exists())
+        self.assertEqual(_tree(out), files)
+        # A folder that is refused is not listed at all.
+        foreign = out.parent / "foreign"
+        foreign.mkdir()
+        (foreign / "keep.txt").write_bytes(b"keep\n")
+        with patch.object(module, "_longest_below", wraps=module._longest_below) as measured, \
+             self.assertRaises(module.BuildError):
+            module.write_package(files, foreign)
+        measured.assert_not_called()
+        # check: the package folder as it is read, then a separator, PACKAGE_FOLDER, a separator and the
+        # longest fresh file below the temporary folder.
+        self.assertEqual(reserved(module.compare, files, out), [
+            ("antigravity", new),
+            ("agentic-vault-antigravity-check-", len("/antigravity/") + len("skills/vault-day/SKILL.md"))])
+        # build: the longest path below the folders the sources come from (the reduced copy holds no other
+        # folder), then every link target outside the package as the path it is.
+        longest = 0
+        for directory, dirnames, filenames in os.walk(_deep(self.base)):
+            for name in (*dirnames, *filenames):
+                longest = max(longest, len(Path(directory, name).relative_to(_deep(self.base)).as_posix()))
+        self.assertEqual(sorted(entry.name for entry in self.base.iterdir()), sorted(module.SOURCE_FOLDERS))
+        build = reserved(module.build_package, self.base)
+        self.assertEqual(build[0], ("base", 1 + longest))
+        self.assertGreater(len(build), 50)
+        self.assertEqual({reserve for _name, reserve in build[1:]}, {0})
+        # Only those folders are listed, so a folder that is no repository is refused at once.
+        with patch.object(module, "_longest_below", wraps=module._longest_below) as measured, \
+             self.assertRaises(module.BuildError) as refused:
+            module.build_package(self.temp)
+        self.assertEqual([listed.args[0] for listed in measured.call_args_list],
+                         [self.temp / top for top in module.SOURCE_FOLDERS])
+        self.assertIn(".claude-plugin/plugin.json cannot be read", str(refused.exception))
 
 
 class MarkdownScanningTests(unittest.TestCase):
