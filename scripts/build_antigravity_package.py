@@ -24,6 +24,12 @@ index mode of every copied file with its source (the git hooks are 100755), name
 `git update-index --chmod` that fixes a difference and exits 1 on any. A file the index does not hold yet
 is not compared, and a folder outside the work tree (a release ZIP) is compared by bytes only; the last
 line of `check` says which. Standard library only.
+
+On Windows without long-path support a path of 260 characters or more is reached only in its
+extended-length form. A folder this script reads or writes (the repository, the package folder, the
+staging folders next to the output and the temporary folder of `check`) takes that form when the folder
+and the longest path below it reach 240 characters together; every shorter folder is used as before, and
+messages always name plain paths. git is always given the plain folder.
 """
 from __future__ import annotations
 
@@ -66,6 +72,8 @@ HOOK_MODULE = "hooks/antigravity_hook.py"
 HOOK_RUNNERS = ("sh ./hooks/run_python_hook.sh", "py -3", "python")
 HOOK_EVENTS = (("SessionStart", "session_start.py", 30), ("Stop", "session_checkpoint.py", 15))
 SHARED_SKILLS = ("agentic-vault", "webapp-principles")
+# Every file build_package reads lies below one of these folders (targets of links are only looked up).
+SOURCE_FOLDERS = (".claude-plugin", "commands", "hooks", "skills", "assets", "docs")
 PLACEHOLDERS = (("${CLAUDE_PLUGIN_ROOT}", "<PLUGIN_ROOT>"), ("$ARGUMENTS", "<ARGUMENTS>"))
 DOC_PATH = re.compile(r"docs/(?:security/)?[^/]+\.md")
 EXCLUDED_DOC_FOLDERS = frozenset({"releases", "verification", "superpowers", "plans", "screenshots"})
@@ -211,6 +219,78 @@ class Package:
         self.docs = docs
         self.github_missing = github_missing
         self.copied = list(copied or [])
+
+
+# --- long-path helpers (keep this block identical in the standalone tools that carry it) ---
+PLAIN_PATH_LIMIT = 240  # the margin below Windows MAX_PATH (260) that vault_evidence.fs_path uses
+
+
+def _extended(path) -> Path:
+    """The Windows extended-length form of an absolute path; any other path, and any other system, unchanged."""
+    text = str(path)
+    if os.name != "nt" or text.startswith("\\\\?\\"):
+        return Path(path)
+    if re.match(r"^[A-Za-z]:\\", text):
+        return Path("\\\\?\\" + text)
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path(path)
+
+
+def _plain(path) -> Path:
+    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    text = str(path)
+    if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + text[8:])
+    if os.name == "nt" and text.startswith("\\\\?\\"):
+        return Path(text[4:])
+    return Path(path)
+
+
+def _workspace(root, reserve: int) -> Path:
+    """root, in extended-length form when root plus `reserve` more characters reaches the plain limit."""
+    return _extended(root) if len(str(root)) + reserve >= PLAIN_PATH_LIMIT else Path(root)
+# --- end of long-path helpers ---
+
+
+# The extended-length prefix inside a message: as it is, or with every backslash doubled once or more
+# (an OSError quotes its file name with repr, and a shutil.Error quotes such messages again).
+EXTENDED_PREFIX = re.compile(r"(\\+)\1\?\1(UNC\1)?")
+
+
+def _plain_text(text: str) -> str:
+    """text with the paths it names in their plain form (no extended-length prefix)."""
+    if os.name != "nt":
+        return text
+    return EXTENDED_PREFIX.sub(lambda found: found.group(1) * 2 if found.group(2) else "", text)
+
+
+def _longest(relatives: Iterable[str]) -> int:
+    """Characters of the longest of some relative paths; 0 when there is none."""
+    return max(map(len, relatives), default=0)
+
+
+def _longest_below(folder: Path, skipped: frozenset[str] = SKIPPED_DIRS) -> int:
+    """Characters of the longest relative path of an entry below folder (`skipped` folder names left out).
+
+    0 when folder has no entry or is not a folder. The names are listed through the form folder is given
+    in: an entry too deep to be listed through a plain name lies below one that already reaches the plain
+    limit, so the result still tells when the extended-length form is needed.
+    """
+    base = len(os.path.join(folder, ""))
+    longest = 0
+    for directory, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [name for name in dirnames if name not in skipped]
+        offset = len(os.path.join(directory, "")) - base
+        longest = max([longest, *(offset + len(name) for name in (*dirnames, *filenames))])
+    return longest
+
+
+def _reachable(folder: Path) -> Path:
+    """folder as given, or its absolute extended-length form when its longest path reaches the plain limit."""
+    absolute = Path(os.path.abspath(folder))
+    deep = _workspace(absolute, 1 + _longest_below(folder))
+    return folder if deep == absolute else deep
 
 
 # --- Markdown scanning -------------------------------------------------------------------------------
@@ -617,7 +697,8 @@ class _Linker:
                 new = f"{REPO_URL}/tree/v{self.version}{fragment}"
                 counts["github"] += 1
             else:
-                on_disk = self.repo / resolved
+                # A target outside the source folders may lie deeper than they do (see build_package).
+                on_disk = _workspace(self.repo / resolved, 0)
                 kind = "tree" if folder or on_disk.is_dir() else "blob"
                 if not on_disk.exists():
                     self.missing.add(f"{source}: {target}")
@@ -770,10 +851,14 @@ def _reference(move: SectionMove, sections: list[str], linker: _Linker) -> str:
 def build_package(repo: Path) -> Package:
     """Generate every package file in memory; raise BuildError listing each problem."""
     repo = Path(repo).resolve()
+    # A repository in a deep folder (a copy under a long TEMP, for one) is read through the extended-length
+    # form: when its root, a separator, one of SOURCE_FOLDERS, a separator and the longest path below that
+    # folder reach the plain limit together. Any other repository is read as before.
+    repo = _workspace(repo, max(len(top) + 2 + _longest_below(repo / top) for top in SOURCE_FOLDERS))
     try:
         claude = json.loads((repo / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as error:
-        raise BuildError(f".claude-plugin/plugin.json cannot be read: {error}") from None
+        raise BuildError(f".claude-plugin/plugin.json cannot be read: {_plain_text(str(error))}") from None
     version = claude.get("version") if isinstance(claude, dict) else None
     if not isinstance(version, str) or not version:
         raise BuildError(".claude-plugin/plugin.json has no version")
@@ -918,7 +1003,7 @@ def _write_tree(files: dict[str, bytes], root: Path) -> None:
 
 
 def _read_tree(root: Path) -> dict[str, bytes]:
-    return {relative: (root / relative).read_bytes() for relative in _walk(root, str(root))}
+    return {relative: (root / relative).read_bytes() for relative in _walk(root, str(_plain(root)))}
 
 
 def _is_generated_package(folder: Path) -> bool:
@@ -935,18 +1020,27 @@ def _is_generated_package(folder: Path) -> bool:
 def write_package(files: dict[str, bytes], out: Path) -> None:
     """Write the package to out, replacing it only when it is absent or an earlier generated package."""
     out = Path(os.path.abspath(out))
+    # Three folders hold a package, each as deep as the longest path inside it: the staging folder (the new
+    # files), `previous` (what out held before, caches included) and out itself (first one, then the other).
+    # Each takes the extended-length form when its own name and that depth reach the plain limit together;
+    # the two temporary names are longer than out's, so they can take it while out stays plain. What out
+    # held is measured only after out is known to be absent or a package, never in a folder that is refused.
+    new = 1 + _longest(files)
+    out = _workspace(out, new)
     if out.exists() or out.is_symlink():
         if out.is_symlink() or not out.is_dir():
-            raise BuildError(f"refusing to replace {out}: it is not a folder")
+            raise BuildError(f"refusing to replace {_plain(out)}: it is not a folder")
         if not _is_generated_package(out):
-            raise BuildError(f"refusing to replace {out}: only an absent folder or an earlier generated package "
+            raise BuildError(f"refusing to replace {_plain(out)}: only an absent folder or an earlier generated package "
                              f"(plugin.json with name \"{PACKAGE_NAME}\" and the Antigravity $schema) is replaced")
+    old = 1 + _longest_below(out, frozenset())
+    out = _workspace(out, max(new, old))
     out.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".{out.name}-build-", dir=out.parent))
+    staging = _workspace(tempfile.mkdtemp(prefix=f".{out.name}-build-", dir=out.parent), new)
     try:
         _write_tree(files, staging)
         if out.exists():
-            previous = Path(tempfile.mkdtemp(prefix=f".{out.name}-previous-", dir=out.parent))
+            previous = _workspace(tempfile.mkdtemp(prefix=f".{out.name}-previous-", dir=out.parent), old)
             previous.rmdir()
             os.replace(out, previous)
             try:
@@ -964,13 +1058,22 @@ def write_package(files: dict[str, bytes], out: Path) -> None:
 
 def compare(files: dict[str, bytes], against: Path) -> list[str]:
     """Build into a temporary folder and list every difference with the package folder against."""
-    if not against.is_dir():
-        raise BuildError(f"package folder not found: {against}")
+    folder = _reachable(against)
+    if not folder.is_dir():
+        raise BuildError(f"package folder not found: {_plain(against)}")
+    # Below the temporary folder the fresh build adds a separator, PACKAGE_FOLDER, a separator and its
+    # longest path; a temporary folder that reaches the plain limit with them is used, and removed, through
+    # the extended-length form (the context manager then finds nothing left under the plain name).
     with tempfile.TemporaryDirectory(prefix="agentic-vault-antigravity-check-") as temporary:
-        fresh = Path(temporary) / PACKAGE_FOLDER
-        _write_tree(files, fresh)
-        built = _read_tree(fresh)
-    existing = _read_tree(against)
+        root = _workspace(temporary, len(PACKAGE_FOLDER) + 2 + _longest(files))
+        try:
+            fresh = root / PACKAGE_FOLDER
+            _write_tree(files, fresh)
+            built = _read_tree(fresh)
+        finally:
+            if root != Path(temporary):
+                shutil.rmtree(root)
+    existing = _read_tree(folder)
     differences = []
     for relative in sorted(set(built) | set(existing)):
         if relative not in existing:
@@ -983,11 +1086,15 @@ def compare(files: dict[str, bytes], against: Path) -> list[str]:
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess | None:
-    """Run git in cwd with no terminal input; None when git cannot be started or does not answer."""
+    """Run git in cwd with no terminal input; None when git cannot be started or does not answer.
+
+    git changes into cwd, and a process cannot work in a folder that is reached only through the
+    extended-length form, so git always gets the plain form of cwd.
+    """
     environment = {key: value for key, value in os.environ.items()
                    if key.upper() not in GIT_REPOSITORY_VARIABLES}
     try:
-        return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, env=environment,
+        return subprocess.run(["git", "-C", str(_plain(cwd)), *args], capture_output=True, env=environment,
                               stdin=subprocess.DEVNULL, timeout=GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1005,6 +1112,8 @@ def mode_differences(copied: Iterable[str], repo: Path, against: Path) -> tuple[
     ZIP or a folder elsewhere is compared by bytes alone. A copy or source that the git index does not hold
     (a new file not added yet) is skipped. Raises BuildError when git fails inside that work tree.
     """
+    # Only names are compared here (git reads its index, not the files), so the plain forms do.
+    repo, against = _plain(repo), _plain_text(os.path.abspath(against))
     found = _git(repo, "rev-parse", "--show-toplevel")
     if found is None:
         return [], "git modes: not compared (git is not available)"
@@ -1013,9 +1122,9 @@ def mode_differences(copied: Iterable[str], repo: Path, against: Path) -> tuple[
     top = Path(found.stdout.decode("utf-8", errors="replace").strip()).resolve()
     try:
         repo_prefix = repo.resolve().relative_to(top).as_posix()
-        against_prefix = Path(os.path.abspath(against)).resolve().relative_to(top).as_posix()
+        against_prefix = Path(against).resolve().relative_to(top).as_posix()
     except ValueError:
-        return [], f"git modes: not compared ({os.path.abspath(against)} is outside the git work tree {top})"
+        return [], f"git modes: not compared ({against} is outside the git work tree {top})"
     repo_prefix = "" if repo_prefix == "." else repo_prefix
     if against_prefix in (".", repo_prefix):
         return [], "git modes: not compared (the package folder is the repository itself)"
@@ -1061,7 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--repo", type=Path, default=ROOT, help="repository root (default: this checkout)")
     check.add_argument("--against", type=Path, help="package folder (default: <repo>/antigravity)")
     args = parser.parse_args(argv)
-    repo = args.repo.resolve()
+    repo = _plain(args.repo.resolve())
     try:
         package = build_package(repo)
         if args.command == "build":
@@ -1069,26 +1178,26 @@ def main(argv: list[str] | None = None) -> int:
             write_package(package.files, out)
             skills = sum(1 for relative in package.files if re.fullmatch(r"skills/[^/]+/SKILL\.md", relative))
             print(f"built Antigravity package v{package.version}: {len(package.files)} files, {skills} skills, "
-                  f"{len(package.docs)} docs -> {os.path.abspath(out)}")
+                  f"{len(package.docs)} docs -> {_plain_text(os.path.abspath(out))}")
             return 0
         against = args.against if args.against is not None else repo / PACKAGE_FOLDER
         differences = compare(package.files, against)
         mode_lines, mode_note = mode_differences(package.copied, repo, against)
         differences += mode_lines
     except BuildError as error:
-        for line in str(error).splitlines():
+        for line in _plain_text(str(error)).splitlines():
             print(f"build_antigravity_package: error: {line}", file=sys.stderr)
         return 1
     except OSError as error:
-        print(f"build_antigravity_package: error: {error}", file=sys.stderr)
+        print(f"build_antigravity_package: error: {_plain_text(str(error))}", file=sys.stderr)
         return 1
     for line in differences:
         print(line)
     if differences:
-        print(f"{len(differences)} difference(s) between a fresh build and {os.path.abspath(against)}")
+        print(f"{len(differences)} difference(s) between a fresh build and {_plain_text(os.path.abspath(against))}")
         print(mode_note)
         return 1
-    print(f"identical: {len(package.files)} files in {os.path.abspath(against)}")
+    print(f"identical: {len(package.files)} files in {_plain_text(os.path.abspath(against))}")
     print(mode_note)
     return 0
 
