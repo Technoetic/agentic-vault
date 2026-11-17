@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - package-style test runs
 
 WINDOWS = os.name == "nt"
 PREFIX = "\\\\?\\"
+ROOT = Path("C:\\t") if WINDOWS else Path("/t")  # a short absolute root for the string-only cases
 
 
 class ExtendedPathHelperTests(unittest.TestCase):
@@ -42,19 +43,17 @@ class ExtendedPathHelperTests(unittest.TestCase):
             self.assertEqual(plain(absolute), absolute)
 
     def test_deep_path_changes_nothing_below_the_limit(self) -> None:
-        root = Path(tempfile.gettempdir()).resolve()
-        short = root / "note.md"
+        short = ROOT / "note.md"
         self.assertLess(len(str(short)), PLAIN_PATH_LIMIT)
         self.assertEqual(str(deep_path(short)), str(short))
-        just_below = root / ("n" * (PLAIN_PATH_LIMIT - 1 - len(str(root)) - 1))
+        just_below = ROOT / ("n" * (PLAIN_PATH_LIMIT - 1 - len(str(ROOT)) - 1))
         self.assertEqual(len(str(just_below)), PLAIN_PATH_LIMIT - 1)
         self.assertEqual(str(deep_path(just_below)), str(just_below))
 
     def test_deep_path_switches_at_the_limit_and_counts_the_reserve(self) -> None:
-        root = Path(tempfile.gettempdir()).resolve()
-        at_limit = root / ("n" * (PLAIN_PATH_LIMIT - len(str(root)) - 1))
+        at_limit = ROOT / ("n" * (PLAIN_PATH_LIMIT - len(str(ROOT)) - 1))
         self.assertEqual(len(str(at_limit)), PLAIN_PATH_LIMIT)
-        short = root / "work"
+        short = ROOT / "work"
         reserve = PLAIN_PATH_LIMIT - len(str(short))
         if WINDOWS:
             self.assertEqual(str(deep_path(at_limit)), PREFIX + str(at_limit))
