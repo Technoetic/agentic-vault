@@ -14,6 +14,15 @@ import tempfile
 import unittest
 from unittest import mock
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
+# A receipt below the runtime folder can lie beyond the plain Windows path limit under a long
+# temporary folder. The runtime reaches it through vault_evidence.fs_path; these tests read, write
+# and tamper with it through deep_path, which leaves a path below the limit unchanged.
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 import vault_runs as runs
@@ -157,9 +166,9 @@ class VaultImprovementsTests(unittest.TestCase):
         runtime = self.vault / runs.RUNTIME_DIR
         for function, keys in ((improvements.inspect, INSPECT_KEYS), (improvements.compare, COMPARE_KEYS)):
             default = function(self.vault, plan_id)
-            files = {path.name: path.read_bytes() for path in runtime.iterdir()}
+            files = {path.name: deep_path(path).read_bytes() for path in runtime.iterdir()}
             opted = function(self.vault, plan_id, receipt_order=True)
-            self.assertEqual({path.name: path.read_bytes() for path in runtime.iterdir()}, files)
+            self.assertEqual({path.name: deep_path(path).read_bytes() for path in runtime.iterdir()}, files)
             self.assertEqual(set(default), keys)
             self.assertEqual([key for key in opted if key not in ORDER_KEYS], list(default))
             self.assertEqual({key: value for key, value in opted.items() if key not in ORDER_KEYS}, default)
@@ -172,9 +181,9 @@ class VaultImprovementsTests(unittest.TestCase):
 
     def test_prepare_reuses_immutable_plan_and_inspect_is_read_only(self):
         plan = self.plan()
-        before = (self.vault / plan['path']).read_bytes()
+        before = deep_path(self.vault / plan['path']).read_bytes()
         self.assertEqual(self.plan()['id'], plan['id'])
-        self.assertEqual(before, (self.vault / plan['path']).read_bytes())
+        self.assertEqual(before, deep_path(self.vault / plan['path']).read_bytes())
         files = set((self.vault / runs.RUNTIME_DIR).iterdir())
         inspected = improvements.inspect(self.vault, plan['id'])
         self.assertEqual(set((self.vault / runs.RUNTIME_DIR).iterdir()), files)
@@ -208,7 +217,7 @@ class VaultImprovementsTests(unittest.TestCase):
         for comparison, delta in zip(result['comparisons'], (0.2, 0.1, 0.5)):
             self.assertAlmostEqual(comparison['score_delta'], delta)
         for comparison in result['comparisons']:
-            self.assertTrue((self.vault / comparison['path']).is_file())
+            self.assertTrue(deep_path(self.vault / comparison['path']).is_file())
         self.assert_advisory(result)
 
     def test_nonpositive_delta_keeps_baseline(self):
@@ -287,9 +296,9 @@ class VaultImprovementsTests(unittest.TestCase):
         self.assertIsNone(no_entry['lesson_candidate'])
         record = self.record(plan)
         self.assertEqual(record['lesson_candidate']['edit_indices'], [0])
-        before = (self.vault / record['path']).read_bytes()
+        before = deep_path(self.vault / record['path']).read_bytes()
         self.assertEqual(self.record(plan)['id'], record['id'])
-        self.assertEqual((self.vault / record['path']).read_bytes(), before)
+        self.assertEqual(deep_path(self.vault / record['path']).read_bytes(), before)
         files = set((self.vault / runs.RUNTIME_DIR).iterdir())
         inspected = improvements.inspect_record(self.vault, record['id'])
         self.assertEqual(set((self.vault / runs.RUNTIME_DIR).iterdir()), files)
@@ -297,7 +306,7 @@ class VaultImprovementsTests(unittest.TestCase):
         self.assertEqual(inspected['plan_id'], plan['id'])
         self.assert_advisory(record)
         self.assert_advisory(inspected)
-        self.assertFalse((self.vault / '00-meta/proposals').exists())
+        self.assertFalse(deep_path(self.vault / '00-meta/proposals').exists())
 
     def test_reflection_requires_all_four_completed_runs(self):
         plan = self.plan()
@@ -374,7 +383,7 @@ class VaultImprovementsTests(unittest.TestCase):
         self.finish()
         record = self.record(plan)
         for original, field in ((plan, 'definition'), (record, 'report')):
-            path = self.vault / original['path']
+            path = deep_path(self.vault / original['path'])
             value = json.loads(path.read_bytes())
             if field == 'definition': value['payload'][field]['task_class'] = 'altered'
             else: value['payload'][field]['edits'][0]['observed'] = 'Altered claim.'
@@ -462,7 +471,7 @@ class VaultImprovementsTests(unittest.TestCase):
         self.finish()
         record = self.record(plan)
         for receipt, function in ((plan, improvements.inspect), (record, improvements.inspect_record)):
-            path = self.vault / receipt['path']
+            path = deep_path(self.vault / receipt['path'])
             original = path.read_bytes()
             value = json.loads(original)
             value['receipt_sha256'] = '0' * 64
@@ -579,7 +588,7 @@ class VaultImprovementsTests(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, opted['compare'], ''))
         # A changed candidate note, or a completion receipt that writes the same instant with a
         # +09:00 offset under a recomputed checksum, is refused the same way with the option.
-        receipt = self.vault / runs.RUNTIME_DIR / runs._names(self.arms['general']['id'])[1]
+        receipt = deep_path(self.vault / runs.RUNTIME_DIR / runs._names(self.arms['general']['id'])[1])
         shifted = json.loads(receipt.read_bytes())
         self.assertEqual(shifted['created_at'], EARLIER)
         shifted['created_at'] = '2026-10-30T08:00:00+09:00'
