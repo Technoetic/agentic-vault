@@ -1,8 +1,10 @@
 """Regression tests for Windows MAX_PATH (>260 chars) runtime paths and error classification."""
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +22,8 @@ if str(SCRIPTS) not in sys.path:
 import backup_vault  # noqa: E402
 import vault_evidence  # noqa: E402
 import vault_improvements  # noqa: E402
+import vault_lesson_metrics  # noqa: E402
+import vault_proposals  # noqa: E402
 import vault_runs  # noqa: E402
 import vault_state  # noqa: E402
 import vault_task_contracts  # noqa: E402
@@ -169,6 +173,55 @@ class WindowsLongPathTests(unittest.TestCase):
         with mock.patch.object(tests_pkg, "_orig_rmtree", side_effect=fake_py312_rmtree):
             tempfile.TemporaryDirectory._rmtree("dummy_312", ignore_errors=False, repeated=True)
         self.assertEqual(calls_312, [("dummy_312", False, True)])
+
+
+class LessonMetricsLongPathTests(unittest.TestCase):
+    """An observation record lies 102 characters below the vault root, beyond MAX_PATH from a 159-character root."""
+
+    # Proposal receipts (56 characters below the root) stay below MAX_PATH at this length; observation records do not.
+    ROOT_LENGTH = 172
+
+    def setUp(self) -> None:
+        base = Path(tempfile.mkdtemp(prefix="av-lp-")).resolve()
+        self.addCleanup(lambda: _rmtree_long(base))
+        padding = self.ROOT_LENGTH - len(str(base)) - len(os.sep + "vault") - 1
+        root = base / ("p" * padding) if padding > 0 else base
+        self.vault = root / "vault"
+        (self.vault / "00-meta").mkdir(parents=True)
+        (self.vault / "00-meta" / "vault-config.json").write_text(
+            json.dumps({"required_keys": ["title"], "enums": {}}), encoding="utf-8")
+        (self.vault / "CLAUDE.md").write_bytes(b"# Rules\nBefore\n")
+        (self.vault / "00-meta" / "candidate.md").write_bytes(b"# Rules\nAfter: retry once\n")
+
+    def call(self, module, *arguments: str) -> dict:
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            code = module.main(["--vault", str(self.vault), *arguments])
+        output = json.loads(stream.getvalue())
+        self.assertEqual(code, 0, output)
+        return output
+
+    def test_observations_are_recorded_and_summarized_beyond_260_chars(self) -> None:
+        proposal = self.call(vault_proposals, "propose", "--target", "CLAUDE.md", "--candidate",
+                             "00-meta/candidate.md", "--lesson", "L-001", "--summary", "Retry recovery")
+        self.call(vault_proposals, "apply", proposal["id"], "--approve")
+        observation = {"attempt_id": "A-001", "session_id": "S-001", "applicability": "applicable",
+                       "outcome": "success", "verification_status": "unverified", "evidence_ids": []}
+        recorded = vault_lesson_metrics.record_observation(self.vault, proposal["id"], observation)
+        record = self.vault / recorded["path"]
+        self.assertGreater(len(str(record)), 260)
+        self.assertTrue(vault_evidence.fs_path(record).is_file())
+        # Neither the temporary nor the writer lock is left behind.
+        self.assertEqual(os.listdir(vault_evidence.fs_path(record.parent)), [record.name])
+        self.assertFalse(vault_evidence.fs_path(record.parent.parent / ".lock").exists())
+        second = vault_lesson_metrics.record_observation(
+            self.vault, proposal["id"], {**observation, "attempt_id": "A-002"})
+        self.assertNotEqual(second["id"], recorded["id"])
+        summary = vault_lesson_metrics.summarize(self.vault, proposal["id"])
+        self.assertEqual(summary["counts"]["eligible_attempts"], 2)
+        with self.assertRaises(vault_lesson_metrics.LessonMetricsError) as caught:
+            vault_lesson_metrics.record_observation(self.vault, proposal["id"], observation)
+        self.assertEqual(str(caught.exception), "duplicate_attempt")
 
 
 if __name__ == "__main__":
