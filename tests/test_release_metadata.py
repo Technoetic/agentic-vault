@@ -4026,7 +4026,8 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
         leads = [line.split(":", 1)[0] for line in bullets]
         self.assertEqual(leads, ["- Same-number decision and mistake headings", "- Header-line defusing",
                                  "- Kept Jev answer and BizRouter models", "- Repository settings",
-                                 "- Long TEMP run", "- Long TEMP guard", "- Release documents and surfaces"])
+                                 "- Long TEMP run", "- Long TEMP guard", "- Long-path fixes",
+                                 "- Release documents and surfaces"])
         folded = _folded(evidence)
         for literal in ("`scripts/long_temp_suite.py`", "`AGENTIC_VAULT_REQUIRE_LONG_TEMP`",
                         "`DeclaredLongTempTests.test_tempfile_uses_the_declared_long_temp`",
