@@ -107,6 +107,11 @@ class LongTemporaryFolderTests(unittest.TestCase):
 
     def test_both_examples_pass_and_leave_the_temporary_folder_empty(self):
         self.assertGreaterEqual(len(str(self.folder)), self.FOLDER_LENGTH)
+        # tempfile skips a folder it cannot use: prove that a child with this environment uses this one.
+        environment = dict(os.environ, TEMP=str(self.folder), TMP=str(self.folder), TMPDIR=str(self.folder))
+        probe = subprocess.run([sys.executable, '-c', 'import tempfile; print(tempfile.gettempdir())'],
+                               env=environment, capture_output=True, text=True, encoding='utf-8', timeout=60)
+        self.assertEqual(os.path.normcase(probe.stdout.strip()), os.path.normcase(str(self.folder)))
         for name in ('evaluate_improvement_accounting.py', 'evaluate_improvement_experiments.py'):
             with self.subTest(example=name):
                 result = self.run_example(name)

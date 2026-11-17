@@ -13,10 +13,14 @@ long TEMP can be an ordinary run. This tool
    length (the suite's own guard, ``tests/test_000_environment.py``, then fails
    when ``tempfile`` uses another folder),
 4. removes the folder (unless ``--keep``) and prints a one-line JSON summary as
-   the last line on stderr.
+   the last line on stderr, also when the suite was interrupted with Ctrl+C.
 
-The exit code is that of the suite; 2 is a usage error and 3 means that the
-folder is not the one ``tempfile`` uses (nothing was run).
+The exit code is that of the suite; 2 is a usage error (the summary is not
+printed then, since no folder was made) or a ``--summary`` file that cannot be
+written, and 3 means that the folder is not the one ``tempfile`` uses (nothing
+was run). A Windows status code of 2**31 or more (for example 0xC000013A after
+Ctrl+C) is passed on unchanged as the process status; the summary records it as
+the unsigned number the suite process returned.
 
 Usage:
     python -B scripts/long_temp_suite.py [--length N] [--parent DIR] [--keep] [--summary OUT] [-- ARG ...]
@@ -44,6 +48,8 @@ NAME_PREFIX = "av-long-temp-"
 MAX_NAME = 255  # one path component
 EXIT_USAGE = 2
 EXIT_NOT_EFFECTIVE = 3
+INTERRUPTED = 0xC000013A if os.name == "nt" else 130  # what an interrupted console program returns
+INTERRUPT_GRACE = 30  # seconds the suite gets to end by itself after Ctrl+C
 PROBE = (
     "import os, sys, tempfile\n"
     "used = os.path.normcase(os.path.abspath(tempfile.gettempdir()))\n"
@@ -58,13 +64,15 @@ class UsageError(Exception):
 def folder_path(parent: Path, length: int, token: str) -> Path:
     """The folder below parent whose path is exactly `length` characters long."""
     head = NAME_PREFIX + token + "-"
-    padding = length - len(str(parent)) - 1 - len(head)
+    # A root such as C:\ or / already ends with the separator, so the length is taken from the joined path.
+    base = len(str(parent / head)) - len(head)
+    padding = length - base - len(head)
     if padding < 1:
-        shortest = len(str(parent)) + 1 + len(head) + 1
+        shortest = base + len(head) + 1
         raise UsageError(f"--length {length} is too short for this parent folder (at least {shortest})")
     name = head + "x" * padding
     if len(name) > MAX_NAME:
-        longest = len(str(parent)) + 1 + MAX_NAME
+        longest = base + MAX_NAME
         raise UsageError(f"--length {length} is too long for one folder name below this parent (at most {longest})")
     return parent / name
 
@@ -133,7 +141,25 @@ def run_suite(arguments: list[str], environment: dict[str, str]) -> int:
     # _args_from_interpreter_flags is the helper multiprocessing uses to start a child like its parent
     # (-B, -X utf8, -W ...), so the suite runs under the flags this tool was started with.
     command = [sys.executable, *subprocess._args_from_interpreter_flags(), "-m", "unittest", *arguments]
-    return subprocess.run(command, cwd=ROOT, env=environment, check=False).returncode
+    process = subprocess.Popen(command, cwd=ROOT, env=environment)
+    try:
+        return process.wait()
+    except KeyboardInterrupt:
+        # Ctrl+C reaches the suite as well: let it end and report its own status.
+        try:
+            return process.wait(timeout=INTERRUPT_GRACE)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            process.kill()
+            process.wait()
+            return INTERRUPTED
+
+
+def exit_status(returncode: int) -> int:
+    """The process status for returncode: a Windows status of 2**31 or more as the signed number that
+    SystemExit accepts and Windows turns back into the same status; any other code unchanged."""
+    if os.name == "nt" and returncode >= 2 ** 31:
+        return returncode - 2 ** 32
+    return returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,13 +179,14 @@ def main(argv: list[str] | None = None) -> int:
         parent = (options.parent or Path(tempfile.gettempdir())).resolve()
         if not parent.is_dir():
             raise UsageError("the parent folder does not exist")
+        folder = folder_path(parent, options.length, uuid.uuid4().hex[:8])
         if options.summary is not None:
-            try:
+            try:  # appending checks that the file can be written without emptying it
                 options.summary.parent.mkdir(parents=True, exist_ok=True)
-                options.summary.write_bytes(b"")
+                with open(options.summary, "ab"):
+                    pass
             except OSError as error:
                 raise UsageError(f"cannot write the summary: {error.strerror}") from error
-        folder = folder_path(parent, options.length, uuid.uuid4().hex[:8])
         try:
             os.mkdir(folder)
         except OSError as error:
@@ -197,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     if options.keep:
         print(f"long_temp_suite: kept {folder}", file=sys.stderr)
     print(text, file=sys.stderr)
-    return summary["returncode"] if written or summary["returncode"] else 1
+    return exit_status(summary["returncode"] if written or summary["returncode"] else EXIT_USAGE)
 
 
 if __name__ == "__main__":

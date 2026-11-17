@@ -60,6 +60,15 @@ class FolderPathTests(unittest.TestCase):
                 self.assertEqual(folder.parent, parent)
                 self.assertTrue(folder.name.startswith("av-long-temp-0a1b2c3d-"))
 
+    def test_the_length_is_exact_below_a_root_folder_as_well(self) -> None:
+        # A drive or file-system root already ends with its separator; nothing is created here.
+        root = Path(os.path.abspath(os.sep))
+        for length in (60, 150):
+            with self.subTest(length=length):
+                folder = tool.folder_path(root, length, "0a1b2c3d")
+                self.assertEqual(len(str(folder)), length)
+                self.assertEqual(folder.parent, root)
+
     def test_a_length_the_parent_cannot_give_is_a_usage_error(self) -> None:
         parent = Path(tempfile.gettempdir()).resolve()
         with self.assertRaises(tool.UsageError):
@@ -166,6 +175,63 @@ class RunTests(unittest.TestCase):
                 run_suite.assert_not_called()
                 self.assertTrue(errors.getvalue().startswith("long_temp_suite: "))
         self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_an_interrupted_suite_still_reports_its_status(self) -> None:
+        status = 0xC000013A  # what Windows reports for a console program ended by Ctrl+C
+
+        class Interrupted:
+            waits = 0
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def wait(self, timeout=None):
+                Interrupted.waits += 1
+                if Interrupted.waits == 1:
+                    raise KeyboardInterrupt
+                return status
+
+            def kill(self):
+                raise AssertionError("the suite ended by itself and must not be killed")
+
+        errors = io.StringIO()
+        with mock.patch.object(tool, "tempfile_uses", return_value=True), \
+             mock.patch.object(tool.subprocess, "Popen", Interrupted), contextlib.redirect_stderr(errors):
+            code = tool.main(["--parent", str(self.parent), "--length", str(self.length),
+                              "--summary", str(self.summary)])
+        summary = json.loads(errors.getvalue().strip().splitlines()[-1])
+        self.assertEqual(summary["returncode"], status)
+        self.assertEqual(json.loads(self.summary.read_text(encoding="utf-8")), summary)
+        self.assertEqual(code, status - 2 ** 32 if os.name == "nt" else status)
+        self.assertEqual(list(self.parent.iterdir()), [])
+
+    def test_a_windows_status_is_passed_on_as_a_status_the_process_can_end_with(self) -> None:
+        self.assertEqual(tool.exit_status(0), 0)
+        self.assertEqual(tool.exit_status(1), 1)
+        self.assertEqual(tool.exit_status(-2), -2)
+        big = 0xC0000005
+        self.assertEqual(tool.exit_status(big), big - 2 ** 32 if os.name == "nt" else big)
+
+    def test_a_usage_error_leaves_an_existing_summary_file_as_it_was(self) -> None:
+        self.summary.parent.mkdir(parents=True)
+        self.summary.write_text("previous\n", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = tool.main(["--parent", str(self.parent), "--length", str(len(str(self.parent)) + 3),
+                              "--summary", str(self.summary)])
+        self.assertEqual(code, 2)
+        self.assertEqual(self.summary.read_text(encoding="utf-8"), "previous\n")
+
+    def test_a_summary_that_cannot_be_written_after_a_passing_suite_is_exit_code_2(self) -> None:
+        errors = io.StringIO()
+        with mock.patch.object(tool, "tempfile_uses", return_value=True), \
+             mock.patch.object(tool, "run_suite", return_value=0), \
+             mock.patch.object(Path, "write_bytes", side_effect=PermissionError(13, "denied")), \
+             contextlib.redirect_stderr(errors):
+            code = tool.main(["--parent", str(self.parent), "--length", str(self.length),
+                              "--summary", str(self.summary)])
+        self.assertEqual(code, 2)
+        self.assertIn("cannot write the summary", errors.getvalue())
+        self.assertEqual(json.loads(errors.getvalue().strip().splitlines()[-1])["returncode"], 0)
 
     def test_the_default_arguments_are_the_whole_suite(self) -> None:
         self.assertEqual(tool.DEFAULT_ARGUMENTS, ("discover", "-s", "tests"))
