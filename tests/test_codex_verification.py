@@ -19,9 +19,9 @@ import unittest
 from unittest.mock import patch
 
 try:
-    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, make_junction, plain
 except ImportError:  # run as tests.<module> from the repository root
-    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, make_junction, plain
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +37,10 @@ PREFIX = "\\\\?\\"  # the extended-length prefix; only Windows adds it
 # the extended-length form only when it plus this room reaches the plain limit, so nothing changes
 # under an ordinary TEMP.
 FIXTURE_ROOM = 100
+# The npm layouts put the native binary up to some 120 characters below the launcher, and the
+# stand-in binary needs room for the names of the runtime libraries next to it.
+NPM_LAYOUT_ROOM = 128
+PROGRAM_NAME_ROOM = 16
 # What verify() reports for the fixture plugin, whatever the length of the workspace.
 FIXTURE_REPORT = {"version": "0.11.0", "installed_resources": "verified", "isolated_home": True,
                   "model_turns": 0, "host": "fixture"}
@@ -878,7 +882,7 @@ class CodexVerificationTests(unittest.TestCase):
         target = "aarch64" if platform.machine().lower() == "arm64" else "x86_64"
         package_arch = "arm64" if target == "aarch64" else "x64"
         for layout in ("nested", "hoisted", "bundled"):
-            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temporary:
+            with self.subTest(layout=layout), self.temporary_directory(NPM_LAYOUT_ROOM) as temporary:
                 root = Path(temporary)
                 launcher = root / "codex.CMD"
                 launcher.write_text('@echo {"source":"wrapper"}\n', encoding="utf-8")
@@ -891,7 +895,19 @@ class CodexVerificationTests(unittest.TestCase):
                     modules = package / "node_modules" if layout == "nested" else root / "node_modules"
                     vendor = modules / f"@openai/codex-win32-{package_arch}/vendor"
                 native = vendor / f"{target}-pc-windows-msvc/bin/codex.exe"
-                native.parent.mkdir(parents=True)
+                if deep_path(plain(native.parent), PROGRAM_NAME_ROOM) == plain(native.parent):
+                    native.parent.mkdir(parents=True)
+                else:
+                    # Without long-path support Windows starts no program from a path beyond
+                    # MAX_PATH, not even in the extended-length form, and this stand-in stops
+                    # loading some characters earlier. Where a long TEMP makes the layout put the
+                    # binary at the plain limit, the folder that holds it is a junction to a
+                    # short one in the same temporary directory, the way a linking package
+                    # manager lays packages out; the resolver follows it. Under an ordinary TEMP
+                    # the layout is the plain folders it always was.
+                    (root / "native").mkdir()
+                    native.parent.parent.mkdir(parents=True)
+                    make_junction(native.parent, plain(root / "native"))
                 # A Windows venv python.exe is a redirector requiring pyvenv.cfg.
                 # This fixture needs a relocatable stand-in for the native binary.
                 native_python = Path(getattr(sys, "_base_executable", sys.executable)).resolve()
