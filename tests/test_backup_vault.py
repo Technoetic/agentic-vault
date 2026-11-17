@@ -12,9 +12,9 @@ import unittest
 from unittest import mock
 
 try:
-    from _winfs import make_junction
+    from _winfs import deep_path, make_junction
 except ImportError:  # run as tests.<module> from the repository root
-    from tests._winfs import make_junction
+    from tests._winfs import deep_path, make_junction
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/agentic-vault/scripts/backup_vault.py"
@@ -51,7 +51,7 @@ class SnapshotTests(unittest.TestCase):
         self.binary.unlink()
         second = self.create()
         self.assertNotEqual(first, second)
-        self.assertFalse((second / "files/90-assets/sample.bin").exists())
+        self.assertFalse(deep_path(second / "files/90-assets/sample.bin").exists())
         restored = self.root / "restored"
         backup.restore_snapshot(first, restored)
         self.assertEqual((restored / "90-assets/sample.bin").read_bytes(),
@@ -62,7 +62,7 @@ class SnapshotTests(unittest.TestCase):
         snapshot = self.create()
         self.binary.write_bytes(b"modified")
         backup.verify_snapshot(snapshot)
-        self.assertEqual((snapshot / "files/90-assets/sample.bin").read_bytes(),
+        self.assertEqual(deep_path(snapshot / "files/90-assets/sample.bin").read_bytes(),
                          b"original\x00\xff\x01")
 
     def test_source_change_during_copy_prevents_publication(self):
@@ -92,7 +92,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_corruption_is_refused_before_restore_side_effects(self):
         snapshot = self.create()
-        (snapshot / "files/90-assets/sample.bin").write_bytes(b"tampered")
+        deep_path(snapshot / "files/90-assets/sample.bin").write_bytes(b"tampered")
         destination = self.root / "new-parent/restored"
         with self.assertRaises((ValueError, OSError)):
             backup.restore_snapshot(snapshot, destination)
@@ -156,12 +156,12 @@ class SnapshotTests(unittest.TestCase):
 
     def test_unlisted_files_and_missing_files_are_corruption(self):
         snapshot = self.create()
-        extra = snapshot / "files/extra.txt"
+        extra = deep_path(snapshot / "files/extra.txt")
         extra.write_text("extra", encoding="utf-8")
         with self.assertRaises((ValueError, OSError)):
             backup.verify_snapshot(snapshot)
         extra.unlink()
-        (snapshot / "files/90-assets/sample.bin").unlink()
+        deep_path(snapshot / "files/90-assets/sample.bin").unlink()
         with self.assertRaises((ValueError, OSError)):
             backup.verify_snapshot(snapshot)
 
@@ -289,7 +289,7 @@ class SnapshotTests(unittest.TestCase):
         result = subprocess.run(["git", "clone", str(snapshot / "history.bundle"), str(clone)], capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((clone / "00-meta/vault-config.json").exists())
-        self.assertFalse((snapshot / "files/.git").exists())
+        self.assertFalse(deep_path(snapshot / "files/.git").exists())
 
     def test_missing_git_is_a_failure_when_history_is_required(self):
         (self.vault / ".git").mkdir()
