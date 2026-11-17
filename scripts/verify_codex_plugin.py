@@ -95,13 +95,16 @@ def _answer(path) -> Path:
 def _resolved(path) -> Path:
     """Where path leads, for comparisons with the workspace paths; resolved in the form _answer gives it.
 
-    From the plain limit on, the result is shown in plain form, whichever spelling the host answered
-    in. Below the limit it is compared as it always was: an extended-length spelling stays extended
-    and so does not match a plain workspace path.
+    A plain answer comes back in plain form, also when the tool reached it through the extended-length
+    form because the spelling reaches the switch (it can lead to a shorter folder through '..' or a
+    link). An extended-length answer is shown in plain form from the switch on; below it, it is compared
+    as it always was: it stays extended and so does not match a plain workspace path.
     """
-    resolved = _answer(path).resolve()
+    answer = _answer(path)
+    resolved = answer.resolve()
     shown = _plain(resolved)
-    return shown if len(str(shown)) >= PLAIN_PATH_LIMIT else resolved
+    extended_by_the_tool = str(answer) != str(Path(path))
+    return shown if extended_by_the_tool or len(str(shown)) >= PLAIN_PATH_LIMIT else resolved
 
 
 def _longest_copied_path(source: Path) -> int:

@@ -1320,6 +1320,14 @@ class CodexVerificationTests(unittest.TestCase):
         self.assertEqual(answer == plain(short.resolve()), not WINDOWS)
         self.assertEqual(verifier._resolved(str(short)), short.resolve())
 
+    def test_a_long_plain_answer_that_leads_to_a_short_folder_is_compared_plainly(self) -> None:
+        # The tool reads a plain spelling of 240 or more characters through the extended-length form; where
+        # '..' leads back to a short folder, the answer is still located by its plain path, as v0.52.0 did.
+        short = ROOT / "docs"
+        spelling = os.path.join(str(short), "d" * 130, "e" * 130, os.pardir, os.pardir)
+        self.assertGreaterEqual(len(spelling), PLAIN_PATH_LIMIT)
+        self.assertEqual(verifier._resolved(spelling), short.resolve())
+
     def test_an_extended_answer_keeps_its_literal_names(self) -> None:
         # Windows drops a trailing dot or space from a plain name but not from an extended-length one,
         # so a sibling such as 'codex-home.' must not be taken for the home, nor 'SKILL.md.' for SKILL.md.
