@@ -28,6 +28,29 @@ def _check(condition, message):
         raise AssertionError(message)
 
 
+def deepest_receipt(runtime_dir, *folders):
+    """The longest path an example creates below the temporary folder: `folders`, then the runtime
+    folder of the vault, then an improvement record (the longest receipt name of the modules)."""
+    return Path(*folders, *runtime_dir.split('/'), 'improvement-record-' + 64 * '0' + '.json')
+
+
+def temporary_parent(evidence, below):
+    """The `dir` of an example's temporary folder: None (tempfile's default) or its extended-length form.
+
+    `below` is the deepest path the example creates below the temporary folder. Under a long
+    temporary folder on Windows that path can reach the plain path limit. The runtime modules reach
+    such a receipt through fs_path, but tempfile could not remove it through a plain path and the
+    example ended with an error after every check had passed. In that case the temporary folder is
+    returned in the extended-length form that fs_path gives the receipt: the folder tempfile creates
+    in it carries that form, so tempfile removes it through that form and reports a failed removal
+    as before. Otherwise the result is None and nothing changes.
+    """
+    parent = Path(tempfile.gettempdir())
+    below = Path(below)
+    chosen = evidence.fs_path(parent / below).parents[len(below.parts) - 1]
+    return None if chosen == parent else str(chosen)
+
+
 def _review_only(result):
     _check(result['authority'] == AUTHORITY, 'unexpected authority')
     _check(result['requires_review'] is True, 'review must remain required')
@@ -205,8 +228,12 @@ class SyntheticVault:
 
 def _scenario(runs, improvements, name, soft_passes, decision, candidate_id,
               *, hard_failure=None, with_reflections=False):
-    with tempfile.TemporaryDirectory(prefix='av-improvement-example-') as directory:
-        fixture = SyntheticVault(Path(directory), runs, improvements)
+    evidence = runs.evidence
+    below = deepest_receipt(runs.RUNTIME_DIR, 'av-improvement-example-' + 8 * '0')
+    with tempfile.TemporaryDirectory(prefix='av-improvement-example-',
+                                     dir=temporary_parent(evidence, below)) as directory:
+        # Either way the runtime modules receive the vault as a plain path, the form a caller gives.
+        fixture = SyntheticVault(evidence.plain_path(Path(directory)), runs, improvements)
         plan = fixture.prepare()
         fixture.complete(dict(zip(ROLES, soft_passes)), hard_failure)
         inspected = improvements.inspect(fixture.root, plan['id'])
@@ -235,7 +262,8 @@ def _scenario(runs, improvements, name, soft_passes, decision, candidate_id,
             _check(row['score_delta'] == native['score_delta'], 'native score delta must remain intact')
             _check(row['eligible'] == native['eligible'], 'native hard-failure veto must remain intact')
             _check(native['outcome_count'] == 10, 'native denominator must include every observation')
-            _check((fixture.root / native['path']).is_file(), 'native comparison must be persisted')
+            _check(evidence.fs_path(fixture.root / native['path']).is_file(),
+                   'native comparison must be persisted')
             scores[role] = {'score_delta': native['score_delta'], 'eligible': native['eligible']}
         if hard_failure is not None:
             affected = result['comparisons'] if hard_failure == 'baseline' else [

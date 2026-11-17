@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-from evaluate_improvement_experiments import SyntheticVault, ROLES
+from evaluate_improvement_experiments import SyntheticVault, ROLES, deepest_receipt, temporary_parent
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
@@ -25,8 +25,11 @@ def evaluate():
     runs = importlib.import_module('vault_runs')
     improvements = importlib.import_module('vault_improvements')
     costs = importlib.import_module('vault_run_costs')
-    with tempfile.TemporaryDirectory() as temporary:
-        vault = Path(temporary) / 'vault'
+    evidence = runs.evidence
+    below = deepest_receipt(runs.RUNTIME_DIR, 'tmp' + 8 * '0', 'vault')
+    with tempfile.TemporaryDirectory(dir=temporary_parent(evidence, below)) as temporary:
+        # Either way the runtime modules receive the vault as a plain path, the form a caller gives.
+        vault = evidence.plain_path(Path(temporary)) / 'vault'
         fixture = SyntheticVault(vault, runs, improvements)
         grader_path = 'evaluator/grader.py'
         grader = '# Synthetic grader snapshot; this file is never executed.\n'
