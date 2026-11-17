@@ -16,6 +16,15 @@ except ImportError:
     import test_vault_runs as native
 
 try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
+# A receipt below the runtime folder can lie beyond the plain Windows path limit under a long
+# temporary folder. The runtime reaches it through vault_evidence.fs_path; these tests read and
+# rewrite it through deep_path, which leaves a path below the limit unchanged.
+
+try:
     costs = importlib.import_module('vault_run_costs')
 except ModuleNotFoundError:
     costs = None
@@ -54,7 +63,7 @@ class RunCostsTests(unittest.TestCase):
             function(*args)
 
     def rewrite_receipt(self, result, mutate):
-        path = self.vault / result['path']
+        path = deep_path(self.vault / result['path'])
         value = json.loads(path.read_text(encoding='utf-8'))
         mutate(value)
         value['id'] = native.runs.evidence.digest(native.runs.evidence.encode(value['payload']))
@@ -81,7 +90,7 @@ class RunCostsTests(unittest.TestCase):
         self.assertEqual(inspected['missing_phases'], [])
         self.assertTrue(inspected['full_cost_available'])
         self.assertEqual(inspected['metering'], 'caller_described_not_authenticated')
-        self.assertTrue((self.vault / result['path']).is_file())
+        self.assertTrue(deep_path(self.vault / result['path']).is_file())
 
     def test_unknown_is_not_zero_and_known_subtotals_remain_visible(self):
         prepared = self.base.prepare()
@@ -323,9 +332,9 @@ class RunCostsTests(unittest.TestCase):
     def test_cost_receipt_is_immutable_and_binding_to_prepared_receipt_is_exact(self):
         prepared = self.base.prepare()
         result = self.record(prepared)
-        before = (self.vault / result['path']).read_bytes()
+        before = deep_path(self.vault / result['path']).read_bytes()
         self.error(costs.record, self.vault, prepared['id'], 'input/cost.json')
-        self.assertEqual((self.vault / result['path']).read_bytes(), before)
+        self.assertEqual(deep_path(self.vault / result['path']).read_bytes(), before)
         tampered_id = self.rewrite_receipt(result,
             lambda value: value['payload'].update(prepared_receipt_sha256='0' * 64))
         self.error(costs.inspect, self.vault, tampered_id)
@@ -347,14 +356,15 @@ class RunCostsTests(unittest.TestCase):
         before = self.record(baseline, prefix='before', value=10)
         after = self.record(candidate, prefix='after', value=0)
         runtime = self.vault / native.runs.RUNTIME_DIR
-        original = {path.name: path.read_bytes() for path in runtime.glob('*.json')}
+        original = {path.name: deep_path(path).read_bytes() for path in runtime.glob('*.json')}
         result = costs.summarize(self.vault, [after['id'], before['id']])
         self.assertEqual(result['totals']['cost_microusd'], 120)
         self.assertEqual(result['totals']['calls'], 8)
         self.assertEqual(result['run_count'], 2)
         self.assertTrue(result['full_cost_available'])
         costs.inspect(self.vault, before['id'])
-        self.assertEqual({path.name: path.read_bytes() for path in runtime.glob('*.json')}, original)
+        self.assertEqual({path.name: deep_path(path).read_bytes() for path in runtime.glob('*.json')},
+                         original)
 
     def test_cli_all_verbs_and_content_free_invalid_arguments(self):
         baseline, candidate = self.base.pair()
