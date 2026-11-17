@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -18,6 +19,38 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "agentic-vault@agentic-vault-local"
+
+
+# --- long-path helpers (keep this block identical in the standalone tools that carry it) ---
+PLAIN_PATH_LIMIT = 240  # the margin below Windows MAX_PATH (260) that vault_evidence.fs_path uses
+
+
+def _extended(path) -> Path:
+    """The Windows extended-length form of an absolute path; any other path, and any other system, unchanged."""
+    text = str(path)
+    if os.name != "nt" or text.startswith("\\\\?\\"):
+        return Path(path)
+    if re.match(r"^[A-Za-z]:\\", text):
+        return Path("\\\\?\\" + text)
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path(path)
+
+
+def _plain(path) -> Path:
+    """The path without the extended-length prefix, for messages, reports and comparisons."""
+    text = str(path)
+    if os.name == "nt" and text.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + text[8:])
+    if os.name == "nt" and text.startswith("\\\\?\\"):
+        return Path(text[4:])
+    return Path(path)
+
+
+def _workspace(root, reserve: int) -> Path:
+    """root, in extended-length form when root plus `reserve` more characters reaches the plain limit."""
+    return _extended(root) if len(str(root)) + reserve >= PLAIN_PATH_LIMIT else Path(root)
+# --- end of long-path helpers ---
 
 
 def resolve_codex_executable(codex: str) -> str:
