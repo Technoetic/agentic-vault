@@ -14,9 +14,9 @@ import unittest
 from unittest import mock
 
 try:
-    from _winfs import make_junction
+    from _winfs import deep_path, make_junction
 except ImportError:  # run as tests.<module> from the repository root
-    from tests._winfs import make_junction
+    from tests._winfs import deep_path, make_junction
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -80,7 +80,9 @@ class VaultOperationTests(unittest.TestCase):
                                 {'count': 1, 'nested': {'b': 2, 'a': 1}}, **kwargs)
 
     def receipt(self, operation_id):
-        return self.vault / operations.RUNTIME_DIR / ('operation-' + operation_id + '.json')
+        # operation-<64 hex>.json can lie beyond the plain Windows path limit under a long temporary
+        # folder; the module reaches it through fs_path, the tests through deep_path.
+        return deep_path(self.vault / operations.RUNTIME_DIR / ('operation-' + operation_id + '.json'))
 
     def run_operation_children(self, *, count=2):
         release = Path(self.tmp.name) / 'release'
@@ -375,7 +377,7 @@ class VaultOperationTests(unittest.TestCase):
             elif result['result']['disposition'] != 'claimed':
                 self.assertEqual(result['result']['disposition'], 'blocked')
                 self.assertNotIn('owner_token', result['result'])
-        receipts = list((self.vault / operations.RUNTIME_DIR).glob('operation-*.json'))
+        receipts = [deep_path(path) for path in (self.vault / operations.RUNTIME_DIR).glob('operation-*.json')]
         self.assertLessEqual(len(receipts), 1)
         if observed:
             self.assertEqual(len(receipts), 1)
