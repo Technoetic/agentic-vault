@@ -13,6 +13,11 @@ try:
 except ImportError:
     from tests import test_vault_runs as fixture_module
 
+try:
+    from _winfs import deep_path
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import deep_path
+
 runs = fixture_module.runs
 
 
@@ -171,7 +176,9 @@ class EvaluatorBindingTests(unittest.TestCase):
         receipt['payload'], receipt['id'] = forged, new_id
         receipt['receipt_sha256'] = runs.evidence.digest(runs.evidence.encode({
             key: value for key, value in receipt.items() if key != 'receipt_sha256'}))
-        path = store.record_path(runs._names(new_id)[0])
+        # record_path gives the plain path; under a long temporary folder the receipt lies beyond
+        # the plain Windows path limit, where the runtime itself writes through fs_path.
+        path = deep_path(store.record_path(runs._names(new_id)[0]))
         path.write_bytes(runs.evidence.encode(receipt))
         with self.assertRaises(runs.RunError):
             runs.inspect(self.vault, new_id)
@@ -186,7 +193,7 @@ class EvaluatorBindingTests(unittest.TestCase):
         receipt['payload']['outcomes'][0]['assertions'][0]['passed'] = 1
         receipt['receipt_sha256'] = runs.evidence.digest(runs.evidence.encode({
             key: value for key, value in receipt.items() if key != 'receipt_sha256'}))
-        store.record_path(name).write_bytes(runs.evidence.encode(receipt))
+        deep_path(store.record_path(name)).write_bytes(runs.evidence.encode(receipt))
         with self.assertRaises(runs.RunError):
             runs.inspect(self.vault, prepared['id'])
 
