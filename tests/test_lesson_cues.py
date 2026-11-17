@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import contextlib
+import getpass
 import importlib
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -606,11 +608,19 @@ class ProcessTests(HookCase):
             folder = self.hook._state_dir()
         return self.hook.claim(folder, 'probe-vault', 'probe-session', {'kind': 'probe'}) is True
 
+    def session_record_length(self):
+        """The length of a session record path below the state folder, named as the hook names it."""
+        try:
+            user = re.sub(r'[^A-Za-z0-9_-]', '_', getpass.getuser())[:32]
+        except Exception:  # the hook falls back to the same name when none can be found
+            user = 'user'
+        return len(os.path.join(str(self.state), 'agentic-vault-lesson-cues-' + user, '0' * 64))
+
     def test_round_trip_with_a_session_record_and_ascii_output(self):
         self.cues(self.entry('L-002', {**GUARD, 'text': '비용이 든 호출이 있었다'}))
         usable = self.session_record_usable()
-        deepest_record = len(str(self.state)) + len('/agentic-vault-lesson-cues-') + 32 + 1 + 64
-        if deepest_record < 240:
+        # The fallback is explained only on Windows, where a plain path holds at most 259 characters.
+        if os.name != 'nt' or self.session_record_length() < 260:
             self.assertTrue(usable, 'the session record must be usable when its path fits the plain limit')
         stdin = json.dumps(self.payload('paid-tool run')).encode('utf-8')
         first = self.run_hook(stdin, str(self.vault))

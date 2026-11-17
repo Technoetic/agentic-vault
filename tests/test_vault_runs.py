@@ -20,7 +20,7 @@ except ImportError:  # run as tests.<module> from the repository root
 # temporary folder. The runtime reaches it through vault_evidence.fs_path; these tests read, write
 # and tamper with it through deep_path, which leaves a path below the limit unchanged.
 
-TESTS =Path(__file__).resolve().parent
+TESTS = Path(__file__).resolve().parent
 SCRIPTS = TESTS.parent / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 if str(TESTS) not in sys.path:
