@@ -176,7 +176,7 @@ class WindowsLongPathTests(unittest.TestCase):
 
 
 class LessonMetricsLongPathTests(unittest.TestCase):
-    """An observation record lies 102 characters below the vault root, beyond MAX_PATH from a 159-character root."""
+    """An observation record lies 102 characters below the vault root, beyond MAX_PATH from a 158-character root."""
 
     # Proposal receipts (56 characters below the root) stay below MAX_PATH at this length; observation records do not.
     ROOT_LENGTH = 172
