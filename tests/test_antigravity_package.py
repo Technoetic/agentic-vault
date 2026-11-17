@@ -905,6 +905,9 @@ class GeneratorRefusalTests(unittest.TestCase):
         self.assertEqual(code, 0, lines)
         self.assertEqual(lines[-1], "git modes: not compared (no copied file is in the git index together with "
                                     "its source)")
+        # git reads the files itself here and, with core.longpaths unset, takes no path of 260 characters or
+        # more on Windows. The longest path it adds is the TEMP folder plus 104 characters (this class folder,
+        # the variant, antigravity/ and the longest package path), so the step fits a TEMP of up to 155.
         git("add", "-A")
         hooks = ("assets/git-hooks/pre-commit", "assets/git-hooks/pre-push")
         copies = tuple(f"antigravity/{path}" for path in hooks)
