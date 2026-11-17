@@ -61,10 +61,15 @@ def make_junction(link: str | os.PathLike[str], target: str | os.PathLike[str]) 
     Only when that function is unavailable does it fall back to
     ``cmd /c mklink /J``; the fallback captures output as bytes and never
     decodes it, and raises ``OSError`` with a content-free message on failure.
+
+    A link whose path reaches the plain limit is created through its
+    extended-length form. The target is always given in plain form because it
+    is written into the reparse point as given, and an extended-length target
+    is refused by the system.
     """
     create = getattr(_winapi, "CreateJunction", None)
     if create is not None:
-        create(str(target), str(link))
+        create(str(plain(target)), str(deep_path(link)))
         return
     try:
         result = subprocess.run(

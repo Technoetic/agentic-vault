@@ -13,9 +13,9 @@ import tempfile
 import unittest
 
 try:
-    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, make_junction, plain
 except ImportError:  # pragma: no cover - package-style test runs
-    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, make_junction, plain
 
 WINDOWS = os.name == "nt"
 PREFIX = "\\\\?\\"
@@ -77,6 +77,25 @@ class ExtendedPathHelperTests(unittest.TestCase):
         self.assertGreater(len(str(plain(target))), 260)
         shutil.rmtree(extended(base))
         self.assertFalse(extended(base).exists())
+
+    def test_a_junction_link_beyond_the_plain_limit_is_created(self) -> None:
+        if not WINDOWS:
+            return  # junctions are a Windows form; there is nothing to check on another system
+        base = Path(tempfile.mkdtemp(prefix="av-winfs-")).resolve()
+        self.addCleanup(lambda: shutil.rmtree(extended(base), ignore_errors=True))
+        outside = base / "outside"
+        outside.mkdir()
+        (outside / "marker.txt").write_text("m", encoding="utf-8")
+        nested = base
+        while len(str(nested)) < 262:
+            nested = nested / ("segment_" + "j" * 24)
+        extended(nested).mkdir(parents=True)
+        link = nested / "link"
+        make_junction(link, outside)
+        self.assertEqual(os.listdir(extended(link)), ["marker.txt"])
+        os.rmdir(extended(link))
+        self.assertFalse(extended(link).exists())
+        self.assertTrue((outside / "marker.txt").exists())
 
 
 if __name__ == "__main__":
