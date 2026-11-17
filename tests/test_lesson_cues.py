@@ -595,17 +595,40 @@ class ProcessTests(HookCase):
         return subprocess.run([sys.executable, '-X', 'utf8', '-I', str(scripts / 'lesson-cues.py')], input=stdin,
                               capture_output=True, env=env, cwd=str(self.vault))
 
+    def session_record_usable(self):
+        """Whether the hook can keep its session record below the state folder in this environment.
+
+        The record lies in a per-user folder below the hook's temporary folder, 92 characters plus the
+        user name deeper. On Windows without long-path support that path passes the plain limit when the
+        temporary folder is long, and the hook's documented fallback delivers a guard as a hint.
+        """
+        with mock.patch.object(self.hook.tempfile, 'gettempdir', return_value=str(self.state)):
+            folder = self.hook._state_dir()
+        return self.hook.claim(folder, 'probe-vault', 'probe-session', {'kind': 'probe'}) is True
+
     def test_round_trip_with_a_session_record_and_ascii_output(self):
         self.cues(self.entry('L-002', {**GUARD, 'text': '비용이 든 호출이 있었다'}))
+        usable = self.session_record_usable()
+        deepest_record = len(str(self.state)) + len('/agentic-vault-lesson-cues-') + 32 + 1 + 64
+        if deepest_record < 240:
+            self.assertTrue(usable, 'the session record must be usable when its path fits the plain limit')
         stdin = json.dumps(self.payload('paid-tool run')).encode('utf-8')
         first = self.run_hook(stdin, str(self.vault))
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertTrue(first.stdout.isascii())
         result = json.loads(first.stdout)['hookSpecificOutput']
-        self.assertEqual(result['permissionDecision'], 'deny')
-        self.assertIn('비용이 든 호출이 있었다', result['permissionDecisionReason'])
         again = self.run_hook(stdin, str(self.vault))
-        self.assertEqual((again.returncode, again.stdout), (0, b''))
+        if usable:
+            self.assertEqual(result['permissionDecision'], 'deny')
+            self.assertIn('비용이 든 호출이 있었다', result['permissionDecisionReason'])
+            self.assertEqual((again.returncode, again.stdout), (0, b''))
+        else:
+            # Documented fallback: without a usable session record a guard is delivered as a hint, and
+            # because it cannot be marked as shown the next call carries it again.
+            self.assertNotIn('permissionDecision', result)
+            self.assertIn('비용이 든 호출이 있었다', result['additionalContext'])
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertEqual(json.loads(again.stdout)['hookSpecificOutput'], result)
 
     def test_every_failure_is_silent_on_stdout_and_exits_zero(self):
         self.cues(self.entry('L-002', GUARD))
