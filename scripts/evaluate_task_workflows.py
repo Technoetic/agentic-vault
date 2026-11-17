@@ -89,14 +89,32 @@ class SyntheticVault:
         return observer.audit(self.vault, path)
 
 
+def _temporary_parent(evidence, runtime_dir):
+    """The `dir` of the demo's temporary folder: None (tempfile's default) or its extended-length form.
+
+    The deepest file of the demo is a contract receipt,
+    <temporary folder>/tmp<8 characters>/vault/<runtime folder>/task-contract-<64 hex>.json.
+    Under a long temporary folder on Windows that path can reach the plain path limit. The runtime
+    modules reach the receipt through fs_path, but tempfile could not remove it through a plain
+    path. In that case the temporary folder is returned in the extended-length form that fs_path
+    gives the receipt: the folder tempfile creates in it carries that form, so tempfile removes it
+    through that form and reports a failed removal as before. Otherwise the result is None.
+    """
+    parent = Path(tempfile.gettempdir())
+    receipt = Path('tmp' + 8 * '0', 'vault', *runtime_dir.split('/'), 'task-contract-' + 64 * '0' + '.json')
+    chosen = evidence.fs_path(parent / receipt).parents[len(receipt.parts) - 1]
+    return None if chosen == parent else str(chosen)
+
+
 def evaluate():
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     contracts, evidence, staged, cycles = [importlib.import_module(name) for name in (
         'vault_task_contracts', 'vault_evidence', 'vault_staged_evaluation', 'vault_improvement_cycles')]
     controls = {}
-    with tempfile.TemporaryDirectory() as temporary:
-        vault = Path(temporary) / 'vault'
+    with tempfile.TemporaryDirectory(dir=_temporary_parent(evidence, contracts.runs.RUNTIME_DIR)) as temporary:
+        # Either way the runtime modules receive the vault as a plain path, the form a caller gives.
+        vault = evidence.plain_path(Path(temporary)) / 'vault'
         fixture = SyntheticVault(vault, evidence)
         fixture.write_json('input/task.json', fixture.definition)
         captured = contracts.capture(vault, 'input/task.json')

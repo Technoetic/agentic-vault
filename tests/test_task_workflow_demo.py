@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+try:
+    from _winfs import PLAIN_PATH_LIMIT, extended
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import PLAIN_PATH_LIMIT, extended
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'scripts' / 'evaluate_task_workflows.py'
+SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 
 
 class TaskWorkflowDemoTests(unittest.TestCase):
@@ -43,6 +53,42 @@ class TaskWorkflowDemoTests(unittest.TestCase):
         self.assertEqual(controls['bounded_observation']['generation_limit'], 'max_generations')
         self.assertNotIn(str(ROOT), result.stdout)
         self.assertNotIn(temporary, result.stdout)
+
+
+class TemporaryFolderTests(unittest.TestCase):
+    """The demo keeps tempfile's default folder unless its deepest receipt reaches the plain path limit."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('evaluate_task_workflows', SCRIPT)
+        cls.demo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.demo)
+        if str(SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(SCRIPTS))
+        cls.evidence = importlib.import_module('vault_evidence')
+        cls.runtime_dir = importlib.import_module('vault_state').RUNTIME_DIR
+        # The longest path the demo creates below the temporary folder:
+        # /tmp<8 characters>/vault/<runtime folder>/task-contract-<64 hex>.json
+        cls.below = (len('/tmp') + 8 + len('/vault/') + len(cls.runtime_dir)
+                     + len('/task-contract-') + 64 + len('.json'))
+
+    def chosen(self, length):
+        """A temporary folder path of that length and the `dir` the demo chooses for it."""
+        root = 'C:\\' if os.name == 'nt' else '/'
+        folder = root + 'x' * (length - len(root))
+        with mock.patch.object(self.demo.tempfile, 'gettempdir', return_value=folder):
+            return folder, self.demo._temporary_parent(self.evidence, self.runtime_dir)
+
+    def test_the_default_folder_is_kept_while_the_deepest_receipt_stays_below_the_plain_limit(self):
+        for length in (33, PLAIN_PATH_LIMIT - self.below - 1):
+            with self.subTest(length=length):
+                self.assertIsNone(self.chosen(length)[1])
+
+    def test_the_extended_length_form_is_chosen_at_the_plain_limit_and_only_on_windows(self):
+        for length in (PLAIN_PATH_LIMIT - self.below, 150):
+            with self.subTest(length=length):
+                folder, chosen = self.chosen(length)
+                self.assertEqual(chosen, str(extended(folder)) if os.name == 'nt' else None)
 
 
 if __name__ == '__main__':
