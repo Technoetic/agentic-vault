@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.52.0"
-EXPECTED_PUBLIC_REF = "0.52.0"
+EXPECTED = "0.52.1"
+EXPECTED_PUBLIC_REF = "0.52.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.52.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.52.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.52.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.52.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.52.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.52.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -3213,7 +3213,8 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn("## v0.49.0 — source-aware task workflows", headings)
         self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
         self.assertIn("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter", headings)
-        self.assertEqual(headings[0], V0520ReleaseMetadataTests.ENGLISH)
+        self.assertIn(V0520ReleaseMetadataTests.ENGLISH, headings)
+        self.assertEqual(headings[0], V0521ReleaseMetadataTests.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3258,7 +3259,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.51.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.52.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3497,6 +3498,7 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("through v0.49.0", long_description)
         self.assertNotIn("through v0.50.0", long_description)
         self.assertNotIn("through v0.51.0", long_description)
+        self.assertNotIn("through v0.52.0", long_description)
 
     def test_release_note_states_that_remote_tracking_refs_are_not_consulted(self) -> None:
         boundaries = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 알려진 경계"))
@@ -3567,10 +3569,13 @@ class V0510ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(CHECKER_SHA256_V0460, self.VERIFICATION.read_text(encoding="utf-8"))
 
 
+# v0.52.0 is an unpublished candidate: its tag is kept, it has no GitHub release, and v0.52.1 carries all of
+# its changes. The note and the contract keep their tagged text under a status statement, and the README and
+# the Codex guide keep the candidate's sections behind the v0.52.1 sections.
 class V0520ReleaseMetadataTests(unittest.TestCase):
     RELEASE = REPO_ROOT / "docs/releases/v0.52.0.md"
     VERIFICATION = REPO_ROOT / "docs/verification/v0.52.0.md"
-    TITLE = "# v0.52.0 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
+    TITLE = "# v0.52.0 — 미공개 후보"
     SECTIONS = ("## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증",
                 "## 연구 출처와 기존 기능의 차이", "## 알려진 경계")
     INSTALL_REF = "현재 설치 ref는 `v0.52.0`이다."
@@ -3603,8 +3608,26 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
         "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/"
         "managing-rulesets/available-rules-for-rulesets",
     )
-    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
     REJECTED_MODELS = ("typesafe/jev-1.13.0", "typesafe/jev-latest")
+    # The status statements that the two documents open with.
+    NOTE_STATUS = (
+        "이 후보는 릴리스로 게시하지 않았다.",
+        "`v0.52.0` 태그는 그대로 두고 다시 쓰지 않으며, 이 태그의 GitHub 릴리스는 없다.",
+        "[v0.52.1](v0.52.1.md)로 대체한다.",
+    )
+    RECORD_STATUS = (
+        "Status: **unpublished candidate**, superseded by [v0.52.1](v0.52.1.md).",
+        "No GitHub release was published for v0.52.0.",
+        "The `v0.52.0` tag stays as it is and is never rewritten.",
+    )
+    # The text from these lines to the end is the text of the blobs at tag v0.52.0 from the same lines on
+    # (SHA-256 of the LF text, as test_historical_release_records_keep_canonical_bytes computes it).
+    KEPT_TEXT = (
+        ("docs/releases/v0.52.0.md", "개선 조사가 먼저 볼 항목으로 고른 세 가지를 구현하고 저장소 설정 둘을 켠다.",
+         "aaa56bb0fc70ce768a3400cfdee1632b0e3b4f9b71699498bc18b7a8a6427d68"),
+        ("docs/verification/v0.52.0.md", "This specifies required gates, not measured pass results.",
+         "6fd507a0c5721bbcafed43150626ce75e26176ccee3fe8db75a3d7683787a4f3"),
+    )
 
     def test_release_note_title_and_sections_are_in_order(self) -> None:
         text = self.RELEASE.read_text(encoding="utf-8")
@@ -3612,7 +3635,32 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
         headings = [line for line in text.splitlines() if line.startswith("## ")]
         self.assertEqual(tuple(headings), self.SECTIONS)
 
+    def test_note_and_contract_open_with_the_candidate_statement(self) -> None:
+        # The statement is the first paragraph below the title: not published and why, the tag kept and
+        # never rewritten, no GitHub release, and the release that replaces the candidate.
+        for path, status in ((self.RELEASE, self.NOTE_STATUS), (self.VERIFICATION, self.RECORD_STATUS)):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(lines[1], "")
+            self.assertEqual(lines[3], "")
+            for literal in status:
+                with self.subTest(document=path.name, literal=literal):
+                    self.assertIn(literal, lines[2])
+            with self.subTest(document=path.name, reason="TEMP"):
+                self.assertIn("TEMP", lines[2])
+            self.assertTrue((path.parent / "v0.52.1.md").is_file())
+
+    def test_note_and_contract_keep_their_tagged_text(self) -> None:
+        for relative, start, expected in self.KEPT_TEXT:
+            with self.subTest(path=relative):
+                text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+                self.assertEqual(text.count(start), 1)
+                # Nothing but the title and the status statement stands above the kept text.
+                self.assertEqual(len(text[:text.index(start)].splitlines()), 4)
+                kept = text[text.index(start):].encode("utf-8")
+                self.assertEqual(hashlib.sha256(kept).hexdigest(), expected)
+
     def test_release_note_states_the_install_ref_the_certificate_and_the_rejected_models(self) -> None:
+        # The candidate's own statements, kept as they were at the tag.
         upgrade = _section(self.RELEASE.read_text(encoding="utf-8"), "## 하위호환·업그레이드")
         self.assertIn(self.INSTALL_REF, upgrade.splitlines())
         folded = _folded(upgrade)
@@ -3649,13 +3697,15 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, folded)
 
-    def test_release_note_uses_absolute_links_for_github_release_paste(self) -> None:
+    def test_release_note_links_name_the_candidate_tag_and_the_replacing_note(self) -> None:
         import re
         text = self.RELEASE.read_text(encoding="utf-8")
-        for target in re.findall(r"\]\(([^)\s]+)\)", text):
-            with self.subTest(target=target):
-                self.assertTrue(target.startswith(("https://", "#")), target)
-        # Links to repository files name this release's tag, not the previous one.
+        targets = re.findall(r"\]\(([^)\s]+)\)", text)
+        # The one relative link is the status statement's link to the note that replaces the candidate.
+        self.assertEqual([target for target in targets if not target.startswith(("https://", "#"))],
+                         ["v0.52.1.md"])
+        self.assertIn("](v0.52.1.md)", text.splitlines()[2])
+        # Links to repository files still name the candidate's tag, which exists and is not rewritten.
         refs = re.findall(r"\]\(https://github\.com/Technoetic/agentic-vault/(?:blob|tree)/([^/)\s]+)/", text)
         self.assertTrue(refs)
         self.assertEqual(set(refs), {"v0.52.0"})
@@ -3687,7 +3737,8 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(f"`checker_sha256` stays `{CHECKER_SHA256_V0460}`", defaults)
         self.assertIn("byte-identical to v0.51.0", defaults)
 
-    def test_v0520_moves_only_the_healthcheck_stamp(self) -> None:
+    def test_no_engine_stamp_stays_at_the_candidate_version(self) -> None:
+        # The health check stamp follows the plugin version in a patch release too.
         stamped = set()
         for top in ("assets", "hooks", "skills"):
             for path in (REPO_ROOT / top).rglob("*"):
@@ -3699,56 +3750,55 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
                     continue
                 if "engine=0.52.0" in text:
                     stamped.add(path.relative_to(REPO_ROOT).as_posix())
-        self.assertEqual(stamped, self.DECLARED_STAMPS)
-        lines = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(lines[1], "# agentic-vault:healthcheck engine=0.52.0")
-        self.assertEqual(sum("engine=0.52.0" in line for line in lines), 1)
+        self.assertEqual(stamped, set())
 
-    def test_readme_sections_link_the_v0520_documents_and_fold_v0510(self) -> None:
+    def test_readme_keeps_the_candidate_sections_first_in_the_folded_history(self) -> None:
         readme = README.read_text(encoding="utf-8")
-        overview = readme.index("## 🌐 English overview")
         history = readme.index("📜 이전 버전 변경 이력")
-        for heading in (self.KOREAN, self.ENGLISH):
+        self.assertIn("📜 이전 버전 변경 이력 (v0.9.0 ~ v0.52.0 / Historical release notes)", readme)
+        for heading, (previous, older) in zip((self.KOREAN, self.ENGLISH), self.PREVIOUS):
             with self.subTest(heading=heading):
                 self.assertEqual(readme.count("\n" + heading + "\n"), 1)
-                self.assertLess(overview, readme.index("\n" + heading + "\n"))
-                self.assertLess(readme.index("\n" + heading + "\n"), history)
+                self.assertLess(history, readme.index("\n" + heading + "\n"))
+                self.assertLess(readme.index("\n" + heading + "\n"), readme.index("\n" + previous + "\n"))
+                self.assertEqual(readme.count("\n" + previous + "\n"), 1)
+                self.assertLess(readme.index("\n" + previous + "\n"), readme.index("\n" + older + "\n"))
         korean = _folded(_section(readme, self.KOREAN))
         english = _folded(_section(readme, self.ENGLISH))
+        # Each section opens by saying that the candidate was not published, why, and where its changes ship.
+        self.assertTrue(korean.startswith(self.KOREAN + " 공개하지 않은 후보다. "), korean[:120])
+        self.assertTrue(english.startswith(self.ENGLISH + " Unpublished candidate: "), english[:150])
+        self.assertIn("태그는 그대로 있고 GitHub 릴리스는 없으며, 아래 변경은 [v0.52.1](docs/releases/v0.52.1.md)로 공개한다.",
+                      korean)
+        self.assertIn("The tag is kept and has no GitHub release, and the changes below ship as "
+                      "[v0.52.1](docs/releases/v0.52.1.md).", english)
         for name, text in (("korean", korean), ("english", english)):
-            for link in ("](docs/releases/v0.52.0.md)", "](docs/verification/v0.52.0.md)"):
+            with self.subTest(section=name, reason="TEMP"):
+                self.assertIn("TEMP", text)
+        for name, text in (("korean", korean), ("english", english)):
+            for link in ("](docs/releases/v0.52.1.md)", "](docs/releases/v0.52.0.md)",
+                         "](docs/verification/v0.52.0.md)"):
                 with self.subTest(section=name, link=link):
                     self.assertIn(link, text)
-        self.assertIn("](https://github.com/Technoetic/agentic-vault/releases/tag/v0.52.0)", korean)
         self.assertIn("v0.46.0부터 v0.52.0까지", korean)
         self.assertIn("unchanged from v0.46.0 through v0.52.0", english)
-        # v0.51.0 keeps its two sections, now first in the folded history.
-        self.assertIn("📜 이전 버전 변경 이력 (v0.9.0 ~ v0.51.0 / Historical release notes)", readme)
-        for previous, older in self.PREVIOUS:
-            with self.subTest(previous=previous):
-                self.assertEqual(readme.count("\n" + previous + "\n"), 1)
-                self.assertLess(history, readme.index("\n" + previous + "\n"))
-                self.assertLess(readme.index("\n" + previous + "\n"), readme.index("\n" + older + "\n"))
-        active = readme[:history]
-        for stale in ("releases/tag/v0.51.0", "docs/verification/v0.51.0.md", "engine=0.51.0", "--ref v0.51.0",
-                      "tree/v0.51.0/"):
+        # No text offers the candidate as a release, an install ref or a package address.
+        for stale in ("releases/tag/v0.52.0", "--ref v0.52.0", "tree/v0.52.0/", "engine=0.52.0"):
             with self.subTest(stale=stale):
-                self.assertNotIn(stale, active)
+                self.assertNotIn(stale, readme)
 
-    def test_codex_guide_and_description_name_the_release(self) -> None:
+    def test_codex_guide_keeps_the_candidate_section_behind_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[0], self.ENGLISH)
+        self.assertEqual(headings[1], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
-        for literal in ("](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
+        for literal in ("The v0.52.0 candidate, which was not published (see v0.52.1 above), adds",
+                        "](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
                         "unchanged from v0.46.0 through v0.52.0"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, section)
-        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
-        description = manifest["interface"]["longDescription"]
-        for literal in ("Release v0.52.0", "section 14d", "google/gemini-decision-1", "primary"):
-            with self.subTest(description=literal):
-                self.assertIn(literal, description)
+        self.assertNotIn("Release v0.52.0", codex)
+        self.assertNotIn("--ref v0.52.0", codex)
 
     def test_security_states_the_reporting_form_and_the_session_start_hygiene_limit(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
@@ -3781,7 +3831,11 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
             bullet.append(line)
         bullet = _folded("\n".join(bullet))
         for literal in ("`refs/tags/v*`", "우회 주체", "태그 70개 가운데 41개", "릴리스 23개", "초안만 있는 태그 4개",
-                        "릴리스가 없는 태그 14개", "비공개 취약점 제보"):
+                        "릴리스가 없는 태그 14개", "비공개 취약점 제보",
+                        # The candidate's own tag is one more tag without a release; v0.52.1 reads the two
+                        # settings back.
+                        "v0.52.0은 공개하지 않은 후보다.", "릴리스가 없는 태그로 남아",
+                        "[검증 계약](verification/v0.52.1.md)"):
             with self.subTest(bullet=literal):
                 self.assertIn(literal, bullet)
         proofs = _section(text, "## 증명하는 것과 증명하지 않는 것")
@@ -3797,3 +3851,294 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
         for literal in ("SLSA", "Source VSA", "L4", "두 사람", "Source 수준은 주장하지 않는다"):
             with self.subTest(source_track=literal):
                 self.assertIn(literal, after)
+
+
+# v0.52.1 publishes, for the first time, everything the v0.52.0 candidate added and fixes the long Windows
+# TEMP path run that the candidate's release review found wanting. Only the heading, the usage line and the
+# tag statement of the new release-note section are pinned: its body is revised after the fixes are in.
+class V0521ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs/releases/v0.52.1.md"
+    VERIFICATION = REPO_ROOT / "docs/verification/v0.52.1.md"
+    TITLE = "# v0.52.1 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
+    LONG_TEMP_SECTION = "## v0.52.0 후보에서 고친 긴 TEMP 경로 시험"
+    SECTIONS = (LONG_TEMP_SECTION, "## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증",
+                "## 연구 출처와 기존 기능의 차이", "## 알려진 경계")
+    INSTALL_REF = "현재 설치 ref는 `v0.52.1`이다."
+    CERTIFICATE_SENTENCE = (
+        "인증서가 묶는 일곱 파일(`vault_lint_extensions.py`·`vault_warning_policy.py`·`vault_provenance.py`·"
+        "`vault_egress.py`·`vault_ssot.py`·`jev_client.py`·`vault_paths.py`)은 v0.46.0부터 v0.52.1까지 바이트 "
+        "단위로 같아, 실제 설치 바이트가 같은 경우 기존 경고 승격 인증서가 그대로 유효하다."
+    )
+    TAG_STATEMENT = "v0.52.0 태그는 다시 쓰지 않았고 그 태그에는 GitHub 릴리스가 없다."
+    USAGE = "python -B scripts/long_temp_suite.py [--length N] [--parent DIR] [--keep] [--summary OUT] [-- ARG ...]"
+    RECORD_TITLE = "# v0.52.1 verification contract"
+    RECORD_SECTIONS = ("## Scope", "## Feature evidence", "## Default-result comparison",
+                       "## Required release gates", "## Boundaries")
+    GATE_1 = (
+        "1. Commit integrated source, focused tests, a full fresh local suite, a second full run of the suite on "
+        "Windows through `scripts/long_temp_suite.py` (TEMP and TMP set to a 150-character folder that "
+        "`tempfile.gettempdir()` returns, with the `LongPathsEnabled` value recorded), required offline smoke "
+        "commands, compilation, whole-tree whitespace, package generation/check, and independent read-only "
+        "verification."
+    )
+    KOREAN = "## v0.52.1 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
+    ENGLISH = "## v0.52.1 — same-number report, defused header lines and kept Jev answers on escalation"
+    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+
+    def test_release_note_title_and_sections_are_in_order(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        self.assertEqual(lines[0], self.TITLE)
+        headings = [line for line in lines if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.SECTIONS)
+        # The long TEMP section comes right after the opening paragraph.
+        self.assertEqual(lines[1], "")
+        self.assertTrue(lines[2].startswith("개선 조사가 먼저 볼 항목으로 고른 세 가지를 구현하고"), lines[2][:40])
+        self.assertEqual(lines[3:5], ["", self.LONG_TEMP_SECTION])
+        # The opening paragraph says where the changes were first carried and names the public baseline.
+        for literal in ("공개하지 않은 v0.52.0 후보", "v0.52.1은 그 변경을 모두 담아 처음 공개하고",
+                        "`22168b7ddd10796e8ad0a894fe2c79a704bd7da2`"):
+            with self.subTest(opening=literal):
+                self.assertIn(literal, lines[2])
+
+    def test_long_temp_section_states_the_usage_line_and_the_kept_tag(self) -> None:
+        # Only these literals of the section are pinned; its body is not.
+        section = _section(self.RELEASE.read_text(encoding="utf-8"), self.LONG_TEMP_SECTION)
+        lines = section.splitlines()
+        self.assertEqual(lines.count(self.USAGE), 1)
+        usage = lines.index(self.USAGE)
+        self.assertEqual((lines[usage - 1], lines[usage + 1]), ("```text", "```"))
+        self.assertIn(self.TAG_STATEMENT, lines)
+
+    def test_release_note_states_the_install_ref_the_certificate_and_the_rejected_models(self) -> None:
+        upgrade = _section(self.RELEASE.read_text(encoding="utf-8"), "## 하위호환·업그레이드")
+        self.assertIn(self.INSTALL_REF, upgrade.splitlines())
+        folded = _folded(upgrade)
+        self.assertIn(self.CERTIFICATE_SENTENCE, folded)
+        self.assertIn("healthcheck만 `engine=0.52.1`로 이동하며 기존 규칙·어댑터 스탬프는 유지한다.", folded)
+        self.assertIn(f"`checker_sha256`는 `{CHECKER_SHA256_V0460}` 그대로다.", folded)
+        for model in V0520ReleaseMetadataTests.REJECTED_MODELS:
+            with self.subTest(model=model):
+                self.assertIn(f"`{model}`", folded)
+        self.assertIn("`invalid_arguments`", folded)
+        self.assertNotIn("v0.52.0까지", folded)
+
+    def test_release_note_names_the_default_changes(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        defaults = _folded(_section(text, "## 기본 결과 변경"))
+        for literal in ("`engine=0.52.1`", "`ENGINE_VERSION`", "섹션 14d", "`duplicate_entry_ids`",
+                        "`[note line, not a hook header] `", "`--escalate-bizrouter`", "`primary`", "`agreement`",
+                        "`disagreed_ids`", "`provider_disagreement`", "`invalid_arguments`",
+                        "v0.51.0과 바이트 단위로 같다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, defaults)
+        self.assertNotIn("engine=0.52.0", defaults)
+        # The five items of the candidate come first, in its order, with the version line moved; the four
+        # feature items are the candidate's lines.
+        bullets = [line for line in _section(text, "## 기본 결과 변경").splitlines() if line.startswith("- ")]
+        candidate = [line for line in _section(V0520ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8"),
+                                               "## 기본 결과 변경").splitlines() if line.startswith("- ")]
+        self.assertGreaterEqual(len(bullets), 5)
+        self.assertTrue(bullets[0].startswith("- 판 메타데이터:"), bullets[0][:30])
+        self.assertEqual(bullets[1:5], candidate[1:5])
+
+    def test_release_note_carries_the_changes_and_sources_of_the_candidate(self) -> None:
+        text = self.RELEASE.read_text(encoding="utf-8")
+        changes = _section(text, "## 변경")
+        numbered = [line for line in changes.splitlines() if line[:1].isdigit()]
+        for index, lead in enumerate(("1. 같은 번호의 결정·실수 항목 보고(healthcheck 섹션 14d",
+                                      "2. `SessionStart`의 가짜 머리글 줄 무력화(`hooks/session_start.py`).",
+                                      "3. 판단 올리기의 Jev 원답 보존과 BizRouter 모델 축소(",
+                                      "4. 저장소 설정(유지관리자가 적용, 코드 변경 없음).",
+                                      "5. 판 표면.")):
+            with self.subTest(item=index + 1):
+                self.assertTrue(numbered[index].startswith(lead), numbered[index][:50])
+        sources = _section(text, "## 연구 출처와 기존 기능의 차이")
+        for url in V0520ReleaseMetadataTests.SOURCES:
+            with self.subTest(url=url):
+                self.assertEqual(sources.count(f"]({url})"), 1)
+        folded = _folded(sources)
+        for literal in ("부록 I", "효과 수치는 이 저장소의 효과로 주장하지 않는다",
+                        "이전 저장소 문서는 이 출처들을 인용하지 않았다"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_release_note_uses_absolute_links_for_github_release_paste(self) -> None:
+        import re
+        text = self.RELEASE.read_text(encoding="utf-8")
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            with self.subTest(target=target):
+                self.assertTrue(target.startswith(("https://", "#")), target)
+        # Links to repository files name this release's tag, not the candidate's.
+        refs = re.findall(r"\]\(https://github\.com/Technoetic/agentic-vault/(?:blob|tree)/([^/)\s]+)/", text)
+        self.assertTrue(refs)
+        self.assertEqual(set(refs), {"v0.52.1"})
+        self.assertIn(CHECKER_SHA256_V0460, text)
+
+    def test_release_note_boundaries_name_the_long_temp_limits(self) -> None:
+        # The run that was made, the executables that were not tried and the adapter that was not changed
+        # are named; the sentences themselves are not pinned.
+        boundaries = _section(self.RELEASE.read_text(encoding="utf-8"), "## 알려진 경계")
+        for token in ("`LongPathsEnabled`", "150자", "`codex`", "`agy`",
+                      "`assets/adapters/lesson-cues/lesson-cues.py`"):
+            with self.subTest(token=token):
+                self.assertIn(token, boundaries)
+
+    def test_verification_title_sections_and_fourteen_gates(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], self.RECORD_TITLE)
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(tuple(headings), self.RECORD_SECTIONS)
+        gates = _section(text, "## Required release gates")
+        numbered = [line for line in gates.splitlines() if line[:1].isdigit()]
+        self.assertEqual([int(line.split(".", 1)[0]) for line in numbered], list(range(1, 15)))
+        # Gate 1 names the second full run through the long TEMP runner, word for word.
+        self.assertEqual(numbered[0], self.GATE_1)
+        # Gate 4 reads back the two settings applied for the candidate; they must still be active, and
+        # the candidate's tag stays as it is.
+        for literal in ("read back", "applied for v0.52.0", "`v*` tag ruleset", "private vulnerability reporting",
+                        "still active", "unchanged remote `v0.52.0` tag", "push only the tag"):
+            with self.subTest(gate4=literal):
+                self.assertIn(literal, numbered[3])
+        self.assertNotIn("apply the", numbered[3])
+        # The other twelve gates are the candidate's gates.
+        candidate = [line for line in _section(V0520ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8"),
+                                               "## Required release gates").splitlines() if line[:1].isdigit()]
+        for index in (1, 2, *range(4, 14)):
+            with self.subTest(gate=index + 1):
+                self.assertEqual(numbered[index], candidate[index])
+        self.assertIn("Never rewrite a public tag.", numbered[13])
+
+    def test_verification_scope_evidence_and_unchanged_checker(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        scope = _folded(_section(text, "## Scope"))
+        for literal in ("unpublished v0.52.0 candidate", "`LongPathsEnabled` 0", "150-character",
+                        "`scripts/long_temp_suite.py`", "`tests/_winfs.py`", "applied for v0.52.0 on 2026-11-16",
+                        "seven certificate-bound checker files", "is not rewritten"):
+            with self.subTest(scope=literal):
+                self.assertIn(literal, scope)
+        evidence = _section(text, "## Feature evidence")
+        bullets = [line for line in evidence.splitlines() if line.startswith("- ")]
+        candidate = [line for line in _section(V0520ReleaseMetadataTests.VERIFICATION.read_text(encoding="utf-8"),
+                                               "## Feature evidence").splitlines() if line.startswith("- ")]
+        # The three feature items of the candidate are unchanged.
+        self.assertEqual(bullets[:3], candidate[:3])
+        leads = [line.split(":", 1)[0] for line in bullets]
+        self.assertEqual(leads, ["- Same-number decision and mistake headings", "- Header-line defusing",
+                                 "- Kept Jev answer and BizRouter models", "- Repository settings",
+                                 "- Long TEMP run", "- Long TEMP guard", "- Release documents and surfaces"])
+        folded = _folded(evidence)
+        for literal in ("`scripts/long_temp_suite.py`", "`AGENTIC_VAULT_REQUIRE_LONG_TEMP`",
+                        "`DeclaredLongTempTests.test_tempfile_uses_the_declared_long_temp`",
+                        "`tests/test_000_environment.py`", "`tests/test_long_temp_suite.py`",
+                        "It is never skipped.", "`V0521ReleaseMetadataTests`", "`V0520ReleaseMetadataTests`",
+                        "`engine=0.52.1`"):
+            with self.subTest(evidence=literal):
+                self.assertIn(literal, folded)
+        defaults = _folded(_section(text, "## Default-result comparison"))
+        self.assertIn("Seven certificate-bound checker files remain byte-identical from v0.46.0 through v0.52.1, "
+                      f"so `checker_sha256` stays `{CHECKER_SHA256_V0460}`.", defaults)
+        self.assertIn("byte-identical to v0.51.0", defaults)
+        self.assertIn("`ENGINE_VERSION` move to 0.52.1.", defaults)
+        boundaries = _folded(_section(text, "## Boundaries"))
+        for token in ("`LongPathsEnabled` 0", "150-character", "`codex`", "`agy`", "lesson cue adapter"):
+            with self.subTest(boundary=token):
+                self.assertIn(token, boundaries)
+
+    def test_v0521_moves_only_the_healthcheck_stamp(self) -> None:
+        stamped = set()
+        for top in ("assets", "hooks", "skills"):
+            for path in (REPO_ROOT / top).rglob("*"):
+                if not path.is_file() or "__pycache__" in path.parts:
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    continue
+                if "engine=0.52.1" in text:
+                    stamped.add(path.relative_to(REPO_ROOT).as_posix())
+        self.assertEqual(stamped, self.DECLARED_STAMPS)
+        lines = HEALTHCHECK_SCRIPT.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines[1], "# agentic-vault:healthcheck engine=0.52.1")
+        self.assertEqual(sum("engine=0.52.1" in line for line in lines), 1)
+        self.assertEqual(_module_constant(HEALTHCHECK_SCRIPT, "ENGINE_VERSION"), "0.52.1")
+
+    def test_readme_sections_link_the_v0521_documents_and_name_the_candidate(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        overview = readme.index("## 🌐 English overview")
+        history = readme.index("📜 이전 버전 변경 이력")
+        for heading in (self.KOREAN, self.ENGLISH):
+            with self.subTest(heading=heading):
+                self.assertEqual(readme.count("\n" + heading + "\n"), 1)
+                self.assertLess(overview, readme.index("\n" + heading + "\n"))
+                self.assertLess(readme.index("\n" + heading + "\n"), history)
+        self.assertLess(readme.index("\n" + self.KOREAN + "\n"), readme.index("\n" + self.ENGLISH + "\n"))
+        korean = _folded(_section(readme, self.KOREAN))
+        english = _folded(_section(readme, self.ENGLISH))
+        for name, text in (("korean", korean), ("english", english)):
+            for literal in ("](docs/releases/v0.52.1.md)", "](docs/verification/v0.52.1.md)",
+                            "`scripts/long_temp_suite.py`", "`LongPathsEnabled`"):
+                with self.subTest(section=name, literal=literal):
+                    self.assertIn(literal, text)
+        self.assertIn("](https://github.com/Technoetic/agentic-vault/releases/tag/v0.52.1)", korean)
+        self.assertIn("v0.46.0부터 v0.52.1까지", korean)
+        self.assertIn("unchanged from v0.46.0 through v0.52.1", english)
+        # The candidate is named as unpublished, in the wording used for v0.45.0.
+        self.assertIn("v0.52.0은 공개하지 않은 후보다.", korean)
+        self.assertIn("unpublished v0.52.0 candidate", english)
+        self.assertIn("was never rewritten and has no GitHub release", english)
+        # The part above the folded history offers no document, ref or stamp of the candidate.
+        active = readme[:history]
+        for stale in ("releases/tag/v0.52.0", "docs/releases/v0.52.0.md", "docs/verification/v0.52.0.md",
+                      "engine=0.52.0", "--ref v0.52.0", "tree/v0.52.0/", "v0.52.0까지", "through v0.52.0"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, active)
+        current = next(line for line in readme.splitlines() if line.startswith("현재 버전은 **v"))
+        self.assertIn("공개하지 않은 v0.52.0 후보", current)
+
+    def test_codex_guide_and_description_name_the_release(self) -> None:
+        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.ENGLISH)
+        section = _folded(_section(codex, self.ENGLISH))
+        for literal in ("v0.52.1 supersedes the unpublished v0.52.0 candidate", "](releases/v0.52.1.md)",
+                        "](verification/v0.52.1.md)", "unchanged from v0.46.0 through v0.52.1",
+                        "`scripts/long_temp_suite.py`"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, section)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"]
+        for literal in ("Release v0.52.1", "section 14d", "google/gemini-decision-1", "primary",
+                        "an unpublished candidate that v0.52.1 supersedes",
+                        "unchanged from v0.46.0 through v0.52.1."):
+            with self.subTest(description=literal):
+                self.assertIn(literal, description)
+        self.assertNotIn("Release v0.52.0", description)
+
+    def test_release_integrity_names_the_release_and_the_read_back(self) -> None:
+        integrity = _folded((REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8"))
+        self.assertIn("현재 v0.52.1의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.52.1.md)",
+                      integrity)
+        # The two settings applied for the candidate are read back for this release.
+        self.assertIn("v0.52.1은 태그를 push하기 직전에 두 설정을 다시 읽어 그대로 켜져 있는지 확인한다"
+                      "([검증 계약](verification/v0.52.1.md)).", integrity)
+        self.assertNotIn("verification/v0.52.0.md", integrity)
+
+    def test_security_and_docs_index_name_the_release_and_the_candidate(self) -> None:
+        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        versions = _section(security, "## Supported versions")
+        self.assertIn("| 0.52.1 (latest) | Yes. Security fixes target the latest source version. |",
+                      versions.splitlines())
+        self.assertIn("| 0.52.0 and earlier | No. Upgrade to 0.52.1. From 0.46.0 to 0.52.1 the seven "
+                      "certificate-bound checker files are unchanged,", versions)
+        self.assertIn("The unpublished v0.52.0, v0.40.0,", versions)
+        summary = next(line for line in security.splitlines() if line.startswith("- 보안 수정 대상은 최신"))
+        for literal in ("최신 0.52.1 소스다.", "0.52.0 이하는 0.52.1로 갱신한다.", "0.46.0부터 0.52.1까지",
+                        "0.52.0은", "게시하지 않은 후보다.", "태그는 그대로 있고 GitHub 릴리스는 없으며"):
+            with self.subTest(summary=literal):
+                self.assertIn(literal, summary)
+        index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+        row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
+        self.assertIn("최신 소스는 [v0.52.1](releases/v0.52.1.md); [검증 기록](verification/v0.52.1.md). "
+                      "[v0.52.0](releases/v0.52.0.md)은 긴 Windows TEMP 경로 시험 문제로 대체한 미공개 후보이며 "
+                      "태그와 당시 기록을 보존한다.", row)
