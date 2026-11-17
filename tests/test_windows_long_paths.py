@@ -28,6 +28,11 @@ import vault_runs  # noqa: E402
 import vault_state  # noqa: E402
 import vault_task_contracts  # noqa: E402
 
+try:
+    from _winfs import extended, make_junction
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import extended, make_junction
+
 
 def _rmtree_long(root: Path) -> None:
     target = Path("\\\\?\\" + str(root.resolve())) if os.name == "nt" and not str(root).startswith("\\\\?\\") else root
@@ -180,34 +185,44 @@ class LessonMetricsLongPathTests(unittest.TestCase):
 
     # Proposal receipts (56 characters below the root) stay below MAX_PATH at this length; observation records do not.
     ROOT_LENGTH = 172
+    OBSERVATION = {"attempt_id": "A-001", "session_id": "S-001", "applicability": "applicable",
+                   "outcome": "success", "verification_status": "unverified", "evidence_ids": []}
 
     def setUp(self) -> None:
+        self.vault = self.make_vault(self.ROOT_LENGTH)
+
+    def make_vault(self, length: int) -> Path:
+        """A fresh vault whose path has at least `length` characters (exactly that many below an ordinary TEMP)."""
         base = Path(tempfile.mkdtemp(prefix="av-lp-")).resolve()
         self.addCleanup(lambda: _rmtree_long(base))
-        padding = self.ROOT_LENGTH - len(str(base)) - len(os.sep + "vault") - 1
-        root = base / ("p" * padding) if padding > 0 else base
-        self.vault = root / "vault"
-        (self.vault / "00-meta").mkdir(parents=True)
-        (self.vault / "00-meta" / "vault-config.json").write_text(
+        padding = length - len(str(base)) - len(os.sep + "vault") - 1
+        vault = base / ("p" * max(padding, 1)) / "vault"
+        (vault / "00-meta").mkdir(parents=True)
+        (vault / "00-meta" / "vault-config.json").write_text(
             json.dumps({"required_keys": ["title"], "enums": {}}), encoding="utf-8")
-        (self.vault / "CLAUDE.md").write_bytes(b"# Rules\nBefore\n")
-        (self.vault / "00-meta" / "candidate.md").write_bytes(b"# Rules\nAfter: retry once\n")
+        (vault / "CLAUDE.md").write_bytes(b"# Rules\nBefore\n")
+        (vault / "00-meta" / "candidate.md").write_bytes(b"# Rules\nAfter: retry once\n")
+        return vault
 
-    def call(self, module, *arguments: str) -> dict:
+    def call(self, module, *arguments: str, vault: Path | None = None) -> dict:
         stream = io.StringIO()
         with contextlib.redirect_stdout(stream):
-            code = module.main(["--vault", str(self.vault), *arguments])
+            code = module.main(["--vault", str(vault or self.vault), *arguments])
         output = json.loads(stream.getvalue())
         self.assertEqual(code, 0, output)
         return output
 
-    def test_observations_are_recorded_and_summarized_beyond_260_chars(self) -> None:
+    def applied_proposal(self, vault: Path) -> str:
         proposal = self.call(vault_proposals, "propose", "--target", "CLAUDE.md", "--candidate",
-                             "00-meta/candidate.md", "--lesson", "L-001", "--summary", "Retry recovery")
-        self.call(vault_proposals, "apply", proposal["id"], "--approve")
-        observation = {"attempt_id": "A-001", "session_id": "S-001", "applicability": "applicable",
-                       "outcome": "success", "verification_status": "unverified", "evidence_ids": []}
-        recorded = vault_lesson_metrics.record_observation(self.vault, proposal["id"], observation)
+                             "00-meta/candidate.md", "--lesson", "L-001", "--summary", "Retry recovery", vault=vault)
+        self.call(vault_proposals, "apply", proposal["id"], "--approve", vault=vault)
+        return proposal["id"]
+
+    def test_observations_are_recorded_and_summarized_beyond_260_chars(self) -> None:
+        self.assertGreaterEqual(len(str(self.vault)), self.ROOT_LENGTH)
+        proposal_id = self.applied_proposal(self.vault)
+        observation = dict(self.OBSERVATION)
+        recorded = vault_lesson_metrics.record_observation(self.vault, proposal_id, observation)
         record = self.vault / recorded["path"]
         self.assertGreater(len(str(record)), 260)
         self.assertTrue(vault_evidence.fs_path(record).is_file())
@@ -215,14 +230,48 @@ class LessonMetricsLongPathTests(unittest.TestCase):
         self.assertEqual(os.listdir(vault_evidence.fs_path(record.parent)), [record.name])
         self.assertFalse(vault_evidence.fs_path(record.parent.parent / ".lock").exists())
         second = vault_lesson_metrics.record_observation(
-            self.vault, proposal["id"], {**observation, "attempt_id": "A-002"})
+            self.vault, proposal_id, {**observation, "attempt_id": "A-002"})
         self.assertNotEqual(second["id"], recorded["id"])
-        summary = vault_lesson_metrics.summarize(self.vault, proposal["id"])
+        summary = vault_lesson_metrics.summarize(self.vault, proposal_id)
         self.assertEqual(summary["counts"]["eligible_attempts"], 2)
         with self.assertRaises(vault_lesson_metrics.LessonMetricsError) as caught:
-            vault_lesson_metrics.record_observation(self.vault, proposal["id"], observation)
+            vault_lesson_metrics.record_observation(self.vault, proposal_id, observation)
         self.assertEqual(str(caught.exception), "duplicate_attempt")
 
+    def test_a_vault_named_in_the_extended_form_records_and_leaves_nothing_behind(self) -> None:
+        # A caller may name the vault in the extended-length form, at any length; the store then works
+        # in that form throughout, as it did before (on other systems extended() returns the same path).
+        short = self.make_vault(1)
+        for vault in (short, self.vault):
+            with self.subTest(length=len(str(vault))):
+                proposal_id = self.applied_proposal(vault)
+                spelled = extended(vault)
+                recorded = vault_lesson_metrics.record_observation(spelled, proposal_id, dict(self.OBSERVATION))
+                summary = vault_lesson_metrics.summarize(spelled, proposal_id)
+                self.assertEqual(summary["counts"]["eligible_attempts"], 1)
+                folder = vault_evidence.fs_path(vault / recorded["path"]).parent
+                self.assertEqual(os.listdir(folder), [Path(recorded["path"]).name])
+                self.assertFalse(vault_evidence.fs_path(folder.parent / ".lock").exists())
+
+    @unittest.skipUnless(os.name == "nt", "junctions exist only on Windows")
+    def test_a_junction_beyond_260_chars_is_refused_like_a_short_one(self) -> None:
+        # The record folder lies 64 characters below the root, so from 197 characters it passes MAX_PATH,
+        # out of reach of a plain lstat call, while the proposal receipt (56 characters below) does not.
+        vault = self.make_vault(197)
+        proposal_id = self.applied_proposal(vault)
+        outside = Path(tempfile.mkdtemp(prefix="av-lp-outside-")).resolve()
+        self.addCleanup(lambda: _rmtree_long(outside))
+        observations = vault / "00-meta" / "proposals" / "observations"
+        vault_evidence.fs_path(observations).mkdir(parents=True, exist_ok=True)
+        record_folder = observations / proposal_id
+        self.assertGreaterEqual(len(str(record_folder)), 260)
+        make_junction(record_folder, outside)
+        for call in (lambda: vault_lesson_metrics.record_observation(vault, proposal_id, dict(self.OBSERVATION)),
+                     lambda: vault_lesson_metrics.summarize(vault, proposal_id)):
+            with self.assertRaises(vault_lesson_metrics.LessonMetricsError) as caught:
+                call()
+            self.assertEqual(str(caught.exception), "unsafe_path")
+        self.assertEqual(os.listdir(outside), [])
 
 if __name__ == "__main__":
     unittest.main()

@@ -96,6 +96,20 @@ def _validate_input(observation):
     return {**observation, 'evidence_ids': list(ids)}
 
 
+def _extended_root(path):
+    """The extended-length form of an absolute Windows path, whatever its length.
+
+    vault_evidence.fs_path extends only a path that nears the plain limit; the link walk below needs
+    the root itself in that form so that every component under it can be examined.
+    """
+    text = str(path)
+    if text.startswith('\\\\?\\'):
+        return Path(text)
+    if text.startswith('\\\\'):
+        return Path('\\\\?\\UNC\\' + text[2:])
+    return Path('\\\\?\\' + text)
+
+
 def _effective_verification(requested, records):
     if requested == 'unknown':
         return 'unknown'
@@ -121,11 +135,30 @@ class Store:
         self.denied = (*self.config['deny_zones'], *self.config['exclude_dirs'], '.git')
         self.path(CONFIG_PATH, internal=True)
 
+    def _walk_vault(self, relative):
+        """The vault as resolve_note_path should walk it for relative.
+
+        resolve_note_path checks each component for a link or reparse point with a plain lstat call,
+        which cannot reach a component beyond the plain Windows path limit: such a component would
+        read as missing and pass unchecked, while the store's own I/O reaches it through fs_path. A
+        path that fs_path gives the extended-length form is therefore walked from the extended-length
+        form of the vault, where every component can be examined. Other paths are walked as before.
+        """
+        if os.name != 'nt' or str(self.root).startswith('\\\\?\\'):
+            return None
+        joined = self.root.joinpath(*str(relative).replace('\\', '/').split('/'))
+        if evidence.fs_path(joined) == joined:
+            return None
+        return _extended_root(Path(os.path.abspath(self.vault)))
+
     def path(self, relative, *, internal=False):
+        walk = self._walk_vault(relative)
         try:
-            result = resolve_note_path(self.vault, relative, self.denied)
+            result = resolve_note_path(walk if walk is not None else self.vault, relative, self.denied)
         except ValueError as exc:
             raise LessonMetricsError('unsafe_path') from exc
+        if walk is not None:
+            result = evidence.plain_path(result)  # back to the form of the root
         canonical = result.relative_to(self.root).as_posix().casefold()
         if self.worktrees.denied(result.relative_to(self.root).parts, self.denied):
             raise LessonMetricsError('unsafe_path')
@@ -329,7 +362,9 @@ class Store:
         # folder is handed over: a folder below the plain Windows limit can hold a file beyond it.
         io_directory = evidence.fs_path(directory / ('.observation-' + '0' * 8 + '.tmp')).parent
         fd, temporary = tempfile.mkstemp(prefix='.observation-', suffix='.tmp', dir=io_directory)
-        temporary = evidence.plain_path(Path(temporary))
+        temporary = Path(temporary)
+        # The temporary and the root can be in different forms; rel_posix compares them without the prefix.
+        relative_temporary = evidence.rel_posix(temporary, self.root)
         try:
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(data)
@@ -342,9 +377,9 @@ class Store:
                 raise LessonMetricsError('observation_store_changed')
             if self.path(relative, internal=True) != path:
                 raise LessonMetricsError('unsafe_path')
-            checked_temporary = self.path(temporary.relative_to(self.root).as_posix(), internal=True)
+            checked_temporary = self.path(relative_temporary, internal=True)
             temporary_info, current_mark, _data = self.read(
-                checked_temporary.relative_to(self.root).as_posix(), limit=MAX_OBSERVATION_BYTES,
+                evidence.rel_posix(checked_temporary, self.root), limit=MAX_OBSERVATION_BYTES,
                 internal=True)
             if (temporary_info != {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
                     or current_mark != temporary_mark):
@@ -359,7 +394,7 @@ class Store:
             except FileExistsError as exc:
                 raise LessonMetricsError('observation_already_exists') from exc
         finally:
-            checked = evidence.fs_path(self.path(temporary.relative_to(self.root).as_posix(), internal=True))
+            checked = evidence.fs_path(self.path(relative_temporary, internal=True))
             if checked.exists():
                 checked.unlink()
 
