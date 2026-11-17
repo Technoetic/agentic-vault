@@ -15,6 +15,11 @@ import time
 import unittest
 from unittest.mock import patch
 
+try:
+    from _winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+except ImportError:  # run as tests.<module> from the repository root
+    from tests._winfs import PLAIN_PATH_LIMIT, deep_path, extended, plain
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -22,6 +27,9 @@ SPEC = importlib.util.spec_from_file_location(
 )
 verifier = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verifier)
+
+WINDOWS = os.name == "nt"
+PREFIX = "\\\\?\\"  # the extended-length prefix; only Windows adds it
 
 
 class CodexVerificationTests(unittest.TestCase):
@@ -958,6 +966,47 @@ class CodexVerificationTests(unittest.TestCase):
 
         self.assertTrue((root / "started").is_file())
         self.assert_child_lock_released(root)
+
+    # Long paths: Windows without long-path support refuses a plain path of 260 characters. The
+    # tests below hold on every system; the extended-length form they expect exists on Windows only.
+
+    def test_long_path_helpers_keep_short_paths_and_switch_at_the_plain_limit(self) -> None:
+        self.assertEqual(verifier.PLAIN_PATH_LIMIT, PLAIN_PATH_LIMIT)
+        base = "C:\\t" if WINDOWS else "/t"
+        below = base + os.sep + "n" * (PLAIN_PATH_LIMIT - 1 - len(base) - 1)
+        at_limit = below + "n"
+        short = base + os.sep + "work"
+        room = PLAIN_PATH_LIMIT - len(short)
+        relative = os.path.join("notes", "n" * PLAIN_PATH_LIMIT)
+
+        def long_form(text: str) -> str:
+            return PREFIX + text if WINDOWS else text
+
+        self.assertEqual((len(below), len(at_limit)), (PLAIN_PATH_LIMIT - 1, PLAIN_PATH_LIMIT))
+        # plain below the limit, extended at it, and the reserve counts
+        self.assertEqual(str(verifier._workspace(below, 0)), below)
+        self.assertEqual(str(verifier._workspace(at_limit, 0)), long_form(at_limit))
+        self.assertEqual(str(verifier._workspace(short, room - 1)), short)
+        self.assertEqual(str(verifier._workspace(short, room)), long_form(short))
+        # the two forms undo each other and neither is applied twice
+        self.assertEqual(str(verifier._extended(short)), long_form(short))
+        self.assertEqual(str(verifier._extended(long_form(short))), long_form(short))
+        self.assertEqual(str(verifier._plain(long_form(at_limit))), at_limit)
+        self.assertEqual(str(verifier._plain(short)), short)
+        # a relative path has no extended-length form
+        self.assertEqual(str(verifier._workspace(relative, 0)), relative)
+        self.assertEqual(str(verifier._extended(relative)), relative)
+        if WINDOWS:
+            share = "\\\\server\\share\\folder"
+            self.assertEqual(str(verifier._extended(share)), PREFIX + "UNC\\server\\share\\folder")
+            self.assertEqual(str(verifier._plain(PREFIX + "UNC\\server\\share\\folder")), share)
+        # tests/_winfs.py carries the same helpers for fixtures; the two sets agree
+        for sample in (below, at_limit, short, relative, long_form(at_limit)):
+            with self.subTest(sample=sample[:12], length=len(sample)):
+                self.assertEqual(verifier._extended(sample), extended(sample))
+                self.assertEqual(verifier._plain(sample), plain(sample))
+                for reserve in (0, room):
+                    self.assertEqual(verifier._workspace(sample, reserve), deep_path(sample, reserve))
 
 
 if __name__ == "__main__":
