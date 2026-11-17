@@ -88,6 +88,8 @@ jobs:
         run: python scripts/evaluate_memory_reliability.py
       - name: Handoff fold loss alarm (no model calls)
         run: python scripts/evaluate_handoff_fold.py
+      - name: Compare interrupted and uninterrupted work with negative controls
+        run: python scripts/evaluate_handoff_resume.py demo
       - name: Measure preservation check mutation fidelity (report only; no model calls)
         run: python scripts/evaluate_verifier_fidelity.py
       - name: Hard bilingual recall at top3 (explicit query expansion)

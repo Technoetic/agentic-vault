@@ -321,10 +321,10 @@ def _bm25_passage(doc: dict, match: dict, phrase: str, query_terms, tokenize=Non
             match["snippet"] = _legacy._snippet(line, phrase, query_terms)
 
 
-def _ranked_paths(scores: dict, priority=()) -> list[str]:
-    """Order by score. Only the final result order passes priority: a channel rank or a
-    graph seed that saw it would change the scores themselves and pass a higher note."""
-    return sorted(scores, key=lambda path: (-scores[path], _legacy._priority_rank(path, priority), path.casefold(), path))
+def _ranked_paths(scores: dict, priority=(), *, order_evidence=()) -> list[str]:
+    """Break score ties by explicit step order, then by configured priority (final results only)."""
+    return sorted(scores, key=lambda path: (-scores[path], path not in order_evidence,
+                                            _legacy._priority_rank(path, priority), path.casefold(), path))
 
 
 def _invalid(diagnostics, status="invalid_options"):
@@ -553,9 +553,15 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             external_ranks[rel] = min(item["rank"], external_ranks.get(rel, item["rank"]))
         except (ValueError, OSError):
             diagnostics["external_rejected"] += 1
-    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores), 1)}
-    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25), 1)}
-    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores), 1)}
+    step_order = _legacy._korean_step_order(query[:_legacy.MAX_QUERY_CHARS].strip().removesuffix("?"))
+    order_evidence = {}
+    if step_order:
+        for rel in lexical_matches:
+            if proof := _legacy._order_evidence(eligible[rel]["text"], step_order):
+                order_evidence[rel] = proof
+    lexical_ranks = {path: n for n, path in enumerate(_ranked_paths(lexical_scores, order_evidence=order_evidence), 1)}
+    bm25_ranks = {path: n for n, path in enumerate(_ranked_paths(bm25, order_evidence=order_evidence), 1)}
+    ngram_ranks = {path: n for n, path in enumerate(_ranked_paths(ngram_scores, order_evidence=order_evidence), 1)}
     rrf_keys = ("rrf_lexical", "rrf_bm25", "rrf_external", "rrf_bm25_hangul2") if ngram_active else ("rrf_lexical", "rrf_bm25", "rrf_external")
     active = lexical_scores if backend == "lexical" else bm25
     candidates = set(active) | set(external_ranks)
@@ -574,6 +580,9 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             # lexical match (a word-token BM25 hit implies one). It may still hold an
             # external candidate rank, so cite a line holding those bigrams.
             _bm25_passage(doc, match, phrase, ngram_terms, tokenize=_hangul2_tokens)
+        if rel in order_evidence:
+            match["line"], line = order_evidence[rel]
+            match["snippet"] = _legacy._snippet(line, phrase, query_terms)
         contributions = {"lexical": lexical_scores.get(rel, 0), "bm25": bm25.get(rel, 0.0), "rrf_lexical": 0.0, "rrf_bm25": 0.0, "rrf_external": 0.0, "graph": 0.0}
         ranks = {"lexical": lexical_ranks.get(rel), "bm25": bm25_ranks.get(rel), "external": external_ranks.get(rel)}
         if ngram_active:
@@ -593,7 +602,7 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             match["score"] = active[rel]
         match.update({"scores": contributions, "ranks": ranks, "source": _source(doc, match), "temporal": doc["temporal"], "graph": [], "review_status": "needs_review", "source_authority": "unverified"})
         matches[rel] = match
-    seeds = _ranked_paths({rel: match["score"] for rel, match in matches.items()})[:limit]
+    seeds = _ranked_paths({rel: match["score"] for rel, match in matches.items()}, order_evidence=order_evidence)[:limit]
     if expand_links and complete_names:
         frontier = [(seed, seed, 0, (seed,)) for seed in seeds]
         while frontier:
@@ -645,7 +654,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     final_config = _legacy._read_config(safe_vault, _legacy._diagnostics())
     if final_config != config:
         return _policy_changed(diagnostics)
-    ranked = [matches[rel] for rel in _ranked_paths({rel: match["score"] for rel, match in matches.items()}, priority)]
+    ranked = [matches[rel] for rel in _ranked_paths({rel: match["score"] for rel, match in matches.items()},
+                                                   priority, order_evidence=order_evidence)]
     selected = []
     dropped = []
     verified_hashes = {}

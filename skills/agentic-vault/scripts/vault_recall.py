@@ -51,6 +51,9 @@ _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 # give the values in linear time (see below).
 _TITLE_KEY_RE = re.compile(r"\s*title\s*:", re.IGNORECASE)
 _HEADING_OPEN_RE = re.compile(r"\s*#{1,6}(?=\s)")
+_STEP_ORDER = re.compile(r"([가-힣]{1,32})[ \t]+(이전|전|이후|후|다음|뒤)(?:에)?[ \t]+([가-힣]{1,32})")
+_STEP_PREFIX = re.compile(r"^(?:[-*+] |#{1,6} |[0-9]{1,4}[.)] )")
+_FENCE_START = re.compile(r" {0,3}(`{3,}|~{3,})")
 
 
 def _diagnostics() -> dict:
@@ -126,6 +129,50 @@ def _normalize(text: str) -> str:
 
 def _terms(text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(_WORD_RE.findall(_normalize(text))))
+
+
+def _korean_step_order(text: str) -> tuple[str, str] | None:
+    """Interpret only two named steps joined by an explicit before/after marker."""
+    if len(text) > 128:
+        return None
+    match = _STEP_ORDER.fullmatch(unicodedata.normalize("NFKC", text).strip())
+    if not match:
+        return None
+    left, cue, right = match.groups()
+    if left == right:
+        return None
+    return (right, left) if cue in ("전", "이전") else (left, right)
+
+
+def _order_evidence(text: str, order: tuple[str, str]) -> tuple[int, str] | None:
+    """First unambiguous supporting line in the already allowed text of this note."""
+    support = None
+    frontmatter = False
+    fence = ""
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if number == 1 and stripped == "---":
+            frontmatter = True
+            continue
+        if frontmatter:
+            frontmatter = stripped not in ("---", "...")
+            continue
+        if line.startswith(("    ", "\t")):
+            continue
+        if fence:
+            if stripped.startswith(fence) and not stripped.lstrip(fence[0]):
+                fence = ""
+            continue
+        opening = _FENCE_START.match(line)
+        if opening:
+            fence = opening.group(1)
+            continue
+        steps = _korean_step_order(_STEP_PREFIX.sub("", stripped, count=1).removesuffix("."))
+        if steps == (order[1], order[0]):
+            return None
+        if steps == order and support is None:
+            support = (number, line)
+    return support
 
 
 def _path_matches_rule(parts: Sequence[str], rule: str) -> bool:
@@ -596,6 +643,7 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
     query_terms = _terms(bounded_query)[:MAX_QUERY_TERMS]
     diagnostics["query_terms_used"] = len(query_terms)
     phrase = _normalize(bounded_query)
+    step_order = _korean_step_order(bounded_query.strip().removesuffix("?"))
 
     try:
         if not vault.is_dir():
@@ -630,6 +678,7 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
         candidates = candidates[:MAX_FILES]
 
     ranked: list[dict] = []
+    supporting_paths = set()
     for index, (rel_path, path) in enumerate(candidates):
         diagnostics["files_considered"] += 1
         try:
@@ -665,9 +714,14 @@ def _legacy_recall(vault: Path, query: str, limit: int = 5, max_tokens: int = 15
                 continue
         match = _rank_document(rel_path, text, phrase, query_terms)
         if match is not None:
+            if step_order and (proof := _order_evidence(text, step_order)):
+                match["line"], line = proof
+                match["snippet"] = _snippet(line, phrase, query_terms)
+                supporting_paths.add(rel_path)
             ranked.append(match)
 
-    ranked.sort(key=lambda match: (-match["score"], _priority_rank(match["path"], priority),
+    ranked.sort(key=lambda match: (-match["score"], match["path"] not in supporting_paths,
+                                   _priority_rank(match["path"], priority),
                                    match["path"].casefold(), match["path"]))
     matches = ranked[:limit]
     context = _render_context(matches, max_tokens, diagnostics)
