@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.53.0"
-EXPECTED_PUBLIC_REF = "0.53.0"
+EXPECTED = "0.53.1"
+EXPECTED_PUBLIC_REF = "0.53.1"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.53.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.53.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.53.1-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.53.1.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.53.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.53.1 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -3214,7 +3214,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
         self.assertIn("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter", headings)
         self.assertIn(V0520ReleaseMetadataTests.ENGLISH, headings)
-        self.assertEqual(headings[:3], [V0530ReleaseMetadataTests.ENGLISH,
+        self.assertEqual(headings[:4], [V0531ReleaseMetadataTests.CODEX_EN, V0530ReleaseMetadataTests.ENGLISH,
                                        V0521ReleaseMetadataTests.ENGLISH, V0520ReleaseMetadataTests.ENGLISH])
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
@@ -3228,7 +3228,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.53.0](releases/v0.53.0.md) / [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3260,7 +3260,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.52.1 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.53.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3791,7 +3791,7 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_keeps_the_candidate_section_behind_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[2], self.ENGLISH)
+        self.assertEqual(headings[3], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("The v0.52.0 candidate, which was not published (see v0.52.1 above), adds",
                         "](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
@@ -4101,7 +4101,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_and_description_name_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[1], self.ENGLISH)
+        self.assertEqual(headings[2], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("v0.52.1 supersedes the unpublished v0.52.0 candidate", "](releases/v0.52.1.md)",
                         "](verification/v0.52.1.md)", "unchanged from v0.46.0 through v0.52.1",
@@ -4122,7 +4122,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
 
     def test_release_integrity_names_the_release_and_the_read_back(self) -> None:
         integrity = _folded((REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8"))
-        self.assertIn("현재 v0.53.0의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.53.0.md)",
+        self.assertIn("현재 v0.53.1의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.53.1.md)",
                       integrity)
         # The two settings applied for the candidate are read back for this release.
         self.assertIn("v0.52.1은 태그를 push하기 직전에 두 설정을 다시 읽어 그대로 켜져 있는지 확인한다"
@@ -4132,19 +4132,19 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_security_and_docs_index_name_the_release_and_the_candidate(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
         versions = _section(security, "## Supported versions")
-        self.assertIn("| 0.53.0 (latest) | Yes. Security fixes target the latest source version. |",
+        self.assertIn("| 0.53.1 (latest) | Yes. Security fixes target the latest source version. |",
                       versions.splitlines())
-        self.assertIn("| 0.52.1 and earlier | No. Upgrade to 0.53.0. From 0.46.0 to 0.53.0 the seven "
+        self.assertIn("| 0.53.0 and earlier | No. Upgrade to 0.53.1. From 0.46.0 to 0.53.1 the seven "
                       "certificate-bound checker files are unchanged,", versions)
         self.assertIn("The unpublished v0.52.0, v0.40.0,", versions)
         summary = next(line for line in security.splitlines() if line.startswith("- 보안 수정 대상은 최신"))
-        for literal in ("최신 0.53.0 소스다.", "0.52.1 이하는 0.53.0로 갱신한다.", "0.46.0부터 0.53.0까지",
+        for literal in ("최신 0.53.1 소스다.", "0.53.0 이하는 0.53.1로 갱신한다.", "0.46.0부터 0.53.1까지",
                         "0.52.0은", "게시하지 않은 후보다.", "태그는 그대로 있고 GitHub 릴리스는 없으며"):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
-        self.assertIn("최신 소스는 [v0.53.0](releases/v0.53.0.md); [검증 기록](verification/v0.53.0.md). "
+        self.assertIn("최신 소스는 [v0.53.1](releases/v0.53.1.md); [검증 기록](verification/v0.53.1.md). "
                       "[v0.52.0](releases/v0.52.0.md)은 긴 Windows TEMP 경로 시험 문제로 대체한 미공개 후보이며 "
                       "태그와 당시 기록을 보존한다.", row)
 
@@ -4166,10 +4166,81 @@ class V0530ReleaseMetadataTests(unittest.TestCase):
                 with self.subTest(heading=heading, target=target):
                     self.assertIn(f"]({prefix}{target})", section)
 
-    def test_current_codex_manifest_names_the_release_and_its_scope(self) -> None:
-        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+    def test_historical_codex_manifest_names_the_release_and_its_scope(self) -> None:
+        manifest = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.53.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         description = manifest["interface"]["longDescription"]
         for literal in ("Release v0.53.0", "break recall ties", "first-handoff tutorial",
                         "scripted controls and participant scoring", "No new runtime dependencies"):
             with self.subTest(literal=literal):
+                self.assertIn(literal, description)
+
+
+class V0531ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs" / "releases" / "v0.53.1.md"
+    VERIFICATION = REPO_ROOT / "docs" / "verification" / "v0.53.1.md"
+    README_KO = "## v0.53.1 — 외부 평가 개선, CI 병렬 실행, 보안·문서 정합성 복구"
+    README_EN = "## v0.53.1 — External-review fixes, parallel CI runner and documentation sync"
+    CODEX_EN = "## v0.53.1 — External-review fixes, parallel CI runner and documentation sync"
+
+    def test_release_note_uses_only_absolute_links_and_pins_unchanged_checker(self) -> None:
+        import re
+
+        text = self.RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.53.1 — 외부 평가 개선, CI 병렬 실행, 보안·문서 정합성 복구")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계"])
+        self.assertIn("현재 설치 ref는 `v0.53.1`이다.", text)
+        self.assertIn(CHECKER_SHA256_V0460, text)
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            with self.subTest(link=target):
+                self.assertTrue(
+                    target.startswith("https://"),
+                    f"v0.53.1 release note must not contain relative links for GitHub Release rendering: {target}",
+                )
+
+    def test_verification_contract_requires_master_ci_before_publication(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.53.1 verification contract")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## Scope", "## Feature evidence", "## Default-result comparison",
+                                    "## Required release gates", "## Boundaries"])
+        folded = _folded(text)
+        for literal in ("scripts/run_unittest_parallel.py", "bizrouter_client.py",
+                        "BEFORE publishing the GitHub Release", CHECKER_SHA256_V0460):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_security_and_antigravity_and_jarvis_fixes_stay_pinned(self) -> None:
+        security = _folded((REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8"))
+        for literal in ("bizrouter_client.py", "https://api.bizrouter.ai/v1/decisions",
+                        "BIZROUTER_API_KEY", "google/gemini-decision-1", "since 0.52.1"):
+            with self.subTest(security=literal):
+                self.assertIn(literal, security)
+        self.assertNotIn("(since 0.52.0)", security)
+        self.assertNotIn("or a Stop event no integer", security)
+        antigravity = (REPO_ROOT / "docs" / "antigravity.md").read_text(encoding="utf-8")
+        self.assertNotIn("Stop에 정수 `executionNum`이", antigravity)
+        self.assertIn("원시 이벤트 SHA-256", antigravity)
+        self.assertIn("tree/v0.53.1/antigravity", antigravity)
+        jarvis = (REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py").read_text(encoding="utf-8")
+        self.assertNotIn("D:/NS", jarvis)
+
+    def test_readme_and_codex_guide_and_manifest_name_v0531(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        self.assertIn("Antigravity CLI", readme.splitlines()[4])
+        self.assertIn("Antigravity_CLI-Package", readme)
+        for heading in (self.README_KO, self.README_EN):
+            section = _section(readme, heading)
+            self.assertIn("](docs/releases/v0.53.1.md)", section)
+            self.assertIn("](docs/verification/v0.53.1.md)", section)
+        codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.CODEX_EN)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"]
+        for literal in ("Release v0.53.1", "bizrouter_client.py", "run_unittest_parallel.py",
+                        "v0.46.0 through v0.53.1"):
+            with self.subTest(description=literal):
                 self.assertIn(literal, description)

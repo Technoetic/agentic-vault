@@ -402,6 +402,24 @@ class HeaderLineHookTests(unittest.TestCase):
         self.assertEqual(section["estimated_emitted_chars"],
                          len(HOT_HEADER + "\nCurrent.\n" + PREFIX + HOT_HEADER))
 
+    def test_doctor_counts_redacted_secret_lines_like_hook(self) -> None:
+        hot = "Safe hot line.\n" + HOT_HEADER + " GITHUB_TOKEN=" + FAKE_TOKEN + "\n" + FIXED_HEADER + "\nEnd.\n"
+        self.make_vault(handoff="Continue.\n", hot=hot)
+
+        output = self.session("startup")
+        doctor = subprocess.run(
+            [sys.executable, str(self.plugin / "skills" / "agentic-vault" / "scripts" / "vault_doctor.py"),
+             "--vault", str(self.vault), "--format", "json"],
+            cwd=self.plugin, env=self.env(), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=60, check=False)
+
+        self.assertEqual(doctor.returncode, 0, doctor.stderr)
+        self.assertNotIn(FAKE_TOKEN, output)
+        report = json.loads(doctor.stdout.decode("utf-8"))
+        units = len(output.encode("utf-16-le")) // 2
+        self.assertEqual(report["hook"]["estimated_emitted_chars"], units)
+        self.assertNotIn(FAKE_TOKEN, doctor.stdout.decode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

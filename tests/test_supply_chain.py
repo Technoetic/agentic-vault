@@ -107,9 +107,11 @@ REPORT_WARNINGS_V0240 = (
 )
 # Commands of the blocking jobs at v0.24.0 (d2b9315). Each must still run, unchanged and
 # in this order; steps may be added around them. Change a gate here deliberately.
+# v0.53.1: single-process unittest discover reached 55.45/60 min on windows-latest/Python 3.10;
+# scripts/run_unittest_parallel.py runs the same full tests/test_*.py suite across 4 workers.
 BLOCKING_RUNS_V0240 = {
     "unittest": (
-        "python -m unittest discover -s tests -v",
+        "python scripts/run_unittest_parallel.py --workers 4",
         "python scripts/evaluate_recall.py",
         "python scripts/evaluate_recall.py --fixture tests/fixtures/recall_advanced --compare"
         " --max-no-answer-false-positive-rate 0 --max-forbidden-exposure-rate 0 --max-stale-top-1-rate 0",

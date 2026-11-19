@@ -42,6 +42,13 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 proposals = importlib.import_module('vault_proposals')
 operations = importlib.import_module('vault_operations')
+try:
+    from tests._winfs import deep_path as _deep_path
+except ImportError:
+    TESTS_DIR = Path(__file__).resolve().parent
+    if str(TESTS_DIR) not in sys.path:
+        sys.path.insert(0, str(TESTS_DIR))
+    from _winfs import deep_path as _deep_path
 
 
 if HAVE_HYPOTHESIS:
@@ -87,7 +94,7 @@ if HAVE_HYPOTHESIS:
                 if destination == self.target and self.fault == 'before-target':
                     raise OSError('synthetic target publication failure')
                 if (self.fault == 'accounting' and destination.parent.name == 'proposals'
-                        and json.loads(Path(source).read_bytes()).get('status')
+                        and json.loads(_deep_path(Path(source)).read_bytes()).get('status')
                         in ('applied', 'rolled_back')):
                     raise OSError('synthetic final accounting failure')
                 result = real_replace(source, destination)
@@ -104,7 +111,7 @@ if HAVE_HYPOTHESIS:
             return self.records[slot % len(self.records)]
 
         def receipt_bytes(self, record):
-            return (self.vault / '00-meta/proposals' / (record['id'] + '.json')).read_bytes()
+            return _deep_path(self.vault / '00-meta/proposals' / (record['id'] + '.json')).read_bytes()
 
         def mutate(self, action, record=None, *, preview_hash=None):
             # Match main(): a new Store, cooperative lock, fresh receipt on each
@@ -287,8 +294,9 @@ if HAVE_HYPOTHESIS:
             self.records = {}
 
         def receipt_bytes(self, record):
-            return (self.vault / operations.RUNTIME_DIR /
-                    ('operation-' + record['id'] + '.json')).read_bytes()
+            return _deep_path(
+                self.vault / operations.RUNTIME_DIR / ('operation-' + record['id'] + '.json')
+            ).read_bytes()
 
         def inspect(self, record):
             before = self.receipt_bytes(record)

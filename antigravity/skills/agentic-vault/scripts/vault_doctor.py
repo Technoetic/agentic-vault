@@ -234,9 +234,12 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
-    # The hook prefixes note lines that open like its section headers (v0.52.0)
-    # before rendering, so the counts follow the same text. An older hook has
-    # no such step, and its output is reproduced as it is.
+    # The hook redacts sensitive lines (v0.51.0) and then prefixes note lines that
+    # open like its section headers (v0.52.1) before rendering, so the counts follow
+    # the exact same text. An older hook without either helper is reproduced as it is.
+    redact = getattr(session_hook, "_redact_sensitive_lines", None)
+    if redact is not None:
+        text = redact(text)
     neutralize = getattr(session_hook, "_neutralize_header_lines", None)
     if neutralize is not None:
         text = neutralize(text)

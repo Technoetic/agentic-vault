@@ -13,8 +13,8 @@ LLM 호출은 전부 `claude -p` 세션이다. 프롬프트는 argv가 아니라
 Windows에서는 cmd.exe가 인자를 다시 해석하는 `.cmd`·`.bat` 런처를 실행하지 않는다.
 
 사용:
-  python jarvis_bridge.py --vault D:/NS            # 상시 실행
-  python jarvis_bridge.py --vault D:/NS --self-test # 네트워크 없는 자체 검증
+  python jarvis_bridge.py --vault /path/to/vault            # 상시 실행
+  python jarvis_bridge.py --vault /path/to/vault --self-test # 네트워크 없는 자체 검증
 
 비밀: 봇 토큰은 env JARVIS_TELEGRAM_TOKEN 로만 전달한다. 볼트·리포에 저장 금지.
 설정: <vault>/00-meta/vault-config.json 의 "jarvis" 블록. 없거나 enabled=false면 침묵 종료.

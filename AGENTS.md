@@ -128,7 +128,7 @@ any of them changes what agents do in every vault after the update.
 CI runs these commands, among others (`.github/workflows/tests.yml`); on Windows set `PYTHONUTF8=1` as CI does.
 
 ```text
-python -m unittest discover -s tests -v
+python scripts/run_unittest_parallel.py --workers 4
 python -m compileall -q hooks skills/agentic-vault/scripts scripts
 git diff --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
 ```

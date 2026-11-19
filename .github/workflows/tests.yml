@@ -48,7 +48,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Unit and filesystem integration tests
-        run: python -m unittest discover -s tests -v
+        run: python scripts/run_unittest_parallel.py --workers 4
       - name: Bilingual lexical retrieval regression
         run: python scripts/evaluate_recall.py
       - name: Temporal and graph retrieval comparison

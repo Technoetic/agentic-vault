@@ -55,3 +55,36 @@ class FirstHandoffTutorialTests(unittest.TestCase):
             resumed = run(commands[1], folder)
             self.assertIn(new_action, resumed)
             self.assertNotIn(old_action, resumed)
+
+    def test_help_prints_usage_and_creates_no_temp_folder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = dict(os.environ, TMP=temporary, TEMP=temporary, TMPDIR=temporary, PYTHONUTF8="1")
+            result = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "scripts" / "first_handoff.py"), "--help"],
+                cwd=ROOT, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, encoding="utf-8", timeout=30, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--dir", result.stdout)
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+    def test_dir_option_creates_vault_and_refuses_nonempty_dir(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "custom-demo"
+            first = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "scripts" / "first_handoff.py"), "--dir", str(target)],
+                cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, encoding="utf-8", timeout=30, check=False,
+            )
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(Path(first.stdout.strip()).resolve(), target.resolve())
+            self.assertTrue((target / "handoff.md").is_file())
+            self.assertTrue((target / "notes" / "label-trial.md").is_file())
+
+            second = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "scripts" / "first_handoff.py"), "--dir", str(target)],
+                cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, encoding="utf-8", timeout=30, check=False,
+            )
+            self.assertEqual(second.returncode, 2)
+            self.assertIn("not empty", second.stderr)

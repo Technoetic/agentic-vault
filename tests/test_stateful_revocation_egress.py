@@ -196,7 +196,11 @@ if HAVE_HYPOTHESIS:
                 self.registry_valid = False
             else:
                 path = self.fixture.root / '00-meta/hot.md'
-                self.fixture.write('00-meta/hot.md', path.read_bytes() + b'BENIGN_EDIT\r\n')
+                try:
+                    from tests._winfs import deep_path as _deep_path
+                except ImportError:
+                    from _winfs import deep_path as _deep_path
+                self.fixture.write('00-meta/hot.md', _deep_path(path).read_bytes() + b'BENIGN_EDIT\r\n')
                 self.hot_binding_valid = False
             self.generation += 1
 
