@@ -70,6 +70,8 @@ class CapacityCase(unittest.TestCase):
         self.git('config', 'user.email', 'fixture@example.invalid')
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'core.autocrlf', 'false')
+        self.git('config', 'maintenance.auto', 'false')
+        self.git('config', 'gc.auto', '0')
 
     def commit_sizes(self, relative, points):
         """Commit one note at each (timestamp, size) point."""

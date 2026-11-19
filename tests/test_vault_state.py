@@ -731,6 +731,46 @@ except StateError as e: print(str(e))
                 self.assertEqual(unlinks, [])
                 self.assertTrue(path.exists())
 
+    def test_guard_retries_vanishing_zero_link_regular_entry_but_rejects_hardlink(self):
+        import stat
+
+        policy = state._Policy(self.vault)
+        real_exclusive = state._exclusive
+        real_lstat = Path.lstat
+        calls = {'exclusive': 0}
+
+        def flaky_exclusive(pol, name, record):
+            calls['exclusive'] += 1
+            if calls['exclusive'] == 1:
+                raise FileExistsError(name)
+            return real_exclusive(pol, name, record)
+
+        vanished_meta = type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_nlink': 0})()
+
+        def lstat_once(path_obj, *, _seen=[False]):
+            if not _seen[0] and str(path_obj).endswith('.guard'):
+                _seen[0] = True
+                return vanished_meta
+            return real_lstat(path_obj)
+
+        with mock.patch.object(state, '_exclusive', side_effect=flaky_exclusive), \
+             mock.patch.object(Path, 'lstat', autospec=True, side_effect=lstat_once):
+            with state._guard(policy, 'vanish.json', time.monotonic() + 2):
+                self.assertEqual(calls['exclusive'], 2)
+
+        hardlink_meta = type('Stat', (), {'st_mode': stat.S_IFREG | 0o600, 'st_nlink': 2})()
+
+        def lstat_hardlink_guard(path_obj):
+            if str(path_obj).endswith('.guard'):
+                return hardlink_meta
+            return real_lstat(path_obj)
+
+        with mock.patch.object(state, '_exclusive', side_effect=FileExistsError('hardlink')), \
+             mock.patch.object(Path, 'lstat', autospec=True, side_effect=lstat_hardlink_guard):
+            with self.assertRaisesRegex(state.StateError, 'unsafe_lock'):
+                with state._guard(policy, 'hardlink.json', time.monotonic() + 2):
+                    self.fail('hardlink guard acquired')
+
 
 if __name__ == '__main__':
     unittest.main()

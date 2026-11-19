@@ -273,14 +273,30 @@ def _guard(policy, name, deadline):
             break
         except FileExistsError:
             path = policy.runtime(guard_name)
+            meta = None
             try:
-                regular(fs_path(path).lstat())
+                meta = fs_path(path).lstat()
+                regular(meta)
             except FileNotFoundError:
                 # Another cooperating holder may release its short guard
                 # between the O_EXCL collision and this identity check.
                 _pause(deadline)
                 continue
-            except (EvidenceError, OSError) as exc:
+            except EvidenceError as exc:
+                # On POSIX/APFS a concurrent unlink can transiently expose
+                # st_nlink == 0 on a vanishing regular guard before ENOENT.
+                # Only retry if the entry is genuinely gone; symlinks, reparse
+                # points, and hardlinks (st_nlink > 1) still raise unsafe_lock.
+                reparse = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+                if (meta is not None
+                        and stat.S_ISREG(meta.st_mode)
+                        and meta.st_nlink == 0
+                        and not (getattr(meta, 'st_file_attributes', 0) & reparse)
+                        and not os.path.lexists(fs_path(path))):
+                    _pause(deadline)
+                    continue
+                raise StateError('unsafe_lock') from exc
+            except OSError as exc:
                 if is_path_too_long(exc):
                     raise StateError('path_too_long') from exc
                 raise StateError('unsafe_lock') from exc

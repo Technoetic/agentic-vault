@@ -14,7 +14,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
 [![Antigravity CLI Package](https://img.shields.io/badge/Antigravity_CLI-Package-0F172A?style=for-the-badge)](docs/antigravity.md)
-[![Version](https://img.shields.io/badge/v0.53.1-10B981?style=for-the-badge)](docs/releases/v0.53.1.md)
+[![Version](https://img.shields.io/badge/v0.53.2-10B981?style=for-the-badge)](docs/releases/v0.53.2.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -110,13 +110,13 @@ Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/
 
 ---
 
-## v0.53.1 — 외부 평가 개선, CI 병렬 실행, 보안·문서 정합성 복구
+## v0.53.2 — 외부 평가 개선, CI 병렬 실행, 보안·문서 정합성 복구 및 시험 경합 해소
 
-v0.53.0 외부 평가에서 지적된 7개 항목을 수정한다. `SECURITY.md`에 선택형 BizRouter Decisions 외부 송신(`bizrouter_client.py`)과 `0.52.1` 기준 버전을 반영하고, `docs/antigravity.md`의 낡은 `Stop` 중복 방지 문구를 현행 동작에 맞췄다. `vault_doctor`의 주입 추정이 `SessionStart`와 동일하게 비밀 마스킹 뒤 길이를 계산하도록 맞추고, `scripts/first_handoff.py`에 `--help`·`--dir` CLI 파서를 더했으며, `jarvis_bridge.py` 사용 예의 개인 경로를 일반 경로로 바꿨다. Windows 150자 `TEMP`(`LongPathsEnabled=0`)에서도 Hypothesis 상태기 시험이 통과하도록 긴 경로 읽기를 보강했고, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`)로 CI의 `windows-latest` 실행 시간을 60분 한도 아래로 크게 줄였다. 인증서가 묶는 일곱 파일은 v0.46.0부터 v0.53.1까지 바이트 단위로 같다. [릴리스 노트](docs/releases/v0.53.1.md) · [검증 계약](docs/verification/v0.53.1.md) · [GitHub 릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.53.1)
+v0.53.0 외부 평가에서 지적된 7개 항목과 미공개 `v0.53.1` 후보 태그 CI에서 드러난 시험·잠금 경합 2건(`test_vault_capacity`의 Git 자동 유지보수 비활성화 및 `vault_state._guard`의 동시 해제 중인 일반 guard 재시도)을 수정해 처음 공개한다(`v0.53.1`은 게시하지 않은 후보 태그이며 다시 쓰지 않고 보존한다). `SECURITY.md`에 선택형 BizRouter Decisions 외부 송신(`bizrouter_client.py`)과 `0.52.1` 기준 버전을 반영하고, `docs/antigravity.md`의 낡은 `Stop` 중복 방지 문구를 현행 동작에 맞췄다. `vault_doctor`의 주입 추정이 `SessionStart`와 동일하게 비밀 마스킹 뒤 길이를 계산하도록 맞추고, `scripts/first_handoff.py`에 `--help`·`--dir` CLI 파서를 더했으며, `jarvis_bridge.py` 사용 예의 개인 경로를 일반 경로로 바꿨다. Windows 150자 `TEMP`(`LongPathsEnabled=0`)에서도 Hypothesis 상태기 시험이 통과하도록 긴 경로 읽기를 보강했고, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`)로 CI의 `windows-latest` 실행 시간을 60분 한도 아래로 크게 줄였다. 인증서가 묶는 일곱 파일은 v0.46.0부터 v0.53.2까지 바이트 단위로 같다. [릴리스 노트](docs/releases/v0.53.2.md) · [검증 계약](docs/verification/v0.53.2.md) · [GitHub 릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.53.2)
 
-## v0.53.1 — External-review fixes, parallel CI runner and documentation sync
+## v0.53.2 — External-review fixes, parallel CI runner, documentation sync and race fixes
 
-Resolves seven findings from the external v0.53.0 review: documents the opt-in BizRouter Decisions egress (`bizrouter_client.py`) and corrects the `0.52.1` version reference in `SECURITY.md`, updates stale Antigravity `Stop` dedup text in `docs/antigravity.md`, applies `SessionStart` credential redaction inside `vault_doctor` injection estimates, adds `--help` and `--dir` parsing to `scripts/first_handoff.py`, replaces author-local example paths in `jarvis_bridge.py`, uses Windows extended-length paths in Hypothesis lifecycle receipt checks so 150-character TEMP runs succeed, and adds `scripts/run_unittest_parallel.py --workers 4` (Python stdlib only) to keep `windows-latest` CI well below the 60-minute cap. The seven certificate-bound checker files remain byte-identical from v0.46.0 through v0.53.1. [Release scope](docs/releases/v0.53.1.md) · [Verification contract](docs/verification/v0.53.1.md)
+Supersedes the unpublished `v0.53.1` candidate tag (which was never rewritten and has no GitHub Release) after disabling automatic git maintenance/GC in `test_vault_capacity` fixtures and retrying vanishing zero-link regular guard entries during concurrent POSIX unlinks in `vault_state._guard`. Publishes for the first time all seven findings from the external v0.53.0 review: documents the opt-in BizRouter Decisions egress (`bizrouter_client.py`) and corrects the `0.52.1` version reference in `SECURITY.md`, updates stale Antigravity `Stop` dedup text in `docs/antigravity.md`, applies `SessionStart` credential redaction inside `vault_doctor` injection estimates, adds `--help` and `--dir` parsing to `scripts/first_handoff.py`, replaces author-local example paths in `jarvis_bridge.py`, uses Windows extended-length paths in Hypothesis lifecycle receipt checks so 150-character TEMP runs succeed, and adds `scripts/run_unittest_parallel.py --workers 4` (Python stdlib only) to keep `windows-latest` CI well below the 60-minute cap. The seven certificate-bound checker files remain byte-identical from v0.46.0 through v0.53.2. [Release scope](docs/releases/v0.53.2.md) · [Verification contract](docs/verification/v0.53.2.md)
 
 ## v0.53.0 — 작업 순서를 구별하는 검색과 첫 인계
 
@@ -407,7 +407,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.53.1 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.53.2 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 ├── antigravity/                       ← Antigravity CLI용 생성 패키지 (scripts/build_antigravity_package.py가 만든다, 손으로 고치지 않음)
@@ -515,11 +515,11 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.53.1**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.53.1은 v0.53.0 외부 평가에서 나온 보안·문서 정합성, `vault_doctor` 비밀 마스킹 일치, `first_handoff.py` CLI 인자, Hypothesis 긴 경로 읽기, `jarvis_bridge.py` 개인 경로 정리, 그리고 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`)를 반영한다([이번 변경·검증 범위](docs/releases/v0.53.1.md)). v0.53.0은 명시적인 한국어 절차 순서 질의의 검색 동점 처리, 두 세션의 인계 결과를 채점하는 실험, 첫 인계 실습을 제공한다([v0.53.0 변경 범위](docs/releases/v0.53.0.md)). v0.52.1은 healthcheck의 같은 번호 결정·실수 항목 보고(섹션 14d, 보고 전용), `SessionStart`의 가짜 머리글 줄 무력화, `jev_ask.py --escalate-bizrouter`의 Jev 원답 보존과 BizRouter 모델 축소(`google/gemini-decision-1`만), 저장소의 `v*` 태그 규칙 집합과 비공개 취약점 제보를 다루며 [v0.52.1 변경 범위](docs/releases/v0.52.1.md)에 적었다. 이 변경은 공개하지 않은 v0.52.0 후보에 처음 들어갔으며, v0.52.1은 긴 Windows TEMP 폴더에서 실패하던 저장소 도구·평가 스크립트·`vault_lesson_metrics.py`·시험 fixture를 고쳐 함께 공개했다. v0.51.0은 독립 평가 결함 수정(Windows 긴 경로·`SessionStart` 비밀 마스킹·Antigravity `Stop` 중복 방지·초기 `/vault-init` 청결성·시험 격리·문서 복구)과 선택형 BizRouter Decisions 어댑터(`google/gemini-decision-1`)를 다뤘다([v0.51.0 변경 범위](docs/releases/v0.51.0.md)). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 로컬 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다([v0.50.0 변경 범위](docs/releases/v0.50.0.md)). v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.53.2**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.53.2는 공개하지 않은 v0.53.1 후보 태그를 대체해 v0.53.0 외부 평가에서 나온 보안·문서 정합성, `vault_doctor` 비밀 마스킹 일치, `first_handoff.py` CLI 인자, Hypothesis 긴 경로 읽기, `jarvis_bridge.py` 개인 경로 정리, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`), 그리고 시험·잠금 경합 수정 2건을 함께 공개한다([이번 변경·검증 범위](docs/releases/v0.53.2.md)). v0.53.0은 명시적인 한국어 절차 순서 질의의 검색 동점 처리, 두 세션의 인계 결과를 채점하는 실험, 첫 인계 실습을 제공한다([v0.53.0 변경 범위](docs/releases/v0.53.0.md)). v0.52.1은 healthcheck의 같은 번호 결정·실수 항목 보고(섹션 14d, 보고 전용), `SessionStart`의 가짜 머리글 줄 무력화, `jev_ask.py --escalate-bizrouter`의 Jev 원답 보존과 BizRouter 모델 축소(`google/gemini-decision-1`만), 저장소의 `v*` 태그 규칙 집합과 비공개 취약점 제보를 다루며 [v0.52.1 변경 범위](docs/releases/v0.52.1.md)에 적었다. 이 변경은 공개하지 않은 v0.52.0 후보에 처음 들어갔으며, v0.52.1은 긴 Windows TEMP 폴더에서 실패하던 저장소 도구·평가 스크립트·`vault_lesson_metrics.py`·시험 fixture를 고쳐 함께 공개했다. v0.51.0은 독립 평가 결함 수정(Windows 긴 경로·`SessionStart` 비밀 마스킹·Antigravity `Stop` 중복 방지·초기 `/vault-init` 청결성·시험 격리·문서 복구)과 선택형 BizRouter Decisions 어댑터(`google/gemini-decision-1`)를 다뤘다([v0.51.0 변경 범위](docs/releases/v0.51.0.md)). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 로컬 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다([v0.50.0 변경 범위](docs/releases/v0.50.0.md)). v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.53.1`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.53.2`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.53.1) 경로는 v0.53.1을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.53.1 검증 기록](docs/verification/v0.53.1.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.53.0](docs/releases/v0.53.0.md)·[v0.52.1](docs/releases/v0.52.1.md)·[v0.51.0](docs/releases/v0.51.0.md)·[v0.50.0](docs/releases/v0.50.0.md)·[v0.49.0](docs/releases/v0.49.0.md)·[v0.48.0](docs/releases/v0.48.0.md)·[v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.53.2) 경로는 v0.53.2을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.53.2 검증 기록](docs/verification/v0.53.2.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.53.0](docs/releases/v0.53.0.md)·[v0.52.1](docs/releases/v0.52.1.md)·[v0.51.0](docs/releases/v0.51.0.md)·[v0.50.0](docs/releases/v0.50.0.md)·[v0.49.0](docs/releases/v0.49.0.md)·[v0.48.0](docs/releases/v0.48.0.md)·[v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -562,7 +562,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.53.1
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.53.2
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -576,7 +576,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 터미널에서 이 릴리스 태그의 패키지 폴더를 설치한다:
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.1/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.2/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더 경로를 줘도 된다. 저장소 루트 주소로 설치하면 agy가 Claude Code 플러그인 구조를 자동 변환해 설치하지만, 그 설치로는 인계가 주입되지 않는 것으로 보여 쓰지 않는다. 설치·갱신·직접 해 보는 확인 절차와 한계는 [Antigravity CLI 안내](docs/antigravity.md)에 있다. 실제 agy 대화 세션으로는 확인하지 않았다.
@@ -868,7 +868,7 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
 - 패키지에는 Antigravity CLI용 스킬 17개(공용 스킬 둘과 명령 15개를 같은 이름으로 바꾼 스킬)와 훅
   둘(SessionStart·Stop)이 들어 있다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
   폴더가 생성 결과와 같은지는 시험이 지킨다. 설치는 태그를 고정한 주소
-  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.1/antigravity`나 로컬 폴더로
+  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.2/antigravity`나 로컬 폴더로
   한다([Antigravity CLI 안내](docs/antigravity.md)).
 - 세션 시작 훅은 생성 패키지가 주는 `--host antigravity` 플래그가 있을 때만 훅 입력의 `cwd`·`workspacePaths`에서
   볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 도움말과 줄임 옵션 `--h`를 빼면 플래그 없는 기본 경로는
@@ -1276,7 +1276,7 @@ there. The package lives in `antigravity/` and is generated from the repository'
 hooks and engine scripts by [`scripts/build_antigravity_package.py`](scripts/build_antigravity_package.py);
 it holds 17 Antigravity CLI skills (the two shared skills and one per command) and two hooks, and a test
 keeps the committed folder equal to the generator's output. Install it from the release tag with
-`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.1/antigravity` or from a local
+`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.53.2/antigravity` or from a local
 copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit
 `--host antigravity` mode that finds the one vault named in the hook input and injects the handoff and
 hot note through `injectSteps`, and the checkpoint hook records Antigravity's `Stop` event; without the
@@ -1746,8 +1746,8 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs in the install section target v0.53.1.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.53.1.md);
+budgets; new findings warn first. The installation refs in the install section target v0.53.2.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.53.2.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
