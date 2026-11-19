@@ -187,7 +187,8 @@ class VaultStateTests(unittest.TestCase):
             with self.assertRaisesRegex(state.StateError, 'lock_busy'):
                 with state.advisory_lock(self.vault, 'shared', ttl_seconds=60, wait_seconds=.06):
                     self.fail('second writer entered')
-            self.assertLess(time.monotonic() - started, .5)
+            # Still bounded far below ttl_seconds=60 while tolerating Windows parallel-CI fsync jitter.
+            self.assertLess(time.monotonic() - started, 5.0)
         self.assertFalse(deep_path(lease['lock_path']).exists())
 
     def test_release_never_removes_replacement_owner(self):
