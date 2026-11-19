@@ -77,7 +77,8 @@ finally:
 def git(cwd: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
-         "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main", *args],
+         "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main",
+         "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args],
         cwd=cwd, env=git_environment(), capture_output=True, encoding="utf-8", timeout=60, check=False)
     if result.returncode:
         raise AssertionError(f"git {args[0]} failed: {result.stderr}")
