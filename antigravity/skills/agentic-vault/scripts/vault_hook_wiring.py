@@ -180,9 +180,11 @@ def _extract_handler_targets(
             skipped = True
             continue
         path = Path(expanded)
-        if not path.is_absolute():
-            path = vault / path
-        candidates.append((path, expanded))
+        resolved_candidate = path if path.is_absolute() else vault / path
+        if os.name != "nt" and "\\" in expanded and not _is_file_safe(resolved_candidate):
+            alt = Path(expanded.replace("\\", "/"))
+            resolved_candidate = alt if alt.is_absolute() else vault / alt
+        candidates.append((resolved_candidate, expanded))
     if not candidates:
         return [], True
     return candidates, skipped

@@ -107,6 +107,9 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_capacity.py",
             "skills/agentic-vault/scripts/vault_handoff_fold.py",
             "skills/agentic-vault/scripts/vault_plugin_scope.py",
+            "skills/agentic-vault/scripts/vault_hook_wiring.py",
+            "skills/agentic-vault/scripts/vault_install_state.py",
+            "scripts/verify_release_claims.py",
             "skills/agentic-vault/scripts/vault_lesson_clusters.py",
             "skills/agentic-vault/scripts/vault_lesson_cues.py",
             "skills/agentic-vault/scripts/vault_worktrees.py",
@@ -651,7 +654,9 @@ class CodexVerificationTests(unittest.TestCase):
     def test_installed_doctor_resources_must_exist_and_match(self) -> None:
         # The doctor turns a reader it cannot load into a fixed probe_failed block.
         for relative in ("skills/agentic-vault/scripts/vault_doctor.py",
-                         "skills/agentic-vault/scripts/vault_session_evidence.py"):
+                         "skills/agentic-vault/scripts/vault_session_evidence.py",
+                         "skills/agentic-vault/scripts/vault_hook_wiring.py",
+                         "skills/agentic-vault/scripts/vault_install_state.py"):
             for mutation in ("changed", "missing"):
                 with self.subTest(resource=relative, mutation=mutation), \
                      tempfile.TemporaryDirectory() as temporary:

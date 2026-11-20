@@ -503,22 +503,24 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
             preserved.append({"path": rel, "reason": "modified_by_user"})
             remaining_entries.append(rec)
             continue
-        removable.append((rel, recorded_sha, stamp_re))
+        removable.append((rel, recorded_sha, stamp_re, rec))
 
     removed: list[str] = []
     pruned_dirs: list[str] = []
     state_removed = False
 
     if apply:
-        for rel, recorded_sha, stamp_re in removable:
+        for rel, recorded_sha, stamp_re, rec in removable:
             # Re-verify regular file, stamp, and SHA-256 right before unlink.
             fresh_data, fresh_state = _read_regular_bytes(resolved, rel)
             if fresh_data is None or _sha256_bytes(fresh_data) != recorded_sha or not _detect_stamp(fresh_data, stamp_re)[0]:
                 preserved.append({"path": rel, "reason": "changed_before_unlink"})
+                remaining_entries.append(rec)
                 continue
             target, check_state = _check_safe_vault_path(resolved, rel)
             if check_state != "regular" or target is None:
                 preserved.append({"path": rel, "reason": "changed_before_unlink"})
+                remaining_entries.append(rec)
                 continue
             os.unlink(_fs_path(target))
             removed.append(rel)
@@ -554,7 +556,7 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
         "applied": bool(apply),
         "status": "applied" if apply else "dry_run",
         "reason_code": "managed_removed" if apply else "dry_run_only",
-        "removable": [rel for rel, _, _ in removable],
+        "removable": [rel for rel, _, _, _ in removable],
         "removed": removed,
         "preserved": preserved,
         "pruned_dirs": pruned_dirs,
