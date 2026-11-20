@@ -82,6 +82,7 @@ dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한�
 `apply --approve`와 proposal stdin을 사용한다. 업그레이드가 지식/교훈 대장을 자동 이행하지 않는다.
 [보강 도구](../docs/hardening.md)의 출처·교훈 델타·literal 품질·토큰 보정은 명시적으로 선택한다.
 기존 budget 계수·warning severity·aliases·Jarvis 일정/인증/활성 범위는 유지한다.
+선택적으로 `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_install_state.py" record --vault .`로 현재 엔진 소유 파일과 사용자 소유 파일의 소유권·SHA-256을 `00-meta/.vault-install-state.json`에 기록해 두면, 이후 `/vault-doctor --install-state`나 `vault_install_state.py uninstall`(기본 dry-run, 사용자 파일·수정본 자동 보존)으로 상태를 추적할 수 있다.
 
 - `0.9.0`은 Codex에서도 같은 엔진을 사용한다. `$agentic-vault:agentic-vault session-start`·`recall <질의>`·`session-end`·`lint`·`backup` 진입점을 안내하라. Codex 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰해야 실행되며, 주입이 없으면 스킬의 `session-start`로 복원한다. 생성 AGENTS의 사용자 규칙 참조와 rules 여섯 본문이 모두 보존됐는지 확인한다. 이 업그레이드로 Codex 전역 설정이나 Claude 권한 설정을 변경하지 않는다. Jarvis의 실행기는 계속 Claude CLI다.
 - `0.9.0`의 세션 주입은 예산을 실제 출력에 적용하며 0은 주입 비활성화다. 주입은 검사기 `validate_config` 전체를 통과해야 동작한다 — 어떤 키든 형식 오류(정수 키에 문자열·실수, `null`, `./` 접두·끝 슬래시 경로, 확장자가 `.md`가 아닌 `hot_note`·`handoff_note`, 빈 enum 등)면 handoff·hot이 둘 다 조용히 빠지고 stderr 한 줄만 남으니, 업그레이드 직후 healthcheck로 config 오류부터 확인하라. 구판 설정값은 유지하고 이 의미 변경을 안내하라. 절대경로·상위 경로·deny zone·심볼릭 링크/정션을 가리키는 상태 파일은 주입되지 않으므로, 설정 오류를 우회하지 말고 사용자에게 정상적인 볼트 내부 경로를 제시하라.

@@ -84,6 +84,24 @@ _HEADER_STARTS = tuple(
 # after them (a full-width "=", other spacing or case, another format
 # character such as U+00AD or U+200E in front) is left as it is.
 _LEADING_BLANKS = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]*")
+# Invisible smuggling and visual-spoofing code points removed before secret
+# redaction and header neutralization (v0.54.0): Unicode Tag block
+# (U+E0000-U+E007F, ASCII/Tag smuggling), Variation Selectors Supplement
+# (U+E0100-U+E01EF), bidirectional overrides/isolates (U+202A-U+202E,
+# U+2066-U+2069), Mongolian vowel separator (U+180E), Hangul invisible
+# fillers (U+115F-U+1160), and invisible math operators (U+2061-U+2064).
+# Normal emojis (including U+FE0F/U+200D), Hangul syllables, and the
+# header-leading characters tested in v0.52.1 are left untouched.
+_DANGEROUS_INVISIBLE_RE = re.compile(
+    r"[\u115f\u1160\u180e\u202a-\u202e\u2061-\u2064\u2066-\u2069\U000e0000-\U000e007f\U000e0100-\U000e01ef]+"
+)
+
+
+def _strip_invisible_smuggling(text: str) -> str:
+    """Remove invisible smuggling and bidi-override characters; leave benign text as the same object."""
+    if not text or not _DANGEROUS_INVISIBLE_RE.search(text):
+        return text
+    return _DANGEROUS_INVISIBLE_RE.sub("", text)
 
 
 def _redact_sensitive_lines(text: str) -> str:
@@ -651,7 +669,7 @@ def _compact_extra_source(vault: Path, config: dict, key: str, fallback: str = '
         raise ValueError('runtime_is_not_context')
     path = checked_note_path(vault, value, (*config['deny_zones'], '.git'))
     text, truncated = _revocation_note(path, value, revocations)
-    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(text)), 0, truncated, value)
+    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), 0, truncated, value)
 
 
 def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSource | None], *, revocations=None) -> SectionSource | None:
@@ -778,7 +796,7 @@ def _configured_source(
     text, source_truncated = _revocation_note(path, rel_path, revocations)
     if text is None:
         return None
-    return SectionSource(header, _neutralize_header_lines(_redact_sensitive_lines(text)), budget, source_truncated, rel_path)
+    return SectionSource(header, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), budget, source_truncated, rel_path)
 
 
 def _write_stdout(text: str) -> None:

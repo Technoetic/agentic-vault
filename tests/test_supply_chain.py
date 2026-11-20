@@ -595,6 +595,23 @@ class ReleaseIntegrityDocTests(unittest.TestCase):
             with self.subTest(operand=operand):
                 self.assertIn(operand, documented[0])
 
+    def test_workflows_reject_untrusted_privileged_pr_checkouts(self) -> None:
+        # Inspired by ECC's validate-workflow-security.js (v0.54.0): privileged triggers
+        # (pull_request_target / workflow_run) must never check out untrusted PR head refs.
+        workflows_dir = ROOT / ".github" / "workflows"
+        untrusted_pr_re = re.compile(
+            r"github\.event\.(?:pull_request\.head|workflow_run\.head_|workflow_run\.pull_requests\[\d+\]\.head)"
+            r"|^\s*ref:\s*['\"]?[^'\"\n]*refs/(?:remotes/)?pull/",
+            re.MULTILINE,
+        )
+        for wf in sorted([*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")]):
+            text = wf.read_text(encoding="utf-8")
+            if re.search(r"\b(?:pull_request_target|workflow_run)\s*:", text):
+                self.assertIsNone(
+                    untrusted_pr_re.search(text),
+                    f"{wf.name} combines privileged trigger with untrusted PR checkout",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

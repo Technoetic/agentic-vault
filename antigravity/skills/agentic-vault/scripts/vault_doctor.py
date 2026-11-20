@@ -234,9 +234,13 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
-    # The hook redacts sensitive lines (v0.51.0) and then prefixes note lines that
-    # open like its section headers (v0.52.1) before rendering, so the counts follow
-    # the exact same text. An older hook without either helper is reproduced as it is.
+    # The hook strips invisible smuggling chars (v0.54.0), redacts sensitive lines
+    # (v0.51.0), and then prefixes note lines that open like its section headers
+    # (v0.52.1) before rendering, so the counts follow the exact same text. An
+    # older hook without any helper is reproduced as it is.
+    strip_smuggling = getattr(session_hook, "_strip_invisible_smuggling", None)
+    if strip_smuggling is not None:
+        text = strip_smuggling(text)
     redact = getattr(session_hook, "_redact_sensitive_lines", None)
     if redact is not None:
         text = redact(text)
@@ -637,6 +641,18 @@ PLUGIN_SCOPE_UNAVAILABLE = {
     "next_action": "check_the_plugin_install",
     "trust_boundary": "settings_files_only_other_sources_unknown",
 }
+HOOK_WIRING_UNAVAILABLE = {
+    "schema_version": 1,
+    "status": "unavailable",
+    "reason_code": "probe_failed",
+    "next_action": "check_vault_settings_manually",
+    "trust_boundary": "static_path_existence_only_hooks_not_executed",
+}
+INSTALL_STATE_UNAVAILABLE = {
+    "schema": "agentic-vault/install-state/v1",
+    "status": "unavailable",
+    "reason_code": "probe_failed",
+}
 
 
 def _format_text(report: dict) -> str:
@@ -706,6 +722,18 @@ def _format_text(report: dict) -> str:
             lines.extend(scope_lines(report["plugin_scope"]))
         except Exception:  # fail-soft by contract: a fixed line, never exception text
             lines.append("plugin_scope: unknown (probe_failed)")
+    if "hook_wiring" in report:
+        try:
+            from vault_hook_wiring import text_lines as wiring_lines
+            lines.extend(wiring_lines(report["hook_wiring"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("hook_wiring: unavailable (probe_failed)")
+    if "install_state" in report:
+        try:
+            from vault_install_state import text_lines as state_lines
+            lines.extend(state_lines(report["install_state"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("install_state: unavailable (probe_failed)")
     return "\n".join(lines)
 
 
@@ -762,6 +790,21 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--hook-wiring", action="store_true",
+        help=(
+            "Also audit whether scripts referenced by the vault's Claude settings hooks "
+            "and vault git hooks exist on disk. Read-only, no-leak, runs no hook, and "
+            "never changes the exit code."
+        ),
+    )
+    parser.add_argument(
+        "--install-state", action="store_true",
+        help=(
+            "Also report read-only drift between 00-meta/.vault-install-state.json and "
+            "managed vs user-owned vault files. Fail-soft; never changes the exit code."
+        ),
+    )
+    parser.add_argument(
         "--require-vault", action="store_true",
         help=(
             "Exit 2 instead of 0 when the folder has no 00-meta/vault-config.json "
@@ -807,6 +850,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         except Exception:  # fail-soft by contract: no exception text, which may quote content
             report["plugin_scope"] = dict(PLUGIN_SCOPE_UNAVAILABLE)
+    if args.hook_wiring:
+        # Loaded only on request; read-only, no-leak, exit code stays the vault's.
+        try:
+            from vault_hook_wiring import diagnose_hook_wiring
+            report["hook_wiring"] = diagnose_hook_wiring(args.vault, plugin_root=REPO_ROOT)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["hook_wiring"] = dict(HOOK_WIRING_UNAVAILABLE)
+    if args.install_state:
+        # Loaded only on request; read-only drift view, exit code stays the vault's.
+        try:
+            from vault_install_state import diagnose_install_state
+            report["install_state"] = diagnose_install_state(args.vault)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["install_state"] = dict(INSTALL_STATE_UNAVAILABLE)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

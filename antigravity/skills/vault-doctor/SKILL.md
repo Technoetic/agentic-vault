@@ -94,3 +94,9 @@ python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_doctor.py" --vault "<�
     `healthcheck_copy_outdated`는 `/vault-upgrade`로 안내한다. 호스트가 합친 값이 필요하다고 할 때만 `--plugin-scope-host`를 더하며, 이때만
     `claude plugin list --json`을 고정 인자·셸 없이 실행한다. 설정 변경과 훅 실행은 하지 않고 종료 코드도 바뀌지 않는다.
     [값과 한계](../../docs/reliability.md#double-injection-broken-output-and-plugin-scope-optional)
+13. 사용자가 볼트 훅 배선 깨짐이나 누락 스크립트를 물을 때만 같은 Doctor에 `--hook-wiring`을 추가한다.
+    `.claude/settings.json`·`.claude/settings.local.json`의 훅 명령과 `00-meta/scripts/git-hooks/`의 대상 파일 실존 여부만 읽기 전용으로 확인한다.
+    원시 훅 명령이나 환경 변수는 출력하지 않으며 훅을 실행하지 않고 종료 코드도 바뀌지 않는다. 해석할 수 없는 변수는 추측하지 않고 `commands_skipped`로 보고한다.
+14. 사용자가 볼트에 설치된 엔진 관리 파일과 사용자 수정 파일의 차이를 물을 때만 같은 Doctor에 `--install-state`를 추가한다.
+    `00-meta/.vault-install-state.json` 기준으로 `managed`·`modified_by_user`·`user_owned` 상태를 읽기 전용으로 보고한다(종료 코드 불변).
+    기록이나 안전 제거(기본 dry-run)는 사용자가 명시 요청할 때만 `vault_install_state.py record|status|uninstall`을 사용한다.
