@@ -321,16 +321,18 @@ class SnapshotTests(unittest.TestCase):
             restored = self.root / "restored-sync"
             backup.restore_snapshot(snapshot, restored)
 
-        self.assertEqual(len(synced_paths), 3)
+        self.assertEqual(len(synced_paths), 4)
         self.assertTrue(synced_paths[0].name.startswith(".staging-"))
         self.assertEqual(synced_paths[1], self.target / "snapshots")
         self.assertEqual(synced_paths[2], restored)
+        self.assertEqual(synced_paths[3], restored.parent)
 
     def test_sync_dir_opens_fsyncs_and_ignores_unsupported_errno_on_posix(self):
         import errno as _errno
 
         folder = self.root / "sync-dir-test"
         folder.mkdir()
+        expected_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         calls: list[tuple[str, object]] = []
         with (
             mock.patch.object(backup, "SYNC_FOLDERS", True),
@@ -340,19 +342,23 @@ class SnapshotTests(unittest.TestCase):
         ):
             backup._sync_dir(folder)
         self.assertEqual([c[0] for c in calls], ["open", "fsync", "close"])
+        self.assertEqual(calls[0], ("open", expected_flags))
         self.assertEqual(calls[1], ("fsync", 77))
         self.assertEqual(calls[2], ("close", 77))
 
-        # EINVAL/ENOTSUP should be tolerated while closing the descriptor.
-        closed: list[int] = []
-        with (
-            mock.patch.object(backup, "SYNC_FOLDERS", True),
-            mock.patch.object(backup.os, "open", return_value=88),
-            mock.patch.object(backup.os, "fsync", side_effect=OSError(_errno.EINVAL, "unsupported")),
-            mock.patch.object(backup.os, "close", side_effect=closed.append),
-        ):
-            backup._sync_dir(folder)
-        self.assertEqual(closed, [88])
+        # EINVAL/ENOTSUP/EOPNOTSUPP should be tolerated while closing the descriptor.
+        unsupported = sorted({_errno.EINVAL, _errno.ENOTSUP, getattr(_errno, "EOPNOTSUPP", _errno.ENOTSUP)})
+        for err_no in unsupported:
+            closed: list[int] = []
+            with (
+                self.subTest(errno=err_no),
+                mock.patch.object(backup, "SYNC_FOLDERS", True),
+                mock.patch.object(backup.os, "open", return_value=88),
+                mock.patch.object(backup.os, "fsync", side_effect=OSError(err_no, "unsupported")),
+                mock.patch.object(backup.os, "close", side_effect=closed.append),
+            ):
+                backup._sync_dir(folder)
+                self.assertEqual(closed, [88])
 
         # Real I/O errors (EIO) must still propagate and close the descriptor.
         closed_eio: list[int] = []
@@ -362,8 +368,9 @@ class SnapshotTests(unittest.TestCase):
             mock.patch.object(backup.os, "fsync", side_effect=OSError(_errno.EIO, "disk error")),
             mock.patch.object(backup.os, "close", side_effect=closed_eio.append),
         ):
-            with self.assertRaises(OSError):
+            with self.assertRaises(OSError) as ctx:
                 backup._sync_dir(folder)
+        self.assertEqual(ctx.exception.errno, _errno.EIO)
         self.assertEqual(closed_eio, [99])
 
         # On Windows (SYNC_FOLDERS=False), _sync_dir is a clean no-op.

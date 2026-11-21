@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_EXTENSIONS = frozenset({
     ".py", ".md", ".json", ".yml", ".yaml", ".sh", ".ps1", ".txt", ".toml", ".in",
 })
+EXTENSIONLESS_TEXT_FILES = frozenset({
+    "pre-commit", "pre-push", ".gitattributes", ".gitignore", "LICENSE",
+})
 PLACEHOLDER_USERS = frozenset({
     "example", "me", "user", "username", "you", "yourname", "yourusername",
     "your-username", "alice", "bob", "tester",
@@ -80,7 +83,7 @@ class RepoHygieneTests(unittest.TestCase):
         violations: list[str] = []
         for rel in _tracked_files():
             path = ROOT / rel
-            if path.suffix.lower() not in TEXT_EXTENSIONS or not path.is_file():
+            if (path.suffix.lower() not in TEXT_EXTENSIONS and path.name not in EXTENSIONLESS_TEXT_FILES) or not path.is_file():
                 continue
             raw = path.read_bytes()
             bad: list[str] = []
@@ -93,6 +96,14 @@ class RepoHygieneTests(unittest.TestCase):
             if bad:
                 violations.append(f"{rel}: {', '.join(bad)}")
         self.assertEqual(violations, [], "Dangerous invisible Unicode characters or UTF-8 BOM found:\n" + "\n".join(violations))
+
+    def test_dangerous_invisible_helper_detects_v0541_codepoints_and_preserves_benign(self) -> None:
+        for cp in (0x00AD, 0x034F, 0x061C, 0x200E, 0x200F, 0x3164, 0xFFA0):
+            with self.subTest(bad=f"U+{cp:04X}"):
+                self.assertTrue(_is_dangerous_invisible(cp))
+        for ch in ("A", "가", "\u26a0", "\ufe0f", "\u2705", "\u200d"):
+            with self.subTest(benign=f"U+{ord(ch):04X}"):
+                self.assertFalse(_is_dangerous_invisible(ord(ch)))
 
     def test_no_personal_paths_in_shipped_surfaces(self) -> None:
         violations: list[str] = []

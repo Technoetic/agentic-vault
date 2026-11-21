@@ -389,6 +389,11 @@ class SupplyChainAuditJobTests(unittest.TestCase):
         self.assertIn(f"rhysd/actionlint/releases/download/v{ACTIONLINT_VERSION}/actionlint_{ACTIONLINT_VERSION}_linux_amd64.tar.gz", joined)
         self.assertIn(ACTIONLINT_SHA256, joined)
         self.assertIn("sha256sum -c -", joined)
+        report = [line for s in steps(self.audit()) for line in run_lines(s)]
+        self.assertEqual(
+            report.count('echo "::warning title=actionlint (advisory)::findings or tool error; see the actionlint step log"'),
+            1,
+        )
         for name in BLOCKING_JOBS:
             for line in self.jobs[name]:
                 self.assertNotIn("actionlint", line)

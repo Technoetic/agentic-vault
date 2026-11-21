@@ -55,7 +55,7 @@ def _sync_dir(path: Path) -> None:
     """
     if not SYNC_FOLDERS:
         return
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(fs_path(path), flags)
     try:
         os.fsync(descriptor)
@@ -406,6 +406,7 @@ def restore_snapshot(snapshot: Path, destination: Path) -> Path:
         if _digest(destination / name) != record:
             raise BackupError("restored file checksum mismatch")
     _sync_dir(destination)
+    _sync_dir(destination.parent)
     return destination
 
 

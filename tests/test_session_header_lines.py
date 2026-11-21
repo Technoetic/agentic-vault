@@ -455,7 +455,7 @@ class HeaderLineHookTests(unittest.TestCase):
         self.assertEqual(report["hook"]["estimated_emitted_chars"], units)
 
     def test_benign_text_returns_same_object_from_strip_invisible_smuggling(self) -> None:
-        benign = "한국어 노트 \u26a0\ufe0f \u2705 with\u200bheader-leading\ufeffchars.\n"
+        benign = "한국어 노트 \u26a0\ufe0f \u2705 \U0001f468\u200d\U0001f4bb with\u200bheader-leading\ufeffchars.\n"
         self.assertIs(hook._strip_invisible_smuggling(benign), benign)
 
     def test_default_ignorable_v0541_chars_are_stripped_before_redaction_and_header_defusing(self) -> None:
