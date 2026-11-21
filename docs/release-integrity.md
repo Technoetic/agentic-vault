@@ -9,8 +9,8 @@ GitHub 기능 설명은 공식 문서 [Immutable releases](https://docs.github.c
 직접 조회·실행한 측정값이며 각 항목에 대상 수를 적는다. 저장소의 현재 불변 릴리스 설정은
 2026-10-20 API 조회에서 `"enabled": true`, `"enforced_by_owner": false`였다. v0.23.0과 v0.24.0은
 불변 릴리스로 게시됐고(같은 날 `gh release view`의 `isImmutable`이 둘 다 `true`), v0.25.0도 2026-10-19
-게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.54.0의 최종 소스·CI·ZIP/blob 대조와
-재빌드 명세는 [릴리스 검증](verification/v0.54.0.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
+게시 직후 확인에서 `immutable: true`였다(별도 게시 후 기록). 현재 v0.54.1의 최종 소스·CI·ZIP/blob 대조와
+재빌드 명세는 [릴리스 검증](verification/v0.54.1.md)과 게시 전 릴리스 자산 `verification.json`에 기록한다. 게시 뒤 릴리스 증명·공개 재다운로드 확인은 별도
 `post-publication.json`에 보관한다. 게시 전 대기 상태를 검증 통과로 해석하지 않는다.
 
 ## 공개 자산
@@ -316,11 +316,11 @@ v0.22.1까지 게시한 GitHub 릴리스 23개는 불변 릴리스로 게시되�
 ## CI 공급망 점검(경고 전용)
 
 `.github/workflows/tests.yml`의 `supply-chain-audit` 작업은 push·PR·수동 실행마다 zizmor로 GitHub Actions 워크플로를
-정적 분석하고, pip-audit으로 `requirements-dev.txt`의 알려진 취약점을 조회한다. 결과는 경고로만 표시한다.
-zizmor, pip-audit 설치, pip-audit 감사 세 단계와 작업 모두 `continue-on-error: true`라 실패해도 워크플로가 실패하지
-않는다. 마지막 보고 단계가 세 단계의 결과를 읽어 성공하지 않은 단계마다 `::warning` 주석을 남긴다. 권한은
+정적 분석하고, v0.54.1부터 SHA-256으로 고정한 [`rhysd/actionlint`](https://github.com/rhysd/actionlint) `v1.7.12`(MIT, 2026-03-30 게시)로 워크플로 문법·표현식·`shellcheck`를 검사하며, pip-audit으로 `requirements-dev.txt`의 알려진 취약점을 조회한다. 결과는 경고로만 표시한다.
+zizmor, actionlint, pip-audit 설치, pip-audit 감사 네 단계와 작업 모두 `continue-on-error: true`라 실패해도 워크플로가 실패하지
+않는다. 마지막 보고 단계가 네 단계의 결과를 읽어 성공하지 않은 단계마다 `::warning` 주석을 남긴다. 권한은
 `contents: read`뿐이며 SARIF 업로드(`security-events`)와 OIDC 토큰(`id-token`)을 쓰지 않는다. 기존 테스트 작업과
-게이트는 바뀌지 않는다.
+게이트는 바뀌지 않는다. 또한 v0.54.1 릴리스 준비 시점에 GitHub 저장소의 Dependabot 보안 업데이트(`dependabot_security_updates`)를 켜고 API 재조회로 확인했다(`secret_scanning_validity_checks`는 현 저장소 등급에서 활성화되지 않았다).
 
 - **로컬 측정(2026-10-17):** zizmor 1.31.1을 오프라인 모드로 `.github/workflows`(워크플로 1개)에 실행했다.
   기본(regular) persona는 0건이고 1건은 persona 기준으로 숨겨졌다. pedantic·auditor persona는 각 1건(Low,

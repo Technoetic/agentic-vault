@@ -1,4 +1,4 @@
-﻿# Recoverable Markdown bundles
+# Recoverable Markdown bundles
 
 `vault_bundle.py` is an opt-in local journal for completing a bounded set of existing Markdown replacements after an interruption. It uses the existing vault policy, stable reads, cooperating note leases and per-file staged replacement. It does not provide multi-file atomic visibility, rollback, semantic merge, or a universal power-loss guarantee. Readers can observe a partly completed bundle. Uncooperative writers and filesystem changes beyond the final observations are not frozen.
 

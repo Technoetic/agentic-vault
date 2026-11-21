@@ -61,7 +61,12 @@ def _tracked_files() -> list[str]:
 
 def _is_dangerous_invisible(cp: int) -> bool:
     return (
-        cp in (0x200B, 0x200C, 0x2060, 0x180E, 0x115F, 0x1160)
+        cp in (
+            0x00AD, 0x034F, 0x061C,
+            0x115F, 0x1160, 0x180E,
+            0x200B, 0x200C, 0x200E, 0x200F, 0x2060,
+            0x3164, 0xFFA0,
+        )
         or (0x2061 <= cp <= 0x2064)
         or (0x202A <= cp <= 0x202E)
         or (0x2066 <= cp <= 0x2069)
@@ -77,13 +82,17 @@ class RepoHygieneTests(unittest.TestCase):
             path = ROOT / rel
             if path.suffix.lower() not in TEXT_EXTENSIONS or not path.is_file():
                 continue
-            text = path.read_text(encoding="utf-8", errors="replace")
-            bad = sorted({f"U+{ord(ch):04X}" for ch in text if _is_dangerous_invisible(ord(ch))})
+            raw = path.read_bytes()
+            bad: list[str] = []
+            if raw.startswith(b"\xef\xbb\xbf"):
+                bad.append("UTF-8 BOM(leading)")
+            text = raw.decode("utf-8", errors="replace")
+            bad.extend(sorted({f"U+{ord(ch):04X}" for ch in text if _is_dangerous_invisible(ord(ch))}))
             if not rel.startswith("tests/") and "\ufeff" in text[1:]:
                 bad.append("U+FEFF(mid)")
             if bad:
                 violations.append(f"{rel}: {', '.join(bad)}")
-        self.assertEqual(violations, [], "Dangerous invisible Unicode characters found:\n" + "\n".join(violations))
+        self.assertEqual(violations, [], "Dangerous invisible Unicode characters or UTF-8 BOM found:\n" + "\n".join(violations))
 
     def test_no_personal_paths_in_shipped_surfaces(self) -> None:
         violations: list[str] = []

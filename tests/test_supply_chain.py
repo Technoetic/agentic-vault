@@ -92,8 +92,10 @@ PINNED_RELEASE_TAGS = {
     "zizmorcore/zizmor-action": ("cc914d7f3750a2d13d75c7f184a1060aa0e9d482", "v0.6.4"),
 }
 ZIZMOR_VERSION = "'1.30.1'"
+ACTIONLINT_VERSION = "1.7.12"
+ACTIONLINT_SHA256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
 INSTALL_STEP_ID = "pip-audit-install"
-AUDIT_STEP_IDS = ("zizmor", INSTALL_STEP_ID, "pip-audit")
+AUDIT_STEP_IDS = ("zizmor", "actionlint", INSTALL_STEP_ID, "pip-audit")
 # pip "Secure installs": hash-checking mode and no source distributions.
 HASHED_INSTALL = "python -m pip install --require-hashes --only-binary :all: -r ci/requirements-audit.txt"
 # --no-deps reads the exact pins; --disable-pip stops pip-audit from creating a
@@ -378,6 +380,18 @@ class SupplyChainAuditJobTests(unittest.TestCase):
         self.assertEqual(run_lines(step), [PIN_ONLY_AUDIT])
         self.assertEqual(scalars(step, 8).get("if"), AUDIT_GATE)
         self.assertNotIn("uses", scalars(step, 8))
+
+    def test_actionlint_is_pinned_and_sha256_verified(self) -> None:
+        step = step_with_id(self.audit(), "actionlint")
+        self.assertEqual(scalars(step, 8).get("continue-on-error"), "true")
+        self.assertNotIn("uses", scalars(step, 8))
+        joined = "\n".join(run_lines(step))
+        self.assertIn(f"rhysd/actionlint/releases/download/v{ACTIONLINT_VERSION}/actionlint_{ACTIONLINT_VERSION}_linux_amd64.tar.gz", joined)
+        self.assertIn(ACTIONLINT_SHA256, joined)
+        self.assertIn("sha256sum -c -", joined)
+        for name in BLOCKING_JOBS:
+            for line in self.jobs[name]:
+                self.assertNotIn("actionlint", line)
 
     def test_step_outcomes_surface_as_warning_annotations(self) -> None:
         audit = self.audit()

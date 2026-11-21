@@ -14,6 +14,7 @@ snapshot. Hashes detect accidental corruption, not malicious manifest replacemen
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import os
@@ -42,6 +43,28 @@ EXCLUDE_FILES = ["Thumbs.db", "desktop.ini"]
 CHUNK_SIZE = 1024 * 1024
 MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+SYNC_FOLDERS = os.name != "nt"
+
+
+def _sync_dir(path: Path) -> None:
+    """Flush directory entry metadata on POSIX so atomic publish survives power loss.
+
+    Windows cannot open a directory with O_RDONLY for os.fsync. On POSIX file
+    systems that reject directory fsync (EINVAL, ENOTSUP, EOPNOTSUPP), return
+    without failing snapshot publication; real I/O errors still propagate.
+    """
+    if not SYNC_FOLDERS:
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(fs_path(path), flags)
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        unsupported = {errno.EINVAL, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}
+        if exc.errno not in unsupported:
+            raise
+    finally:
+        os.close(descriptor)
 
 
 class BackupError(ValueError):
@@ -353,11 +376,13 @@ def create_backup(vault: Path, target: Path, *, skipped=None) -> Path:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        _sync_dir(stage)
         verify_snapshot(stage)
         published = snapshots / identifier
         if fs_path(published).exists():
             raise BackupError("snapshot identifier collision")
         os.replace(fs_path(stage), fs_path(published))
+        _sync_dir(snapshots)
         return published
 
 
@@ -380,6 +405,7 @@ def restore_snapshot(snapshot: Path, destination: Path) -> Path:
             raise BackupError("snapshot changed during restore")
         if _digest(destination / name) != record:
             raise BackupError("restored file checksum mismatch")
+    _sync_dir(destination)
     return destination
 
 

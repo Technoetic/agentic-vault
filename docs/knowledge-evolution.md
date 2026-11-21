@@ -1,4 +1,4 @@
-﻿# Offline knowledge evolution evaluation
+# Offline knowledge evolution evaluation
 
 Run `python scripts/evaluate_knowledge_evolution.py` or pass an explicit JSON fixture path. The evaluator uses only the standard library and constructs a temporary synthetic vault. It invokes the actual inventory capture/check and selected-note export APIs, checks independently authored expected transitions, and verifies exported hashes and a selected-link invariant. The destination and fixture contents cannot select arbitrary replay paths.
 

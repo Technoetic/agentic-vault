@@ -85,15 +85,19 @@ _HEADER_STARTS = tuple(
 # character such as U+00AD or U+200E in front) is left as it is.
 _LEADING_BLANKS = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]*")
 # Invisible smuggling and visual-spoofing code points removed before secret
-# redaction and header neutralization (v0.54.0): Unicode Tag block
+# redaction and header neutralization (v0.54.0, expanded in v0.54.1 per
+# Trojan Source [USENIX Security 2023], Unicode UTS #39 [Unicode 18.0.0],
+# and Bad Characters [IEEE S&P 2022]): Unicode Tag block
 # (U+E0000-U+E007F, ASCII/Tag smuggling), Variation Selectors Supplement
-# (U+E0100-U+E01EF), bidirectional overrides/isolates (U+202A-U+202E,
-# U+2066-U+2069), Mongolian vowel separator (U+180E), Hangul invisible
-# fillers (U+115F-U+1160), and invisible math operators (U+2061-U+2064).
-# Normal emojis (including U+FE0F/U+200D), Hangul syllables, and the
-# header-leading characters tested in v0.52.1 are left untouched.
+# (U+E0100-U+E01EF), bidirectional overrides/isolates/marks (U+061C,
+# U+200E-U+200F, U+202A-U+202E, U+2066-U+2069), soft hyphen (U+00AD),
+# combining grapheme joiner (U+034F), Mongolian vowel separator (U+180E),
+# Hangul invisible fillers (U+115F-U+1160, U+3164, U+FFA0), and invisible
+# math operators (U+2061-U+2064). Normal emojis (including U+FE0F/U+200D),
+# Hangul syllables, and the header-leading characters tested in v0.52.1 are
+# left untouched.
 _DANGEROUS_INVISIBLE_RE = re.compile(
-    r"[\u115f\u1160\u180e\u202a-\u202e\u2061-\u2064\u2066-\u2069\U000e0000-\U000e007f\U000e0100-\U000e01ef]+"
+    r"[\u00ad\u034f\u061c\u115f\u1160\u180e\u200e\u200f\u202a-\u202e\u2061-\u2064\u2066-\u2069\u3164\uffa0\U000e0000-\U000e007f\U000e0100-\U000e01ef]+"
 )
 
 

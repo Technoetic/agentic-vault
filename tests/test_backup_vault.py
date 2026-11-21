@@ -308,6 +308,71 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("git", result.stderr.lower())
         self.assertEqual(list((self.target / "snapshots").glob("*")), [])
 
+    def test_create_backup_and_restore_sync_parent_directories_on_posix(self):
+        synced_paths: list[Path] = []
+        original_sync = backup._sync_dir
+
+        def record_sync(path: Path) -> None:
+            synced_paths.append(Path(path))
+            original_sync(path)
+
+        with mock.patch.object(backup, "_sync_dir", side_effect=record_sync):
+            snapshot = self.create()
+            restored = self.root / "restored-sync"
+            backup.restore_snapshot(snapshot, restored)
+
+        self.assertEqual(len(synced_paths), 3)
+        self.assertTrue(synced_paths[0].name.startswith(".staging-"))
+        self.assertEqual(synced_paths[1], self.target / "snapshots")
+        self.assertEqual(synced_paths[2], restored)
+
+    def test_sync_dir_opens_fsyncs_and_ignores_unsupported_errno_on_posix(self):
+        import errno as _errno
+
+        folder = self.root / "sync-dir-test"
+        folder.mkdir()
+        calls: list[tuple[str, object]] = []
+        with (
+            mock.patch.object(backup, "SYNC_FOLDERS", True),
+            mock.patch.object(backup.os, "open", side_effect=lambda p, f: (calls.append(("open", f)), 77)[1]),
+            mock.patch.object(backup.os, "fsync", side_effect=lambda fd: calls.append(("fsync", fd))),
+            mock.patch.object(backup.os, "close", side_effect=lambda fd: calls.append(("close", fd))),
+        ):
+            backup._sync_dir(folder)
+        self.assertEqual([c[0] for c in calls], ["open", "fsync", "close"])
+        self.assertEqual(calls[1], ("fsync", 77))
+        self.assertEqual(calls[2], ("close", 77))
+
+        # EINVAL/ENOTSUP should be tolerated while closing the descriptor.
+        closed: list[int] = []
+        with (
+            mock.patch.object(backup, "SYNC_FOLDERS", True),
+            mock.patch.object(backup.os, "open", return_value=88),
+            mock.patch.object(backup.os, "fsync", side_effect=OSError(_errno.EINVAL, "unsupported")),
+            mock.patch.object(backup.os, "close", side_effect=closed.append),
+        ):
+            backup._sync_dir(folder)
+        self.assertEqual(closed, [88])
+
+        # Real I/O errors (EIO) must still propagate and close the descriptor.
+        closed_eio: list[int] = []
+        with (
+            mock.patch.object(backup, "SYNC_FOLDERS", True),
+            mock.patch.object(backup.os, "open", return_value=99),
+            mock.patch.object(backup.os, "fsync", side_effect=OSError(_errno.EIO, "disk error")),
+            mock.patch.object(backup.os, "close", side_effect=closed_eio.append),
+        ):
+            with self.assertRaises(OSError):
+                backup._sync_dir(folder)
+        self.assertEqual(closed_eio, [99])
+
+        # On Windows (SYNC_FOLDERS=False), _sync_dir is a clean no-op.
+        with (
+            mock.patch.object(backup, "SYNC_FOLDERS", False),
+            mock.patch.object(backup.os, "open", side_effect=AssertionError("must not open on Windows")),
+        ):
+            backup._sync_dir(folder)
+
 
 if __name__ == "__main__":
     unittest.main()
