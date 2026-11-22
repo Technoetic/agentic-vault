@@ -229,7 +229,20 @@ def main(argv=None):
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(export_bundle(args.vault, args.note, args.output), ensure_ascii=True, sort_keys=True))
+        manifest = export_bundle(args.vault, args.note, args.output)
+        try:
+            from vault_cloud_sync import detect_cloud_sync_path
+            sync_info = detect_cloud_sync_path(args.output)
+            if sync_info.get("detected"):
+                provider = sync_info.get("provider") or "cloud_sync"
+                print(
+                    f"[agentic-vault] Warning: export destination appears to be inside a cloud-synced "
+                    f"folder ({provider}); review note classification before syncing.",
+                    file=sys.stderr,
+                )
+        except Exception:
+            pass
+        print(json.dumps(manifest, ensure_ascii=True, sort_keys=True))
         return 0
     except ExportError as exc:
         print(json.dumps({'ok': False, 'error': str(exc)}))

@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.54.1"
-EXPECTED_PUBLIC_REF = "0.54.1"
+EXPECTED = "0.55.0"
+EXPECTED_PUBLIC_REF = "0.55.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.54.1-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.54.1.md)"
+    "[![Version](https://img.shields.io/badge/v0.55.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.55.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.54.1 · MIT)"
+    "← plugin.json · marketplace.json (v0.55.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -358,11 +358,18 @@ CHECKER_SHA256_V0340 = "be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202
 # Declared v0.46.0 fingerprint, written by hand after F1 (deny zones fold Unicode
 # normalization) changed vault_paths.py and vault_lint_extensions.py.
 CHECKER_SHA256_V0460 = "09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d"
+# Declared v0.55.0 fingerprint, written by hand after verification-date staleness,
+# alias-collision lint, and URL-query egress checks changed vault_lint_extensions.py
+# and vault_egress.py.
+CHECKER_SHA256_V0550 = "ee421d6f8cc419f9d10017fe7fc3f52084dde4775e4a20ca5fe3271cb6691f98"
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
 CURRENT_CHECKER_SECTION = "## v0.35.1 source and certificate migration"
-# The v0.46.0 section sits above it and runs to the next "## " heading; README's v0.36.x sections
-# between the two print the v0.34.0 digest again.
+# The v0.55.0 section sits immediately above v0.46.0, which sits above v0.35.1.
+V0550_CHECKER_SECTION = "## v0.55.0 source and certificate migration"
+V0550_RETURN_COORDINATION = (
+    "Returning to v0.54.1, or to any release from v0.46.0 to v0.54.1, needs the same coordination."
+)
 V0460_CHECKER_SECTION = "## v0.46.0 source and certificate migration"
 V0460_RETURN_COORDINATION = (
     "Returning to v0.45.1, or to any release from v0.34.0 to v0.45.1, needs the same coordination."
@@ -658,7 +665,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 self.assertIn(commit, verification_section)
                 self.assertIn(commit, record)
 
-    # v0.47.0 and v0.48.0 change none of the seven bound files, so they keep the v0.46.0 value below.
+    # v0.55.0 intentionally transitions checker_sha256 after modifying vault_lint_extensions.py and vault_egress.py.
     def test_stated_source_checker_hash_matches_actual_certificate(self) -> None:
         # The expected value is declared, never derived from the implementation under test.
         # A child process reads the actual checkout beside the certificate CLI.
@@ -667,10 +674,34 @@ class ReleaseMetadataTests(unittest.TestCase):
                                 text=True, encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checker_sha256"],
-                         CHECKER_SHA256_V0460)
+                         CHECKER_SHA256_V0550)
+        self.assertNotEqual(CHECKER_SHA256_V0550, CHECKER_SHA256_V0460)
         self.assertNotEqual(CHECKER_SHA256_V0460, CHECKER_SHA256_V0340)
         self.assertNotEqual(CHECKER_SHA256_V0340, CHECKER_SHA256_V0330)
         self.assertNotEqual(CHECKER_SHA256_V0330, CHECKER_SHA256_V0320)
+
+    def test_v0550_checker_addenda_state_new_hash_and_coordination(self) -> None:
+        # vault_lint_extensions.py and vault_egress.py changed in v0.55.0, so each addendum opens
+        # above v0.46.0 with a section stating both fingerprints once and bidirectional coordination.
+        for rel_path in SOURCE_CHECKER_ADDENDUM_PATHS:
+            with self.subTest(path=rel_path):
+                text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+                self.assertEqual(text.count(V0550_CHECKER_SECTION + "\n"), 1)
+                start = text.index(V0550_CHECKER_SECTION + "\n")
+                self.assertLess(start, text.index(V0460_CHECKER_SECTION + "\n"))
+                end = text.find("\n## ", start + len(V0550_CHECKER_SECTION))
+                section = _folded(text[start:end if end != -1 else len(text)])
+                self.assertIn(f"`{CHECKER_SHA256_V0550}`", section)
+                self.assertIn(f"`{CHECKER_SHA256_V0460}`", section)
+                for digest in (CHECKER_SHA256_V0550, CHECKER_SHA256_V0460):
+                    self.assertEqual(section.count(digest[:8]), 1, digest[:8])
+                self.assertIn("`38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a`", section)
+                self.assertIn("`vault_lint_extensions.py`", section)
+                self.assertIn("`vault_egress.py`", section)
+                self.assertIn(SOURCE_CHECKER_COORDINATION, section)
+                self.assertIn(V0550_RETURN_COORDINATION, section)
+                for digest in (CHECKER_SHA256_V0340, CHECKER_SHA256_V0330, CHECKER_SHA256_V0320):
+                    self.assertNotIn(digest[:8], section)
 
     def test_v0460_checker_addenda_state_new_hash_and_coordination(self) -> None:
         # vault_paths.py and vault_lint_extensions.py changed in v0.46.0, so each addendum opens
@@ -2527,9 +2558,11 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertNotIn("시도 횟수만 담은 안내", changes)
 
     def test_codex_long_description_conditions_the_checker_sentence(self) -> None:
-        # The checker does not change between v0.46.0 and v0.47.0, so the migration sentence applies only
-        # to transitions from v0.45.1 or earlier (finding RD-3).
-        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        # Preserve the published v0.47.0 description where checker_sha256 did not change
+        # from v0.46.0 (finding RD-3); v0.55.0 intentionally transitions checker_sha256.
+        codex = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.47.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         long_description = codex["interface"]["longDescription"]
         self.assertIn("For transitions from v0.45.1 or earlier, where " + V0310_CODEX_UPGRADE_SENTENCE,
                       long_description)
@@ -3214,9 +3247,10 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
         self.assertIn("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter", headings)
         self.assertIn(V0520ReleaseMetadataTests.ENGLISH, headings)
-        self.assertEqual(headings[:6], [V0541ReleaseMetadataTests.CODEX_EN, V0540ReleaseMetadataTests.CODEX_EN,
-                                        V0532ReleaseMetadataTests.CODEX_EN, V0530ReleaseMetadataTests.ENGLISH,
-                                        V0521ReleaseMetadataTests.ENGLISH, V0520ReleaseMetadataTests.ENGLISH])
+        self.assertEqual(headings[:7], [V0550ReleaseMetadataTests.CODEX_EN, V0541ReleaseMetadataTests.CODEX_EN,
+                                        V0540ReleaseMetadataTests.CODEX_EN, V0532ReleaseMetadataTests.CODEX_EN,
+                                        V0530ReleaseMetadataTests.ENGLISH, V0521ReleaseMetadataTests.ENGLISH,
+                                        V0520ReleaseMetadataTests.ENGLISH])
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3229,7 +3263,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.54.0](releases/v0.54.0.md) / [v0.53.2](releases/v0.53.2.md) / [v0.53.0](releases/v0.53.0.md) / [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.54.1](releases/v0.54.1.md) / [v0.54.0](releases/v0.54.0.md) / [v0.53.2](releases/v0.53.2.md) / [v0.53.0](releases/v0.53.0.md) / [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3261,7 +3295,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.54.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.54.1 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
@@ -3473,9 +3507,11 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
 
     def test_no_text_says_help_gains_only_one_line(self) -> None:
         # argparse adds the option to the usage block and one option line and realigns the six
-        # existing option lines (finding F2).
+        # existing option lines (finding F2). Preserve the published v0.50.0 marketplace text.
         readme = README.read_text(encoding="utf-8")
-        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        codex = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.50.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         places = (
             ("record", _folded(_section(self.VERIFICATION.read_text(encoding="utf-8"),
                                         "## Default-result comparison")), "gains one line"),
@@ -3494,11 +3530,13 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
                 self.assertTrue("realign" in text or "다시 정렬" in text, name)
 
     def test_codex_long_description_carries_the_checker_range_to_v0500(self) -> None:
-        codex = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        # Preserve the historical v0.50.0 checker-range claim; v0.55.0 intentionally transitions checker_sha256.
+        codex = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.50.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         long_description = codex["interface"]["longDescription"]
-        self.assertIn(f"unchanged from v0.46.0 through v{EXPECTED}.", long_description)
+        self.assertIn("unchanged from v0.46.0 through v0.50.0.", long_description)
         self.assertNotIn("through v0.49.0", long_description)
-        self.assertNotIn("through v0.50.0", long_description)
         self.assertNotIn("through v0.51.0", long_description)
         self.assertNotIn("through v0.52.0", long_description)
 
@@ -3515,14 +3553,16 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("healthcheck engine stamp (line 2", record)
 
     def test_readme_and_codex_description_name_only_local_branches_and_tags(self) -> None:
-        # The README summaries and the Codex description carry the same local-only boundary
-        # (final-candidate check, minor): section 14c consults refs/heads and refs/tags only.
+        # The README summaries and the published v0.50.0 Codex description carry the same local-only
+        # boundary (final-candidate check, minor): section 14c consults refs/heads and refs/tags only.
         readme = _folded((REPO_ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertNotIn("detached HEAD no branch or tag contains", readme)
         self.assertIn("detached HEAD no local branch or tag contains", readme)
         self.assertNotIn("어느 분기·태그에도", readme)
         self.assertEqual(readme.count("어느 로컬 분기·태그에도"), 2)
-        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        manifest = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.50.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         description = manifest["interface"]["longDescription"] if "interface" in manifest else manifest["longDescription"]
         self.assertNotIn("no branch or tag contains", description)
         self.assertIn("no local branch or tag contains", description)
@@ -3792,7 +3832,7 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_keeps_the_candidate_section_behind_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[5], self.ENGLISH)
+        self.assertEqual(headings[6], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("The v0.52.0 candidate, which was not published (see v0.52.1 above), adds",
                         "](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
@@ -4102,7 +4142,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_and_description_name_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[4], self.ENGLISH)
+        self.assertEqual(headings[5], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("v0.52.1 supersedes the unpublished v0.52.0 candidate", "](releases/v0.52.1.md)",
                         "](verification/v0.52.1.md)", "unchanged from v0.46.0 through v0.52.1",
@@ -4123,7 +4163,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
 
     def test_release_integrity_names_the_release_and_the_read_back(self) -> None:
         integrity = _folded((REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8"))
-        self.assertIn("현재 v0.54.1의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.54.1.md)",
+        self.assertIn("현재 v0.55.0의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.55.0.md)",
                       integrity)
         # The two settings applied for the candidate are read back for this release.
         self.assertIn("v0.52.1은 태그를 push하기 직전에 두 설정을 다시 읽어 그대로 켜져 있는지 확인한다"
@@ -4133,19 +4173,19 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_security_and_docs_index_name_the_release_and_the_candidate(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
         versions = _section(security, "## Supported versions")
-        self.assertIn("| 0.54.1 (latest) | Yes. Security fixes target the latest source version. |",
+        self.assertIn("| 0.55.0 (latest) | Yes. Security fixes target the latest source version. |",
                       versions.splitlines())
-        self.assertIn("| 0.54.0 and earlier | No. Upgrade to 0.54.1. From 0.46.0 to 0.54.1 the seven "
-                      "certificate-bound checker files are unchanged,", versions)
+        self.assertIn("| 0.54.1 and earlier | No. Upgrade to 0.55.0. From 0.46.0 to 0.54.1 the seven "
+                      "certificate-bound checker files were unchanged;", versions)
         self.assertIn("The unpublished v0.53.1, v0.52.0, v0.40.0,", versions)
         summary = next(line for line in security.splitlines() if line.startswith("- 보안 수정 대상은 최신"))
-        for literal in ("최신 0.54.1 소스다.", "0.54.0 이하는 0.54.1로 갱신한다.", "0.46.0부터 0.54.1까지",
+        for literal in ("최신 0.55.0 소스다.", "0.54.1 이하는 0.55.0으로 갱신한다.", "0.46.0부터 0.54.1까지",
                         "0.52.0은", "게시하지 않은 후보다.", "태그는 그대로 있고 GitHub 릴리스는 없으며"):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
-        self.assertIn("최신 소스는 [v0.54.1](releases/v0.54.1.md); [검증 기록](verification/v0.54.1.md). "
+        self.assertIn("최신 소스는 [v0.55.0](releases/v0.55.0.md); [검증 기록](verification/v0.55.0.md). "
                       "[v0.52.0](releases/v0.52.0.md)은 긴 Windows TEMP 경로 시험 문제로 대체한 미공개 후보이며 "
                       "태그와 당시 기록을 보존한다.", row)
 
@@ -4232,7 +4272,7 @@ class V0532ReleaseMetadataTests(unittest.TestCase):
         antigravity = (REPO_ROOT / "docs" / "antigravity.md").read_text(encoding="utf-8")
         self.assertNotIn("Stop에 정수 `executionNum`이", antigravity)
         self.assertIn("원시 이벤트 SHA-256", antigravity)
-        self.assertIn("tree/v0.54.1/antigravity", antigravity)
+        self.assertIn("tree/v0.55.0/antigravity", antigravity)
         jarvis = (REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py").read_text(encoding="utf-8")
         self.assertNotIn("D:/NS", jarvis)
 
@@ -4246,7 +4286,7 @@ class V0532ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.53.2.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[2], self.CODEX_EN)
+        self.assertEqual(headings[3], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.53.2:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4304,7 +4344,7 @@ class V0540ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.54.0.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[1], self.CODEX_EN)
+        self.assertEqual(headings[2], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.54.0:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4365,9 +4405,69 @@ class V0541ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.54.1.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[0], self.CODEX_EN)
-        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(headings[1], self.CODEX_EN)
+        manifest = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.54.1:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         description = manifest["interface"]["longDescription"]
         for literal in ("Release v0.54.1", "U+034F", "backup_vault.py", "actionlint", "v0.46.0 through v0.54.1"):
             with self.subTest(description=literal):
                 self.assertIn(literal, description)
+
+
+class V0550ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs" / "releases" / "v0.55.0.md"
+    VERIFICATION = REPO_ROOT / "docs" / "verification" / "v0.55.0.md"
+    README_KO = "## v0.55.0 — 검증일 노화·별칭 충돌 린트, URL 쿼리 유출 검사, 클라우드 동기화 경고 및 첫 실행 기능 요약"
+    README_EN = "## v0.55.0 — Verification-date staleness, alias-collision lint, URL-query egress guard, cloud-sync awareness and capability summary"
+    CODEX_EN = "## v0.55.0 — Verification-date staleness, alias-collision lint, URL-query egress guard, cloud-sync awareness and capability summary"
+
+    def test_release_note_uses_only_absolute_links_and_pins_certificate_transition(self) -> None:
+        import re
+
+        text = self.RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.55.0 — 검증일 노화·별칭 충돌 린트, URL 쿼리 유출 검사, 클라우드 동기화 경고 및 첫 실행 기능 요약")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계"])
+        for literal in ("현재 설치 ref는 `v0.55.0`이다.", CHECKER_SHA256_V0550, CHECKER_SHA256_V0460,
+                        "https://github.com/seulee26/stock-team-harness",
+                        "checked-at-stale", "review-by-passed", "alias-collision", "egress-url-secret",
+                        "vault_cloud_sync.py", "--cloud-sync", "--summary"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            with self.subTest(link=target):
+                self.assertTrue(
+                    target.startswith("https://"),
+                    f"v0.55.0 release note must not contain relative links: {target}",
+                )
+
+    def test_verification_contract_pins_gates_and_v0550_features(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.55.0 verification contract")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## Scope", "## Feature evidence", "## Default-result comparison",
+                                    "## Required release gates", "## Boundaries"])
+        folded = _folded(text)
+        for literal in ("checked-at-stale", "review-by-passed", "alias-collision", "egress-url-secret",
+                        "vault_cloud_sync.py", "scripts/verify_release_claims.py",
+                        "BEFORE publishing the GitHub Release", CHECKER_SHA256_V0550, CHECKER_SHA256_V0460):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_readme_codex_and_manifest_name_v0550(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        for heading in (self.README_KO, self.README_EN):
+            section = _section(readme, heading)
+            self.assertIn("](docs/releases/v0.55.0.md)", section)
+            self.assertIn("](docs/verification/v0.55.0.md)", section)
+        codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.CODEX_EN)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"]
+        for literal in ("Release v0.55.0", "stock-team-harness", "checked-at-stale", "alias-collision",
+                        "egress-url-secret", "vault_cloud_sync.py", V0310_CODEX_UPGRADE_SENTENCE):
+            with self.subTest(description=literal):
+                self.assertIn(literal, description)
+        self.assertNotIn("unchanged from v0.46.0 through v0.55.0", description)

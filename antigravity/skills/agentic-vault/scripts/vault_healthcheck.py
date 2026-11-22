@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.54.1
+# agentic-vault:healthcheck engine=0.55.0
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -109,7 +109,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.54.1"
+ENGINE_VERSION = "0.55.0"
 HEALTHCHECK_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
@@ -230,6 +230,7 @@ KNOWN_CONFIG_KEYS = frozenset({
     "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
     "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
     "constraints_note", "lint_max_warnings", "promotion_review_sessions",
+    "checked_at_stale_days", "checked_at_annual_rollover",
 })
 _CONFIG_KEY_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
@@ -512,6 +513,17 @@ def _validate_staged_growth_keys(config: dict) -> None:
             raise HealthcheckError("staged_growth_max_tokens must be a non-negative integer")
 
 
+def _validate_freshness_keys(config: dict) -> None:
+    """Reject malformed opt-in checked_at freshness settings."""
+    if "checked_at_stale_days" in config:
+        days = config["checked_at_stale_days"]
+        if not isinstance(days, int) or isinstance(days, bool) or days < 0:
+            raise HealthcheckError("checked_at_stale_days must be a non-negative integer")
+    if "checked_at_annual_rollover" in config:
+        if not isinstance(config["checked_at_annual_rollover"], bool):
+            raise HealthcheckError("checked_at_annual_rollover must be true/false")
+
+
 def validate_config(raw: object) -> dict:
     """Validate untrusted JSON config and return a normalized independent mapping."""
     if not isinstance(raw, dict):
@@ -522,6 +534,7 @@ def validate_config(raw: object) -> dict:
     _validated_warning_policy(config)
     _validate_sync_warning_keys(config)
     _validate_staged_growth_keys(config)
+    _validate_freshness_keys(config)
 
     for key in _STRING_KEYS:
         value = config.get(key)

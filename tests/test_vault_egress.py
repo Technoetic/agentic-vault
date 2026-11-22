@@ -117,6 +117,43 @@ class EgressTests(unittest.TestCase):
         self.assertEqual(self.module.scan_text(
             'Password policy discussion.\nAPI key rotation guidance.\r\nAuthorization overview.'), [])
 
+    def test_url_query_secret_parameters_warn_without_echoing_values(self):
+        cases = (
+            'See https://api.example.com/v1/items?token=abcd1234efgh',
+            '[Report](https://storage.example.com/doc.pdf?X-Amz-Signature=deadbeef123456)',
+            'Signed link: https://storage.googleapis.com/b/f?X-Goog-Signature=cafebabe9988',
+            'Account link https://broker.example.com/x?accountseq=98765432&foo=bar',
+            'Disguised https://api.example.com/v1?to\u200bken=abcd1234efgh',
+            'Fullwidth https://api.example.com/v1\uff1f\uff54\uff4f\uff4b\uff45\uff4e\uff1dabcd1234efgh',
+            ' '.join(f'https://ok.example.com/p/{i}?page={i}' for i in range(70))
+            + ' https://api.example.com/v1?sig=hidden9999',
+        )
+        for text in cases:
+            with self.subTest(text=text[:60]):
+                rows = self.module.scan_text(text, '20-knowledge/links.md')
+                self.assertIn('egress-url-secret', [r['code'] for r in rows])
+                serialized = json.dumps(rows, ensure_ascii=False)
+                for forbidden in ('abcd1234efgh', 'deadbeef123456', 'cafebabe9988', '98765432', 'hidden9999'):
+                    self.assertNotIn(forbidden, serialized)
+
+    def test_url_query_secret_redacts_sensitive_path_and_skips_benign_pagination_and_placeholders(self):
+        bad_path = '20-knowledge/https://api.example.com/?token=abcd1234efgh.md'
+        rows = self.module.scan_text('https://api.example.com/?token=abcd1234efgh', bad_path)
+        self.assertEqual([r['code'] for r in rows], ['egress-url-secret'])
+        self.assertEqual(rows[0]['path'], '<redacted-sensitive-path>')
+        self.assertNotIn('abcd1234efgh', json.dumps(rows))
+
+        for benign in (
+            'https://api.example.com/list?page_token=abcd1234efgh&limit=20',
+            'https://api.example.com/list?next_token=abcd1234efgh&cursor=xyz999',
+            'https://api.example.com/docs?token=<YOUR_TOKEN>',
+            'https://api.example.com/docs?signature={SIGNATURE}',
+            'https://api.example.com/docs?sig=123',
+            'https://example.com/search?q=token&sort=desc',
+        ):
+            with self.subTest(benign=benign):
+                self.assertEqual(self.module.scan_text(benign), [])
+
 
 if __name__ == '__main__':
     unittest.main()

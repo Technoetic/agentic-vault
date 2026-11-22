@@ -8,11 +8,12 @@ class TaskWorkflowReleaseTests(unittest.TestCase):
     def test_current_upgrade_and_result_links_do_not_point_to_prior_release(self):
         security=(ROOT/'SECURITY.md').read_text(encoding='utf-8')
         summary=next(line for line in security.splitlines() if line.startswith('- 보안 수정 대상은 최신'))
-        self.assertIn('0.54.0 이하는 0.54.1로 갱신한다.',summary)
+        self.assertIn('0.54.1 이하는 0.55.0으로 갱신한다.',summary)
         self.assertIn('0.46.0부터 0.54.1까지',summary)
         readme=(ROOT/'README.md').read_text(encoding='utf-8')
         current=next(line for line in readme.splitlines() if line.startswith('현재 버전은 **v'))
-        self.assertIn('[이번 변경·검증 범위](docs/releases/v0.54.1.md)',current)
+        self.assertIn('[이번 변경·검증 범위](docs/releases/v0.55.0.md)',current)
+        self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.54.1.md)',current)
         self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.54.0.md)',current)
         self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.53.2.md)',current)
         self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.53.1.md)',current)
@@ -24,8 +25,8 @@ class TaskWorkflowReleaseTests(unittest.TestCase):
         self.assertNotIn('[이번 변경·검증 범위](docs/releases/v0.49.0.md)',current)
     def test_current_manifests_and_healthcheck_identify_release(self):
         for name in ('.claude-plugin/plugin.json','.codex-plugin/plugin.json'):
-            self.assertEqual(json.loads((ROOT/name).read_text(encoding='utf-8'))['version'],'0.54.1')
-        self.assertIn('engine=0.54.1',(ROOT/'skills/agentic-vault/scripts/vault_healthcheck.py').read_text(encoding='utf-8').splitlines()[1])
+            self.assertEqual(json.loads((ROOT/name).read_text(encoding='utf-8'))['version'],'0.55.0')
+        self.assertIn('engine=0.55.0',(ROOT/'skills/agentic-vault/scripts/vault_healthcheck.py').read_text(encoding='utf-8').splitlines()[1])
     def test_all_opt_in_helpers_and_guides_are_discoverable(self):
         skill=(ROOT/'skills/agentic-vault/SKILL.md').read_text(encoding='utf-8')
         codex=(ROOT/'skills/agentic-vault/references/codex.md').read_text(encoding='utf-8')

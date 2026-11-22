@@ -653,6 +653,23 @@ INSTALL_STATE_UNAVAILABLE = {
     "status": "unavailable",
     "reason_code": "probe_failed",
 }
+CLOUD_SYNC_UNAVAILABLE = {
+    "schema_version": 1,
+    "status": "unavailable",
+    "reason_code": "probe_failed",
+    "next_action": "check_vault_path_manually",
+    "trust_boundary": "lexical_path_and_env_heuristics_only",
+}
+SUMMARY_UNAVAILABLE = {
+    "schema_version": 1,
+    "vault_status": "unavailable",
+    "cloud_sync_detected": False,
+    "cloud_sync_provider": None,
+    "ready_now": [],
+    "optional_setup": [],
+    "next_step": "run_vault_doctor_without_summary",
+    "trust_boundary": "local_metadata_heuristics_only_host_runtime_unverified",
+}
 
 
 def _format_text(report: dict) -> str:
@@ -734,6 +751,18 @@ def _format_text(report: dict) -> str:
             lines.extend(state_lines(report["install_state"]))
         except Exception:  # fail-soft by contract: a fixed line, never exception text
             lines.append("install_state: unavailable (probe_failed)")
+    if "cloud_sync" in report:
+        try:
+            from vault_cloud_sync import text_lines as sync_lines
+            lines.extend(sync_lines(report["cloud_sync"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("cloud_sync: unavailable (probe_failed)")
+    if "capability_summary" in report:
+        try:
+            from vault_cloud_sync import summary_text_lines
+            lines.extend(summary_text_lines(report["capability_summary"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("summary_vault_status: unavailable (probe_failed)")
     return "\n".join(lines)
 
 
@@ -805,6 +834,22 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cloud-sync", action="store_true",
+        help=(
+            "Also heuristically check whether the vault or configured backup_target sits "
+            "inside a cloud-synced folder (OneDrive, Google Drive, Dropbox, iCloud) and "
+            "note local-only artifacts. Read-only, path-redacted, fail-soft; never changes the exit code."
+        ),
+    )
+    parser.add_argument(
+        "--summary", action="store_true",
+        help=(
+            "Also include a concise first-run capability digest (what is ready now vs "
+            "optional setup) for initialized vaults and non-vault folders. Fail-soft; "
+            "never changes the exit code."
+        ),
+    )
+    parser.add_argument(
         "--require-vault", action="store_true",
         help=(
             "Exit 2 instead of 0 when the folder has no 00-meta/vault-config.json "
@@ -864,6 +909,20 @@ def main(argv: list[str] | None = None) -> int:
             report["install_state"] = diagnose_install_state(args.vault)
         except Exception:  # fail-soft by contract: fixed words, never exception text
             report["install_state"] = dict(INSTALL_STATE_UNAVAILABLE)
+    if args.cloud_sync:
+        # Loaded only on request; lexical/env heuristic only, exit code stays the vault's.
+        try:
+            from vault_cloud_sync import diagnose_cloud_sync
+            report["cloud_sync"] = diagnose_cloud_sync(args.vault)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["cloud_sync"] = dict(CLOUD_SYNC_UNAVAILABLE)
+    if args.summary:
+        # Loaded only on request; concise first-run digest, exit code stays the vault's.
+        try:
+            from vault_cloud_sync import summarize_capabilities
+            report["capability_summary"] = summarize_capabilities(args.vault, report)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["capability_summary"] = dict(SUMMARY_UNAVAILABLE)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

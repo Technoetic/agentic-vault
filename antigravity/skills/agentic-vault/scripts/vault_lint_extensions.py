@@ -18,14 +18,17 @@ import re
 import unicodedata
 
 WARNING_CODES = frozenset({'missing-anchor', 'ambiguous-link', 'missing-link-path',
-    'invalid-date', 'lint-incomplete', 'provenance-body-mismatch', 'provenance-invalid',
+    'invalid-date', 'checked-at-stale', 'review-by-passed', 'alias-collision',
+    'lint-incomplete', 'provenance-body-mismatch', 'provenance-invalid',
     'provenance-unresolved', 'provenance-incomplete', 'egress-secret', 'egress-korean-id',
-    'egress-incomplete', 'ssot-legacy-schema', 'ssot-empty-fact', 'ssot-confirmed-source-missing',
-    'ssot-invalid-date', 'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-temporal-conflict',
-    'ssot-open-ended-conflict', 'ssot-duplicate-column', 'ssot-invalid-row'})
+    'egress-url-secret', 'egress-incomplete', 'ssot-legacy-schema', 'ssot-empty-fact',
+    'ssot-confirmed-source-missing', 'ssot-invalid-date', 'ssot-unknown-validity',
+    'ssot-unknown-recorded', 'ssot-temporal-conflict', 'ssot-open-ended-conflict',
+    'ssot-duplicate-column', 'ssot-invalid-row'})
 PROMOTABLE_CODES = WARNING_CODES - {'lint-incomplete', 'provenance-unresolved',
     'provenance-incomplete', 'egress-incomplete', 'ssot-legacy-schema',
-    'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-open-ended-conflict'}
+    'ssot-unknown-validity', 'ssot-unknown-recorded', 'ssot-open-ended-conflict',
+    'checked-at-stale', 'review-by-passed'}
 MAX_MESSAGE = 512
 MAX_DETAIL_STRING = 256
 MAX_DETAIL_ITEMS = 16
@@ -33,6 +36,8 @@ MAX_NOTE_CHARS = 1_000_000
 MAX_TOTAL_CHARS = 8_000_000
 MAX_NOTES = 10_000
 MAX_WARNINGS = 200
+MAX_ALIASES_PER_NOTE = 32
+MAX_ALIAS_CHARS = 256
 
 
 def _bounded(value, depth=0):
@@ -160,6 +165,8 @@ def _frontmatter_end(lines):
 # old patterns as oracles.
 _HEADING_OPEN_RE = re.compile(r' {0,3}#{1,6}(?=\s)')
 _DATE_FIELD_RE = re.compile(r'(created|updated):')
+_FRESHNESS_FIELD_RE = re.compile(r'(checked_at|review_by):')
+_ALIASES_FIELD_RE = re.compile(r'aliases:')
 _COMMENT_MARK_RE = re.compile(r'\s#')
 
 
@@ -179,6 +186,125 @@ def _date_field(line):
     """Former re.match(r'^(created|updated):\\s*(.*?)\\s*$', line) groups, or None."""
     match = _DATE_FIELD_RE.match(line)
     return (match[1], line[match.end():].strip()) if match else None
+
+
+def _freshness_field(line):
+    match = _FRESHNESS_FIELD_RE.match(line)
+    return (match[1], line[match.end():].strip()) if match else None
+
+
+def _unquote_scalar(value):
+    scalar = _before_comment(value).strip()
+    if len(scalar) >= 2 and scalar[0] in ('"', "'") and scalar[-1] == scalar[0]:
+        scalar = scalar[1:-1]
+    return scalar
+
+
+def _parse_iso_date(scalar):
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', scalar):
+        return None
+    try:
+        return date.fromisoformat(scalar)
+    except ValueError:
+        return None
+
+
+def _frontmatter_scoped(path, config):
+    exemptions = config.get('frontmatter_exempt_paths', config.get('fm_exempt_zones', [])) or []
+    if any(path == zone or path.startswith(str(zone).rstrip('/') + '/') for zone in exemptions):
+        return False
+    roots = config.get('frontmatter_roots')
+    if roots is not None and not any(path == zone or path.startswith(zone.rstrip('/') + '/') for zone in roots):
+        return False
+    return True
+
+
+def _split_flow_items(inner):
+    """Split a YAML inline flow list `[...]` in linear time, honoring quotes."""
+    items, buf, quote_char = [], [], None
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
+        if quote_char:
+            if quote_char == '"' and ch == '\\' and i + 1 < len(inner):
+                buf.append(inner[i + 1])
+                i += 2
+                continue
+            if ch == quote_char:
+                quote_char = None
+            else:
+                buf.append(ch)
+        else:
+            if ch in ('"', "'"):
+                quote_char = ch
+            elif ch == ',':
+                item = ''.join(buf).strip()
+                if item:
+                    items.append(item)
+                buf = []
+            else:
+                buf.append(ch)
+        i += 1
+    if quote_char is not None:
+        return []
+    tail = ''.join(buf).strip()
+    if tail:
+        items.append(tail)
+    return items
+
+
+def _extract_aliases(lines, end):
+    """Return bounded list of (1-based line, raw_alias, normalized_key) from frontmatter."""
+    if end < 3:
+        return []
+    found = []
+    i = 1
+    while i < end - 1:
+        match = _ALIASES_FIELD_RE.match(lines[i])
+        if not match:
+            i += 1
+            continue
+        raw_rest = lines[i][match.end():].strip()
+        if raw_rest.startswith('['):
+            closing = raw_rest.rfind(']')
+            if closing > 0 and not _before_comment(raw_rest[closing + 1:]).strip():
+                for raw in _split_flow_items(raw_rest[1:closing]):
+                    cleaned = raw.strip()
+                    if cleaned and len(cleaned) <= MAX_ALIAS_CHARS:
+                        key = unicodedata.normalize('NFC', cleaned).casefold()
+                        found.append((i + 1, cleaned, key))
+                        if len(found) >= MAX_ALIASES_PER_NOTE:
+                            return found
+            i += 1
+            continue
+        rest = _before_comment(raw_rest).strip()
+        if not rest:
+            i += 1
+            while i < end - 1:
+                raw_line = lines[i]
+                stripped = raw_line.lstrip(' ')
+                if not stripped or stripped.startswith('#'):
+                    i += 1
+                    continue
+                if stripped.startswith('- '):
+                    cleaned = _unquote_scalar(stripped[2:])
+                    if cleaned and len(cleaned) <= MAX_ALIAS_CHARS:
+                        key = unicodedata.normalize('NFC', cleaned).casefold()
+                        found.append((i + 1, cleaned, key))
+                        if len(found) >= MAX_ALIASES_PER_NOTE:
+                            return found
+                    i += 1
+                else:
+                    break
+        else:
+            cleaned = _unquote_scalar(rest)
+            if cleaned and len(cleaned) <= MAX_ALIAS_CHARS:
+                key = unicodedata.normalize('NFC', cleaned).casefold()
+                found.append((i + 1, cleaned, key))
+                if len(found) >= MAX_ALIASES_PER_NOTE:
+                    return found
+            i += 1
+    return found
 
 
 def _without_closing_run(text):
@@ -334,36 +460,67 @@ def _resolve(target, source, notes, stems, qualified):
     return qualified.get(base, [])
 
 
-def _date_warnings(path, lines, end, config):
-    exemptions = config.get('frontmatter_exempt_paths', config.get('fm_exempt_zones', [])) or []
-    if any(path == zone or path.startswith(str(zone).rstrip('/') + '/') for zone in exemptions):
-        return []
-    roots = config.get('frontmatter_roots')
-    if roots is not None and not any(path == zone or path.startswith(zone.rstrip('/') + '/') for zone in roots):
+def _date_warnings(path, lines, end, config, current_day=None):
+    if not _frontmatter_scoped(path, config):
         return []
     warnings = []
+    stale_days = config.get('checked_at_stale_days', 0)
+    if not isinstance(stale_days, int) or isinstance(stale_days, bool) or stale_days < 0:
+        stale_days = 0
+    annual_rollover = config.get('checked_at_annual_rollover', False) is True
     for i in range(1, end - 1):
         parsed = _date_field(lines[i])
-        if not parsed:
+        if parsed:
+            field, value = parsed
+            scalar = _unquote_scalar(value)
+            if _parse_iso_date(scalar) is None:
+                warnings.append(make_warning('invalid-date', path, i + 1,
+                                f'{field} must be a nonempty calendar date (YYYY-MM-DD)',
+                                details={'field': field, 'value': scalar}))
             continue
-        field, value = parsed
-        scalar = _before_comment(value).strip()
-        if len(scalar) >= 2 and scalar[0] in ('"', "'") and scalar[-1] == scalar[0]:
-            scalar = scalar[1:-1]
-        valid = bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', scalar))
-        if valid:
-            try:
-                date.fromisoformat(scalar)
-            except ValueError:
-                valid = False
-        if not valid:
+        fresh = _freshness_field(lines[i])
+        if not fresh:
+            continue
+        field, value = fresh
+        scalar = _unquote_scalar(value)
+        if not scalar:
+            continue
+        parsed_day = _parse_iso_date(scalar)
+        if parsed_day is None:
             warnings.append(make_warning('invalid-date', path, i + 1,
                             f'{field} must be a nonempty calendar date (YYYY-MM-DD)',
                             details={'field': field, 'value': scalar}))
+            continue
+        if current_day is None:
+            continue
+        if field == 'review_by' and parsed_day < current_day:
+            warnings.append(make_warning('review-by-passed', path, i + 1,
+                            f'review_by date ({scalar}) has passed; re-verify note facts',
+                            details={'field': 'review_by', 'review_by': scalar,
+                                     'as_of': current_day.isoformat()}))
+        elif field == 'checked_at':
+            elapsed = (current_day - parsed_day).days
+            if stale_days > 0 and elapsed > stale_days:
+                warnings.append(make_warning('checked-at-stale', path, i + 1,
+                                f'checked_at ({scalar}) exceeds {stale_days}-day freshness threshold',
+                                details={'field': 'checked_at', 'checked_at': scalar,
+                                         'days': elapsed, 'threshold_days': stale_days}))
+            elif annual_rollover and current_day.year > parsed_day.year:
+                warnings.append(make_warning('checked-at-stale', path, i + 1,
+                                f'checked_at ({scalar}) is from a prior calendar year; re-verify external facts',
+                                details={'field': 'checked_at', 'checked_at': scalar,
+                                         'reason': 'annual_rollover', 'checked_year': parsed_day.year,
+                                         'current_year': current_day.year}))
     return warnings
 
 
-def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[str] | None = None) -> list[dict]:
+def analyze_notes(
+    notes: dict[str, str],
+    config: dict,
+    *,
+    consumer_paths: set[str] | None = None,
+    today: date | None = None,
+) -> list[dict]:
     """Analyze bounded approved originals; all new findings remain warnings.
 
     Bare duplicate stems abstain with candidates. Qualified paths match exactly;
@@ -374,6 +531,7 @@ def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[st
     """
     if not isinstance(notes, dict) or not isinstance(config, dict):
         raise ValueError('notes and config must be mappings')
+    current_day = date.today() if today is None else today
     approved = {}
     incomplete = []
     total = 0
@@ -389,23 +547,53 @@ def analyze_notes(notes: dict[str, str], config: dict, *, consumer_paths: set[st
             continue
         approved[path] = text
         total += len(text)
-    stems, qualified = {}, {}
+    stems, qualified, norm_stems = {}, {}, {}
     cleaned, anchors, fm_ends = {}, {}, {}
+    note_aliases, alias_index = {}, {}
     for path, text in approved.items():
         stem = path.rsplit('/', 1)[-1]
         stem = stem[:-3] if stem.lower().endswith('.md') else stem
         stems.setdefault(stem, []).append(path)
+        norm_stems.setdefault(unicodedata.normalize('NFC', stem).casefold(), []).append(path)
         qualified.setdefault(path[:-3] if path.lower().endswith('.md') else path, []).append(path)
         lines = _clean_lines(text)
         cleaned[path] = lines
         fm_ends[path] = _frontmatter_end(lines)
         anchors[path] = _anchors(lines, fm_ends[path])
+        if _frontmatter_scoped(path, config):
+            extracted = _extract_aliases(lines, fm_ends[path])
+            if extracted:
+                note_aliases[path] = extracted
+                for _, _, key in extracted:
+                    alias_index.setdefault(key, []).append(path)
     results = []
     cap = _limit(config, 'lint_max_warnings', MAX_WARNINGS)
     for path, lines in cleaned.items():
         if consumer_paths is not None and path not in consumer_paths:
             continue
-        results.extend(_date_warnings(path, lines, fm_ends[path], config))
+        results.extend(_date_warnings(path, lines, fm_ends[path], config, current_day))
+        seen_alias_keys = set()
+        for line_number, raw_alias, norm_key in note_aliases.get(path, ()):
+            if norm_key in seen_alias_keys:
+                continue
+            seen_alias_keys.add(norm_key)
+            other_stems = [other for other in norm_stems.get(norm_key, ()) if other != path]
+            if other_stems:
+                results.append(make_warning('alias-collision', path, line_number,
+                               'Note alias matches another note filename stem; review possible duplicate entity',
+                               details={'alias': raw_alias, 'collision_kind': 'stem',
+                                        'other_paths': sorted(other_stems)}))
+            other_aliases = sorted({other for other in alias_index.get(norm_key, ()) if other != path})
+            if other_aliases:
+                results.append(make_warning('alias-collision', path, line_number,
+                               'Note alias is shared with another note; review possible duplicate entity',
+                               details={'alias': raw_alias, 'collision_kind': 'alias',
+                                        'other_paths': other_aliases}))
+            if len(results) > cap:
+                incomplete.append('warning output limit')
+                break
+        if len(results) > cap:
+            break
         for line_number, line in enumerate(lines, 1):
             line = _without_code_spans(line)
             for raw in _wiki_link_texts(line):

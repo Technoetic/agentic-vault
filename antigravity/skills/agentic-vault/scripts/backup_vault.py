@@ -446,7 +446,21 @@ def main() -> int:
                 print("[agentic-vault] No backup_target configured; backup skipped.")
                 return 0
             left_out = []
-            snapshot = create_backup(vault, Path(target), skipped=left_out)
+            target_path = Path(target)
+            resolved_target = target_path if target_path.is_absolute() else vault / target_path
+            try:
+                from vault_cloud_sync import detect_cloud_sync_path
+                sync_info = detect_cloud_sync_path(resolved_target)
+                if sync_info.get("detected"):
+                    provider = sync_info.get("provider") or "cloud_sync"
+                    print(
+                        f"[agentic-vault] Warning: backup target appears to be inside a cloud-synced "
+                        f"folder ({provider}); review sensitive vault notes before syncing.",
+                        file=sys.stderr,
+                    )
+            except Exception:
+                pass
+            snapshot = create_backup(vault, target_path, skipped=left_out)
             for name in left_out:
                 print(f"[agentic-vault] Left out linked worktree copy: {name}")
             print(f"Snapshot: {snapshot}")

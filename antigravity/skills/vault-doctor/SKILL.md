@@ -100,3 +100,7 @@ python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_doctor.py" --vault "<�
 14. 사용자가 볼트에 설치된 엔진 관리 파일과 사용자 수정 파일의 차이를 물을 때만 같은 Doctor에 `--install-state`를 추가한다.
     `00-meta/.vault-install-state.json` 기준으로 `managed`·`modified_by_user`·`user_owned` 상태를 읽기 전용으로 보고한다(종료 코드 불변).
     기록이나 안전 제거(기본 dry-run)는 사용자가 명시 요청할 때만 `vault_install_state.py record|status|uninstall`을 사용한다.
+15. 처음 설치한 사용자가 "지금 바로 쓸 수 있는 것과 추가로 준비할 것"을 짧게 묻거나 비(非)볼트 폴더에서 시작 상태를 파악하려 하면 같은 Doctor에 `--summary`를 추가한다.
+    볼트 초기화 여부·세션 주입 상태·클라우드 동기화 여부·선택형 도구 준비 상태를 2~3줄 요약(`capability_summary`)으로 읽기 전용 보고한다(종료 코드 불변).
+16. 사용자가 볼트나 백업 대상이 클라우드 동기화 폴더(OneDrive·Google Drive·Dropbox·iCloud) 안에 있는지 확인할 때는 같은 Doctor에 `--cloud-sync`를 추가한다.
+    경로 조각과 환경 변수 휴리스틱만으로 동기화 여부와 로컬 전용 파일(`.claude/settings.local.json`·`.env`) 존재 표식만 읽기 전용으로 보고하며, 원시 경로·사용자명·파일 내용은 출력하지 않는다(종료 코드 불변).

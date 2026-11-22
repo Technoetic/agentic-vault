@@ -1,5 +1,29 @@
 # 출처와 공유 상태 보강
 
+## v0.55.0 source and certificate migration
+
+v0.55.0 changes two of the seven certificate-bound checker files, `vault_lint_extensions.py` and
+`vault_egress.py`, adding `checked-at-stale` / `review-by-passed` verification-date warnings,
+deterministic `alias-collision` lint, and `egress-url-secret` URL query-parameter inspection.
+The measured `checker_sha256` changes from
+`09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d` (v0.46.0 to v0.54.1) to
+`ee421d6f8cc419f9d10017fe7fc3f52084dde4775e4a20ca5fe3271cb6691f98`. The harmless corpus
+`38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a` is unchanged.
+A vault that promotes warnings to `fatal` stops under the new engine until it follows the
+coordination below: the health check exits 1, SessionStart injects nothing, the staged gate
+refuses commits, and doctor and recall report `invalid_config`. Vaults without promotion
+are unaffected. While engine versions are mixed no single certificate fits every copy, so
+keep promotion off until every copy runs the same bytes.
+
+Before switching to or from these source bytes, return promoted levels to `warning`;
+align every engine copy that checks the vault (Claude Code, Codex, and the git vault's
+`00-meta/scripts/`) to the same bytes; run `vault_warning_policy.py --certificate` on
+that installation (including its harmless replay), then promote again.
+Returning to v0.54.1, or to any release from v0.46.0 to v0.54.1, needs the same coordination.
+See the [release note](releases/v0.55.0.md#하위호환업그레이드) and the
+[verification contract](verification/v0.55.0.md). No installed plugin or vault
+engine copy is updated by release preparation.
+
 ## v0.46.0 source and certificate migration
 
 v0.46.0 changes two of the seven certificate-bound checker files, `vault_paths.py` and

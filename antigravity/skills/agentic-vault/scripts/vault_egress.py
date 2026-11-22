@@ -11,6 +11,7 @@ from datetime import date
 import hashlib
 import json
 import re
+from urllib.parse import parse_qsl, urlsplit
 
 from jev_client import _normalized, _matches_sensitive
 from vault_paths import relative_parts, zone_matches
@@ -22,6 +23,52 @@ MAX_WARNINGS = 128
 DEFAULT_DENY = ('10-inbox/_processed', '20-knowledge/_archive', '50-projects/_completed',
                 '90-assets', '.obsidian', '.git')
 ID_RE = re.compile(r'(?<![0-9])([0-9]{2})([0-9]{2})([0-9]{2})[- \t]?([1-8])([0-9]{6})(?![0-9])')
+_URL_RE = re.compile(r'https?://[^\s<>"\'`)\]]+', re.I)
+URL_SECRET_QUERY_KEYS = frozenset({
+    'token', 'access_token', 'refresh_token', 'auth_token', 'id_token',
+    'api_key', 'apikey', 'client_secret', 'secret', 'password', 'passwd',
+    'signature', 'sig', 'x-amz-signature', 'x-amz-credential',
+    'x-amz-security-token', 'x-goog-signature', 'x-goog-credential',
+    'sas', 'accountseq',
+})
+
+
+def _is_template_placeholder(value: str) -> bool:
+    stripped = value.strip()
+    return (
+        (stripped.startswith('<') and stripped.endswith('>'))
+        or (stripped.startswith('{') and stripped.endswith('}'))
+    )
+
+
+def _urls_have_secret_query(text: str) -> bool:
+    for match in _URL_RE.finditer(text):
+        raw_url = match.group(0).rstrip('.,;:')
+        try:
+            query = urlsplit(raw_url).query
+        except ValueError:
+            continue
+        if not query:
+            continue
+        for key, value in parse_qsl(query, keep_blank_values=False):
+            key_norm = key.strip().casefold()
+            val_clean = value.strip()
+            if (
+                key_norm in URL_SECRET_QUERY_KEYS
+                and len(val_clean) >= 4
+                and not _is_template_placeholder(val_clean)
+            ):
+                return True
+    return False
+
+
+def _has_url_secret(text: str) -> bool:
+    if _urls_have_secret_query(text):
+        return True
+    if text.isascii():
+        return False
+    normalized = _normalized(text)
+    return normalized != text and _urls_have_secret_query(normalized)
 
 
 def _warning(code, path, line, reason=None):
@@ -30,9 +77,11 @@ def _warning(code, path, line, reason=None):
     # A filename can itself contain a credential or identifier. Inspect the
     # complete label before truncation; only its opaque issue hash survives.
     safe_path = ('<redacted-sensitive-path>' if _matches_sensitive(path)
-                 or _has_korean_id(_normalized(path)) else path[:256])
+                 or _has_korean_id(_normalized(path))
+                 or _has_url_secret(path) else path[:256])
     messages = {'egress-secret': 'Possible credential pattern in selected original; review before egress',
         'egress-korean-id': 'Possible Korean personal identifier; review before egress',
+        'egress-url-secret': 'Possible credential or signature query parameter in URL; review before egress',
         'egress-incomplete': 'Egress pattern scan incomplete; no safety claim is available'}
     return {'issue_id': 'lint-'+digest[:20], 'code': code, 'severity': 'warning',
             'path': safe_path, 'line': line, 'message': messages[code],
@@ -71,7 +120,10 @@ def scan_text(text, path=''):
         if 'egress-korean-id' not in found and _has_korean_id(_normalized(original)):
             findings.append(_warning('egress-korean-id', path, line))
             found.add('egress-korean-id')
-        if len(found) == 2:
+        if 'egress-url-secret' not in found and _has_url_secret(original):
+            findings.append(_warning('egress-url-secret', path, line))
+            found.add('egress-url-secret')
+        if len(found) == 3:
             break
     # D1 assignment/authorization patterns can span line separators. Keep the
     # whole bounded original inspection instead of narrowing to split lines;

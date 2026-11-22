@@ -127,6 +127,100 @@ class LintExtensionTests(unittest.TestCase):
             with self.subTest(case=case['id']):
                 self.assertEqual(analyze(case['notes'], case.get('config', {})), [])
 
+    def test_checked_at_staleness_annual_rollover_and_review_by_warnings(self):
+        from datetime import date as dt_date
+
+        analyze = self.analyzer()
+        notes = {
+            '20-knowledge/stale.md': '---\ntitle: Tax\nchecked_at: 2025-11-01\nreview_by: 2026-06-01\n---\nBody',
+            '20-knowledge/fresh.md': '---\ntitle: Fresh\nchecked_at: 2026-10-15\nreview_by: 2027-01-01\n---\nBody',
+            '20-knowledge/future.md': '---\ntitle: Future\nchecked_at: 2027-02-01\n---\nBody',
+            '20-knowledge/bad.md': '---\ntitle: Bad\nchecked_at: 2026-02-30\nreview_by: not-a-date\n---\nBody',
+        }
+        as_of = dt_date(2026, 11, 22)
+        default_findings = analyze(notes, {}, today=as_of)
+        self.assertEqual(
+            [(x['code'], x['path'], x['details'].get('field')) for x in default_findings],
+            [
+                ('invalid-date', '20-knowledge/bad.md', 'checked_at'),
+                ('invalid-date', '20-knowledge/bad.md', 'review_by'),
+                ('review-by-passed', '20-knowledge/stale.md', 'review_by'),
+            ],
+        )
+
+        days_findings = analyze(notes, {'checked_at_stale_days': 180}, today=as_of)
+        self.assertIn(
+            ('checked-at-stale', '20-knowledge/stale.md', 'checked_at'),
+            [(x['code'], x['path'], x['details'].get('field')) for x in days_findings],
+        )
+        self.assertNotIn(
+            '20-knowledge/fresh.md',
+            [x['path'] for x in days_findings if x['code'] == 'checked-at-stale'],
+        )
+
+        rollover_findings = analyze(notes, {'checked_at_annual_rollover': True}, today=as_of)
+        rollover_stale = [x for x in rollover_findings if x['code'] == 'checked-at-stale']
+        self.assertEqual([x['path'] for x in rollover_stale], ['20-knowledge/stale.md'])
+        self.assertEqual(rollover_stale[0]['details'].get('reason'), 'annual_rollover')
+
+    def test_alias_collision_detects_stem_and_shared_aliases_and_respects_boundaries(self):
+        analyze = self.analyzer()
+        notes = {
+            '20-knowledge/005930.md': '---\ntitle: 005930\naliases: ["Samsung", "005930", "반도체 대표"]\n---\nBody',
+            '20-knowledge/Samsung.md': '---\ntitle: Samsung\naliases:\n  - "반도체 대표"\n  - "Unique Alias"\n---\nBody',
+            '20-knowledge/_archive/Hidden.md': '---\ntitle: Hidden\naliases: ["Unique Alias"]\n---\nBody',
+            'scratch/raw.md': '---\ntitle: Raw\naliases: ["Samsung"]\n---\nBody',
+        }
+        config = {
+            'deny_zones': ['20-knowledge/_archive'],
+            'frontmatter_exempt_paths': ['scratch'],
+        }
+        findings = [x for x in analyze(notes, config) if x['code'] == 'alias-collision']
+        summary = [(x['path'], x['details']['collision_kind'], x['details']['alias'], x['details']['other_paths'])
+                   for x in findings]
+        self.assertIn(('20-knowledge/005930.md', 'stem', 'Samsung', ['20-knowledge/Samsung.md']), summary)
+        self.assertIn(('20-knowledge/005930.md', 'alias', '반도체 대표', ['20-knowledge/Samsung.md']), summary)
+        self.assertIn(('20-knowledge/Samsung.md', 'alias', '반도체 대표', ['20-knowledge/005930.md']), summary)
+        self.assertFalse(any(row[2] == '005930' for row in summary))
+        self.assertFalse(any(row[2] == 'Unique Alias' for row in summary))
+        self.assertFalse(any(row[0] == 'scratch/raw.md' for row in summary))
+
+    def test_time_dependent_freshness_codes_are_not_promotable_while_deterministic_codes_are(self):
+        lint = importlib.import_module('vault_lint_extensions')
+        policy = importlib.import_module('vault_warning_policy')
+        for code in ('checked-at-stale', 'review-by-passed'):
+            self.assertIn(code, lint.WARNING_CODES)
+            self.assertNotIn(code, lint.PROMOTABLE_CODES)
+            cert = policy.build_promotion_certificate()
+            res = policy.validate_promotion(
+                {'levels': {code: 'fatal'}, 'certificate': cert},
+                policy.checker_sha256(), policy.corpus_sha256(),
+            )
+            self.assertFalse(res['valid'])
+        for code in ('alias-collision', 'egress-url-secret'):
+            self.assertIn(code, lint.PROMOTABLE_CODES)
+            cert = policy.build_promotion_certificate()
+            res = policy.validate_promotion(
+                {'levels': {code: 'fatal'}, 'certificate': cert},
+                policy.checker_sha256(), policy.corpus_sha256(),
+            )
+            self.assertTrue(res['valid'], res)
+
+    def test_healthcheck_config_accepts_and_validates_freshness_keys(self):
+        health = importlib.import_module('vault_healthcheck')
+        cfg = health.validate_config({'checked_at_stale_days': 180, 'checked_at_annual_rollover': True})
+        self.assertEqual(cfg['checked_at_stale_days'], 180)
+        self.assertTrue(cfg['checked_at_annual_rollover'])
+        self.assertEqual(health.unknown_config_keys({'checked_at_stale_days': 180, 'checked_at_annual_rollover': True}), [])
+        for bad in (
+            {'checked_at_stale_days': -1},
+            {'checked_at_stale_days': True},
+            {'checked_at_stale_days': '180'},
+            {'checked_at_annual_rollover': 'true'},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(health.HealthcheckError):
+                health.validate_config(bad)
+
 
 class PromotionTests(unittest.TestCase):
     def policy_module(self):

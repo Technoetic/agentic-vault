@@ -160,6 +160,7 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_ssot.py",
             "skills/agentic-vault/scripts/vault_period.py",
             "skills/agentic-vault/scripts/vault_doctor.py",
+            "skills/agentic-vault/scripts/vault_cloud_sync.py",
             "skills/agentic-vault/scripts/bizrouter_client.py",
             "skills/agentic-vault/scripts/vault_session_evidence.py",
             "skills/agentic-vault/scripts/vault_lesson_delta.py",
