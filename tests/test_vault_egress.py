@@ -125,6 +125,8 @@ class EgressTests(unittest.TestCase):
             'Account link https://broker.example.com/x?accountseq=98765432&foo=bar',
             'Disguised https://api.example.com/v1?to\u200bken=abcd1234efgh',
             'Fullwidth https://api.example.com/v1\uff1f\uff54\uff4f\uff4b\uff45\uff4e\uff1dabcd1234efgh',
+            '<https://api.example.com/v1/items?token=abcd1234efgh>',
+            'Mixed https://api.example.com/?token=<YOUR_TOKEN>&sig=hidden9999',
             ' '.join(f'https://ok.example.com/p/{i}?page={i}' for i in range(70))
             + ' https://api.example.com/v1?sig=hidden9999',
         )
@@ -147,12 +149,22 @@ class EgressTests(unittest.TestCase):
             'https://api.example.com/list?page_token=abcd1234efgh&limit=20',
             'https://api.example.com/list?next_token=abcd1234efgh&cursor=xyz999',
             'https://api.example.com/docs?token=<YOUR_TOKEN>',
+            'https://api.example.com/docs?token=%3CYOUR_TOKEN%3E',
             'https://api.example.com/docs?signature={SIGNATURE}',
             'https://api.example.com/docs?sig=123',
             'https://example.com/search?q=token&sort=desc',
+            'Malformed URL https://[::1/bad?token=abcd1234efgh',
         ):
             with self.subTest(benign=benign):
                 self.assertEqual(self.module.scan_text(benign), [])
+
+    def test_analyze_notes_skips_denied_zones_for_url_query_secrets(self):
+        notes = {
+            '20-knowledge/public.md': 'See https://api.example.com/v1?token=abcd1234efgh',
+            '90-assets/private.md': 'See https://api.example.com/v1?token=abcd1234efgh',
+        }
+        rows = self.module.analyze_notes(notes, {'deny_zones': ['90-assets']})
+        self.assertEqual([(r['code'], r['path']) for r in rows], [('egress-url-secret', '20-knowledge/public.md')])
 
 
 if __name__ == '__main__':

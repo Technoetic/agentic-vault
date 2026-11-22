@@ -23,7 +23,7 @@ MAX_WARNINGS = 128
 DEFAULT_DENY = ('10-inbox/_processed', '20-knowledge/_archive', '50-projects/_completed',
                 '90-assets', '.obsidian', '.git')
 ID_RE = re.compile(r'(?<![0-9])([0-9]{2})([0-9]{2})([0-9]{2})[- \t]?([1-8])([0-9]{6})(?![0-9])')
-_URL_RE = re.compile(r'https?://[^\s<>"\'`)\]]+', re.I)
+_URL_RE = re.compile(r'https?://[^\s"\'`)\]]+', re.I)
 URL_SECRET_QUERY_KEYS = frozenset({
     'token', 'access_token', 'refresh_token', 'auth_token', 'id_token',
     'api_key', 'apikey', 'client_secret', 'secret', 'password', 'passwd',
@@ -31,6 +31,22 @@ URL_SECRET_QUERY_KEYS = frozenset({
     'x-amz-security-token', 'x-goog-signature', 'x-goog-credential',
     'sas', 'accountseq',
 })
+
+
+def _trim_url(raw_url: str) -> str:
+    """Stop at an unmatched closing `>` (autolink/HTML) while keeping balanced `<...>` placeholders."""
+    angle_depth = 0
+    end = len(raw_url)
+    for idx, ch in enumerate(raw_url):
+        if ch == '<':
+            angle_depth += 1
+        elif ch == '>':
+            if angle_depth > 0:
+                angle_depth -= 1
+            else:
+                end = idx
+                break
+    return raw_url[:end].rstrip('.,;:')
 
 
 def _is_template_placeholder(value: str) -> bool:
@@ -43,7 +59,7 @@ def _is_template_placeholder(value: str) -> bool:
 
 def _urls_have_secret_query(text: str) -> bool:
     for match in _URL_RE.finditer(text):
-        raw_url = match.group(0).rstrip('.,;:')
+        raw_url = _trim_url(match.group(0))
         try:
             query = urlsplit(raw_url).query
         except ValueError:

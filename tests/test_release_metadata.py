@@ -361,7 +361,7 @@ CHECKER_SHA256_V0460 = "09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6
 # Declared v0.55.0 fingerprint, written by hand after verification-date staleness,
 # alias-collision lint, and URL-query egress checks changed vault_lint_extensions.py
 # and vault_egress.py.
-CHECKER_SHA256_V0550 = "ee421d6f8cc419f9d10017fe7fc3f52084dde4775e4a20ca5fe3271cb6691f98"
+CHECKER_SHA256_V0550 = "3754f606efe8d48c55d5a835bf78552dc9deb6379673d883c5cb9eb56010e79d"
 SOURCE_CHECKER_NOTE_20261030 = "docs/verification/subject-boundary-20261030.md"
 # Each addendum opens with the current release section; the published v0.33.1 section follows.
 CURRENT_CHECKER_SECTION = "## v0.35.1 source and certificate migration"

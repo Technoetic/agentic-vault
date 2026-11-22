@@ -7,7 +7,7 @@ v0.55.0 changes two of the seven certificate-bound checker files, `vault_lint_ex
 deterministic `alias-collision` lint, and `egress-url-secret` URL query-parameter inspection.
 The measured `checker_sha256` changes from
 `09642e7aa77d0b812f5afa646b491fe2d79d44104e399bea4a3001a6f2f1279d` (v0.46.0 to v0.54.1) to
-`ee421d6f8cc419f9d10017fe7fc3f52084dde4775e4a20ca5fe3271cb6691f98`. The harmless corpus
+`3754f606efe8d48c55d5a835bf78552dc9deb6379673d883c5cb9eb56010e79d`. The harmless corpus
 `38efaabde0ce1e1df4008276db9761ba1b88eff35ddd91cb8d4fc4899023d04a` is unchanged.
 A vault that promotes warnings to `fatal` stops under the new engine until it follows the
 coordination below: the health check exits 1, SessionStart injects nothing, the staged gate

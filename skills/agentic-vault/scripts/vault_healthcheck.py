@@ -517,8 +517,8 @@ def _validate_freshness_keys(config: dict) -> None:
     """Reject malformed opt-in checked_at freshness settings."""
     if "checked_at_stale_days" in config:
         days = config["checked_at_stale_days"]
-        if not isinstance(days, int) or isinstance(days, bool) or days < 0:
-            raise HealthcheckError("checked_at_stale_days must be a non-negative integer")
+        if not isinstance(days, int) or isinstance(days, bool) or days < 1:
+            raise HealthcheckError("checked_at_stale_days must be a positive integer")
     if "checked_at_annual_rollover" in config:
         if not isinstance(config["checked_at_annual_rollover"], bool):
             raise HealthcheckError("checked_at_annual_rollover must be true/false")

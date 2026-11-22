@@ -194,10 +194,47 @@ def _freshness_field(line):
 
 
 def _unquote_scalar(value):
-    scalar = _before_comment(value).strip()
-    if len(scalar) >= 2 and scalar[0] in ('"', "'") and scalar[-1] == scalar[0]:
-        scalar = scalar[1:-1]
-    return scalar
+    raw = value.strip()
+    if raw and raw[0] in ('"', "'"):
+        quote = raw[0]
+        buf = []
+        i = 1
+        while i < len(raw):
+            ch = raw[i]
+            if quote == '"' and ch == '\\' and i + 1 < len(raw):
+                buf.append(raw[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                tail = raw[i + 1:].strip()
+                if not tail or tail.startswith('#'):
+                    return ''.join(buf).strip()
+                break
+            buf.append(ch)
+            i += 1
+        return ''
+    return _before_comment(raw).strip()
+
+
+def _find_flow_close(raw_rest):
+    """Return index of first unquoted closing `]` in a YAML flow sequence, or -1."""
+    quote_char = None
+    i = 1
+    while i < len(raw_rest):
+        ch = raw_rest[i]
+        if quote_char:
+            if quote_char == '"' and ch == '\\' and i + 1 < len(raw_rest):
+                i += 2
+                continue
+            if ch == quote_char:
+                quote_char = None
+        else:
+            if ch in ('"', "'"):
+                quote_char = ch
+            elif ch == ']':
+                return i
+        i += 1
+    return -1
 
 
 def _parse_iso_date(scalar):
@@ -266,7 +303,7 @@ def _extract_aliases(lines, end):
             continue
         raw_rest = lines[i][match.end():].strip()
         if raw_rest.startswith('['):
-            closing = raw_rest.rfind(']')
+            closing = _find_flow_close(raw_rest)
             if closing > 0 and not _before_comment(raw_rest[closing + 1:]).strip():
                 for raw in _split_flow_items(raw_rest[1:closing]):
                     cleaned = raw.strip()

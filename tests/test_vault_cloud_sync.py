@@ -50,6 +50,20 @@ class CloudSyncDetectionTests(unittest.TestCase):
             local = self.module.detect_cloud_sync_path(root / "plain-local" / "vault", env={})
             self.assertEqual(local, {"detected": False, "provider": None, "signal": "none"})
 
+            # Commercial/Consumer env vars, bare drive-root guard, and Windows extended-length prefix
+            for var in ("OneDriveCommercial", "OneDriveConsumer"):
+                with self.subTest(env_var=var):
+                    found = self.module.detect_cloud_sync_path(vault, env={var: str(synced_root)})
+                    self.assertEqual(found, {"detected": True, "provider": "onedrive", "signal": "env_root"})
+            drive_root = Path(root.anchor)
+            bare_guard = self.module.detect_cloud_sync_path(root / "plain-local", env={"OneDrive": str(drive_root)})
+            self.assertEqual(bare_guard, {"detected": False, "provider": None, "signal": "none"})
+            if str(vault).startswith(("C:\\", "D:\\", "E:\\")) or (len(str(vault)) > 2 and str(vault)[1:3] == ":\\"):
+                ext_found = self.module.detect_cloud_sync_path(
+                    "\\\\?\\" + str(vault), env={"OneDrive": str(synced_root)}
+                )
+                self.assertEqual(ext_found, {"detected": True, "provider": "onedrive", "signal": "env_root"})
+
     def test_diagnose_cloud_sync_inspects_backup_target_and_local_artifact_signals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -102,6 +116,22 @@ class CloudSyncDetectionTests(unittest.TestCase):
             self.assertEqual(ready["cloud_sync_provider"], "onedrive")
             self.assertIn("review_cloud_sync_boundary_for_sensitive_notes", ready["optional_setup"])
             self.assertIn("set_typesafe_api_key_for_optional_jev_judgments", ready["optional_setup"])
+            self.assertIn("install_aside_cli_if_browser_automation_needed", ready["optional_setup"])
+
+    def test_local_artifact_signals_skip_links_and_reparse_points(self) -> None:
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            vault = root / "vault"
+            (vault / ".claude").mkdir(parents=True)
+            (vault / ".env").write_text("SECRET=1\n", encoding="utf-8")
+            (vault / ".claude" / "settings.local.json").write_text("{}\n", encoding="utf-8")
+            with mock.patch.object(
+                self.module,
+                "_is_link_or_reparse",
+                side_effect=lambda p: Path(p).name in (".env", ".claude"),
+            ):
+                self.assertEqual(self.module._local_artifact_signals(vault), [])
 
 
 class DoctorBackupOkfCloudSyncCliTests(unittest.TestCase):
@@ -155,6 +185,37 @@ class DoctorBackupOkfCloudSyncCliTests(unittest.TestCase):
             self.assertEqual(text_proc.returncode, 0, text_proc.stderr)
             self.assertIn("cloud_sync: cloud_synced (vault_provider=dropbox", text_proc.stdout)
             self.assertIn("summary_vault_status: ready (cloud_sync=true)", text_proc.stdout)
+
+            # Non-vault directory --summary keeps default exit code (0) and emits capability_summary
+            non_vault = root / "empty-dir"
+            non_vault.mkdir(parents=True)
+            nv_default = subprocess.run(
+                [sys.executable, doctor, "--vault", str(non_vault), "--format", "json"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+            )
+            nv_proc = subprocess.run(
+                [sys.executable, doctor, "--vault", str(non_vault), "--summary", "--format", "json"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+            )
+            self.assertEqual(nv_default.returncode, 0, nv_default.stderr)
+            self.assertEqual(nv_proc.returncode, nv_default.returncode, nv_proc.stderr)
+            nv_data = json.loads(nv_proc.stdout)
+            self.assertEqual(nv_data["capability_summary"]["vault_status"], "not_vault")
+
+            # Fail-soft fallback when vault_cloud_sync raises inside doctor main()
+            import contextlib
+            import io
+            from unittest import mock
+            doctor_mod = importlib.import_module("vault_doctor")
+            buf = io.StringIO()
+            with mock.patch("vault_cloud_sync.diagnose_cloud_sync", side_effect=RuntimeError("boom")), \
+                    mock.patch("vault_cloud_sync.summarize_capabilities", side_effect=RuntimeError("boom")), \
+                    contextlib.redirect_stdout(buf):
+                rc = doctor_mod.main(["--vault", str(vault), "--cloud-sync", "--summary", "--format", "json"])
+            self.assertEqual(rc, 0)
+            report_fallback = json.loads(buf.getvalue())
+            self.assertEqual(report_fallback["cloud_sync"]["status"], "unavailable")
+            self.assertEqual(report_fallback["capability_summary"]["vault_status"], "unavailable")
 
     def test_backup_and_okf_emit_advisory_stderr_only_for_cloud_synced_destinations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

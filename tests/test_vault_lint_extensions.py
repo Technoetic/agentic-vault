@@ -157,6 +157,17 @@ class LintExtensionTests(unittest.TestCase):
             '20-knowledge/fresh.md',
             [x['path'] for x in days_findings if x['code'] == 'checked-at-stale'],
         )
+        # Boundary checks: exact threshold elapsed == stale_days is not stale; stale_days + 1 is stale;
+        # review_by == today is not passed.
+        boundary_notes = {
+            '20-knowledge/exact-days.md': '---\ntitle: Exact\nchecked_at: 2026-05-26\nreview_by: 2026-11-22\n---\nBody',
+            '20-knowledge/over-one.md': '---\ntitle: Over\nchecked_at: 2026-05-25\n---\nBody',
+        }
+        boundary = analyze(boundary_notes, {'checked_at_stale_days': 180}, today=as_of)
+        self.assertEqual(
+            [(x['code'], x['path']) for x in boundary],
+            [('checked-at-stale', '20-knowledge/over-one.md')],
+        )
 
         rollover_findings = analyze(notes, {'checked_at_annual_rollover': True}, today=as_of)
         rollover_stale = [x for x in rollover_findings if x['code'] == 'checked-at-stale']
@@ -165,9 +176,23 @@ class LintExtensionTests(unittest.TestCase):
 
     def test_alias_collision_detects_stem_and_shared_aliases_and_respects_boundaries(self):
         analyze = self.analyzer()
+        import unicodedata
+        nfd_alias = unicodedata.normalize('NFD', '한글별칭')
+        nfc_alias = unicodedata.normalize('NFC', '한글별칭')
         notes = {
-            '20-knowledge/005930.md': '---\ntitle: 005930\naliases: ["Samsung", "005930", "반도체 대표"]\n---\nBody',
-            '20-knowledge/Samsung.md': '---\ntitle: Samsung\naliases:\n  - "반도체 대표"\n  - "Unique Alias"\n---\nBody',
+            '20-knowledge/005930.md': '---\ntitle: 005930\naliases: ["Samsung", "005930", "반도체 대표"] # [reviewed]\n---\nBody',
+            '20-knowledge/Samsung.md': (
+                '---\ntitle: Samsung\naliases:\n'
+                '  - "반도체 대표" # comment\n'
+                '  - "Beta # hash" # trailing\n'
+                '  - "Unique Alias"\n'
+                f'  - "{nfd_alias}"\n'
+                '---\nBody'
+            ),
+            '20-knowledge/Extra.md': (
+                f'---\ntitle: Extra\naliases: ["Beta # hash", "{nfc_alias}", "Escaped \\"Quote\\""]\n---\nBody'
+            ),
+            '20-knowledge/Unclosed.md': '---\ntitle: Unclosed\naliases: ["Broken]\n---\nBody',
             '20-knowledge/_archive/Hidden.md': '---\ntitle: Hidden\naliases: ["Unique Alias"]\n---\nBody',
             'scratch/raw.md': '---\ntitle: Raw\naliases: ["Samsung"]\n---\nBody',
         }
@@ -181,9 +206,18 @@ class LintExtensionTests(unittest.TestCase):
         self.assertIn(('20-knowledge/005930.md', 'stem', 'Samsung', ['20-knowledge/Samsung.md']), summary)
         self.assertIn(('20-knowledge/005930.md', 'alias', '반도체 대표', ['20-knowledge/Samsung.md']), summary)
         self.assertIn(('20-knowledge/Samsung.md', 'alias', '반도체 대표', ['20-knowledge/005930.md']), summary)
+        self.assertIn(('20-knowledge/Samsung.md', 'alias', 'Beta # hash', ['20-knowledge/Extra.md']), summary)
+        self.assertIn(('20-knowledge/Extra.md', 'alias', 'Beta # hash', ['20-knowledge/Samsung.md']), summary)
+        self.assertIn(('20-knowledge/Extra.md', 'alias', nfc_alias, ['20-knowledge/Samsung.md']), summary)
         self.assertFalse(any(row[2] == '005930' for row in summary))
         self.assertFalse(any(row[2] == 'Unique Alias' for row in summary))
         self.assertFalse(any(row[0] == 'scratch/raw.md' for row in summary))
+        self.assertFalse(any(row[0] == '20-knowledge/Unclosed.md' for row in summary))
+        # Bounded MAX_ALIASES_PER_NOTE cap
+        lint = importlib.import_module('vault_lint_extensions')
+        many = ', '.join(f'"a{i}"' for i in range(lint.MAX_ALIASES_PER_NOTE + 10))
+        extracted = lint._extract_aliases(['---', f'aliases: [{many}]', '---'], 3)
+        self.assertEqual(len(extracted), lint.MAX_ALIASES_PER_NOTE)
 
     def test_time_dependent_freshness_codes_are_not_promotable_while_deterministic_codes_are(self):
         lint = importlib.import_module('vault_lint_extensions')
@@ -213,10 +247,13 @@ class LintExtensionTests(unittest.TestCase):
         self.assertTrue(cfg['checked_at_annual_rollover'])
         self.assertEqual(health.unknown_config_keys({'checked_at_stale_days': 180, 'checked_at_annual_rollover': True}), [])
         for bad in (
+            {'checked_at_stale_days': 0},
             {'checked_at_stale_days': -1},
             {'checked_at_stale_days': True},
             {'checked_at_stale_days': '180'},
             {'checked_at_annual_rollover': 'true'},
+            {'checked_at_annual_rollover': 1},
+            {'checked_at_annual_rollover': 0},
         ):
             with self.subTest(bad=bad), self.assertRaises(health.HealthcheckError):
                 health.validate_config(bad)

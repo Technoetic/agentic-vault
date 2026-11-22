@@ -74,6 +74,7 @@ OPTIONAL_KEYS = {
     "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
     "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
     "constraints_note", "lint_max_warnings", "promotion_review_sessions",
+    "checked_at_stale_days", "checked_at_annual_rollover",
 }
 SUGGESTIONS = (
     ("deny_zone", "deny_zones"),
@@ -148,8 +149,8 @@ def section_zero(report: str) -> list[str]:
 
 
 class KnownKeyTests(unittest.TestCase):
-    def test_known_keys_are_the_43_engine_keys(self) -> None:
-        self.assertEqual(len(DEFAULT_KEYS | OPTIONAL_KEYS), 43)
+    def test_known_keys_are_the_45_engine_keys(self) -> None:
+        self.assertEqual(len(DEFAULT_KEYS | OPTIONAL_KEYS), 45)
         self.assertIsInstance(vault_healthcheck.KNOWN_CONFIG_KEYS, frozenset)
         self.assertEqual(vault_healthcheck.KNOWN_CONFIG_KEYS, DEFAULT_KEYS | OPTIONAL_KEYS)
         self.assertEqual(set(vault_healthcheck.DEFAULT_CONFIG), DEFAULT_KEYS)
@@ -199,7 +200,7 @@ class KnownKeyTests(unittest.TestCase):
 
         optional = sorted(vault_healthcheck.KNOWN_CONFIG_KEYS
                           - set(vault_healthcheck.DEFAULT_CONFIG))
-        self.assertEqual(len(optional), 18)
+        self.assertEqual(len(optional), 20)
         for name in optional:
             with self.subTest(name=name):
                 self.assertTrue(name in constants or f"`{name}`" in commands,

@@ -35,8 +35,35 @@ _ICLOUD_SEGMENTS = frozenset({
 
 
 def _normalized_abs(raw: str | Path) -> Path:
-    expanded = os.path.expanduser(str(raw))
+    text = str(raw)
+    if text.startswith("\\\\?\\UNC\\"):
+        text = "\\\\" + text[8:]
+    elif len(text) >= 7 and text.startswith("\\\\?\\") and text[5:7] == ":\\":
+        text = text[4:]
+    expanded = os.path.expanduser(text)
     return Path(os.path.normcase(os.path.abspath(expanded)))
+
+
+def _safe_child_exists(vault: Path, parts: tuple[str, ...], *, require_regular: bool = False) -> bool:
+    """Link/reparse-safe existence check under vault without reading file contents."""
+    try:
+        if _is_link_or_reparse(vault):
+            return False
+    except OSError:
+        return False
+    current = vault
+    for part in parts:
+        current = current / part
+        try:
+            if _is_link_or_reparse(current):
+                return False
+        except OSError:
+            return False
+    try:
+        info = current.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) if require_regular else True
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -208,9 +235,9 @@ def summarize_capabilities(
             next_step = "review_section_diagnostics_or_run_vault_lint"
         else:
             next_step = "start_capturing_notes_or_run_vault_lint"
-        if not (vault / ".git").exists():
+        if not _safe_child_exists(vault, (".git",)):
             optional_setup.append("enable_local_git_and_integrity_hooks")
-        if not (vault / "00-meta" / ".vault-install-state.json").is_file():
+        if not _safe_child_exists(vault, ("00-meta", ".vault-install-state.json"), require_regular=True):
             optional_setup.append("record_install_state_for_drift_tracking")
         if _read_backup_target(vault) is None:
             optional_setup.append("configure_local_backup_target")
@@ -220,7 +247,8 @@ def summarize_capabilities(
     else:
         optional_setup.append("set_typesafe_api_key_for_optional_jev_judgments")
 
-    if shutil.which("aside") is not None:
+    which_path = None if env is None else source_env.get("PATH", "")
+    if shutil.which("aside", path=which_path) is not None:
         ready_now.append("aside_cli_detected_on_path")
     else:
         optional_setup.append("install_aside_cli_if_browser_automation_needed")
