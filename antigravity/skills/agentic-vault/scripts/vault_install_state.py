@@ -42,6 +42,7 @@ SCHEMA = "agentic-vault/install-state/v1"
 STATE_REL = "00-meta/.vault-install-state.json"
 MAX_STATE_BYTES = 1024 * 1024
 MAX_SURFACE_BYTES = 4 * 1024 * 1024
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # Canonical engine-managed surfaces and their stamp markers (aligned with
 # commands/vault-upgrade.md). Files at these paths without a matching stamp
@@ -195,6 +196,28 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _canonical_manifest_sha256(doc: dict) -> str:
+    """Compute canonical SHA-256 of an install-state manifest excluding ``manifest_sha256``."""
+    body = {key: value for key, value in doc.items() if key != "manifest_sha256"}
+    encoded = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict:
+    out: dict = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate_json_key:{key}")
+        out[key] = value
+    return out
+
+
 def _detect_stamp(data: bytes, pattern: re.Pattern[str]) -> tuple[bool, str | None]:
     head = data[:4096].decode("utf-8-sig", errors="replace")
     match = pattern.search(head)
@@ -300,7 +323,7 @@ def record_install_state(
     vault: Path,
     *,
     host: str = "all",
-    engine_version: str = "0.54.0",
+    engine_version: str = "0.56.0",
 ) -> dict:
     """Record current managed and user-owned surfaces into 00-meta/.vault-install-state.json."""
     resolved = Path(vault).resolve()
@@ -315,6 +338,7 @@ def record_install_state(
         "engine_version": engine_version,
         "entries": entries,
     }
+    manifest["manifest_sha256"] = _canonical_manifest_sha256(manifest)
     _write_json_atomic(resolved, STATE_REL, manifest)
     managed_count = sum(1 for item in entries if item.get("ownership") == "managed")
     user_count = sum(1 for item in entries if item.get("ownership") == "user_owned")
@@ -324,31 +348,43 @@ def record_install_state(
         "state_path": STATE_REL,
         "engine_version": engine_version,
         "host": host,
+        "manifest_sha256": manifest["manifest_sha256"],
         "managed_count": managed_count,
         "user_owned_count": user_count,
         "entries": entries,
     }
 
 
-def _load_manifest(vault: Path) -> tuple[dict | None, str]:
+def _load_manifest(vault: Path) -> tuple[dict | None, str, str]:
     data, state = _read_regular_bytes(vault, STATE_REL, limit=MAX_STATE_BYTES)
     if state == "missing":
-        return None, "not_recorded"
+        return None, "not_recorded", "not_recorded"
     if data is None:
-        return None, state
+        return None, state, "invalid"
     try:
-        doc = json.loads(data.decode("utf-8"))
+        doc = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
     except (UnicodeError, ValueError, RecursionError):
-        return None, "invalid_json"
+        return None, "invalid_json", "invalid"
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA or not isinstance(doc.get("entries"), list):
-        return None, "invalid_schema"
-    return doc, "ok"
+        return None, "invalid_schema", "invalid"
+    if "manifest_sha256" in doc:
+        claimed = doc["manifest_sha256"]
+        if type(claimed) is not str or not HASH_RE.fullmatch(claimed):
+            return None, "manifest_digest_mismatch", "mismatch"
+        try:
+            actual = _canonical_manifest_sha256(doc)
+        except (TypeError, ValueError):
+            return None, "manifest_digest_mismatch", "mismatch"
+        if claimed != actual:
+            return None, "manifest_digest_mismatch", "mismatch"
+        return doc, "ok", "verified"
+    return doc, "ok", "unsealed_legacy"
 
 
 def diagnose_install_state(vault: Path) -> dict:
     """Read-only comparison between recorded install-state and current vault files."""
     resolved = Path(vault).resolve()
-    manifest, state = _load_manifest(resolved)
+    manifest, state, integrity = _load_manifest(resolved)
     discovered = _discover_surfaces(resolved)
     discovered_by_path = {item["path"]: item for item in discovered}
 
@@ -356,10 +392,16 @@ def diagnose_install_state(vault: Path) -> dict:
         untracked_managed = [
             item["path"] for item in discovered if item.get("ownership") == "managed"
         ]
+        near_misses: list[dict[str, str]] = []
+        if state != "not_recorded":
+            near_misses.append({"path": STATE_REL, "mismatch": state})
+        for path in untracked_managed:
+            near_misses.append({"path": path, "mismatch": "untracked_managed"})
         return {
             "schema": SCHEMA,
             "status": "not_recorded" if state == "not_recorded" else "invalid_state",
             "reason_code": state,
+            "manifest_integrity": integrity,
             "state_path": STATE_REL,
             "recorded_engine_version": None,
             "managed_intact": 0,
@@ -367,11 +409,13 @@ def diagnose_install_state(vault: Path) -> dict:
             "managed_missing": 0,
             "user_owned_count": sum(1 for item in discovered if item.get("ownership") == "user_owned"),
             "untracked_managed": untracked_managed,
+            "near_misses": near_misses,
             "items": [],
         }
 
     recorded_paths: set[str] = set()
     items: list[dict] = []
+    near_misses = []
     managed_intact = 0
     managed_modified = 0
     managed_missing = 0
@@ -402,14 +446,17 @@ def diagnose_install_state(vault: Path) -> dict:
         stamp_re = _managed_stamp_pattern(rel)
         if stamp_re is None:
             items.append({"path": rel, "ownership": "managed", "status": "not_managed_surface"})
+            near_misses.append({"path": rel, "mismatch": "not_managed_surface"})
             managed_modified += 1
             continue
 
         if read_state == "missing":
             managed_missing += 1
             items.append({"path": rel, "ownership": "managed", "status": "missing"})
+            near_misses.append({"path": rel, "mismatch": "missing_file"})
         elif data is None:
             items.append({"path": rel, "ownership": "managed", "status": read_state})
+            near_misses.append({"path": rel, "mismatch": read_state})
         else:
             stamped, _ = _detect_stamp(data, stamp_re)
             if stamped and recorded_sha and _sha256_bytes(data) == recorded_sha:
@@ -418,11 +465,17 @@ def diagnose_install_state(vault: Path) -> dict:
             else:
                 managed_modified += 1
                 items.append({"path": rel, "ownership": "managed", "status": "modified_by_user"})
+                near_misses.append({
+                    "path": rel,
+                    "mismatch": "missing_engine_stamp" if not stamped else "sha256_mismatch",
+                })
 
     untracked_managed = sorted(
         path for path, info in discovered_by_path.items()
         if info.get("ownership") == "managed" and path not in recorded_paths
     )
+    for path in untracked_managed:
+        near_misses.append({"path": path, "mismatch": "untracked_managed"})
     if managed_modified > 0 or managed_missing > 0 or untracked_managed:
         overall = "drift_detected"
         reason = "managed_surface_drift"
@@ -434,6 +487,7 @@ def diagnose_install_state(vault: Path) -> dict:
         "schema": SCHEMA,
         "status": overall,
         "reason_code": reason,
+        "manifest_integrity": integrity,
         "state_path": STATE_REL,
         "recorded_engine_version": manifest.get("engine_version"),
         "managed_intact": managed_intact,
@@ -441,6 +495,7 @@ def diagnose_install_state(vault: Path) -> dict:
         "managed_missing": managed_missing,
         "user_owned_count": user_owned_count,
         "untracked_managed": untracked_managed,
+        "near_misses": near_misses,
         "items": items,
     }
 
@@ -448,7 +503,7 @@ def diagnose_install_state(vault: Path) -> dict:
 def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
     """Plan (and with apply=True execute) removal of ONLY verified canonical managed files."""
     resolved = Path(vault).resolve()
-    manifest, state = _load_manifest(resolved)
+    manifest, state, _integrity = _load_manifest(resolved)
     if manifest is None:
         return {
             "schema": SCHEMA,
@@ -548,6 +603,7 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
         else:
             updated = dict(manifest)
             updated["entries"] = remaining_entries
+            updated["manifest_sha256"] = _canonical_manifest_sha256(updated)
             _write_json_atomic(resolved, STATE_REL, updated)
 
     return {
@@ -567,6 +623,7 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
 def text_lines(report: dict) -> list[str]:
     lines = [
         f"install_state: {report['status']} ({report['reason_code']})",
+        f"install_state_manifest_integrity: {report.get('manifest_integrity', 'unknown')}",
         f"install_state_engine_version: {report.get('recorded_engine_version')}",
         f"install_state_managed_intact: {report.get('managed_intact', 0)}",
         f"install_state_managed_modified: {report.get('managed_modified', 0)}",
@@ -589,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
     p_rec = sub.add_parser("record", help="Record current managed and user-owned vault surfaces.")
     p_rec.add_argument("--vault", required=True, type=Path)
     p_rec.add_argument("--host", choices=("claude", "codex", "antigravity", "all"), default="all")
-    p_rec.add_argument("--engine-version", default="0.54.0")
+    p_rec.add_argument("--engine-version", default="0.56.0")
     p_rec.add_argument("--format", choices=("text", "json"), default="json")
 
     p_stat = sub.add_parser("status", help="Inspect drift between recorded install-state and disk.")

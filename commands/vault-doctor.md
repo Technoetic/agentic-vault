@@ -96,3 +96,5 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
     볼트 초기화 여부·세션 주입 상태·클라우드 동기화 여부·선택형 도구 준비 상태를 5줄 요약(`capability_summary`)으로 읽기 전용 보고한다(종료 코드 불변).
 16. 사용자가 볼트나 백업 대상이 클라우드 동기화 폴더(OneDrive·Google Drive·Dropbox·iCloud) 안에 있는지 확인할 때는 같은 Doctor에 `--cloud-sync`를 추가한다.
     경로 조각과 환경 변수 휴리스틱만으로 동기화 여부와 로컬 전용 파일(`.claude/settings.local.json`·`.env`) 존재 표식만 읽기 전용으로 보고하며, 원시 경로·사용자명·파일 내용은 출력하지 않는다(종료 코드 불변).
+17. 사용자가 호스트(Claude Code·Codex·Antigravity CLI)·OS·어댑터별 지원·비지원·미측정 범위를 한눈에 확인하려 하면 같은 Doctor에 `--coverage`를 추가한다.
+    `vault_coverage_matrix.py`의 정적 메타데이터·선언 표(`supported`·`opt_in_available`·`unsupported`·`not_measured`)를 읽기 전용으로 보고하며, 훅을 실행하거나 원시 경로·노트 본문을 출력하지 않고 종료 코드도 바뀌지 않는다.

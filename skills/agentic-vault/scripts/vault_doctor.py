@@ -670,6 +670,16 @@ SUMMARY_UNAVAILABLE = {
     "next_step": "run_vault_doctor_without_summary",
     "trust_boundary": "local_metadata_heuristics_only_host_runtime_unverified",
 }
+COVERAGE_UNAVAILABLE = {
+    "schema": "agentic-vault/capability-coverage/v1",
+    "status": "unavailable",
+    "platform": "unknown",
+    "host_filter": "all",
+    "vault_initialized": False,
+    "counts": {"supported": 0, "opt_in_available": 0, "unsupported": 0, "not_measured": 0},
+    "rows": [],
+    "trust_boundary": "declared_surface_matrix_and_static_metadata_only",
+}
 
 
 def _format_text(report: dict) -> str:
@@ -763,6 +773,12 @@ def _format_text(report: dict) -> str:
             lines.extend(summary_text_lines(report["capability_summary"]))
         except Exception:  # fail-soft by contract: a fixed line, never exception text
             lines.append("summary_vault_status: unavailable (probe_failed)")
+    if "coverage_matrix" in report:
+        try:
+            from vault_coverage_matrix import text_lines as coverage_lines
+            lines.extend(coverage_lines(report["coverage_matrix"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("coverage_matrix: unavailable (probe_failed)")
     return "\n".join(lines)
 
 
@@ -850,6 +866,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--coverage", action="store_true",
+        help=(
+            "Also include a read-only host/OS/adapter capability coverage matrix "
+            "(supported, opt_in_available, unsupported, not_measured). Fail-soft; "
+            "never changes the exit code."
+        ),
+    )
+    parser.add_argument(
         "--require-vault", action="store_true",
         help=(
             "Exit 2 instead of 0 when the folder has no 00-meta/vault-config.json "
@@ -923,6 +947,13 @@ def main(argv: list[str] | None = None) -> int:
             report["capability_summary"] = summarize_capabilities(args.vault, report)
         except Exception:  # fail-soft by contract: fixed words, never exception text
             report["capability_summary"] = dict(SUMMARY_UNAVAILABLE)
+    if args.coverage:
+        # Loaded only on request; host/OS/adapter coverage matrix, exit code stays the vault's.
+        try:
+            from vault_coverage_matrix import diagnose_coverage
+            report["coverage_matrix"] = diagnose_coverage(args.vault)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["coverage_matrix"] = dict(COVERAGE_UNAVAILABLE)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

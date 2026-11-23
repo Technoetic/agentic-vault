@@ -154,8 +154,8 @@ class VaultInstallStateTests(unittest.TestCase):
         user_note = self.vault / "20-knowledge" / "my-note.md"
         user_note.parent.mkdir(parents=True)
         user_note.write_text("# Private user note\n", encoding="utf-8")
-        # Also strip stamp from AGENTS.md (already unstamped) and forge a tampered manifest
-        # marking CLAUDE.md, vault-config.json, user_note, and unstamped AGENTS.md as managed!
+        # Even if an attacker recomputes manifest_sha256 after forging entries
+        # (defense-in-depth), canonical allowlist + stamp checks still protect user files.
         vault_install_state.record_install_state(self.vault)
         state_file = self.vault / vault_install_state.STATE_REL
         doc = json.loads(state_file.read_text(encoding="utf-8"))
@@ -163,6 +163,7 @@ class VaultInstallStateTests(unittest.TestCase):
             digest = hashlib.sha256((self.vault / rel).read_bytes()).hexdigest()
             doc["entries"] = [e for e in doc["entries"] if e["path"] != rel]
             doc["entries"].append({"path": rel, "ownership": "managed", "sha256": digest, "bytes": 1})
+        doc["manifest_sha256"] = vault_install_state._canonical_manifest_sha256(doc)
         state_file.write_text(json.dumps(doc), encoding="utf-8")
 
         applied = vault_install_state.uninstall_managed(self.vault, apply=True)
@@ -173,6 +174,57 @@ class VaultInstallStateTests(unittest.TestCase):
         self.assertEqual(reasons["AGENTS.md"], "missing_engine_stamp")
         for rel in ("CLAUDE.md", "00-meta/vault-config.json", "20-knowledge/my-note.md", "AGENTS.md"):
             self.assertTrue((self.vault / rel).is_file(), f"{rel} was unexpectedly deleted!")
+
+    def test_manifest_digest_mismatch_fails_closed_on_status_and_uninstall(self) -> None:
+        rec = vault_install_state.record_install_state(self.vault)
+        self.assertRegex(rec["manifest_sha256"], r"^[0-9a-f]{64}$")
+        state_file = self.vault / vault_install_state.STATE_REL
+        doc = json.loads(state_file.read_text(encoding="utf-8"))
+        doc["host"] = "tampered"
+        state_file.write_text(json.dumps(doc), encoding="utf-8")
+
+        diag = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(diag["status"], "invalid_state")
+        self.assertEqual(diag["reason_code"], "manifest_digest_mismatch")
+        self.assertEqual(diag["manifest_integrity"], "mismatch")
+        self.assertTrue(any(m["mismatch"] == "manifest_digest_mismatch" for m in diag["near_misses"]))
+
+        refused = vault_install_state.uninstall_managed(self.vault, apply=True)
+        self.assertEqual(refused["status"], "refused")
+        self.assertEqual(refused["reason_code"], "manifest_digest_mismatch")
+        self.assertEqual(refused["removed"], [])
+        self.assertTrue((self.vault / "00-meta" / "scripts" / "vault_healthcheck.py").is_file())
+
+    def test_legacy_unsealed_manifest_remains_compatible_and_near_misses_report_drift(self) -> None:
+        vault_install_state.record_install_state(self.vault)
+        state_file = self.vault / vault_install_state.STATE_REL
+        doc = json.loads(state_file.read_text(encoding="utf-8"))
+        doc.pop("manifest_sha256")
+        state_file.write_text(json.dumps(doc), encoding="utf-8")
+
+        diag = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(diag["status"], "clean")
+        self.assertEqual(diag["manifest_integrity"], "unsealed_legacy")
+        self.assertEqual(diag["near_misses"], [])
+
+        # Modify a managed file and verify structured near_misses reason.
+        rule_file = self.vault / ".claude" / "rules" / "vault-workflow.md"
+        rule_file.write_text("<!-- agentic-vault:rule engine=0.54.0 -->\n# Edited\n", encoding="utf-8")
+        drift = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(drift["status"], "drift_detected")
+        self.assertIn(
+            {"path": ".claude/rules/vault-workflow.md", "mismatch": "sha256_mismatch"},
+            drift["near_misses"],
+        )
+
+        # Partial uninstall re-seals the remaining manifest cleanly.
+        vault_install_state.record_install_state(self.vault)
+        rule_file.write_text("<!-- agentic-vault:rule engine=0.54.0 -->\n# Edited again\n", encoding="utf-8")
+        applied = vault_install_state.uninstall_managed(self.vault, apply=True)
+        self.assertEqual(applied["status"], "applied")
+        self.assertFalse(applied["state_removed"])
+        after = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(after["manifest_integrity"], "verified")
 
     def test_rejects_hardlinked_managed_target(self) -> None:
         outside = self.vault.parent / "hardlink-source.py"

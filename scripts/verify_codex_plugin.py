@@ -474,6 +474,7 @@ def verify(codex: str) -> dict:
                          "skills/agentic-vault/scripts/vault_period.py",
                          "skills/agentic-vault/scripts/vault_doctor.py",
                          "skills/agentic-vault/scripts/vault_cloud_sync.py",
+                         "skills/agentic-vault/scripts/vault_coverage_matrix.py",
                          "skills/agentic-vault/scripts/vault_session_evidence.py",
                          "skills/agentic-vault/scripts/vault_lesson_delta.py",
                          "skills/agentic-vault/scripts/vault_declarative_rules.py",

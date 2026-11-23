@@ -332,9 +332,10 @@ def _string_pattern_conditions():
 
 
 def evaluate_matrix(*, spec=None, backend='scripted-control', transport=None, control='safe', limits=None,
-                    no_prompt_cache=False, slot_snapshots=False, repeat_agreement=False, string_patterns=False):
+                    no_prompt_cache=False, slot_snapshots=False, repeat_agreement=False, string_patterns=False,
+                    check_activation=False):
     spec = MatrixSpec() if spec is None else spec
-    if any(type(value) is not bool for value in (no_prompt_cache, slot_snapshots, repeat_agreement)):
+    if any(type(value) is not bool for value in (no_prompt_cache, slot_snapshots, repeat_agreement, check_activation)):
         raise ValueError('invalid_measurement_condition')
     if type(string_patterns) is not bool:
         raise ValueError('invalid_string_patterns')
@@ -416,6 +417,12 @@ def evaluate_matrix(*, spec=None, backend='scripted-control', transport=None, co
         _add_measurements(report, groups, rows, no_prompt_cache=no_prompt_cache,
                           slot_snapshots=slot_snapshots, repeat_agreement=repeat_agreement,
                           string_patterns=string_patterns)
+    if check_activation:
+        scripts_dir = str(Path(__file__).resolve().parent)
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import eval_activation
+        report['activation_audit'] = eval_activation.audit_tool_matrix_report(report)
     return report
 
 
@@ -502,6 +509,9 @@ def main(argv=None):
                              'dispatch, grading or the exit status; B-arm episodes count toward the pooled summary '
                              'and the exit status like A-arm episodes. A server may pass the patterns to the model '
                              'as prompt text only.')
+    parser.add_argument('--check-activation', action='store_true',
+                        help='Opt-in silent no-op guard: audit treatment activation and control zero-leakage; '
+                             'exits 70 if an activation invariant fails and no earlier error occurred.')
     for name, field in safety.Limits.__dataclass_fields__.items():
         parser.add_argument('--' + name.replace('_', '-'), type=float if 'seconds' in name else int,
                             default=field.default)
@@ -531,11 +541,13 @@ def main(argv=None):
         report = evaluate_matrix(spec=spec, backend=args.backend, transport=transport,
                                  control=args.control, limits=limits, no_prompt_cache=args.no_prompt_cache,
                                  slot_snapshots=args.slot_snapshots, repeat_agreement=args.repeat_agreement,
-                                 string_patterns=args.string_patterns)
+                                 string_patterns=args.string_patterns, check_activation=args.check_activation)
     except ValueError:
         parser.error('invalid loopback configuration, matrix conditions or resource limits')
     text = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
     status = 1 if report['invalid_evaluation'] or report['summary']['metrics']['model_error_all']['numerator'] else 0
+    if status == 0 and args.check_activation and not report.get('activation_audit', {}).get('passed', False):
+        status = 70
     if receipt is not None:
         try:
             with open(receipt, 'xb') as handle:

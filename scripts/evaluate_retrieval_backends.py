@@ -340,8 +340,8 @@ def partitions(rows: list[dict]) -> dict:
 
 def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='search',
              node=None, timeout=60, allow_model_download=False, artifact_dir=None,
-             qmd_model_cache=None) -> dict:
-    if qmd_mode not in ('search', 'query') or type(kiwi) is not bool:
+             qmd_model_cache=None, check_activation=False) -> dict:
+    if qmd_mode not in ('search', 'query') or type(kiwi) is not bool or type(check_activation) is not bool:
         raise ValueError('invalid backend options')
     if qmd_mode == 'query' and (not qmd_cli or not allow_model_download):
         raise ValueError('query needs explicit CLI and model-download permission')
@@ -358,19 +358,30 @@ def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='searc
     snapshot_ms = (time.perf_counter()-start)*1000
     backends = {}
     searchers = {}
+    activation_telemetry = {}
     for name, bigrams in (('bm25', None), ('bm25_hangul2', 'hangul2')):
-        def search(query, bigrams=bigrams):
+        if check_activation:
+            activation_telemetry[name] = []
+        def search(query, bigrams=bigrams, backend_name=name):
             result = advanced.retrieve(snapshot['vault'], query, limit=5, max_tokens=0, backend='bm25', lexical_ngrams=bigrams)
             diagnostics = result['diagnostics']
             if diagnostics['status'] != 'ok' or not diagnostics['search_complete']:
                 raise RuntimeError('core search incomplete: '+diagnostics['status'])
+            if check_activation:
+                channel = diagnostics.get('lexical_ngram_channel')
+                has_hangul = any('\uac00' <= ch <= '\ud7a3' for ch in query)
+                active = isinstance(channel, dict) and channel.get('status') == 'active' and int(channel.get('query_terms_used', 0)) > 0
+                calls = int(channel.get('query_terms_used', 0)) if isinstance(channel, dict) else 0
+                activation_telemetry[backend_name].append({'active': active, 'calls': calls, 'has_hangul': has_hangul})
             return [match['path'] for match in result['matches']]
         searchers[name] = search
         backends[name] = {'setup_ms': 0, 'index': 'current core in-memory per-query index',
                           'latency_scope': 'core policy/config + full allowed corpus scan + BM25/RRF ranking; no rendering'}
     temporary_context = None
+    requested_optional = []
     try:
         if kiwi:
+            requested_optional.append('kiwi_bm25')
             try:
                 searchers['kiwi_bm25'], backends['kiwi_bm25'] = setup_kiwi(snapshot, advanced)
             except Exception as error:
@@ -384,6 +395,7 @@ def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='searc
             temporary = Path(tempfile.mkdtemp(prefix='av-eval-qmd-', dir=parent))
             temporary_context = temporary
             qmd_name = 'qmd_'+qmd_mode
+            requested_optional.append(qmd_name)
             try:
                 node_command = node or shutil.which('node')
                 if not node_command:
@@ -393,6 +405,8 @@ def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='searc
                 backends[qmd_name] = {'setup_error': f'{type(error).__name__}: {error}', 'corpus_path': str(temporary/'corpus')}
         for name, metadata in backends.items():
             rows = []
+            if check_activation and name not in activation_telemetry:
+                activation_telemetry[name] = []
             for label in snapshot['queries']:
                 start = time.perf_counter()
                 outcome = {'paths': [], 'error': metadata.get('setup_error')}
@@ -402,23 +416,35 @@ def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='searc
                         outcome['paths'] = searchers[name](label['query'])
                     except Exception as error:
                         outcome['error'] = f'{type(error).__name__}: {error}'
+                if check_activation and name in requested_optional:
+                    ran_ok = name in searchers and outcome['error'] is None
+                    activation_telemetry[name].append({'active': ran_ok, 'calls': 1 if ran_ok else 0})
                 outcome['latency_ms'] = (time.perf_counter()-start)*1000
                 rows.append(score_row(label, outcome))
             metadata.update(summary=summarize(rows), per_query=rows, **partitions(rows))
         after = freeze_fixture(path, legacy)
         assert_same_binding(snapshot, after)
-        return {'schema_version': 1, 'fixture': fixture, 'top_k': 5,
-                'binding_status': 'unchanged', 'binding_before': snapshot['binding'], 'binding_after': after['binding'],
-                'allowed_source_count': len(snapshot['documents']), 'snapshot_setup_ms': snapshot_ms,
-                'backends': backends, 'protocol': {'labels': 'evaluation only, never passed to retrieval',
-                'options': 'no query expansion, temporal filtering, graph expansion, answer generation or threshold tuning',
-                'code_binding_scope': 'runner, label validator, and five transitively imported core files; unrelated vault tools excluded',
-                'randomness': 'no sampling or seed; deterministic lexical/embedding ranking; single ordered pass',
-                'latency': 'successful queries only, one pass, no warm-up; scopes differ and are reported per backend',
-                'no_answer_limit': 'nonempty candidates are false positives, not asserted answers; no model abstention or production threshold claim',
-                'export': 'only policy-allowed checked-in fixture Markdown bytes; original path mapping validated exactly'},
-                'settings': {'kiwi': kiwi, 'qmd_mode': qmd_mode if qmd_cli else None,
-                             'timeout_seconds': timeout, 'allow_model_download': allow_model_download}}
+        report = {'schema_version': 1, 'fixture': fixture, 'top_k': 5,
+                  'binding_status': 'unchanged', 'binding_before': snapshot['binding'], 'binding_after': after['binding'],
+                  'allowed_source_count': len(snapshot['documents']), 'snapshot_setup_ms': snapshot_ms,
+                  'backends': backends, 'protocol': {'labels': 'evaluation only, never passed to retrieval',
+                  'options': 'no query expansion, temporal filtering, graph expansion, answer generation or threshold tuning',
+                  'code_binding_scope': 'runner, label validator, and five transitively imported core files; unrelated vault tools excluded',
+                  'randomness': 'no sampling or seed; deterministic lexical/embedding ranking; single ordered pass',
+                  'latency': 'successful queries only, one pass, no warm-up; scopes differ and are reported per backend',
+                  'no_answer_limit': 'nonempty candidates are false positives, not asserted answers; no model abstention or production threshold claim',
+                  'export': 'only policy-allowed checked-in fixture Markdown bytes; original path mapping validated exactly'},
+                  'settings': {'kiwi': kiwi, 'qmd_mode': qmd_mode if qmd_cli else None,
+                               'timeout_seconds': timeout, 'allow_model_download': allow_model_download}}
+        if check_activation:
+            scripts_dir = str(Path(__file__).resolve().parent)
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            import eval_activation
+            report['activation_audit'] = eval_activation.audit_retrieval_backend_telemetry(
+                activation_telemetry, optional_backends=requested_optional,
+            )
+        return report
     finally:
         # Explicit artifact directories keep fixture-only setup for review.
         if temporary_context is not None and artifact_dir is None:
@@ -436,13 +462,15 @@ def main(argv=None) -> int:
     parser.add_argument('--qmd-model-cache', type=Path, help='explicit existing public embedding cache directory; copy only embeddinggemma GGUF')
     parser.add_argument('--timeout', type=float, default=60)
     parser.add_argument('--artifact-dir', type=Path, help='fixture-only corpus/cache outside the worktree')
+    parser.add_argument('--check-activation', action='store_true',
+                        help='opt-in silent no-op guard: audit treatment activation and control zero-leakage (exit 70 on failure)')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args(argv)
     try:
         report = evaluate(args.fixture, kiwi=args.kiwi, qmd_cli=args.qmd_cli, node=args.node,
                           qmd_mode=args.qmd_mode, timeout=args.timeout,
                           allow_model_download=args.allow_model_download, artifact_dir=args.artifact_dir,
-                          qmd_model_cache=args.qmd_model_cache)
+                          qmd_model_cache=args.qmd_model_cache, check_activation=args.check_activation)
     except (ValueError, OSError) as error:
         print(json.dumps({'status':'invalid_evaluation', 'error':str(error)}, ensure_ascii=False))
         return 2
@@ -453,7 +481,11 @@ def main(argv=None) -> int:
         print(json.dumps({'output':str(args.output), 'backends': {name: data['summary'] for name, data in report['backends'].items()}}, ensure_ascii=False))
     else:
         print(rendered)
-    return 0 if all(data['summary']['error_count'] == 0 for data in report['backends'].values()) else 1
+    if not all(data['summary']['error_count'] == 0 for data in report['backends'].values()):
+        return 1
+    if args.check_activation and not report.get('activation_audit', {}).get('passed', False):
+        return 70
+    return 0
 
 
 if __name__ == '__main__':
