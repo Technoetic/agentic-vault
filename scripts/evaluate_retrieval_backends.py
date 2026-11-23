@@ -410,15 +410,20 @@ def evaluate(fixture='recall_hard', *, kiwi=False, qmd_cli=None, qmd_mode='searc
             for label in snapshot['queries']:
                 start = time.perf_counter()
                 outcome = {'paths': [], 'error': metadata.get('setup_error')}
+                before_count = len(activation_telemetry[name]) if check_activation else 0
                 if name in searchers:
                     try:
                         _guard_fixture(path, legacy)
                         outcome['paths'] = searchers[name](label['query'])
                     except Exception as error:
                         outcome['error'] = f'{type(error).__name__}: {error}'
-                if check_activation and name in requested_optional:
-                    ran_ok = name in searchers and outcome['error'] is None
-                    activation_telemetry[name].append({'active': ran_ok, 'calls': 1 if ran_ok else 0})
+                if check_activation:
+                    if name in requested_optional:
+                        ran_ok = name in searchers and outcome['error'] is None
+                        activation_telemetry[name].append({'active': ran_ok, 'calls': 1 if ran_ok else 0})
+                    elif len(activation_telemetry[name]) == before_count:
+                        has_hangul = any('\uac00' <= ch <= '\ud7a3' for ch in label['query'])
+                        activation_telemetry[name].append({'active': False, 'calls': 0, 'has_hangul': has_hangul})
                 outcome['latency_ms'] = (time.perf_counter()-start)*1000
                 rows.append(score_row(label, outcome))
             metadata.update(summary=summarize(rows), per_query=rows, **partitions(rows))

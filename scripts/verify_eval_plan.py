@@ -10,13 +10,14 @@ scratch in Python standard library only for agentic-vault evaluation workflows:
    sealed by an immutable ``frozen_core_sha256`` plus whole-plan ``plan_sha256``.
 2. Post-hoc or pre-measurement ``amendments`` are append-only records carrying
    ``recorded_utc``, ``timing`` (``pre_measurement`` or ``post_hoc``),
-   ``what_changed``, ``why``, and explicit ``gate_overrides``. A
-   ``pre_measurement`` amendment dated after ``observations.measured_utc`` is
-   rejected fail-closed.
+   ``what_changed``, ``why``, and explicit ``gate_overrides``. Any
+   ``pre_measurement`` amendment dated after ``observations.measured_utc`` or
+   measurement dated before ``frozen_utc`` is rejected fail-closed.
 3. ``evaluate_plan`` ALWAYS evaluates the original pre-registered gates and
    emits ``original_verdict`` beside ``amended_verdict`` — post-hoc changes can
    never overwrite or hide a pre-registered failure (``post_hoc_rescued_failure``
-   flags any case where original failed and amended passed).
+   flags any case where pre-post-hoc verdict failed and post-hoc amendments
+   turned it into passed).
 
 Standard library only; zero network, subprocess, or model calls.
 """
@@ -97,7 +98,8 @@ def _loads_strict(text: str) -> Any:
 
 def _read_json_file(path: Path) -> dict[str, Any]:
     try:
-        raw = path.read_bytes()
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_JSON_BYTES + 1)
     except OSError as exc:
         raise EvalPlanError(f"unreadable_file:{path.name}") from exc
     if len(raw) > MAX_JSON_BYTES:
@@ -169,8 +171,9 @@ def compute_frozen_core_sha256(plan: dict[str, Any]) -> str:
 
 
 def compute_plan_sha256(plan: dict[str, Any]) -> str:
-    """Compute canonical SHA-256 over the full plan excluding ``plan_sha256``."""
+    """Compute canonical SHA-256 over the normalized plan body (always with frozen_core_sha256)."""
     body = {k: v for k, v in plan.items() if k != "plan_sha256"}
+    body["frozen_core_sha256"] = compute_frozen_core_sha256(plan)
     return _canonical_sha256(body)
 
 
@@ -193,8 +196,7 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
     if type(claim_limit) is not str or not claim_limit.strip():
         raise EvalPlanError("missing_claim_limit")
 
-    notes = plan.get("notes")
-    if notes is not None and type(notes) is not str:
+    if "notes" in plan and type(plan["notes"]) is not str:
         raise EvalPlanError("invalid_notes")
 
     gates = plan.get("gates")
@@ -218,7 +220,7 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
         if "description" in gate and type(gate["description"]) is not str:
             raise EvalPlanError(f"invalid_gate_description:{gid}")
 
-    amendments = plan.get("amendments", [])
+    amendments = plan["amendments"] if "amendments" in plan else []
     if not isinstance(amendments, list) or len(amendments) > MAX_AMENDMENTS:
         raise EvalPlanError("invalid_amendments_list")
     amendment_ids: set[str] = set()
@@ -236,7 +238,8 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
         if prev_recorded is not None and rec_dt < prev_recorded:
             raise EvalPlanError(f"amendments_not_chronological:{aid}")
         prev_recorded = rec_dt
-        if amend["timing"] not in ALLOWED_TIMINGS:
+        timing = amend["timing"]
+        if type(timing) is not str or timing not in ALLOWED_TIMINGS:
             raise EvalPlanError(f"invalid_amendment_timing:{aid}")
         for text_key in ("what_changed", "why"):
             if type(amend[text_key]) is not str or not amend[text_key].strip():
@@ -245,7 +248,7 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
         if not isinstance(overrides, dict) or not overrides:
             raise EvalPlanError(f"empty_gate_overrides:{aid}")
         for target_gid, spec in overrides.items():
-            if target_gid not in gate_ids:
+            if type(target_gid) is not str or target_gid not in gate_ids:
                 raise EvalPlanError(f"unknown_override_gate:{aid}:{target_gid}")
             if not isinstance(spec, dict) or set(spec) != OVERRIDE_KEYS:
                 raise EvalPlanError(f"invalid_override_spec:{aid}:{target_gid}")
@@ -253,10 +256,11 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
 
     actual_core = compute_frozen_core_sha256(plan)
     actual_plan = compute_plan_sha256(plan)
-    claimed_core = plan.get("frozen_core_sha256")
-    claimed_plan = plan.get("plan_sha256")
+    has_core = "frozen_core_sha256" in plan
+    has_plan = "plan_sha256" in plan
 
-    if claimed_core is not None:
+    if has_core:
+        claimed_core = plan["frozen_core_sha256"]
         if type(claimed_core) is not str or not HASH_RE.fullmatch(claimed_core):
             raise EvalPlanError("invalid_frozen_core_sha256")
         if claimed_core != actual_core:
@@ -264,7 +268,8 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
     elif require_sealed:
         raise EvalPlanError("unsealed_plan:missing_frozen_core_sha256")
 
-    if claimed_plan is not None:
+    if has_plan:
+        claimed_plan = plan["plan_sha256"]
         if type(claimed_plan) is not str or not HASH_RE.fullmatch(claimed_plan):
             raise EvalPlanError("invalid_plan_sha256")
         if claimed_plan != actual_plan:
@@ -272,7 +277,7 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
     elif require_sealed:
         raise EvalPlanError("unsealed_plan:missing_plan_sha256")
 
-    sealed = claimed_core == actual_core and claimed_plan == actual_plan
+    sealed = has_core and has_plan
     return {
         "valid": True,
         "sealed": sealed,
@@ -287,10 +292,17 @@ def validate_plan(plan: dict[str, Any], *, require_sealed: bool = False) -> dict
 
 
 def seal_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of ``plan`` sealed with ``frozen_core_sha256`` and ``plan_sha256``."""
-    stripped = {k: v for k, v in plan.items() if k not in ("frozen_core_sha256", "plan_sha256")}
-    validate_plan(stripped, require_sealed=False)
-    sealed = dict(stripped)
+    """Return a copy of ``plan`` sealed with ``frozen_core_sha256`` and ``plan_sha256``.
+
+    If ``frozen_core_sha256`` is already present (e.g., when re-sealing after
+    appending an amendment), its digest is verified against the pre-registered
+    core so silent gate edits fail closed instead of being overwritten.
+    """
+    if not isinstance(plan, dict):
+        raise EvalPlanError("plan_must_be_object")
+    candidate = {k: v for k, v in plan.items() if k != "plan_sha256"}
+    validate_plan(candidate, require_sealed=False)
+    sealed = dict(candidate)
     sealed["frozen_core_sha256"] = compute_frozen_core_sha256(sealed)
     sealed["plan_sha256"] = compute_plan_sha256(sealed)
     return sealed
@@ -334,15 +346,22 @@ def _eval_gate(gate: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
         else:
             passed = observed < threshold
     else:
-        # Strict type check so bool(True) never equals int(1).
+        # Strict type check for both == and != so None/bool/wrong-type never pass !=.
         same_family = (
             (type(observed) is type(threshold))
             or (type(observed) in (int, float) and type(threshold) in (int, float))
         )
         if not same_family:
-            passed = op == "!="
-        else:
-            passed = (observed == threshold) if op == "==" else (observed != threshold)
+            return {
+                "id": gid,
+                "metric": metric_name,
+                "op": op,
+                "threshold": threshold,
+                "observed": observed,
+                "passed": False,
+                "reason": "type_mismatch",
+            }
+        passed = (observed == threshold) if op == "==" else (observed != threshold)
     return {
         "id": gid,
         "metric": metric_name,
@@ -352,6 +371,16 @@ def _eval_gate(gate: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
         "passed": bool(passed),
         "reason": "ok" if passed else "threshold_unmet",
     }
+
+
+def _apply_overrides(base_gates: list[dict[str, Any]], amendments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    gates = [dict(gate) for gate in base_gates]
+    by_id = {gate["id"]: gate for gate in gates}
+    for amend in amendments:
+        for target_gid, spec in amend["gate_overrides"].items():
+            by_id[target_gid]["op"] = spec["op"]
+            by_id[target_gid]["threshold"] = spec["threshold"]
+    return gates
 
 
 def evaluate_plan(
@@ -368,12 +397,15 @@ def evaluate_plan(
     if not isinstance(metrics, dict):
         raise EvalPlanError("missing_observation_metrics")
 
+    frozen_dt = _parse_iso_utc(plan["frozen_utc"], "frozen_utc")
     measured_utc = observations.get("measured_utc")
     measured_dt: dt.datetime | None = None
     if measured_utc is not None:
         measured_dt = _parse_iso_utc(measured_utc, "observations.measured_utc")
+        if measured_dt < frozen_dt:
+            raise EvalPlanError("measurement_before_plan_freeze")
 
-    amendments = plan.get("amendments", [])
+    amendments = plan["amendments"] if "amendments" in plan else []
     if measured_dt is not None:
         for amend in amendments:
             rec_dt = _parse_iso_utc(amend["recorded_utc"], f"amendments[{amend['id']}].recorded_utc")
@@ -384,20 +416,21 @@ def evaluate_plan(
     original_failed = [item["id"] for item in original_results if not item["passed"]]
     original_verdict = "passed" if not original_failed else "failed"
 
-    amended_gates = [dict(gate) for gate in plan["gates"]]
-    by_id = {gate["id"]: gate for gate in amended_gates}
-    for amend in amendments:
-        for target_gid, spec in amend["gate_overrides"].items():
-            by_id[target_gid]["op"] = spec["op"]
-            by_id[target_gid]["threshold"] = spec["threshold"]
+    pre_measurement_amendments = [a for a in amendments if a["timing"] == "pre_measurement"]
+    pre_post_hoc_gates = _apply_overrides(plan["gates"], pre_measurement_amendments)
+    pre_post_hoc_results = [_eval_gate(gate, metrics) for gate in pre_post_hoc_gates]
+    pre_post_hoc_verdict = "passed" if all(item["passed"] for item in pre_post_hoc_results) else "failed"
 
+    amended_gates = _apply_overrides(plan["gates"], amendments)
     amended_results = [_eval_gate(gate, metrics) for gate in amended_gates]
     amended_failed = [item["id"] for item in amended_results if not item["passed"]]
     amended_verdict = "passed" if not amended_failed else "failed"
 
     has_post_hoc = any(a["timing"] == "post_hoc" for a in amendments)
     verdict_diverged = original_verdict != amended_verdict
-    post_hoc_rescued_failure = has_post_hoc and original_verdict == "failed" and amended_verdict == "passed"
+    post_hoc_rescued_failure = (
+        has_post_hoc and pre_post_hoc_verdict == "failed" and amended_verdict == "passed"
+    )
 
     report: dict[str, Any] = {
         "schema": SCHEMA_REPORT,
@@ -432,12 +465,27 @@ def evaluate_plan(
         ],
         "limitations": list(LIMITATIONS),
     }
-    if "activation_audit" in observations and isinstance(observations["activation_audit"], dict):
+    if "activation_audit" in observations:
+        act = observations["activation_audit"]
+        if (
+            not isinstance(act, dict)
+            or type(act.get("passed")) is not bool
+            or type(act.get("status")) is not str
+        ):
+            raise EvalPlanError("invalid_activation_audit_summary")
         report["activation_audit_summary"] = {
-            "passed": observations["activation_audit"].get("passed"),
-            "status": observations["activation_audit"].get("status"),
+            "passed": act["passed"],
+            "status": act["status"],
         }
     return report
+
+
+def _write_text_safe(path: Path, rendered: str) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        raise EvalPlanError(f"unwritable_output_file:{path.name}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -476,8 +524,7 @@ def main(argv: list[str] | None = None) -> int:
             sealed = seal_plan(plan)
             rendered = json.dumps(sealed, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             if args.out is not None:
-                args.out.parent.mkdir(parents=True, exist_ok=True)
-                args.out.write_text(rendered, encoding="utf-8")
+                _write_text_safe(args.out, rendered)
                 print(json.dumps({
                     "sealed": True,
                     "plan_id": sealed["plan_id"],
@@ -497,8 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         report = evaluate_plan(plan, observations, require_sealed=args.require_sealed)
         rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         if args.out is not None:
-            args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(rendered, encoding="utf-8")
+            _write_text_safe(args.out, rendered)
         sys.stdout.write(rendered)
         if args.strict_original:
             return 0 if report["original_verdict"] == "passed" else 1

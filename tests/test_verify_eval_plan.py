@@ -193,6 +193,104 @@ class VerifyEvalPlanTests(unittest.TestCase):
             )
             self.assertEqual(p_strict.returncode, 1)
 
+    def test_audit_hardening_not_equals_type_mismatch_chronology_null_digests_and_seal_consistency(self) -> None:
+        # 1. != and == must fail closed with type_mismatch on None/bool/str/list observations.
+        plan_ne = vep.seal_plan({
+            "schema": vep.SCHEMA_PLAN,
+            "plan_id": "type-strict-ne",
+            "frozen_utc": "2026-11-23T00:00:00Z",
+            "claim_limit": "Type check fixture only.",
+            "gates": [
+                {"id": "ne_num", "metric": "score", "op": "!=", "threshold": 5},
+                {"id": "eq_num", "metric": "count", "op": "==", "threshold": 0},
+            ],
+        })
+        for bad_val in (None, True, "5", [1, 2]):
+            rep = vep.evaluate_plan(plan_ne, {"metrics": {"score": bad_val, "count": bad_val}}, require_sealed=True)
+            self.assertEqual(rep["original_verdict"], "failed")
+            by_id = {g["id"]: g for g in rep["original_gates"]}
+            self.assertEqual(by_id["ne_num"]["reason"], "type_mismatch")
+            self.assertEqual(by_id["eq_num"]["reason"], "type_mismatch")
+
+        # 2. measured_utc < frozen_utc must fail closed.
+        sealed = vep.seal_plan(_sample_plan())
+        with self.assertRaisesRegex(vep.EvalPlanError, "measurement_before_plan_freeze"):
+            vep.evaluate_plan(
+                sealed,
+                {"measured_utc": "2026-11-22T23:00:00Z", "metrics": {"top5_hit_rate": 1.0, "no_answer_fp_rate": 0.0, "error_count": 0}},
+                require_sealed=True,
+            )
+
+        # 3. Non-hashable timing raises EvalPlanError (not TypeError), JSON null digests rejected,
+        # and validate_plan(unsealed)["plan_sha256"] matches seal_plan(unsealed)["plan_sha256"].
+        unsealed = _sample_plan()
+        self.assertEqual(vep.validate_plan(unsealed)["plan_sha256"], vep.seal_plan(unsealed)["plan_sha256"])
+
+        bad_timing = _sample_plan(amendments=[{
+            "id": "bad-t",
+            "recorded_utc": "2026-11-23T01:00:00Z",
+            "timing": ["post_hoc"],
+            "what_changed": "x",
+            "why": "y",
+            "gate_overrides": {"top5_hit": {"op": ">=", "threshold": 0.8}},
+        }])
+        with self.assertRaisesRegex(vep.EvalPlanError, "invalid_amendment_timing"):
+            vep.validate_plan(bad_timing)
+
+        null_core = dict(_sample_plan(), frozen_core_sha256=None)
+        with self.assertRaisesRegex(vep.EvalPlanError, "invalid_frozen_core_sha256"):
+            vep.validate_plan(null_core)
+        null_plan = dict(_sample_plan(), plan_sha256=None)
+        with self.assertRaisesRegex(vep.EvalPlanError, "invalid_plan_sha256"):
+            vep.validate_plan(null_plan)
+
+        # 4. seal_plan refuses silent gate edits when frozen_core_sha256 is already present.
+        tampered = json.loads(json.dumps(sealed))
+        tampered["gates"][0]["threshold"] = 0.50
+        with self.assertRaisesRegex(vep.EvalPlanError, "frozen_core_digest_mismatch"):
+            vep.seal_plan(tampered)
+
+        # 5. Pre-measurement rescue + no-op post-hoc does NOT misattribute post_hoc_rescued_failure;
+        # valid activation_audit passes through cleanly and invalid activation_audit fails closed.
+        mixed = vep.seal_plan(_sample_plan(amendments=[
+            {
+                "id": "pre-relax",
+                "recorded_utc": "2026-11-23T00:30:00Z",
+                "timing": "pre_measurement",
+                "what_changed": "Pre-run adjustment to 0.85.",
+                "why": "Fixture recalibration before run.",
+                "gate_overrides": {"top5_hit": {"op": ">=", "threshold": 0.85}},
+            },
+            {
+                "id": "post-noop",
+                "recorded_utc": "2026-11-23T02:00:00Z",
+                "timing": "post_hoc",
+                "what_changed": "Documented unchanged threshold.",
+                "why": "Audit annotation.",
+                "gate_overrides": {"top5_hit": {"op": ">=", "threshold": 0.85}},
+            },
+        ]))
+        rep_mixed = vep.evaluate_plan(
+            mixed,
+            {
+                "measured_utc": "2026-11-23T01:00:00Z",
+                "metrics": {"top5_hit_rate": 0.87, "no_answer_fp_rate": 0.0, "error_count": 0},
+                "activation_audit": {"passed": True, "status": "passed"},
+            },
+            require_sealed=True,
+        )
+        self.assertEqual(rep_mixed["original_verdict"], "failed")
+        self.assertEqual(rep_mixed["amended_verdict"], "passed")
+        self.assertTrue(rep_mixed["has_post_hoc_amendments"])
+        self.assertFalse(rep_mixed["post_hoc_rescued_failure"])
+        self.assertEqual(rep_mixed["activation_audit_summary"], {"passed": True, "status": "passed"})
+
+        with self.assertRaisesRegex(vep.EvalPlanError, "invalid_activation_audit_summary"):
+            vep.evaluate_plan(
+                sealed,
+                {"metrics": {"top5_hit_rate": 0.95, "no_answer_fp_rate": 0.0, "error_count": 0}, "activation_audit": {"passed": "yes", "status": "passed"}},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

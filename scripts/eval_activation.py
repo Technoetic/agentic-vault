@@ -27,11 +27,14 @@ def _extract_observation(item: Mapping[str, Any]) -> tuple[bool, int, int]:
     """Normalize a single run/query activation observation into (active, calls, fallbacks)."""
     if not isinstance(item, Mapping):
         raise ValueError("activation observation must be a mapping")
+    explicit_calls = "candidate_calls" in item or "calls" in item
     if "candidate_calls" in item:
         calls = item["candidate_calls"]
     elif "calls" in item:
         calls = item["calls"]
     else:
+        if "active" in item and type(item["active"]) is not bool:
+            raise ValueError("activation active flag must be boolean")
         calls = 1 if item.get("active") is True else 0
     if type(calls) is not int or calls < 0:
         raise ValueError("activation calls must be a non-negative integer")
@@ -42,6 +45,8 @@ def _extract_observation(item: Mapping[str, Any]) -> tuple[bool, int, int]:
         if type(item["active"]) is not bool:
             raise ValueError("activation active flag must be boolean")
         active = item["active"]
+        if explicit_calls and active and calls == 0:
+            raise ValueError("activation observation cannot be active with zero calls")
     else:
         active = calls > 0
     return active, calls, fallbacks
@@ -171,6 +176,21 @@ def audit_arm_activation(
     }
 
 
+def _strict_telemetry_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(row, Mapping):
+        raise ValueError("telemetry row must be a mapping")
+    out: dict[str, Any] = {}
+    if "active" in row:
+        out["active"] = row["active"]
+    if "calls" in row:
+        out["calls"] = row["calls"]
+    elif "candidate_calls" in row:
+        out["candidate_calls"] = row["candidate_calls"]
+    if "fallback_calls" in row:
+        out["fallback_calls"] = row["fallback_calls"]
+    return out
+
+
 def audit_retrieval_backend_telemetry(
     telemetry: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
@@ -190,27 +210,24 @@ def audit_retrieval_backend_telemetry(
     control: list[str] = []
 
     if "bm25" in telemetry:
-        arms["bm25"] = [
-            {"active": bool(r.get("active")), "calls": int(r.get("calls", 0))}
-            for r in telemetry["bm25"]
-        ]
+        arms["bm25"] = [_strict_telemetry_row(r) for r in telemetry["bm25"]]
         control.append("bm25")
 
     if "bm25_hangul2" in telemetry:
-        hangul_rows = [r for r in telemetry["bm25_hangul2"] if r.get("has_hangul", True)]
+        hangul_rows = []
+        for r in telemetry["bm25_hangul2"]:
+            has_h = r.get("has_hangul", True) if isinstance(r, Mapping) else True
+            if type(has_h) is not bool:
+                raise ValueError("telemetry has_hangul must be boolean")
+            if has_h:
+                hangul_rows.append(r)
         source_rows = hangul_rows if hangul_rows else list(telemetry["bm25_hangul2"])
-        arms["bm25_hangul2"] = [
-            {"active": bool(r.get("active")), "calls": int(r.get("calls", 0))}
-            for r in source_rows
-        ]
+        arms["bm25_hangul2"] = [_strict_telemetry_row(r) for r in source_rows]
         treatment.append("bm25_hangul2")
 
     for opt_name in optional_backends:
         if opt_name in telemetry:
-            arms[opt_name] = [
-                {"active": bool(r.get("active")), "calls": int(r.get("calls", 0))}
-                for r in telemetry[opt_name]
-            ]
+            arms[opt_name] = [_strict_telemetry_row(r) for r in telemetry[opt_name]]
         treatment.append(opt_name)
 
     return audit_arm_activation(
@@ -218,6 +235,18 @@ def audit_retrieval_backend_telemetry(
         treatment_arms=treatment,
         control_arms=control,
         require_all_runs=True,
+    )
+
+
+def _episode_executed(ep: Any) -> bool:
+    if not isinstance(ep, dict):
+        return False
+    execution = ep.get("execution")
+    return (
+        isinstance(execution, dict)
+        and type(execution.get("turns")) is int
+        and execution["turns"] > 0
+        and ep.get("failure_subtype") is not None
     )
 
 
@@ -230,6 +259,8 @@ def audit_tool_matrix_report(report: Mapping[str, Any]) -> dict[str, Any]:
     - When ``string_patterns`` is enabled, every schema-B episode carried
       schema-B evaluation conditions and pattern verdicts while schema-A
       episodes recorded zero schema-B pattern evaluations.
+    - When only clean episodes without ``string_patterns`` exist, every episode
+      recorded executed turns and a graded ``failure_subtype``.
     """
     episodes = report.get("episodes")
     if not isinstance(episodes, list) or not episodes:
@@ -310,8 +341,8 @@ def audit_tool_matrix_report(report: Mapping[str, Any]) -> dict[str, Any]:
     if not treatment:
         arms["executed_episodes"] = [
             {
-                "active": bool(isinstance(ep, dict) and ep.get("status") is not None),
-                "calls": 1 if (isinstance(ep, dict) and ep.get("status") is not None) else 0,
+                "active": _episode_executed(ep),
+                "calls": int(ep["execution"]["turns"]) if _episode_executed(ep) else 0,
             }
             for ep in episodes
         ]

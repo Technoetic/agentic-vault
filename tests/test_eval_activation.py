@@ -128,6 +128,36 @@ class EvalActivationTests(unittest.TestCase):
         self.assertEqual(leak_audit["status"], "control_leakage")
         self.assertEqual(leak_audit["exit_code"], 70)
 
+    def test_clean_only_tool_matrix_passes_check_activation_and_strict_types_enforced(self) -> None:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "evaluate_tool_matrix.py"),
+                "--request-language", "ko",
+                "--instruction-language", "en",
+                "--condition", "clean",
+                "--check-activation",
+            ],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertTrue(data["activation_audit"]["passed"])
+        self.assertIn("executed_episodes", data["activation_audit"]["treatment_arms"])
+
+        # Contradictory active=True with calls=0 and non-strict types are rejected.
+        with self.assertRaises(ValueError):
+            ea.audit_arm_activation(
+                {"t": [{"active": True, "calls": 0}]},
+                treatment_arms=("t",),
+                control_arms=(),
+            )
+        with self.assertRaises(ValueError):
+            ea.audit_retrieval_backend_telemetry({
+                "bm25": [{"active": "false", "calls": 0}],
+                "bm25_hangul2": [{"active": True, "calls": 1}],
+            })
+
 
 if __name__ == "__main__":
     unittest.main()

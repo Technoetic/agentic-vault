@@ -239,6 +239,45 @@ class VaultInstallStateTests(unittest.TestCase):
         self.assertEqual(by_path["00-meta/scripts/deny-guard.py"]["ownership"], "unknown")
         self.assertEqual(by_path["00-meta/scripts/deny-guard.py"]["state"], "unsafe_path")
 
+    def test_managed_replaced_by_dir_reports_drift_and_manifest_rejects_nan_and_duplicates(self) -> None:
+        vault_install_state.record_install_state(self.vault)
+        hc = self.vault / "00-meta" / "scripts" / "vault_healthcheck.py"
+        hc.unlink()
+        hc.mkdir()
+        diag = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(diag["status"], "drift_detected")
+        self.assertGreaterEqual(diag["managed_modified"], 1)
+        self.assertIn({"path": "00-meta/scripts/vault_healthcheck.py", "mismatch": "unsafe_path"}, diag["near_misses"])
+
+        # Restore file, test NaN rejected fail-closed in legacy manifest (never mid-uninstall crash).
+        hc.rmdir()
+        hc.write_text("#!/usr/bin/env python3\n# agentic-vault:healthcheck engine=0.54.0\n", encoding="utf-8")
+        vault_install_state.record_install_state(self.vault)
+        state_file = self.vault / vault_install_state.STATE_REL
+        raw_nan = '{"schema":"agentic-vault/install-state/v1","entries":[{"path":"CLAUDE.md","ownership":"user_owned","bytes":NaN}]}'
+        state_file.write_text(raw_nan, encoding="utf-8")
+        self.assertEqual(vault_install_state.diagnose_install_state(self.vault)["status"], "invalid_state")
+        refused = vault_install_state.uninstall_managed(self.vault, apply=True)
+        self.assertEqual(refused["status"], "refused")
+        self.assertEqual(refused["reason_code"], "invalid_json")
+        self.assertTrue(hc.is_file())
+
+        # Duplicate paths and non-dict entries rejected fail-closed.
+        dup_doc = {
+            "schema": vault_install_state.SCHEMA,
+            "entries": [
+                {"path": "00-meta/scripts/vault_healthcheck.py", "ownership": "managed", "sha256": "0" * 64},
+                {"path": "00-meta/scripts/vault_healthcheck.py", "ownership": "managed", "sha256": "0" * 64},
+            ],
+        }
+        state_file.write_text(json.dumps(dup_doc), encoding="utf-8")
+        self.assertEqual(vault_install_state.diagnose_install_state(self.vault)["reason_code"], "invalid_schema")
+        self.assertEqual(vault_install_state.uninstall_managed(self.vault, apply=True)["status"], "refused")
+
+        nondict_doc = {"schema": vault_install_state.SCHEMA, "entries": [123]}
+        state_file.write_text(json.dumps(nondict_doc), encoding="utf-8")
+        self.assertEqual(vault_install_state.diagnose_install_state(self.vault)["reason_code"], "invalid_schema")
+
 
 if __name__ == "__main__":
     unittest.main()

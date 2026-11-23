@@ -107,6 +107,19 @@ class VaultCoverageMatrixTests(unittest.TestCase):
         self.assertIn("coverage_trust_boundary:", txt_proc.stdout)
         self.assertNotIn(str(self.vault), txt_proc.stdout)
 
+    def test_versioned_darwin_and_unknown_platform_handling(self) -> None:
+        mac = vcm.diagnose_coverage(self.vault, host="claude", platform_name="darwin23")
+        self.assertEqual(mac["platform"], "darwin")
+        by_mac = {(r["host"], r["surface"]): r for r in mac["rows"]}
+        self.assertEqual(by_mac[("all", "backup_posix_dir_fsync")]["status"], "supported")
+        self.assertEqual(by_mac[("all", "adapter_aside_helper")]["status"], "unsupported")
+
+        unk = vcm.diagnose_coverage(self.vault, host="claude", platform_name="freebsd14")
+        self.assertEqual(unk["platform"], "unknown")
+        by_unk = {(r["host"], r["surface"]): r for r in unk["rows"]}
+        self.assertEqual(by_unk[("all", "backup_posix_dir_fsync")]["status"], "not_measured")
+        self.assertEqual(by_unk[("all", "adapter_aside_helper")]["status"], "not_measured")
+
 
 if __name__ == "__main__":
     unittest.main()

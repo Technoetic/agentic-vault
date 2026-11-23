@@ -218,6 +218,10 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict:
     return out
 
 
+def _reject_nonfinite_json(token: str) -> object:
+    raise ValueError(f"nonfinite_json_number:{token}")
+
+
 def _detect_stamp(data: bytes, pattern: re.Pattern[str]) -> tuple[bool, str | None]:
     head = data[:4096].decode("utf-8-sig", errors="replace")
     match = pattern.search(head)
@@ -362,11 +366,23 @@ def _load_manifest(vault: Path) -> tuple[dict | None, str, str]:
     if data is None:
         return None, state, "invalid"
     try:
-        doc = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
+        doc = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_nonfinite_json,
+        )
     except (UnicodeError, ValueError, RecursionError):
         return None, "invalid_json", "invalid"
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA or not isinstance(doc.get("entries"), list):
         return None, "invalid_schema", "invalid"
+    seen_paths: set[str] = set()
+    for entry in doc["entries"]:
+        if not isinstance(entry, dict):
+            return None, "invalid_schema", "invalid"
+        rel = entry.get("path")
+        if type(rel) is not str or not rel.strip() or rel in seen_paths:
+            return None, "invalid_schema", "invalid"
+        seen_paths.add(rel)
     if "manifest_sha256" in doc:
         claimed = doc["manifest_sha256"]
         if type(claimed) is not str or not HASH_RE.fullmatch(claimed):
@@ -455,6 +471,7 @@ def diagnose_install_state(vault: Path) -> dict:
             items.append({"path": rel, "ownership": "managed", "status": "missing"})
             near_misses.append({"path": rel, "mismatch": "missing_file"})
         elif data is None:
+            managed_modified += 1
             items.append({"path": rel, "ownership": "managed", "status": read_state})
             near_misses.append({"path": rel, "mismatch": read_state})
         else:
@@ -518,7 +535,7 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
             "state_removed": False,
         }
 
-    removable: list[tuple[str, str, re.Pattern[str]]] = []
+    removable: list[tuple[str, str, re.Pattern[str], dict]] = []
     preserved: list[dict[str, str]] = []
     remaining_entries: list[dict] = []
 

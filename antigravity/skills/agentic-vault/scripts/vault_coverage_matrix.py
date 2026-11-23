@@ -38,11 +38,11 @@ def _normalize_platform(platform_name: str | None = None) -> str:
     raw = (platform_name if platform_name is not None else sys.platform).lower()
     if raw in ("win32", "windows", "nt"):
         return "windows"
-    if raw in ("darwin", "macos"):
+    if raw == "macos" or raw.startswith("darwin"):
         return "darwin"
     if raw.startswith("linux"):
         return "linux"
-    return "linux"
+    return "unknown"
 
 
 def _is_reparse(st: os.stat_result) -> bool:
@@ -116,6 +116,7 @@ def diagnose_coverage(
         raise ValueError(f"unsupported_host:{host}")
     plat = _normalize_platform(platform_name)
     is_windows = plat == "windows"
+    is_posix = plat in ("linux", "darwin")
     resolved = Path(vault)
 
     has_config = _safe_regular_exists(resolved, "00-meta/vault-config.json") == "present"
@@ -174,17 +175,33 @@ def diagnose_coverage(
         surface="backup_posix_dir_fsync",
         host="all",
         os_scope="posix",
-        status="unsupported" if is_windows else "supported",
-        vault_state="not_applicable" if is_windows else ("active_on_disk" if has_config else "absent"),
-        reason="windows_noop_posix_directory_fsync_only" if is_windows else "posix_parent_directory_fsync_enabled",
+        status="supported" if is_posix else ("unsupported" if is_windows else "not_measured"),
+        vault_state=(
+            ("active_on_disk" if has_config else "absent")
+            if is_posix
+            else ("not_applicable" if is_windows else "unverified")
+        ),
+        reason=(
+            "posix_parent_directory_fsync_enabled"
+            if is_posix
+            else ("windows_noop_posix_directory_fsync_only" if is_windows else "unrecognized_platform_os_behavior_not_measured")
+        ),
     ))
     rows.append(_row(
         surface="adapter_aside_helper",
         host="all",
         os_scope="windows",
-        status="opt_in_available" if is_windows else "unsupported",
-        vault_state=("configured" if has_aside_helper else "absent") if is_windows else "not_applicable",
-        reason="windows_powershell_helper_for_aside_cli" if is_windows else "windows_only_powershell_helper",
+        status="opt_in_available" if is_windows else ("unsupported" if is_posix else "not_measured"),
+        vault_state=(
+            ("configured" if has_aside_helper else "absent")
+            if is_windows
+            else ("not_applicable" if is_posix else "unverified")
+        ),
+        reason=(
+            "windows_powershell_helper_for_aside_cli"
+            if is_windows
+            else ("windows_only_powershell_helper" if is_posix else "unrecognized_platform_os_behavior_not_measured")
+        ),
     ))
 
     # Host-specific hook and adapter surfaces.
