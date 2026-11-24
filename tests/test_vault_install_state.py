@@ -1,6 +1,7 @@
 """Tests for deterministic install-state tracking and ownership-guarded uninstall."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -115,6 +116,47 @@ class VaultInstallStateTests(unittest.TestCase):
         self.assertFalse((self.vault / vault_install_state.STATE_REL).exists())
         self.assertTrue((self.vault / "CLAUDE.md").is_file())
 
+    def test_old_sealed_command_entry_is_ignored_on_status_record_and_uninstall(self) -> None:
+        rel = ".claude/commands/aside-repl.md"
+        target = self.vault / rel
+        target.parent.mkdir()
+        original = b"<!-- agentic-vault:adapter aside-repl engine=0.47.0 -->\nold procedure\n"
+        target.write_bytes(original)
+        recorded = vault_install_state.record_install_state(self.vault)
+        self.assertNotIn(rel, [item["path"] for item in recorded["entries"]])
+        state_path = self.vault / vault_install_state.STATE_REL
+        old_manifest = json.loads(state_path.read_text(encoding="utf-8"))
+        old_manifest["entries"].append({"path": rel, "ownership": "managed", "stamp": "0.47.0",
+                                        "sha256": hashlib.sha256(original).hexdigest(), "bytes": len(original)})
+        old_manifest["manifest_sha256"] = vault_install_state._canonical_manifest_sha256(old_manifest)
+        state_path.write_text(json.dumps(old_manifest), encoding="utf-8")
+
+        for current in (original, original + b"a separately edited local command\n", None):
+            with self.subTest(present=current is not None, edited=current != original):
+                if current is None:
+                    target.unlink()
+                else:
+                    target.write_bytes(current)
+                status = vault_install_state.diagnose_install_state(self.vault)
+                self.assertEqual(status["manifest_integrity"], "verified")
+                self.assertEqual(status["status"], "clean")
+                self.assertNotIn(rel, [item["path"] for item in status["items"]])
+                self.assertNotIn(rel, vault_install_state.uninstall_managed(self.vault)["removable"])
+
+        # Even matching the old hash must not allow removal. An unrelated local edit still reports drift.
+        target.write_bytes(original)
+        rule = ".claude/rules/vault-workflow.md"
+        with (self.vault / rule).open("ab") as handle:
+            handle.write(b"local rule change\n")
+        drift = vault_install_state.diagnose_install_state(self.vault)
+        self.assertEqual(drift["near_misses"], [{"path": rule, "mismatch": "sha256_mismatch"}])
+        applied = vault_install_state.uninstall_managed(self.vault, apply=True)
+        self.assertIn("00-meta/scripts/vault_healthcheck.py", applied["removed"])
+        self.assertNotIn(rel, applied["removed"])
+        self.assertEqual(target.read_bytes(), original)
+        refreshed = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertNotIn(rel, [item["path"] for item in refreshed["entries"]])
+
     def test_refuses_uninstall_without_recorded_state(self) -> None:
         res = vault_install_state.uninstall_managed(self.vault, apply=True)
         self.assertEqual(res["status"], "refused")
@@ -149,7 +191,6 @@ class VaultInstallStateTests(unittest.TestCase):
         self.assertEqual(data["install_state"]["managed_intact"], 3)
 
     def test_tampered_manifest_cannot_delete_user_files_or_unstamped_files(self) -> None:
-        import hashlib
 
         user_note = self.vault / "20-knowledge" / "my-note.md"
         user_note.parent.mkdir(parents=True)

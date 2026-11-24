@@ -55,10 +55,11 @@ MANAGED_SURFACES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("00-meta/scripts/deny-guard.py", re.compile(r"agentic-vault:adapter deny-guard engine=([^\s]+)")),
     ("00-meta/scripts/ps-parse.ps1", re.compile(r"agentic-vault:adapter ps-parse engine=([^\s]+)")),
     ("00-meta/scripts/lesson-cues.py", re.compile(r"agentic-vault:adapter lesson-cues engine=([^\s]+)")),
-    (".claude/commands/aside-repl.md", re.compile(r"agentic-vault:adapter aside-repl engine=([^\s]+)")),
     ("AGENTS.md", re.compile(r"agentic-vault:generated")),
 )
 _MANAGED_SURFACE_MAP: dict[str, re.Pattern[str]] = dict(MANAGED_SURFACES)
+# Older sealed manifests can list this vault-local command. Ignore that entry after validating the seal.
+RETIRED_COMMAND_REL = ".claude/commands/aside-repl.md"
 RULE_GLOB_DIR = ".claude/rules"
 RULE_NAME_RE = re.compile(r"^vault-[a-z0-9-]+\.md$")
 RULE_STAMP_RE = re.compile(r"agentic-vault:rule engine=([^\s]+)")
@@ -74,7 +75,6 @@ PRUNABLE_EMPTY_DIRS: tuple[str, ...] = (
     "00-meta/scripts/git-hooks",
     "00-meta/scripts",
     ".claude/rules",
-    ".claude/commands",
 )
 _REPARSE_ATTR = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
@@ -438,9 +438,9 @@ def diagnose_install_state(vault: Path) -> dict:
     user_owned_count = 0
 
     for rec in manifest["entries"]:
-        if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
-            continue
         rel = rec["path"]
+        if rel == RETIRED_COMMAND_REL:
+            continue
         recorded_paths.add(rel)
         ownership = rec.get("ownership", "user_owned")
         recorded_sha = rec.get("sha256")
@@ -540,9 +540,9 @@ def uninstall_managed(vault: Path, *, apply: bool = False) -> dict:
     remaining_entries: list[dict] = []
 
     for rec in manifest["entries"]:
-        if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
-            continue
         rel = rec["path"]
+        if rel == RETIRED_COMMAND_REL:
+            continue
         ownership = rec.get("ownership", "user_owned")
         recorded_sha = rec.get("sha256")
 

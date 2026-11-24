@@ -32,10 +32,6 @@ try:
     from _winfs import make_junction
 except ImportError:  # run as tests.<module> from the repository root
     from tests._winfs import make_junction
-try:
-    from test_command_bodies import FENCE, INLINE
-except ImportError:  # run as tests.<module> from the repository root
-    from tests.test_command_bodies import FENCE, INLINE
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,7 +39,6 @@ SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 ADAPTERS = ROOT / "assets" / "adapters"
 ASSETS = ADAPTERS / "aside"
 HELPER = ASSETS / "aside-up.ps1"
-COMMAND = ASSETS / "aside-repl-command.md"
 COMMAND_REL = ".claude/commands/aside-repl.md"
 HEALTHCHECK = SCRIPTS / "vault_healthcheck.py"
 DENY_GUARD = ADAPTERS / "deny-guard" / "deny-guard.py"
@@ -108,32 +103,6 @@ def _forbidden_spans(text: str,
     return [(start, length) for length, listed in sorted(digests.items())
             for start in range(len(folded) - length + 1)
             if hashlib.sha256(folded[start:start + length].encode("utf-8")).hexdigest() in listed]
-
-
-def _command_parts(text: str) -> tuple[str, str]:
-    """(front matter, rest) of a command file that starts with a `---` block."""
-    assert text.startswith("---\n"), text[:20]
-    _, front, rest = text.split("---\n", 2)
-    return front, rest
-
-
-def _fenced_blocks(text: str) -> list[tuple[str, str, int, int]]:
-    """(info string, body, first line, last line) of every backquote-fenced block."""
-    blocks: list[tuple[str, str, int, int]] = []
-    info: str | None = None
-    body: list[str] = []
-    start = 0
-    for index, line in enumerate(text.splitlines()):
-        stripped = line.strip()
-        if info is None and stripped.startswith("```"):
-            info, body, start = stripped[3:].strip(), [], index
-        elif info is not None and stripped == "```":
-            blocks.append((info, "\n".join(body), start, index))
-            info = None
-        elif info is not None:
-            body.append(line)
-    assert info is None, "unclosed fence"
-    return blocks
 
 
 def _section(text: str, heading: str) -> str:
@@ -240,96 +209,12 @@ class AdapterAssetTests(unittest.TestCase):
         self.assertNotRegex(front, r"(?<!\")\[\[")
         self.assertRegex(body, r"\[\[[^\]]+\]\]")  # at least one wikilink: no orphan note
 
-    def test_repl_command_is_stamped_utf8_and_has_command_frontmatter(self) -> None:
-        # The opt-in /aside-repl procedure is copied into vaults as .claude/commands/aside-repl.md.
-        raw = COMMAND.read_bytes()
-        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "no BOM")
-        # A checkout may carry CRLF line ends when core.autocrlf is on: fold CRLF to LF first,
-        # then no lone carriage return may be left. The rest of the test works on the folded text.
-        text = raw.decode("utf-8").replace("\r\n", "\n")  # raises if the file is not UTF-8
-        self.assertNotIn("\r", text)
-        self.assertTrue(text.startswith("---\n"))
-        front, rest = _command_parts(text)
-        self.assertEqual({line.split(":", 1)[0] for line in front.splitlines()}, {"description", "argument-hint"})
-        match = re.match(r"<!-- agentic-vault:adapter aside-repl engine=(\S+) — ", rest.split("\n", 1)[0])
-        self.assertIsNotNone(match, rest.split("\n", 1)[0])
-        stamp = match.group(1)
-        self.assertEqual(vault_adapters._stamp(text, vault_adapters.COMMAND_STAMP_RE), stamp)
-        self.assertRegex(stamp, vault_adapters.VERSION_RE)
-        # It first ships after v0.46.0 and never names a release beyond the next minor one.
-        major, minor, _ = _manifest_core()
-        self.assertGreater(vault_adapters._compare(stamp, "0.46.0"), 0)
-        self.assertLessEqual(vault_adapters._version(stamp), (major, minor + 1, 0))
-
-    def test_repl_command_injects_no_shell_and_keeps_the_request_out_of_shell_lines(self) -> None:
-        text = COMMAND.read_text(encoding="utf-8")
-        self.assertEqual([match.start() for match in INLINE.finditer(text)], [])
-        self.assertEqual([match.start() for match in FENCE.finditer(text)], [])
-        self.assertEqual(text.count("$ARGUMENTS"), 1)
-        lines = text.splitlines()
-        blocks = _fenced_blocks(text)
-        where = next(index for index, line in enumerate(lines) if "$ARGUMENTS" in line)
-        self.assertFalse(any(first <= where <= last for _, _, first, last in blocks))
-        self.assertNotIn("`", lines[where])
-        for literal in ("$ARGUMENTS[", "${CLAUDE_"):
-            with self.subTest(literal=literal):
-                self.assertNotIn(literal, text)
-        self.assertIsNone(re.search(r"\$[0-9]", text))
-        front, _ = _command_parts(text)
-        keys = {line.split(":", 1)[0].strip() for line in front.splitlines()}
-        for key in ("allowed-tools", "arguments", "shell", "context", "agent", "hooks", "model", "effort",
-                    "disable-model-invocation"):
-            with self.subTest(key=key):
-                self.assertNotIn(key, keys)
-        self.assertEqual([info for info, _, _, _ in blocks], ["bash", "text"])
-        bash, python = blocks[0][1], blocks[1][1]
-        self.assertIn('aside repl "$(cat ', bash)
-        self.assertIn(" 2> ", bash)
-        self.assertIn("subprocess.run(['aside', 'repl', code]", python)
-        self.assertIn("stdout=out, stderr=err", python)
-        self.assertNotIn("shell=True", python)
-        for info, body, _, _ in blocks:
-            with self.subTest(fence=info):
-                self.assertNotIn("ARGUMENTS", body)
-        self.assertNotIn("실측한 전달 방식은 bash 셸에서", text)
-        self.assertNotIn("bash 셸이 없으면 실행하지", text)  # a host without bash gets the Python route
-        # A host on the shell-free Python route may have no grep: the after-run check names both ways
-        # to count the not-running message.
-        # The start hook acts only on commands that begin with `aside` (settings-hooks.json), and the
-        # Python route begins with `python`: on Windows the helper runs first even when the hook is on,
-        # and again directly before the one retry.
-        self.assertIn("- 실행 뒤 종료 코드와 출력 파일의 바이트 수·SHA-256을 확인한다. 실패했으면 출력·오류 파일에 "
-                      "\"Aside isn't running\"이 있는지 건수만 센다(bash 셸이면 `grep -c`, 없으면 Python으로 센다). "
-                      "있으면 2단계 1번을 다시 하되 Windows에서는 훅이 있어도 도우미를 직접 실행하고, 한 번만 다시 "
-                      "실행한다.", lines)
-        self.assertNotIn("있으면 2단계 1번을 다시 한 뒤 한 번만 다시 실행한다.", text)
-        self.assertIn("1. CLAUDE.md의 Aside 조항이 정한 기동 절차를 따른다(Windows에서 자동 기동 훅이 없으면 볼트 루트에서 "
-                      "`powershell -NoProfile -ExecutionPolicy Bypass -File 00-meta/scripts/aside-up.ps1`). "
-                      "4단계의 Python 경로로 넘길 때는 자동 기동 훅이 `aside`로 시작하는 명령에만 동작하므로, "
-                      "Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", lines)
-        self.assertNotIn("`grep -c`로 건수만 보고", text)
-
-    def test_repl_command_closes_tabs_with_the_global_function(self) -> None:
-        # 2026-11-13 (fact A15, one run): closeTab is a global function of the repl, not a method of the
-        # tab object that openTab returns; a trial run that wrote tab.closeTab() got "not a function".
-        lines = COMMAND.read_text(encoding="utf-8").splitlines()
-        self.assertIn("- 스크립트가 연 탭은 스크립트 끝에서 전역 함수 `closeTab(탭)`으로 닫는다(`openTab`이 돌려준 탭 객체의 "
-                      "메서드가 아니다). 브라우저 창은 닫지 않는다(창이 닫히면 CLI 데몬도 종료된다).", lines)
-        self.assertNotIn("- 스크립트가 연 탭은 스크립트 끝에서 `closeTab`으로 닫는다.", "\n".join(lines))
-
-    def test_repl_command_and_guide_state_no_unmeasured_limit(self) -> None:
-        command = COMMAND.read_text(encoding="utf-8")
+    def test_guide_states_no_unmeasured_limit(self) -> None:
         guide = (ASSETS / "operations-guide.md").read_text(encoding="utf-8")
-        for name, text in (("command", command), ("guide", guide)):
-            for literal in ("waitForTimeout", "attachBrowserTab", "about:blank", "127.0.0.1", "localhost"):
-                with self.subTest(asset=name, literal=literal):
-                    self.assertNotIn(literal, text)
-            with self.subTest(asset=name, literal="drive path"):
-                self.assertIsNone(re.search(r"\b[A-Za-z]:[\\/]", text))
-        # Limits live in the guide only; the command names none of them.
-        for literal in ("30초", "import(", "artifacts", "getTabs", "listBrowserTabs", "120", "[["):
-            with self.subTest(asset="command", literal=literal):
-                self.assertNotIn(literal, command)
+        for literal in ("waitForTimeout", "attachBrowserTab", "about:blank", "127.0.0.1", "localhost"):
+            with self.subTest(literal=literal):
+                self.assertNotIn(literal, guide)
+        self.assertIsNone(re.search(r"\b[A-Za-z]:[\\/]", guide))
 
     def test_guide_template_records_the_2026_11_12_repl_rows(self) -> None:
         text = (ASSETS / "operations-guide.md").read_text(encoding="utf-8")
@@ -355,8 +240,8 @@ class AdapterAssetTests(unittest.TestCase):
                         "listBrowserTabs()", "getTabs()", "import(", "30.0초", "./artifacts/x.png", "120s timeout"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, "\n".join(rows))
-        # 2026-11-13: the command's one-line Python route typed in Windows PowerShell 5.1 (one run).
-        python_in_powershell = [row for row in rows if "PowerShell 5.1" in row and "Python 한 줄" in row]
+        # 2026-11-13: passing a script through Python from Windows PowerShell 5.1 (one run).
+        python_in_powershell = [row for row in rows if "PowerShell 5.1" in row and "Python" in row]
         self.assertEqual(len(python_in_powershell), 1)
         for literal in ("큰따옴표·작은따옴표·템플릿 문자열·한글", "그대로 실행됐다", "(1회)"):
             with self.subTest(python_route_literal=literal):
@@ -364,15 +249,13 @@ class AdapterAssetTests(unittest.TestCase):
         intro = text[text.index("# Aside CLI 운영 가이드"):text.index("## 명령과 데이터 경로")]
         self.assertIn("표 두 개", intro)
 
-    def test_clause_points_to_the_procedure_and_is_stamped_0_47_0(self) -> None:
+    def test_clause_explains_direct_cli_usage_and_keeps_the_helper(self) -> None:
         text = (ASSETS / "browser-clause.md").read_text(encoding="utf-8")
         match = re.match(r"<!-- agentic-vault:adapter aside begin engine=(\S+) ", text)
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "0.47.0")
-        self.assertEqual(match.group(1), vault_adapters._stamp(COMMAND.read_text(encoding="utf-8"),
-                                                              vault_adapters.COMMAND_STAMP_RE))
-        for literal in ("**repl 스크립트 전달:**", ".claude/commands/aside-repl.md", "`/aside-repl`",
-                        '"$(cat <파일>)"', "subprocess.run(['aside', 'repl', 코드])"):
+        self.assertEqual(match.group(1), "0.57.1")
+        self.assertNotIn(COMMAND_REL, text)
+        for literal in ("**repl 스크립트 전달:**", '"$(cat <파일>)"', "subprocess.run(['aside', 'repl', 코드])"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, text)
         # The hook does not see the Python route (its command begins with `python`), so that route
@@ -385,7 +268,7 @@ class AdapterAssetTests(unittest.TestCase):
         assets = sorted(path for path in ADAPTERS.glob("*/*") if path.is_file())
         self.assertIn(DENY_GUARD, assets)  # every adapter folder, the deny-zone guard included
         self.assertIn(DENY_GUARD_PARSER, assets)
-        self.assertIn(ASSETS / "aside-repl-command.md", assets)
+        self.assertNotIn(ASSETS / "aside-repl-command.md", assets)
         for path in assets:
             with self.subTest(asset=path.relative_to(ADAPTERS).as_posix()):
                 # Offsets and lengths only, so a failure never prints the matched text.
@@ -992,6 +875,31 @@ class DenyGuardReportTests(_VaultCase):
 class AdapterReportCompatibilityTests(_VaultCase):
     """The deny_guard entry sits next to aside; what v0.31.0 reported stays exactly as it was."""
 
+    def test_retired_command_is_never_offered_or_reported(self) -> None:
+        self.write("CLAUDE.md", (ASSETS / "browser-clause.md").read_text(encoding="utf-8"))
+        before, code = vault_adapters.diagnose(self.vault)
+        self.assertEqual(code, 0)
+        self.assertNotIn("aside_command", before["adapters"])
+        for local_text in (None, "<!-- agentic-vault:adapter aside-repl engine=0.47.0 -->\nLocal changes\n",
+                           "# My independent command\n"):
+            with self.subTest(local_text=local_text):
+                if local_text is not None:
+                    self.write(COMMAND_REL, local_text)
+                for flag in (False, True):
+                    report, code = vault_adapters.diagnose(self.vault, offer_aside_command=flag)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(report, before)
+                    self.assertNotIn("aside_command", vault_adapters._format_text(report))
+                if local_text is not None:
+                    self.assertEqual((self.vault / COMMAND_REL).read_text(encoding="utf-8"), local_text)
+                else:
+                    self.assertFalse((self.vault / COMMAND_REL).exists())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = vault_adapters.main(["--vault", str(self.vault), "--format", "json", "--offer-aside-command"])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), before)
+
     def test_aside_entry_and_text_lines_match_v0310(self) -> None:
         report, code = vault_adapters.diagnose(self.vault)
         stamp = vault_adapters._stamp(HELPER.read_text(encoding="utf-8"))
@@ -1046,19 +954,6 @@ class AdapterReportCompatibilityTests(_VaultCase):
         self.assertEqual(vault_adapters.diagnose(empty),
                          ({"schema_version": 1, "status": "not_vault", "reason_code": "config_not_found",
                            "adapters": {}}, 2))
-
-    def test_installing_the_command_changes_no_other_entry(self) -> None:
-        self.write("CLAUDE.md", "# vault\n\n" + (ASSETS / "browser-clause.md").read_text(encoding="utf-8"))
-        self.write(vault_adapters.HELPER_REL, HELPER.read_text(encoding="utf-8"))
-        before, _ = vault_adapters.diagnose(self.vault)
-        self.write(COMMAND_REL, COMMAND.read_text(encoding="utf-8"))
-        after, _ = vault_adapters.diagnose(self.vault)
-        self.assertEqual(after["adapters"]["aside"], before["adapters"]["aside"])
-        self.assertEqual(after["adapters"]["deny_guard"], before["adapters"]["deny_guard"])
-        self.assertEqual(vault_adapters._format_text(after).splitlines()[:7],
-                         vault_adapters._format_text(before).splitlines()[:7])
-        self.assertNotIn("aside_command", before["adapters"])
-        self.assertEqual(after["adapters"]["aside_command"]["state"], "current")
 
 
 class DenyGuardWiringTests(unittest.TestCase):
@@ -1141,190 +1036,7 @@ class DenyGuardWiringTests(unittest.TestCase):
         self.assertIn("deny zone 가드(`adapters.deny_guard`)도 Claude Code 전용이다",
                       self.read("skills/agentic-vault/references/codex.md"))
 
-
-class AsideCommandReportTests(_VaultCase):
-    """adapters.aside_command: the opt-in /aside-repl procedure command copied into .claude/commands/."""
-
-    def report(self, offer: bool = False) -> dict:
-        report, code = (vault_adapters.diagnose(self.vault, offer_aside_command=True) if offer
-                        else vault_adapters.diagnose(self.vault))
-        self.assertEqual(code, 0)
-        return report["adapters"]
-
-    def install_clause(self) -> None:
-        self.write("CLAUDE.md", "# vault\n\n" + (ASSETS / "browser-clause.md").read_text(encoding="utf-8"))
-
-    @staticmethod
-    def bundled() -> str:
-        return COMMAND.read_text(encoding="utf-8")
-
-    def test_no_entry_without_the_file_or_the_flag(self) -> None:
-        # Pin: a vault without the command sees the report /vault-doctor printed before.
-        for clause in (False, True):
-            with self.subTest(clause=clause):
-                if clause:
-                    self.install_clause()
-                report, code = vault_adapters.diagnose(self.vault)
-                self.assertEqual(code, 0)
-                self.assertNotIn("aside_command", report["adapters"])
-                self.assertFalse(any(line.startswith("aside_command")
-                                     for line in vault_adapters._format_text(report).splitlines()))
-
-    def test_offer_needs_the_flag_and_the_clause(self) -> None:
-        stamp = vault_adapters._stamp(self.bundled(), vault_adapters.COMMAND_STAMP_RE)
-        self.assertEqual(self.report(offer=True)["aside_command"],
-                         {"path": COMMAND_REL, "bundled_stamp": stamp, "installed_stamp": None,
-                          "state": "missing", "actions": []})
-        self.install_clause()
-        self.assertNotIn("aside_command", self.report())
-        self.assertEqual(self.report(offer=True)["aside_command"]["actions"], ["offer_command"])
-        self.assertEqual(self.report(offer=True)["aside"], self.report()["aside"])
-        for argv, expected in (([], None), (["--offer-aside-command"], ["offer_command"])):
-            with self.subTest(argv=argv):
-                buffer = io.StringIO()
-                with redirect_stdout(buffer):
-                    code = vault_adapters.main(["--vault", str(self.vault), "--format", "json", *argv])
-                self.assertEqual(code, 0)
-                entry = json.loads(buffer.getvalue())["adapters"].get("aside_command")
-                self.assertEqual(None if entry is None else entry["actions"], expected)
-        # A clause with broken markers is not "present": nothing is offered.
-        self.write("CLAUDE.md", "<!-- " + vault_adapters.CLAUSE_BEGIN + " -->\nno end marker\n")
-        self.assertEqual(self.report(offer=True)["aside_command"]["actions"], [])
-
-    def test_installed_copy_states(self) -> None:
-        text = self.bundled()
-        bundled = vault_adapters._stamp(text, vault_adapters.COMMAND_STAMP_RE)
-        stamp_line = next(line for line in text.splitlines(keepends=True)
-                          if "agentic-vault:adapter aside-repl engine=" in line)
-        cases = (
-            ("byte", text, "\n", "current", []),
-            ("crlf", text, "\r\n", "current", []),
-            ("bom", "﻿" + text, "\n", "current", []),
-            ("outdated", text.replace(f"engine={bundled}", "engine=0.1.0", 1), "\n", "outdated",
-             ["offer_command_update"]),
-            ("newer", text.replace(f"engine={bundled}", "engine=99.0.0", 1), "\n", "newer", ["review_command"]),
-            ("modified", text + "\n로컬 메모\n", "\n", "modified", ["review_command"]),
-            ("unstamped", text.replace(stamp_line, "", 1), "\n", "unstamped", ["review_command"]),
-            ("prerelease", text.replace(f"engine={bundled}", "engine=0.47.0-rc.1", 1), "\n", "unstamped",
-             ["review_command"]),
-        )
-        for name, content, newline, state, actions in cases:
-            with self.subTest(case=name):
-                self.new_vault()
-                self.install_clause()
-                self.write(COMMAND_REL, content, newline=newline)
-                for offer in (False, True):
-                    entry = self.report(offer)["aside_command"]
-                    self.assertEqual(entry["state"], state)
-                    self.assertEqual(entry["actions"], actions)
-        with self.subTest(case="undecodable"):
-            self.new_vault()
-            self.install_clause()
-            path = self.vault / COMMAND_REL
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"\xff\xfe\x00bad")
-            for offer in (False, True):
-                entry = self.report(offer)["aside_command"]
-                self.assertEqual(entry["state"], "unreadable")
-                self.assertEqual(entry["actions"], ["review_command"])
-
-    def test_linked_commands_folder_is_not_followed(self) -> None:
-        outside = Path(self._tmp.name) / "outside"
-        outside.mkdir()
-        (outside / "aside-repl.md").write_text(self.bundled(), encoding="utf-8")
-        (self.vault / ".claude").mkdir()
-        try:
-            os.symlink(outside, self.vault / ".claude" / "commands", target_is_directory=True)
-        except (OSError, NotImplementedError):
-            self.skipTest("symlinks are not available")
-        self.install_clause()
-        entry = self.report(offer=True)["aside_command"]
-        self.assertEqual(entry["state"], "unsafe_path")
-        self.assertEqual(entry["actions"], ["review_command"])
-
-    @unittest.skipUnless(os.name == "nt", "junctions are Windows only")
-    def test_junctioned_commands_folder_is_not_followed(self) -> None:
-        outside = Path(self._tmp.name) / "outside-junction"
-        outside.mkdir()
-        (outside / "aside-repl.md").write_text(self.bundled(), encoding="utf-8")
-        (self.vault / ".claude").mkdir()
-        make_junction(self.vault / ".claude" / "commands", outside)
-        self.install_clause()
-        for offer in (False, True):
-            entry = self.report(offer)["aside_command"]
-            self.assertEqual(entry["state"], "unsafe_path")
-            self.assertEqual(entry["actions"], ["review_command"])
-
-    def test_existing_file_is_reported_without_the_flag(self) -> None:
-        self.write(COMMAND_REL, self.bundled())
-        stamp = vault_adapters._stamp(self.bundled(), vault_adapters.COMMAND_STAMP_RE)
-        buffer = io.StringIO()
-        with redirect_stdout(buffer):
-            code = vault_adapters.main(["--vault", str(self.vault)])
-        self.assertEqual(code, 0)
-        lines = buffer.getvalue().splitlines()
-        self.assertEqual(lines[-3:], [
-            "deny_guard.actions: none",
-            f"aside_command: current (installed={stamp}, bundled={stamp})",
-            "aside_command.actions: none",
-        ])
-
-    def test_bundled_command_constants_match_the_asset(self) -> None:
-        self.assertEqual(vault_adapters.BUNDLED_COMMAND.resolve(), COMMAND.resolve())
-        self.assertEqual(vault_adapters.COMMAND_REL, COMMAND_REL)
-        stamp = vault_adapters._stamp(self.bundled(), vault_adapters.COMMAND_STAMP_RE)
-        self.assertIsNotNone(stamp)
-        self.assertIn(f"<!-- agentic-vault:adapter aside-repl engine={stamp} — ", self.bundled())
-        # The other adapters' stamp patterns do not read this file's stamp.
-        for pattern in (vault_adapters.HELPER_STAMP_RE, vault_adapters.GUARD_STAMP_RE,
-                        vault_adapters.PARSER_STAMP_RE, vault_adapters.CUES_STAMP_RE):
-            with self.subTest(pattern=pattern.pattern):
-                self.assertIsNone(vault_adapters._stamp(self.bundled(), pattern))
-
-
-class AsideCommandWiringTests(unittest.TestCase):
-    """/vault-init offers the command, /vault-doctor reports it, Codex reaches it through the clause."""
-
-    @staticmethod
-    def read(rel: str) -> str:
-        return (ROOT / rel).read_text(encoding="utf-8")
-
-    def test_offer_flag_is_passed_by_init_and_never_by_doctor(self) -> None:
-        runs: dict[str, list[str]] = {}
-        for path in sorted((*(ROOT / "commands").glob("*.md"), *(ROOT / "skills").rglob("*.md"))):
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if "vault_adapters.py" in line and "--vault" in line:
-                    runs.setdefault(path.relative_to(ROOT).as_posix(), []).append(line)
-        init = self.read("commands/vault-init.md")
-        self.assertEqual(init.count("--offer-aside-command"), 1)
-        self.assertEqual(sum("--offer-aside-command" in line for line in runs["commands/vault-init.md"]), 1)
-        self.assertIn("--offer-aside-command", _section(init, "## 4-1. 도구 어댑터"))
-        for rel in ("commands/vault-doctor.md", "skills/agentic-vault/references/codex.md"):
-            with self.subTest(caller=rel):
-                self.assertIn(rel, runs)
-                self.assertFalse(any("--offer-aside-command" in line for line in runs[rel]))
-
-    def test_init_offers_the_command_separately_in_4_1(self) -> None:
-        init = self.read("commands/vault-init.md")
-        step = _section(init, "## 4-1. 도구 어댑터")
-        for literal in ("`offer_command`", "**따로**", ".claude/commands/aside-repl.md",
-                        ".claude/skills/aside-repl/SKILL.md", "aside-repl-command.md", "`frontmatter_exempt_paths`",
-                        "거부하거나 답이 없으면 복사하지 않는다", "**repl 스크립트 전달:**",
-                        "「고아 노드」와(index 노트가 있으면) 「인덱스 미등록」",
-                        "명령을 넣었다면 `aside_command.state=current`도 확인한다"):
-            with self.subTest(literal=literal):
-                self.assertIn(literal, step)
-        self.assertNotIn("offer_command", _section(init, "## 4-2. deny zone 가드"))
-
-    def test_doctor_reports_the_command_without_offering_it(self) -> None:
-        doctor = self.read("commands/vault-doctor.md")
-        for literal in ("adapters.aside_command", "`offer_command`는 나오지 않는다",
-                        "`adapters.lesson_cues`와 `adapters.aside_command`가 없으면"):
-            with self.subTest(literal=literal):
-                self.assertIn(literal, doctor)
-        self.assertNotIn("--offer-aside-command", doctor.replace("`--offer-aside-command`를 붙이지 않으므로", ""))
-
-    def test_guard_guide_and_codex_reference_state_the_injection_observation(self) -> None:
+    def test_guard_guide_states_the_injection_observation(self) -> None:
         limits = _section(self.read("assets/adapters/deny-guard/guide.md"), "## 한계")
         # The probe command had pre-approved its injected command with allowed-tools; a settings allow
         # rule instead was not run, so the guide names that condition of the observation.
@@ -1333,18 +1045,14 @@ class AsideCommandWiringTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, limits)
         self.assertNotIn("문서상 주입 명령은 권한 규칙만 거친다", limits)
-        codex = self.read("skills/agentic-vault/references/codex.md")
-        for literal in ("adapters.aside_command", "`요청:` 줄의 자리표시자", "--offer-aside-command"):
-            with self.subTest(literal=literal):
-                self.assertIn(literal, codex)
 
 
 _HEALTHCHECK_NOTE = ("---\ntitle: {title}\ntype: concept\nstatus: active\nai_priority: medium\ntags: [demo]\n"
                      "created: 2026-11-01\nupdated: 2026-11-01\n---\n\n# {title}\n\n{links}\n")
 
 
-class AsideCommandHealthcheckTests(unittest.TestCase):
-    """What the health check makes of the command file in a vault laid out as /vault-init lays it out."""
+class VaultLocalCommandHealthcheckTests(unittest.TestCase):
+    """The normal note rules still apply to vault-local commands from earlier installs."""
 
     def build(self, root: Path, index: bool = True, roots: bool = True) -> Path:
         vault = root / "vault"
@@ -1367,7 +1075,8 @@ class AsideCommandHealthcheckTests(unittest.TestCase):
     def install(vault: Path) -> None:
         target = vault / COMMAND_REL
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(COMMAND.read_bytes())
+        target.write_text("---\ndescription: A vault-local procedure\n---\n\n# Local procedure\n",
+                          encoding="utf-8")
 
     def check(self, vault: Path, report: Path) -> tuple[int, dict, str]:
         env = {key: value for key, value in os.environ.items() if key != "CLAUDE_PROJECT_DIR"}

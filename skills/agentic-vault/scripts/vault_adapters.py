@@ -4,11 +4,7 @@
 Three adapters exist: Aside (an AI browser with a CLI), the opt-in deny-zone
 guard (a Claude Code PreToolUse hook template, assets/adapters/deny-guard/) and
 opt-in lesson cues (an advisory PreToolUse hook template,
-assets/adapters/lesson-cues/). The Aside adapter also ships an opt-in
-procedure command (assets/adapters/aside/aside-repl-command.md, copied to
-.claude/commands/aside-repl.md); its aside_command entry appears only when the
-caller passes --offer-aside-command, which /vault-init and /vault-upgrade do
-and /vault-doctor does not, or when that file exists.
+assets/adapters/lesson-cues/).
 The report tells /vault-init, /vault-upgrade and /vault-doctor what is
 installed and what may be offered; it never installs, copies, runs the helper
 or the hooks, or edits settings itself. The guard and the cues are offered only
@@ -69,9 +65,6 @@ HELPER_STAMP_RE = re.compile(r"agentic-vault:adapter aside-up engine=(\S+)")
 GUARD_STAMP_RE = re.compile(r"agentic-vault:adapter deny-guard engine=(\S+)")
 PARSER_STAMP_RE = re.compile(r"agentic-vault:adapter ps-parse engine=(\S+)")
 CUES_STAMP_RE = re.compile(r"agentic-vault:adapter lesson-cues engine=(\S+)")
-BUNDLED_COMMAND = ASIDE_ASSETS / "aside-repl-command.md"
-COMMAND_REL = ".claude/commands/aside-repl.md"
-COMMAND_STAMP_RE = re.compile(r"agentic-vault:adapter aside-repl engine=(\S+)")
 VERSION_RE = re.compile(r"^\d+(?:\.\d+)*$")
 HOOK_FILTERS = {"Bash(aside *)", "PowerShell(aside *)"}
 # `$CLAUDE_PROJECT_DIR` written for one shell: empty under a PowerShell hook
@@ -459,26 +452,9 @@ def lesson_cues_status(vault: Path, offer: bool = False) -> dict:
             "compiled_present": compiled_present, "actions": actions}
 
 
-def aside_command_status(vault: Path, clause: dict, offer: bool = False) -> dict:
-    """State of the opt-in /aside-repl procedure command copied into .claude/commands/.
-
-    The states are those of helper_status. "offer_command" is listed only when
-    offer is set (/vault-init and /vault-upgrade pass --offer-aside-command), the
-    Aside clause is present and no file is at the command path.
-    """
-    command = helper_status(vault, COMMAND_REL, BUNDLED_COMMAND, COMMAND_STAMP_RE)
-    actions: list[str] = []
-    if command["state"] == "outdated":
-        actions.append("offer_command_update")
-    elif command["state"] in SCRIPT_REVIEW_STATES:
-        actions.append("review_command")
-    if offer and command["state"] == "missing" and clause["state"] == "present":
-        actions.append("offer_command")
-    return {**command, "actions": actions}
-
-
 def diagnose(vault: Path, offer_deny_guard: bool = False, offer_lesson_cues: bool = False,
              offer_aside_command: bool = False) -> tuple[dict, int]:
+    """Report active adapters; offer_aside_command is accepted for older callers."""
     vault = vault.expanduser()
     if not (vault / CONFIG_REL).is_file():
         return {"schema_version": 1, "status": "not_vault", "reason_code": "config_not_found",
@@ -502,9 +478,6 @@ def diagnose(vault: Path, offer_deny_guard: bool = False, offer_lesson_cues: boo
     cues = lesson_cues_status(vault, offer_lesson_cues)
     if offer_lesson_cues or cues["state"] != "absent":
         adapters["lesson_cues"] = cues
-    command = aside_command_status(vault, clause, offer_aside_command)
-    if offer_aside_command or command["state"] != "missing":
-        adapters["aside_command"] = command
     return {"schema_version": 1, "status": "ok", "platform": platform, "adapters": adapters}, 0
 
 
@@ -541,11 +514,6 @@ def _format_text(report: dict) -> str:
         lines.append(f"lesson_cues.compiled: {str(cues['compiled_present']).lower()}")
         lines.append(f"lesson_cues.actions: {', '.join(cues['actions']) or 'none'}")
         lines.extend(f"lesson_cues.hook.problem: {problem}" for problem in cues["hook"]["problems"])
-    command = report["adapters"].get("aside_command")
-    if command is not None:
-        lines.append(f"aside_command: {command['state']} "
-                     f"(installed={command['installed_stamp']}, bundled={command['bundled_stamp']})")
-        lines.append(f"aside_command.actions: {', '.join(command['actions']) or 'none'}")
     return "\n".join(lines)
 
 
@@ -560,14 +528,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offer-lesson-cues", action="store_true",
                         help="Add a lesson_cues entry that lists offer_lesson_cues when the opt-in cue hook "
                              "is absent (/vault-init only; /vault-doctor never passes it).")
-    parser.add_argument("--offer-aside-command", action="store_true",
-                        help="Add an aside_command entry that lists offer_command when the Aside clause is present "
-                             "and .claude/commands/aside-repl.md is missing (/vault-init and /vault-upgrade; "
-                             "/vault-doctor never passes it).")
+    parser.add_argument("--offer-aside-command", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     report, exit_code = diagnose(args.vault, offer_deny_guard=args.offer_deny_guard,
-                                 offer_lesson_cues=args.offer_lesson_cues,
-                                 offer_aside_command=args.offer_aside_command)
+                                 offer_lesson_cues=args.offer_lesson_cues)
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

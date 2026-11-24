@@ -21,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # definition of whitespace was not measured.
 INLINE = re.compile(r"(?m)(?:^|(?<=\s))!`")
 FENCE = re.compile(r"(?m)^[ \t]*(?:`{3,}|~{3,})!")
-COMMAND_ASSET = "assets/adapters/aside/aside-repl-command.md"
 
 
 def scanned_files() -> list[Path]:
@@ -49,8 +48,11 @@ class CommandBodyTests(unittest.TestCase):
                 self.assertEqual([match.start() for match in FENCE.finditer(text)], [])
                 self.assertIsNone(re.search(r"(?m)^allowed-tools:", front_matter(text)))
 
-    def test_scan_includes_the_aside_command_asset(self) -> None:
-        self.assertIn(COMMAND_ASSET, {path.relative_to(ROOT).as_posix() for path in scanned_files()})
+    def test_plugin_leaves_the_aside_repl_command_to_the_vault(self) -> None:
+        for relative in ("assets/adapters/aside/aside-repl-command.md", "commands/aside-repl.md",
+                         "skills/aside-repl/SKILL.md"):
+            with self.subTest(relative=relative):
+                self.assertFalse((ROOT / relative).exists())
 
     def test_injection_patterns_match_the_documented_forms(self) -> None:
         def injected(text: str) -> bool:

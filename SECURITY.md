@@ -59,10 +59,8 @@ In scope:
   PreToolUse hook that a user may merge into a vault's Claude settings (by default
   `.claude/settings.local.json`; with Claude Code's `if` filter it runs Windows
   PowerShell before `aside` commands), the helper script it runs from
-  `00-meta/scripts/`, how the hook command resolves the vault path, the optional
-  `/aside-repl` procedure command it may copy to `.claude/commands/` (it injects no
-  shell command and keeps the typed request out of shell lines), and the
-  read-only adapter report.
+  `00-meta/scripts/`, how the hook command resolves the vault path, and the read-only
+  adapter report.
 - **Optional deny-zone guard** (`assets/adapters/deny-guard/`, `vault_adapters.py`):
   the PreToolUse hook template that a user may merge into a vault's
   `.claude/settings.local.json` (never by default: `/vault-init` asks for it
@@ -329,8 +327,7 @@ them being bypassed in a way the documentation does not describe is still welcom
   set `disableSkillShellExecution: true` in Claude Code settings (a `true` in managed settings cannot be
   overridden; bundled and managed skills are not affected), review `!` blocks in project and plugin
   commands and skills before trusting a folder, and do not write injected commands that take arguments.
-  This plugin's commands and skills inject no shell command, and a test keeps it so; the optional
-  `/aside-repl` command is a procedure whose `aside` calls are the agent's own tool calls.
+  This plugin's commands and skills inject no shell command, and a test keeps it so.
 - **Antigravity CLI runs the package's hooks while it is enabled, and ignores their failures.**
   Installing or enabling the `antigravity/` package lets agy run its SessionStart and Stop hooks. The
   documentation describes no per-hook approval step like the Codex `/hooks` review (the CLI does ask

@@ -200,7 +200,6 @@ class CodexVerificationTests(unittest.TestCase):
             "assets/adapters/lesson-cues/settings-hooks.json",
             "assets/adapters/lesson-cues/guide.md",
             "assets/adapters/aside/aside-up.ps1",
-            "assets/adapters/aside/aside-repl-command.md",
         )
         self.assertLess(max(map(len, resources)), FIXTURE_ROOM)
         for relative in resources:
@@ -695,23 +694,6 @@ class CodexVerificationTests(unittest.TestCase):
                     with self.assertRaises((RuntimeError, FileNotFoundError)):
                         self.verify_fixture(source, mutate_cache=mutate_cache)
 
-    def test_installed_aside_command_asset_must_exist_and_match(self) -> None:
-        # The adapter report compares an installed /aside-repl command with this bundled copy.
-        relative = "assets/adapters/aside/aside-repl-command.md"
-        for mutation in ("changed", "missing"):
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
-                source = self.make_plugin_fixture(Path(temporary))
-
-                def mutate_cache(cached):
-                    resource = cached / relative
-                    if mutation == "missing":
-                        resource.unlink()
-                    else:
-                        resource.write_text("Changed command resource\n", encoding="utf-8")
-
-                with self.assertRaises((RuntimeError, FileNotFoundError)):
-                    self.verify_fixture(source, mutate_cache=mutate_cache)
-
     def test_verifier_compares_every_bundled_file_the_adapter_report_reads(self) -> None:
         # Every BUNDLED_* file of the adapter report is byte-compared after the native install.
         tree = ast.parse((ROOT / "scripts/verify_codex_plugin.py").read_text(encoding="utf-8"))
@@ -730,7 +712,7 @@ class CodexVerificationTests(unittest.TestCase):
         finally:
             sys.path.remove(scripts)
         bundled = {name: value for name, value in vars(vault_adapters).items() if name.startswith("BUNDLED_")}
-        self.assertIn("BUNDLED_COMMAND", bundled)  # the /aside-repl command asset (v0.47.0)
+        self.assertIn("BUNDLED_HELPER", bundled)
         for name, path in sorted(bundled.items()):
             with self.subTest(constant=name):
                 self.assertIn(Path(path).resolve().relative_to(ROOT.resolve()).as_posix(), compared)

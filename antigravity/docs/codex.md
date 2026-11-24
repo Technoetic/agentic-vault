@@ -69,9 +69,9 @@ release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/do
 
 v0.47.0 takes up eleven items: eight from a review that compared the plugin with a vendor prompting
 guide, one request handled in the same review (the `/aside-repl` procedure command) and two carried
-over from the v0.46.0 release. On the Codex side, `init` and `upgrade` offer the optional `/aside-repl` procedure command when
-the Aside clause is present, and Codex reads that file when the clause points to it; the shared
-session-end, process-inbox and lesson-delta changes apply as in Claude Code. The seven certificate-bound
+over from the v0.46.0 release. In that release, `init` and `upgrade` offered the optional procedure when
+the Aside clause was present. Codex read the file when the clause pointed to it. The shared
+session-end, process-inbox and lesson-delta changes applied as in Claude Code. The seven certificate-bound
 checker files are unchanged from v0.46.0, and the native Codex check byte-compares 130 installed
 resources. No Codex session ran the procedure for this release. See [scope](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/docs/releases/v0.47.0.md) and
 [verification](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/docs/verification/v0.47.0.md).
@@ -691,7 +691,7 @@ Codex는 훅 모델이 달라 `init`·`upgrade`가 이 가드를 제안·설치�
 `vault_adapters.py`의 `adapters.deny_guard` 상태를 보고만 한다. Claude Code에서 켠 가드도 Codex 세션의
 도구 호출은 검사하지 않는다. 선택형 [교훈 단서 훅](../assets/adapters/lesson-cues/guide.md)도 같은 이유로
 Claude Code 전용이고, 설치 흔적이 있으면 `doctor`가 `adapters.lesson_cues`를 보고만 한다.
-v0.47.0의 선택형 `/aside-repl` 절차 명령은 볼트의 `.claude/commands/`에 들어가는 파일이다. Claude Code에서는 슬래시 명령으로, Codex에서는 CLAUDE.md의 Aside 조항이 가리킬 때 읽는 절차로 쓴다. 본문에는 주입 셸 명령이 없고 요청 글을 셸에 넣지 않는다. bash 셸이 없는 호스트(예: Windows에서 PowerShell 셸 도구만 쓰는 Codex)는 절차 4단계의 Python 실행 줄로 스크립트를 셸 없이 넘긴다(`subprocess.run(['aside', 'repl', code])`). 이 경로는 엔진 개발 기기에서 실측했지만 Codex 세션에서 절차를 실행해 보지는 않았다.
+Codex는 볼트의 Aside 조항을 따라 외부 CLI의 `aside repl`을 호출한다.
 [공식 플러그인 구조](https://developers.openai.com/plugins/build/plugins),
 [스킬](https://learn.chatgpt.com/docs/build-skills),
 [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
@@ -721,7 +721,7 @@ python scripts/evaluate_memory_workflows.py --backend deterministic
 해당 노출 지표는 최종 답변 오류나 공격 성공률이 아니며, 기존 어휘 검색의
 한계를 관찰하는 용도다. [연결 제안 helper](link-proposals.md)는 후보·해시·diff만
 반환한다. 검증기는 이 helper와 사용 문서의 설치본도 원본과 대조한다. `doctor`의 어댑터 보고가 비교
-기준으로 읽는 `vault_adapters.py`, 번들 deny zone 가드 스크립트 두 개, Aside 도우미 `aside-up.ps1`과 `/aside-repl` 명령 원본 `aside-repl-command.md`도
+기준으로 읽는 `vault_adapters.py`, 번들 deny zone 가드 스크립트 두 개, Aside 도우미 `aside-up.ps1`도
 대조한다.
 
 실제 모델이 초기화·마감을 수행하는 대화, 신뢰 후 자동 훅 실행, Codex의 출력
