@@ -76,7 +76,6 @@ class CodexVerificationTests(unittest.TestCase):
         resources = (
             "hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
             "skills/agentic-vault/SKILL.md",
-            "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
             "skills/agentic-vault/references/codex.md",
             "skills/agentic-vault/scripts/vault_recall.py",
             "skills/agentic-vault/scripts/vault_paths.py",
@@ -190,6 +189,9 @@ class CodexVerificationTests(unittest.TestCase):
             "scripts/import_qmd_candidates.py",
             "scripts/evaluate_recall.py",
             "scripts/eval_stats.py",
+            "scripts/eval_recall_hygiene.py",
+            "scripts/sync_result_tables.py",
+            "scripts/rerank_candidates.py",
             "scripts/evaluate_memory_workflows.py",
             "docs/evidence.md", "docs/link-proposals.md", "assets/templates/AGENTS-vault-stub.md",
             "skills/agentic-vault/scripts/vault_adapters.py",
@@ -228,7 +230,6 @@ class CodexVerificationTests(unittest.TestCase):
             skills = []
             for directory, name in (
                 ("agentic-vault", "agentic-vault:agentic-vault"),
-                ("webapp-principles", "agentic-vault:webapp-principles"),
             ):
                 resource = installed / "skills" / directory / "SKILL.md"
                 resource.parent.mkdir(parents=True)
@@ -278,7 +279,7 @@ class CodexVerificationTests(unittest.TestCase):
 
         self.assertEqual(report, {
             "codex": "fixture-host", "skill": "agentic-vault:agentic-vault",
-            "skills": ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"],
+            "skills": ["agentic-vault:agentic-vault"],
             "session_start_hooks": 3,
             "hook_events": {"sessionStart": 3, "preCompact": 1, "sessionEnd": 1},
             "hook_trust": "untrusted",
@@ -288,10 +289,10 @@ class CodexVerificationTests(unittest.TestCase):
         report = self.inspect_discovery_fixture(bind_installed_root=False)
 
         self.assertEqual(report["skill"], "agentic-vault:agentic-vault")
-        self.assertEqual(report["skills"], ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"])
+        self.assertEqual(report["skills"], ["agentic-vault:agentic-vault"])
 
     def test_each_required_native_skill_must_be_present(self) -> None:
-        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+        for name in ("agentic-vault:agentic-vault",):
             with self.subTest(skill=name):
                 def remove_skill(skills):
                     skills[:] = [skill for skill in skills if skill["name"] != name]
@@ -300,7 +301,7 @@ class CodexVerificationTests(unittest.TestCase):
                     self.inspect_discovery_fixture(mutate_skills=remove_skill)
 
     def test_each_required_native_skill_must_be_enabled(self) -> None:
-        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+        for name in ("agentic-vault:agentic-vault",):
             with self.subTest(skill=name):
                 def disable_skill(skills):
                     next(skill for skill in skills if skill["name"] == name)["enabled"] = False
@@ -309,7 +310,7 @@ class CodexVerificationTests(unittest.TestCase):
                     self.inspect_discovery_fixture(mutate_skills=disable_skill)
 
     def test_each_required_native_skill_must_not_be_duplicated(self) -> None:
-        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+        for name in ("agentic-vault:agentic-vault",):
             for duplicate_enabled in (True, False):
                 with self.subTest(skill=name, duplicate_enabled=duplicate_enabled):
                     def duplicate_skill(skills):
@@ -320,7 +321,7 @@ class CodexVerificationTests(unittest.TestCase):
                         self.inspect_discovery_fixture(mutate_skills=duplicate_skill)
 
     def test_each_required_native_skill_path_must_exist(self) -> None:
-        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+        for name in ("agentic-vault:agentic-vault",):
             with self.subTest(skill=name):
                 def remove_skill_file(skills):
                     skill = next(skill for skill in skills if skill["name"] == name)
@@ -330,22 +331,17 @@ class CodexVerificationTests(unittest.TestCase):
                     self.inspect_discovery_fixture(mutate_skills=remove_skill_file)
 
     def test_required_native_skill_paths_must_identify_the_expected_resource(self) -> None:
-        for mutation in ("shared-path", "swapped", "wrong-filename", "other-package"):
+        for mutation in ("wrong-filename", "other-package"):
             with self.subTest(mutation=mutation):
                 def mismatch_resource(skills):
-                    if mutation == "shared-path":
-                        skills[1]["path"] = skills[0]["path"]
-                    elif mutation == "swapped":
-                        skills[0]["path"], skills[1]["path"] = skills[1]["path"], skills[0]["path"]
+                    expected = Path(skills[0]["path"])
+                    if mutation == "wrong-filename":
+                        wrong = expected.with_name("another-skill.md")
                     else:
-                        expected = Path(skills[1]["path"])
-                        if mutation == "wrong-filename":
-                            wrong = expected.with_name("another-skill.md")
-                        else:
-                            wrong = expected.parents[2].with_name("other-package") / "skills/webapp-principles/SKILL.md"
-                        wrong.parent.mkdir(parents=True, exist_ok=True)
-                        wrong.write_bytes(expected.read_bytes())
-                        skills[1]["path"] = str(wrong)
+                        wrong = expected.parents[2].with_name("other-package") / "skills/agentic-vault/SKILL.md"
+                    wrong.parent.mkdir(parents=True, exist_ok=True)
+                    wrong.write_bytes(expected.read_bytes())
+                    skills[0]["path"] = str(wrong)
 
                 with self.assertRaisesRegex(RuntimeError, "skill"):
                     self.inspect_discovery_fixture(mutate_skills=mismatch_resource)
@@ -363,7 +359,7 @@ class CodexVerificationTests(unittest.TestCase):
             self.inspect_discovery_fixture(mutate_skills=move_both_paths_to_another_package)
 
     def test_required_native_skills_must_belong_to_this_plugin(self) -> None:
-        for name in ("agentic-vault:agentic-vault", "agentic-vault:webapp-principles"):
+        for name in ("agentic-vault:agentic-vault",):
             with self.subTest(skill=name):
                 def change_owner(skills):
                     skill = next(skill for skill in skills if skill["name"] == name)
@@ -388,9 +384,9 @@ class CodexVerificationTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.inspect_discovery_fixture(mutate_hooks=mutate_hooks)
 
-    def test_installed_webapp_resources_must_exist_and_match(self) -> None:
-        for relative in ("skills/agentic-vault/SKILL.md", "skills/webapp-principles/SKILL.md",
-                         "docs/webapp-principles.md"):
+    def test_installed_skill_resources_must_exist_and_match(self) -> None:
+        for relative in ("skills/agentic-vault/SKILL.md", "scripts/eval_recall_hygiene.py",
+                         "scripts/sync_result_tables.py", "scripts/rerank_candidates.py"):
             for mutation in ("changed", "missing"):
                 with self.subTest(resource=relative, mutation=mutation), \
                      tempfile.TemporaryDirectory() as temporary:
@@ -1300,14 +1296,14 @@ class CodexVerificationTests(unittest.TestCase):
                 with self.subTest(reported=deep_as.__name__, bind_installed_root=bind_installed_root):
                     report = self.inspect_discovery_fixture(deep_as=deep_as, bind_installed_root=bind_installed_root)
                     self.assertEqual(report["skills"],
-                                     ["agentic-vault:agentic-vault", "agentic-vault:webapp-principles"])
+                                     ["agentic-vault:agentic-vault"])
             with self.subTest(reported=deep_as.__name__, mutation="other-package"):
                 def move_to_another_package(skills):
-                    expected = extended(skills[1]["path"])
-                    wrong = expected.parents[2].with_name("other-package") / "skills/webapp-principles/SKILL.md"
+                    expected = extended(skills[0]["path"])
+                    wrong = expected.parents[2].with_name("other-package") / "skills/agentic-vault/SKILL.md"
                     wrong.parent.mkdir(parents=True)
                     wrong.write_bytes(expected.read_bytes())
-                    skills[1]["path"] = str(deep_as(wrong))
+                    skills[0]["path"] = str(deep_as(wrong))
 
                 with self.assertRaisesRegex(RuntimeError, "skill"):
                     self.inspect_discovery_fixture(mutate_skills=move_to_another_package, deep_as=deep_as)

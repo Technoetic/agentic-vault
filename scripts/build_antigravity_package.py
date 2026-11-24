@@ -3,7 +3,7 @@
 
 The repository root is the Claude Code and Codex plugin. Antigravity CLI reads another layout, so this
 script writes a separate folder (default `antigravity/`): a native `plugin.json`, a `hooks.json` whose
-handlers run the session hooks with `--host antigravity`, the two shared skills, every command document
+handlers run the session hooks with `--host antigravity`, the shared skill, every command document
 as a skill of the same name, copies of the engine scripts, hooks and assets, and the documents those
 files link to. Links keep working: a target that is copied into the package stays relative, any other
 target becomes a GitHub URL at the release tag. Sections that only make a skill body too long for
@@ -71,7 +71,7 @@ HOOK_MODULE = "hooks/antigravity_hook.py"
 # documented; a claim file in the hooks lets one of them act per event (hooks/antigravity_hook.py).
 HOOK_RUNNERS = ("sh ./hooks/run_python_hook.sh", "py -3", "python")
 HOOK_EVENTS = (("SessionStart", "session_start.py", 30), ("Stop", "session_checkpoint.py", 15))
-SHARED_SKILLS = ("agentic-vault", "webapp-principles")
+SHARED_SKILLS = ("agentic-vault",)
 # Every file build_package reads lies below one of these folders (targets of links are only looked up).
 SOURCE_FOLDERS = (".claude-plugin", "commands", "hooks", "skills", "assets", "docs")
 PLACEHOLDERS = (("${CLAUDE_PLUGIN_ROOT}", "<PLUGIN_ROOT>"), ("$ARGUMENTS", "<ARGUMENTS>"))
@@ -759,10 +759,6 @@ def _check_skill_sources(repo: Path) -> None:
         if relative == "SKILL.md" or relative.startswith("scripts/") or re.fullmatch(r"references/[^/]+\.md", relative):
             continue
         raise BuildError(f"skills/agentic-vault/{relative}: unexpected file (update scripts/build_antigravity_package.py)")
-    for relative in _walk(skills / "webapp-principles", "skills/webapp-principles"):
-        if relative != "SKILL.md":
-            raise BuildError(f"skills/webapp-principles/{relative}: unexpected file "
-                             "(update scripts/build_antigravity_package.py)")
 
 
 # --- Generated files ----------------------------------------------------------------------------------

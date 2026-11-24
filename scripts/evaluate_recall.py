@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "recall"
 RECALL_PATH = REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_recall.py"
 EVAL_STATS_PATH = REPO_ROOT / "scripts" / "eval_stats.py"
+EVAL_HYGIENE_PATH = REPO_ROOT / "scripts" / "eval_recall_hygiene.py"
 MAX_QUERIES_BYTES = 1024 * 1024
 MAX_SPLIT_BYTES = 1024 * 1024
 MAX_GOLDSET_WARNINGS = 50
@@ -71,11 +72,22 @@ def _load_recall_module():
 
 @functools.lru_cache(maxsize=1)
 def _load_eval_stats():
-    """Load the small-sample statistics by path; --exact-paired, --rate-bounds, --success-bounds and
-    --abstention-calibration use them."""
+    """Load the small-sample statistics by path; --exact-paired, --rate-bounds, --success-bounds,
+    --bootstrap-ci and --abstention-calibration use them."""
     spec = importlib.util.spec_from_file_location("agentic_vault_eval_stats", EVAL_STATS_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load statistics module: {EVAL_STATS_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@functools.lru_cache(maxsize=1)
+def _load_eval_hygiene():
+    """Load split leakage and layout-invariance hygiene helpers by path."""
+    spec = importlib.util.spec_from_file_location("agentic_vault_eval_hygiene", EVAL_HYGIENE_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load evaluation hygiene module: {EVAL_HYGIENE_PATH}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -767,6 +779,100 @@ def with_success_bounds(report: dict, *, confidence: float = RATE_BOUND_CONFIDEN
     anchor = 'rate_upper_bound_definitions' if 'rate_upper_bound_definitions' in extended else 'interpretation'
     return _with_key_after(extended, anchor, 'success_lower_bound_definitions',
                            {'confidence': confidence, 'side': 'one-sided lower', **SUCCESS_BOUND_DEFINITIONS})
+
+
+def with_paired_bootstrap(
+    report: dict,
+    *,
+    confidence: float = RATE_BOUND_CONFIDENCE,
+    resamples: int = 2000,
+    seed: int = 1707,
+) -> dict:
+    """Return a compare() report plus paired flat & stratified-macro bootstrap CIs.
+
+    Opt-in (--bootstrap-ci). Uses the exact same headline (non-inspected) pair
+    population as paired_randomization. Descriptive only; gates and exit codes
+    never read it, and the input report is not mutated.
+    """
+    if not isinstance(report, dict) or 'baseline' not in report or 'improved' not in report:
+        raise ValueError('paired bootstrap requires a compare() report')
+    stats = _load_eval_stats()
+    paired_baseline = report.get('expansion_ablation', report['baseline'])
+    improved = report['improved']
+    bootstrap = {}
+    for metric in ('source_recall_at_k', 'ndcg_at_5', 'returned_context_claim_coverage'):
+        triples = [
+            (a[metric], b[metric], f"{a['language']}:{a['scenario']}")
+            for a, b in zip(paired_baseline['per_query'], improved['per_query'])
+            if a[metric] is not None and b[metric] is not None and a.get('inspected') is not True
+        ]
+        bootstrap[metric] = stats.paired_bootstrap_ci(
+            [row[0] for row in triples],
+            [row[1] for row in triples],
+            strata=[row[2] for row in triples],
+            confidence=confidence,
+            resamples=resamples,
+            seed=seed,
+        )
+    return _with_key_after(report, 'paired_randomization', 'paired_bootstrap', bootstrap)
+
+
+def with_split_query_leakage(
+    report: dict,
+    fixture: Path | EvaluationInput,
+    split: dict,
+    *,
+    jaccard_threshold: float = 0.60,
+) -> dict:
+    """Attach cross-split near-duplicate query leakage diagnostics to a report.
+
+    Opt-in (--check-split-leakage). Observational only; gates and exit codes are
+    unchanged and the input report is not mutated.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('split query leakage requires an evaluate() or compare() report')
+    prepared = _prepared(fixture)
+    by_id = {row['id']: row for row in prepared.queries}
+    dev_ids = split.get('dev', ())
+    held_ids = split.get('heldout', ())
+    if any(not isinstance(qid, str) or qid not in by_id for qid in (*dev_ids, *held_ids)):
+        raise ValueError('split file contains query ids not present in the evaluated queries')
+    dev_rows = [by_id[qid] for qid in dev_ids]
+    held_rows = [by_id[qid] for qid in held_ids]
+    hygiene = _load_eval_hygiene()
+    audit = hygiene.audit_split_query_leakage(dev_rows, held_rows, jaccard_threshold=jaccard_threshold)
+    return {**report, 'split_query_leakage': audit}
+
+
+def with_layout_invariance(
+    report: dict,
+    fixture: Path | EvaluationInput,
+    *,
+    backend: str = 'bm25',
+    top_k: int = 3,
+    seed: int = 1707,
+    max_tokens: int = 0,
+    lexical_ngrams: str | None = None,
+) -> dict:
+    """Attach content-preserving Markdown layout-invariance probe results to a report.
+
+    Opt-in (--layout-invariance). Runs on an isolated temporary copy of the vault;
+    never modifies source files. Observational only; gates and exit codes are unchanged.
+    """
+    if not isinstance(report, dict):
+        raise ValueError('layout invariance requires an evaluate() or compare() report')
+    prepared = _prepared(fixture)
+    hygiene = _load_eval_hygiene()
+    probe = hygiene.probe_layout_invariance(
+        prepared.vault,
+        prepared.queries,
+        backend=backend,
+        top_k=top_k,
+        seed=seed,
+        max_tokens=max_tokens,
+        lexical_ngrams=lexical_ngrams,
+    )
+    return {**report, 'layout_invariance': probe}
 
 
 def rate_bound_gate_notes(gated: dict) -> list[str]:
@@ -2256,6 +2362,51 @@ def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = F
     else:
         redacted = {name: (_redacted_evaluation(value, digest) if isinstance(value, dict) and "per_query" in value
                            else value) for name, value in report.items()}
+    if isinstance(redacted.get("paired_bootstrap"), dict):
+        redacted["paired_bootstrap"] = {
+            metric: (
+                {**entry, "stratified_macro": {
+                    **entry["stratified_macro"],
+                    "strata": dict(sorted(
+                        (digest(label), count) for label, count in entry["stratified_macro"]["strata"].items()
+                    )),
+                }}
+                if isinstance(entry, dict) and isinstance(entry.get("stratified_macro"), dict)
+                else entry
+            )
+            for metric, entry in redacted["paired_bootstrap"].items()
+        }
+    if isinstance(redacted.get("split_query_leakage"), dict):
+        leak = redacted["split_query_leakage"]
+        redacted_pairs = [
+            {**pair, "dev_id": digest(pair["dev_id"]), "heldout_id": digest(pair["heldout_id"])}
+            for pair in leak.get("pairs", ())
+        ]
+        redacted_pairs.sort(key=lambda item: (-item["max_jaccard"], item["heldout_id"], item["dev_id"]))
+        redacted["split_query_leakage"] = {
+            **leak,
+            "leaked_heldout_ids": sorted(digest(qid) for qid in leak.get("leaked_heldout_ids", ())),
+            "pairs": redacted_pairs,
+        }
+    if isinstance(redacted.get("layout_invariance"), dict):
+        layout = redacted["layout_invariance"]
+        redacted["layout_invariance"] = {
+            **layout,
+            "drifted_queries": [
+                {
+                    **row,
+                    "id": digest(row["id"]),
+                    **(
+                        {
+                            "original_paths": [digest(p) for p in row["original_paths"]],
+                            "perturbed_paths": [digest(p) for p in row["perturbed_paths"]],
+                        }
+                        if key is not None else {}
+                    ),
+                }
+                for row in layout.get("drifted_queries", ())
+            ],
+        }
     if key is None:
         redacted["redaction"] = REDACTION_DESCRIPTION
         mode, algorithm = "unkeyed", "sha256"
@@ -2272,6 +2423,19 @@ def redact_report(report: dict, *, key: bytes | None = None, ephemeral: bool = F
     if key is not None and any(CONFORMAL_KEY in arm for arm in arms):
         description = redacted["redaction"]
         redacted["redaction"] = {**description, "replaced": [*description["replaced"], _KEYED_CONFORMAL_REPLACED]}
+    if isinstance(redacted.get("paired_bootstrap"), dict):
+        description = redacted["redaction"]
+        redacted["redaction"] = {**description, "replaced": [
+            *description["replaced"], "paired_bootstrap.*.stratified_macro.strata keys (sorted by token)"]}
+    if isinstance(redacted.get("split_query_leakage"), dict):
+        description = redacted["redaction"]
+        redacted["redaction"] = {**description, "replaced": [
+            *description["replaced"], "split_query_leakage leaked_heldout_ids and pairs dev_id/heldout_id (sorted by token)"]}
+    if isinstance(redacted.get("layout_invariance"), dict):
+        description = redacted["redaction"]
+        extra = ("layout_invariance.drifted_queries id, original_paths and perturbed_paths"
+                 if key is not None else "layout_invariance.drifted_queries id")
+        redacted["redaction"] = {**description, "replaced": [*description["replaced"], extra]}
     redacted["redaction_mode"] = mode
     redacted["redaction_algorithm"] = algorithm
     return redacted
@@ -2314,6 +2478,34 @@ def with_token_row_order(redacted: dict) -> dict:
     else:
         ordered = {name: (_token_ordered_arm(value) if isinstance(value, dict) and "per_query" in value else value)
                    for name, value in redacted.items()}
+    if isinstance(ordered.get("layout_invariance"), dict):
+        layout = ordered["layout_invariance"]
+        ordered["layout_invariance"] = {
+            **layout,
+            "drifted_queries": sorted(layout.get("drifted_queries", ()), key=_row_token),
+        }
+    if isinstance(ordered.get("split_query_leakage"), dict):
+        leak = ordered["split_query_leakage"]
+        ordered["split_query_leakage"] = {
+            **leak,
+            "leaked_heldout_ids": sorted(leak.get("leaked_heldout_ids", ())),
+            "pairs": sorted(
+                leak.get("pairs", ()),
+                key=lambda item: (-item["max_jaccard"], item["heldout_id"], item["dev_id"]),
+            ),
+        }
+    if isinstance(ordered.get("paired_bootstrap"), dict):
+        ordered["paired_bootstrap"] = {
+            metric: (
+                {**entry, "stratified_macro": {
+                    **entry["stratified_macro"],
+                    "strata": dict(sorted(entry["stratified_macro"]["strata"].items())),
+                }}
+                if isinstance(entry, dict) and isinstance(entry.get("stratified_macro"), dict)
+                else entry
+            )
+            for metric, entry in ordered["paired_bootstrap"].items()
+        }
     description = redacted["redaction"]
     if _GOLD_ROW_ORDER_LIMIT not in description["limits"]:
         raise ValueError("unexpected redaction limits text")
@@ -2460,6 +2652,17 @@ def _parser() -> argparse.ArgumentParser:
                         help='with --compare: exact sign-flip p-values when a paired test has at most 20 non-zero '
                              'differences (otherwise the seeded Monte Carlo test); records method, '
                              'nonzero_pair_count and minimum_attainable_p_value (observational)')
+    parser.add_argument('--bootstrap-ci', action='store_true',
+                        help='with --compare: add 95%% paired percentile bootstrap CIs (flat and (language, scenario) '
+                             'stratified macro; deterministic seed; descriptive, gates and exit code are unchanged)')
+    parser.add_argument('--check-split-leakage', action='store_true',
+                        help='audit dev-vs-heldout exact and near-duplicate query overlap (word & Hangul bigram '
+                             'Jaccard) using --split-file or <fixture>/split.json (observational; gates and exit '
+                             'code are unchanged)')
+    parser.add_argument('--layout-invariance', action='store_true',
+                        help='probe retrieval top-1/top-k rank stability under content-preserving Markdown frontmatter '
+                             'key-order and heading-spacing perturbations on an isolated temporary copy (observational; '
+                             'source vault untouched, gates and exit code are unchanged)')
     parser.add_argument('--rate-bounds', action='store_true',
                         help='add one-sided 95%% upper bounds (Wilson, Clopper-Pearson) with numerator and '
                              'denominator for the no-answer false-positive, forbidden exposure and stale top-1 '
@@ -2546,16 +2749,21 @@ def _mode_error(args: argparse.Namespace) -> str | None:
         return "--derive-split cannot be combined with --split or --redact"
     if args.derive_split and args.gold_removal_twins:
         return "--derive-split cannot be combined with --gold-removal-twins"
+    if args.derive_split and (args.check_split_leakage or args.layout_invariance):
+        return "--derive-split cannot be combined with --check-split-leakage or --layout-invariance"
     calibrating = args.abstention_calibration is not None
     if calibrating and (args.split is not None or args.derive_split):
         # The calibration needs both sides of the split: dev calibrates and heldout tests.
         return "--abstention-calibration cannot be combined with --split or --derive-split"
-    if args.split_file is not None and args.split is None and not args.derive_split and not calibrating:
+    if (args.split_file is not None and args.split is None and not args.derive_split
+            and not calibrating and not args.check_split_leakage):
         return "--split-file requires --split or --derive-split"
     if args.split is not None and args.goldset is not None and args.split_file is None:
         return "--split with --goldset requires --split-file"
     if calibrating and args.goldset is not None and args.split_file is None:
         return "--abstention-calibration with --goldset requires --split-file"
+    if args.check_split_leakage and args.goldset is not None and args.split_file is None:
+        return "--check-split-leakage with --goldset requires --split-file"
     return None
 
 
@@ -2594,6 +2802,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.exact_paired and not args.compare:
         print("--exact-paired requires --compare", file=sys.stderr)
+        return 2
+    if args.bootstrap_ci and not args.compare:
+        print("--bootstrap-ci requires --compare", file=sys.stderr)
         return 2
     if args.redact_row_order == 'token' and args.redact_key_file is None and not args.redact_ephemeral:
         print("--redact-row-order token requires --redact-key-file or --redact-ephemeral; whoever holds the gold "
@@ -2634,9 +2845,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             derived = derive_split(_prepared(source).queries, seed=seed, previous=previous)
             print(json.dumps(derived, ensure_ascii=False, indent=2))
             return 0
+        full_source = source
         if args.split is not None:
             split_file = fixture / "split.json" if args.split_file is None else args.split_file
             source = select_split(source, args.split, split_file)
+        leakage_split = None
+        if args.check_split_leakage:
+            leakage_split = load_split(fixture / "split.json" if args.split_file is None else args.split_file)
         calibration_split = None
         if args.abstention_calibration is not None:
             # Read and match before any retrieval, so a missing, invalid or unmatched split file fails fast.
@@ -2649,6 +2864,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = (compare(source, max_tokens=args.max_tokens, exact_paired=args.exact_paired, **options)
                   if args.compare else
                   evaluate(source, max_tokens=args.max_tokens, advanced=args.advanced, **options))
+        if args.bootstrap_ci:
+            report = with_paired_bootstrap(report)
         if args.render_matched:
             report = with_render_matched(report, source, max_tokens=args.max_tokens,
                                          exact_paired=args.exact_paired, **options)
@@ -2662,6 +2879,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = with_rate_bounds(report)
         if args.success_bounds:
             report = with_success_bounds(report)
+        if leakage_split is not None:
+            report = with_split_query_leakage(report, full_source, leakage_split)
+        if args.layout_invariance:
+            report = with_layout_invariance(
+                report,
+                source,
+                backend=args.backend or 'bm25',
+                top_k=args.top_k,
+                max_tokens=0,
+                lexical_ngrams=args.lexical_ngrams,
+            )
     except GoldSetError as exc:
         # Opt-in modes only; the message names indices, fields and paths.
         print(f"recall evaluation unavailable: {exc}", file=sys.stderr)

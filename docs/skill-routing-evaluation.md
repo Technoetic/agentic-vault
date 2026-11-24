@@ -99,7 +99,7 @@ The synthetic catalog uses the following IDs:
 | ID | Role in these cases |
 |---|---|
 | `av:agentic-vault` | Vault operations and explicitly authorized direct or Jev-first questions |
-| `av:webapp-principles` | Actual webapp implementation and review, including outside a vault |
+| `av:webapp-principles` | Synthetic fixture ID for webapp implementation and review outside a vault (the former built-in skill moved to standalone `Technoetic/webapp6` in v0.57.0) |
 | `harness14:webapp` | Explicitly selected workflow entry or status |
 | `helper:orientation` | Optional neutral helper |
 | `helper:implementation` | Requested code changes after applicable app guidance |

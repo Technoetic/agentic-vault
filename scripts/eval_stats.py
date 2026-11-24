@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import bisect
 from fractions import Fraction
+import hashlib
 import math
+import random
 from statistics import NormalDist
+from typing import Callable, Sequence
 
 EXACT_PAIRED_MAX_NONZERO = 20
 # Same tie rule as paired_randomization: a pattern counts when |sum| >= |observed| - 1e-12.
@@ -35,6 +38,8 @@ TIE_TOLERANCE = 1e-12
 EXACT_PAIRED_METHOD = ('paired sign-flip; two-sided; exact enumeration of all 2^k sign patterns '
                        'of the k non-zero differences')
 HYPERGEOMETRIC_METHOD = 'hypergeometric_exact_inversion; integer bisection over K'
+PAIRED_BOOTSTRAP_METHOD = 'paired percentile bootstrap; deterministic seed; flat and optional stratified macro'
+CROSS_FIT_METHOD = 'deterministic two-fold SHA-256 hash cross-fitting; out-of-fold evaluation'
 
 
 def paired_differences(baseline, improved) -> list:
@@ -44,7 +49,10 @@ def paired_differences(baseline, improved) -> list:
         raise ValueError('paired values must have identical lengths')
     if any(type(value) not in (int, float) or not math.isfinite(value) for value in (*baseline, *improved)):
         raise ValueError('paired values must be finite numbers')
-    return [b - a for a, b in zip(baseline, improved)]
+    diffs = [b - a for a, b in zip(baseline, improved)]
+    if any(not math.isfinite(d) for d in diffs):
+        raise ValueError('paired differences must be finite numbers')
+    return diffs
 
 
 def minimum_attainable_p_value(nonzero_pairs: int) -> float:
@@ -254,3 +262,174 @@ def hypergeometric_upper_bound(misses: int, sample: int, population: int, *,
             high = middle
     return {'misses': misses, 'sample': sample, 'population': population, 'confidence': confidence,
             'upper_misses': low, 'upper_miss_share': low / population, 'method': HYPERGEOMETRIC_METHOD}
+
+
+def _percentile_ci(samples: list[float], confidence: float) -> tuple[float, float]:
+    ordered = sorted(samples)
+    count = len(ordered)
+    alpha_half = exact_alpha(confidence) / 2
+    low_idx = max(0, min(count - 1, math.floor(alpha_half * (count - 1))))
+    high_idx = max(0, min(count - 1, math.ceil((1 - alpha_half) * (count - 1))))
+    return ordered[low_idx], ordered[high_idx]
+
+
+def paired_bootstrap_ci(
+    baseline,
+    improved,
+    *,
+    strata=None,
+    confidence: float = 0.95,
+    resamples: int = 2000,
+    seed: int = 1707,
+) -> dict:
+    """Two-sided paired percentile bootstrap CI for mean(improved - baseline).
+
+    When ``strata`` (a sequence of non-empty stratum labels aligned with the pairs)
+    is given, also reports ``stratified_macro`` by resampling independently within
+    each stratum and macro-averaging stratum means with equal stratum weight.
+    Descriptive only; callers must never turn bootstrap intervals into gates.
+    """
+    delta = paired_differences(baseline, improved)
+    confidence_alpha(confidence)
+    if type(resamples) is not int or not 100 <= resamples <= 20000:
+        raise ValueError('resamples must be an integer between 100 and 20000')
+    if type(seed) is not int:
+        raise ValueError('seed must be an integer')
+    n = len(delta)
+    if strata is not None:
+        if not isinstance(strata, (list, tuple)) or len(strata) != n:
+            raise ValueError('strata must have the same length as paired values')
+        if any(type(label) is not str or not label.strip() for label in strata):
+            raise ValueError('strata labels must be non-empty strings')
+    if not n:
+        result = {
+            'method': PAIRED_BOOTSTRAP_METHOD,
+            'confidence': confidence,
+            'resamples': resamples,
+            'seed': seed,
+            'paired_query_count': 0,
+            'mean_delta': None,
+            'ci_low': None,
+            'ci_high': None,
+        }
+        if strata is not None:
+            result['stratified_macro'] = None
+        return result
+
+    observed = math.fsum(delta) / n
+    rng = random.Random(seed)
+    flat_means = [
+        math.fsum(delta[rng.randrange(n)] for _ in range(n)) / n
+        for _ in range(resamples)
+    ]
+    ci_low, ci_high = _percentile_ci(flat_means, confidence)
+    result = {
+        'method': PAIRED_BOOTSTRAP_METHOD,
+        'confidence': confidence,
+        'resamples': resamples,
+        'seed': seed,
+        'paired_query_count': n,
+        'mean_delta': observed,
+        'ci_low': ci_low,
+        'ci_high': ci_high,
+    }
+    if strata is not None:
+        groups: dict[str, list[float]] = {}
+        for label, value in zip(strata, delta):
+            groups.setdefault(label, []).append(value)
+        ordered_keys = sorted(groups)
+        group_values = [groups[key] for key in ordered_keys]
+        group_count = len(group_values)
+        obs_macro = math.fsum(math.fsum(vals) / len(vals) for vals in group_values) / group_count
+        srng = random.Random(seed ^ 0x5F3759DF)
+        macro_means = []
+        for _ in range(resamples):
+            stratum_means = [
+                math.fsum(vals[srng.randrange(len(vals))] for _ in range(len(vals))) / len(vals)
+                for vals in group_values
+            ]
+            macro_means.append(math.fsum(stratum_means) / group_count)
+        s_low, s_high = _percentile_ci(macro_means, confidence)
+        result['stratified_macro'] = {
+            'stratum_count': group_count,
+            'strata': {key: len(groups[key]) for key in ordered_keys},
+            'observed_macro_delta': obs_macro,
+            'ci_low': s_low,
+            'ci_high': s_high,
+        }
+    return result
+
+
+def cross_fit_two_fold(
+    items: Sequence[dict],
+    fit_fn: Callable[[list[dict]], object],
+    score_fn: Callable[[object, dict], float],
+    *,
+    id_key: str = 'id',
+    seed: int = 1707,
+) -> dict:
+    """Deterministic SHA-256 two-fold cross-fitting for threshold or weight evaluation.
+
+    Partitions ``items`` into two balanced folds by SHA-256(f"{seed}:{item[id_key]}")
+    order (alternating index parity). Fits ``fit_fn`` on fold 1 and scores fold 0,
+    then fits ``fit_fn`` on fold 0 and scores fold 1 so no item is scored by a model
+    fit on itself. Descriptive only; Python standard library only.
+    """
+    if not isinstance(items, (list, tuple)) or len(items) < 2:
+        raise ValueError('cross_fit_two_fold requires a sequence of at least 2 items')
+    if not callable(fit_fn) or not callable(score_fn):
+        raise ValueError('fit_fn and score_fn must be callable')
+    if type(id_key) is not str or not id_key.strip():
+        raise ValueError('id_key must be a non-empty string')
+    if type(seed) is not int:
+        raise ValueError('seed must be an integer')
+
+    seen: set[str] = set()
+    validated: list[dict] = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f'items[{idx}] must be a dict')
+        item_id = item.get(id_key)
+        if type(item_id) is not str or not item_id.strip() or item_id in seen:
+            raise ValueError(f'items[{idx}][{id_key!r}] must be a unique non-empty string')
+        seen.add(item_id)
+        validated.append(item)
+
+    ordered = sorted(
+        validated,
+        key=lambda row: (hashlib.sha256(f'{seed}:{row[id_key]}'.encode('utf-8')).hexdigest(), row[id_key]),
+    )
+    fold_0 = [row for idx, row in enumerate(ordered) if idx % 2 == 0]
+    fold_1 = [row for idx, row in enumerate(ordered) if idx % 2 == 1]
+
+    model_for_0 = fit_fn(list(fold_1))
+    model_for_1 = fit_fn(list(fold_0))
+
+    fold_of: dict[str, int] = {}
+    score_of: dict[str, float] = {}
+    fold_scores: list[list[float]] = [[], []]
+    for fold_idx, (eval_fold, model) in enumerate(((fold_0, model_for_0), (fold_1, model_for_1))):
+        for row in eval_fold:
+            raw = score_fn(model, row)
+            if type(raw) not in (int, float) or not math.isfinite(raw):
+                raise ValueError('score_fn must return finite numeric scores')
+            val = float(raw)
+            item_id = row[id_key]
+            fold_of[item_id] = fold_idx
+            score_of[item_id] = val
+            fold_scores[fold_idx].append(val)
+
+    per_item = [
+        {'id': row[id_key], 'fold': fold_of[row[id_key]], 'score': score_of[row[id_key]]}
+        for row in validated
+    ]
+    all_scores = [row['score'] for row in per_item]
+    return {
+        'method': CROSS_FIT_METHOD,
+        'seed': seed,
+        'item_count': len(validated),
+        'fold_sizes': [len(fold_0), len(fold_1)],
+        'fold_means': [math.fsum(scores) / len(scores) for scores in fold_scores],
+        'overall_mean': math.fsum(all_scores) / len(all_scores),
+        'per_item': per_item,
+    }

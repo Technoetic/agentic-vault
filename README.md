@@ -14,7 +14,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 [![Claude Code Plugin](https://img.shields.io/badge/Claude_Code-Plugin-191919?style=for-the-badge&logo=anthropic&logoColor=white)](https://github.com/Technoetic/agentic-vault)
 [![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-111827?style=for-the-badge)](docs/codex.md)
 [![Antigravity CLI Package](https://img.shields.io/badge/Antigravity_CLI-Package-0F172A?style=for-the-badge)](docs/antigravity.md)
-[![Version](https://img.shields.io/badge/v0.56.0-10B981?style=for-the-badge)](docs/releases/v0.56.0.md)
+[![Version](https://img.shields.io/badge/v0.57.0-10B981?style=for-the-badge)](docs/releases/v0.57.0.md)
 [![License MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
@@ -109,6 +109,14 @@ Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/
 </details>
 
 ---
+
+## v0.57.0 — 짝 부트스트랩·2-폴드 교차 적합 통계, 질의 누수·레이아웃 불변 위생, 결과 표 동기화, 선택형 결정 API 재정렬 및 `webapp-principles` 분리 제거
+
+공개 v0.56.0을 바탕으로 [`ai3inc/opentoolsearch`](https://github.com/ai3inc/opentoolsearch)(`v0.2.1`, Apache-2.0)에서 선별한 다섯 가지 비(非)중복 패턴을 Python 표준 라이브러리만으로 구현하고, 독립 저장소 [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6)로 분리된 내장 `webapp-principles` 스킬과 문서를 제거했다. `scripts/eval_stats.py`에 평면·`(언어, 시나리오)` 층화 매크로 95% 짝 부트스트랩 신뢰구간(`paired_bootstrap_ci`)과 결정론적 SHA-256 2-폴드 교차 적합(`cross_fit_two_fold`)을 추가했고(`evaluate_recall.py --bootstrap-ci` 연결), `scripts/eval_recall_hygiene.py`로 dev/held-out 분할 간 근사 중복 질의 누수 감사(단어·한글 음절 2-gram Jaccard)와 격리 임시 사본 기반 마크다운 레이아웃 불변성 프로브(`evaluate_recall.py --check-split-leakage`·`--layout-invariance`)를 추가했다. `scripts/sync_result_tables.py`로 JSON 평가 산출물과 마크다운 `<!-- table:NAME -->` 블록의 불일치를 fail-closed 검증·원자 갱신하고, `commands/vault-recall.md`에 대명사·생략이 많은 멀티턴 후속 질의 보완 지침을 더했다. 또한 선택형 체크아웃 도구 `scripts/rerank_candidates.py`로 기존 TypeSafe Jev(`--provider jev`) 또는 BizRouter(`--provider bizrouter`) 단일 `choice` API를 이용한 2단계 후보 재정렬(명시적 `__none__` 기권·프롬프트 인젝션 경계·선택형 z-score 융합·`external_candidates` 출력)을 제공한다. 내장 `webapp-principles` 제거로 Codex 필수 스킬은 1개(`agentic-vault:agentic-vault`), Antigravity CLI 생성 패키지 스킬은 16개로 정리됐다. 인증서가 묶는 일곱 파일은 v0.55.0부터 v0.57.0까지 바이트 단위로 같다(`checker_sha256` 불변). [릴리스 노트](docs/releases/v0.57.0.md) · [검증 계약](docs/verification/v0.57.0.md) · [GitHub 릴리스](https://github.com/Technoetic/agentic-vault/releases/tag/v0.57.0)
+
+## v0.57.0 — Paired bootstrap & cross-fitting statistics, recall leakage & layout-invariance hygiene, result table sync, opt-in decision-API reranking, and webapp-principles removal
+
+Selectively adapts five non-redundant Python stdlib-only patterns from `ai3inc/opentoolsearch` (`v0.2.1`, Apache-2.0) and removes the embedded `webapp-principles` skill and guide now maintained in standalone [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6). Adds flat and `(language, scenario)` stratified-macro 95% paired percentile bootstrap CIs (`paired_bootstrap_ci`) plus deterministic SHA-256 2-fold cross-fitting (`cross_fit_two_fold`) to `scripts/eval_stats.py` (`evaluate_recall.py --bootstrap-ci`), adds cross-split near-duplicate query leakage auditing and isolated Markdown layout-invariance probing (`scripts/eval_recall_hygiene.py`, `evaluate_recall.py --check-split-leakage` and `--layout-invariance`), adds fail-closed JSON-to-Markdown result table sync (`scripts/sync_result_tables.py`), adds multi-turn query framing guidance in `commands/vault-recall.md`, and adds opt-in single-choice Stage-2 candidate reranking via TypeSafe Jev or BizRouter (`scripts/rerank_candidates.py`, with explicit `__none__` abstention, optional z-score fusion, and `external_candidates` sidecar output). Removing embedded `webapp-principles` updates Codex required skills to 1 (`agentic-vault:agentic-vault`) and Antigravity CLI skills from 17 to 16. The seven certificate-bound checker files remain byte-identical from v0.55.0 through v0.57.0. [Release scope](docs/releases/v0.57.0.md) · [Verification contract](docs/verification/v0.57.0.md)
 
 ## v0.56.0 — 사전 등록 평가 계획·사후 개정 이중 판정, 설치 상태 자체 다이제스트·기능 커버리지 표 및 사일런트 노옵 방지 감사
 
@@ -439,7 +447,7 @@ graph TB
 
 ```
 agentic-vault/
-├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.56.0 · MIT)
+├── .claude-plugin/                    ← plugin.json · marketplace.json (v0.57.0 · MIT)
 ├── .codex-plugin/plugin.json          ← Codex 플러그인 manifest · 공통 skills 사용
 ├── .agents/plugins/marketplace.json   ← Codex용 로컬 marketplace
 ├── antigravity/                       ← Antigravity CLI용 생성 패키지 (scripts/build_antigravity_package.py가 만든다, 손으로 고치지 않음)
@@ -547,11 +555,11 @@ agentic-vault/
 
 </div>
 
-현재 버전은 **v0.56.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.56.0은 `scripts/verify_eval_plan.py`(사전 등록 평가 계획 봉인·사후 개정 이중 판정), `vault_install_state.py`(자체 `manifest_sha256` 검증·`near_misses` 드리프트 진단), `vault_coverage_matrix.py`(`vault_doctor --coverage` 호스트×OS×어댑터 지원/비지원/미측정 표), `scripts/eval_activation.py`(선택형 `--check-activation` 사일런트 노옵 방지 감사, 종료 코드 `70`)를 추가하며 인증서가 묶는 일곱 파일(`checker_sha256`)은 v0.55.0과 바이트 단위로 유지한다([이번 변경·검증 범위](docs/releases/v0.56.0.md)). v0.55.0은 `vault_lint_extensions.py`의 검증일 노화·연도 경계 경고(`checked-at-stale`·`review-by-passed`)와 결정론적 별칭 충돌 린트(`alias-collision`), `vault_egress.py`의 URL 쿼리 비밀키·서명 검사(`egress-url-secret`), `vault_cloud_sync.py`의 읽기 전용 클라우드 동기화 경고·첫 실행 기능 요약(`vault_doctor --cloud-sync`·`--summary`, `backup_vault.py`·`vault_okf.py` `stderr` 안내), 그리고 반증 가능한 ADR 템플릿과 무근거 결론 번복 점검을 추가하며 `checker_sha256`를 계획적으로 전환했다([v0.55.0 변경 범위](docs/releases/v0.55.0.md), [인증서 전환 안내](docs/releases/v0.55.0.md#하위호환업그레이드)). v0.54.1은 `SessionStart`·`vault_doctor`·저장소 정적 위생 검사에 `Default_Ignorable` 불가시 유니코드 7종(`U+00AD`, `U+034F`, `U+061C`, `U+200E`, `U+200F`, `U+3164`, `U+FFA0`) 차단을 보강하고, 추적 텍스트 파일 5개의 선두 UTF-8 BOM 정리·CI BOM 검사, `backup_vault.py` POSIX 부모 디렉터리 `fsync`, 그리고 CI 경고 전용 SHA-256 고정 `actionlint v1.7.12`와 저장소 Dependabot 보안 업데이트를 추가했다([v0.54.1 변경 범위](docs/releases/v0.54.1.md)). v0.54.0은 `SessionStart`·`vault_doctor` 불가시 유니코드 밀수·양방향 제어 차단, 읽기 전용 훅 배선 감사(`vault_hook_wiring.py` · `--hook-wiring`), 결정론적 설치 상태 원장과 소유권 보호 안전 제거(`vault_install_state.py` · `--install-state`), 저장소 CI 정적 보안·이식성 시험 4종, 그리고 출처 고정 릴리스 주장 검증기(`scripts/verify_release_claims.py`)를 추가했다([v0.54.0 변경 범위](docs/releases/v0.54.0.md)). v0.53.2는 공개하지 않은 v0.53.1 후보 태그를 대체해 v0.53.0 외부 평가에서 나온 보안·문서 정합성, `vault_doctor` 비밀 마스킹 일치, `first_handoff.py` CLI 인자, Hypothesis 긴 경로 읽기, `jarvis_bridge.py` 개인 경로 정리, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`), 그리고 시험·잠금 경합 수정 2건을 함께 공개했다([v0.53.2 변경 범위](docs/releases/v0.53.2.md)). v0.53.0은 명시적인 한국어 절차 순서 질의의 검색 동점 처리, 두 세션의 인계 결과를 채점하는 실험, 첫 인계 실습을 제공한다([v0.53.0 변경 범위](docs/releases/v0.53.0.md)). v0.52.1은 healthcheck의 같은 번호 결정·실수 항목 보고(섹션 14d, 보고 전용), `SessionStart`의 가짜 머리글 줄 무력화, `jev_ask.py --escalate-bizrouter`의 Jev 원답 보존과 BizRouter 모델 축소(`google/gemini-decision-1`만), 저장소의 `v*` 태그 규칙 집합과 비공개 취약점 제보를 다루며 [v0.52.1 변경 범위](docs/releases/v0.52.1.md)에 적었다. 이 변경은 공개하지 않은 v0.52.0 후보에 처음 들어갔으며, v0.52.1은 긴 Windows TEMP 폴더에서 실패하던 저장소 도구·평가 스크립트·`vault_lesson_metrics.py`·시험 fixture를 고쳐 함께 공개했다. v0.51.0은 독립 평가 결함 수정(Windows 긴 경로·`SessionStart` 비밀 마스킹·Antigravity `Stop` 중복 방지·초기 `/vault-init` 청결성·시험 격리·문서 복구)과 선택형 BizRouter Decisions 어댑터(`google/gemini-decision-1`)를 다뤘다([v0.51.0 변경 범위](docs/releases/v0.51.0.md)). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 로컬 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다([v0.50.0 변경 범위](docs/releases/v0.50.0.md)). v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다. [웹앱 전용 공통 스킬](skills/webapp-principles/SKILL.md)과 [여섯 원칙](docs/webapp-principles.md)은 유지한다.
+현재 버전은 **v0.57.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.57.0은 `scripts/eval_stats.py`(평면·층화 매크로 짝 부트스트랩 95% 신뢰구간·결정론적 2-폴드 교차 적합, `evaluate_recall.py --bootstrap-ci`), `scripts/eval_recall_hygiene.py`(분할 간 근사 중복 질의 누수 감사·격리 사본 마크다운 레이아웃 불변성 프로브, `evaluate_recall.py --check-split-leakage`·`--layout-invariance`), `scripts/sync_result_tables.py`(JSON-마크다운 결과 표 fail-closed 동기화), `commands/vault-recall.md`의 멀티턴 후속 질의 보완 지침, 선택형 `scripts/rerank_candidates.py`(TypeSafe Jev·BizRouter 단일 `choice` 기반 2단계 후보 재정렬)를 추가하고, 독립 저장소 [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6)로 분리된 내장 `webapp-principles` 스킬과 문서를 제거한다(Antigravity CLI 스킬 17→16개). 인증서가 묶는 일곱 파일(`checker_sha256`)은 v0.55.0부터 v0.57.0까지 바이트 단위로 유지한다([이번 변경·검증 범위](docs/releases/v0.57.0.md)). v0.56.0은 `scripts/verify_eval_plan.py`(사전 등록 평가 계획 봉인·사후 개정 이중 판정), `vault_install_state.py`(자체 `manifest_sha256` 검증·`near_misses` 드리프트 진단), `vault_coverage_matrix.py`(`vault_doctor --coverage` 호스트×OS×어댑터 지원/비지원/미측정 표), `scripts/eval_activation.py`(선택형 `--check-activation` 사일런트 노옵 방지 감사, 종료 코드 `70`)를 추가하며 인증서가 묶는 일곱 파일(`checker_sha256`)은 v0.55.0과 바이트 단위로 유지한다([v0.56.0 변경 범위](docs/releases/v0.56.0.md)). v0.55.0은 `vault_lint_extensions.py`의 검증일 노화·연도 경계 경고(`checked-at-stale`·`review-by-passed`)와 결정론적 별칭 충돌 린트(`alias-collision`), `vault_egress.py`의 URL 쿼리 비밀키·서명 검사(`egress-url-secret`), `vault_cloud_sync.py`의 읽기 전용 클라우드 동기화 경고·첫 실행 기능 요약(`vault_doctor --cloud-sync`·`--summary`, `backup_vault.py`·`vault_okf.py` `stderr` 안내), 그리고 반증 가능한 ADR 템플릿과 무근거 결론 번복 점검을 추가하며 `checker_sha256`를 계획적으로 전환했다([v0.55.0 변경 범위](docs/releases/v0.55.0.md), [인증서 전환 안내](docs/releases/v0.55.0.md#하위호환업그레이드)). v0.54.1은 `SessionStart`·`vault_doctor`·저장소 정적 위생 검사에 `Default_Ignorable` 불가시 유니코드 7종(`U+00AD`, `U+034F`, `U+061C`, `U+200E`, `U+200F`, `U+3164`, `U+FFA0`) 차단을 보강하고, 추적 텍스트 파일 5개의 선두 UTF-8 BOM 정리·CI BOM 검사, `backup_vault.py` POSIX 부모 디렉터리 `fsync`, 그리고 CI 경고 전용 SHA-256 고정 `actionlint v1.7.12`와 저장소 Dependabot 보안 업데이트를 추가했다([v0.54.1 변경 범위](docs/releases/v0.54.1.md)). v0.54.0은 `SessionStart`·`vault_doctor` 불가시 유니코드 밀수·양방향 제어 차단, 읽기 전용 훅 배선 감사(`vault_hook_wiring.py` · `--hook-wiring`), 결정론적 설치 상태 원장과 소유권 보호 안전 제거(`vault_install_state.py` · `--install-state`), 저장소 CI 정적 보안·이식성 시험 4종, 그리고 출처 고정 릴리스 주장 검증기(`scripts/verify_release_claims.py`)를 추가했다([v0.54.0 변경 범위](docs/releases/v0.54.0.md)). v0.53.2는 공개하지 않은 v0.53.1 후보 태그를 대체해 v0.53.0 외부 평가에서 나온 보안·문서 정합성, `vault_doctor` 비밀 마스킹 일치, `first_handoff.py` CLI 인자, Hypothesis 긴 경로 읽기, `jarvis_bridge.py` 개인 경로 정리, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`), 그리고 시험·잠금 경합 수정 2건을 함께 공개했다([v0.53.2 변경 범위](docs/releases/v0.53.2.md)). v0.53.0은 명시적인 한국어 절차 순서 질의의 검색 동점 처리, 두 세션의 인계 결과를 채점하는 실험, 첫 인계 실습을 제공한다([v0.53.0 변경 범위](docs/releases/v0.53.0.md)). v0.52.1은 healthcheck의 같은 번호 결정·실수 항목 보고(섹션 14d, 보고 전용), `SessionStart`의 가짜 머리글 줄 무력화, `jev_ask.py --escalate-bizrouter`의 Jev 원답 보존과 BizRouter 모델 축소(`google/gemini-decision-1`만), 저장소의 `v*` 태그 규칙 집합과 비공개 취약점 제보를 다루며 [v0.52.1 변경 범위](docs/releases/v0.52.1.md)에 적었다. 이 변경은 공개하지 않은 v0.52.0 후보에 처음 들어갔으며, v0.52.1은 긴 Windows TEMP 폴더에서 실패하던 저장소 도구·평가 스크립트·`vault_lesson_metrics.py`·시험 fixture를 고쳐 함께 공개했다. v0.51.0은 독립 평가 결함 수정(Windows 긴 경로·`SessionStart` 비밀 마스킹·Antigravity `Stop` 중복 방지·초기 `/vault-init` 청결성·시험 격리·문서 복구)과 선택형 BizRouter Decisions 어댑터(`google/gemini-decision-1`)를 다뤘다([v0.51.0 변경 범위](docs/releases/v0.51.0.md)). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 로컬 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다([v0.50.0 변경 범위](docs/releases/v0.50.0.md)). v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. 그 변경은 모두 유지한다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.56.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.57.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 조항 시작 마커와 `/aside-repl` 명령 원본 `aside-repl-command.md`는 `engine=0.47.0`, Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
-아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.56.0) 경로는 v0.56.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.56.0 검증 기록](docs/verification/v0.56.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.55.0](docs/releases/v0.55.0.md)·[v0.54.1](docs/releases/v0.54.1.md)·[v0.54.0](docs/releases/v0.54.0.md)·[v0.53.2](docs/releases/v0.53.2.md)·[v0.53.0](docs/releases/v0.53.0.md)·[v0.52.1](docs/releases/v0.52.1.md)·[v0.51.0](docs/releases/v0.51.0.md)·[v0.50.0](docs/releases/v0.50.0.md)·[v0.49.0](docs/releases/v0.49.0.md)·[v0.48.0](docs/releases/v0.48.0.md)·[v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
+아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.57.0) 경로는 v0.57.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.57.0 검증 기록](docs/verification/v0.57.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.56.0](docs/releases/v0.56.0.md)·[v0.55.0](docs/releases/v0.55.0.md)·[v0.54.1](docs/releases/v0.54.1.md)·[v0.54.0](docs/releases/v0.54.0.md)·[v0.53.2](docs/releases/v0.53.2.md)·[v0.53.0](docs/releases/v0.53.0.md)·[v0.52.1](docs/releases/v0.52.1.md)·[v0.51.0](docs/releases/v0.51.0.md)·[v0.50.0](docs/releases/v0.50.0.md)·[v0.49.0](docs/releases/v0.49.0.md)·[v0.48.0](docs/releases/v0.48.0.md)·[v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
 ### 방법 1 — Claude에게 자연어로 부탁 (가장 자연스러움)
 
@@ -594,7 +602,7 @@ Release ZIP은 풀기 전에 같은 릴리스의 `SHA256SUMS`로 대조할 수 �
 터미널에서 공개 저장소를 등록하고 플러그인을 설치한다:
 
 ```text
-codex plugin marketplace add Technoetic/agentic-vault --ref v0.56.0
+codex plugin marketplace add Technoetic/agentic-vault --ref v0.57.0
 codex plugin add agentic-vault@agentic-vault-local
 ```
 
@@ -608,7 +616,7 @@ Windows PowerShell에서 `codex.ps1` 실행 정책 오류가 나면 위 두 명�
 터미널에서 이 릴리스 태그의 패키지 폴더를 설치한다:
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.56.0/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더 경로를 줘도 된다. 저장소 루트 주소로 설치하면 agy가 Claude Code 플러그인 구조를 자동 변환해 설치하지만, 그 설치로는 인계가 주입되지 않는 것으로 보여 쓰지 않는다. 설치·갱신·직접 해 보는 확인 절차와 한계는 [Antigravity CLI 안내](docs/antigravity.md)에 있다. 실제 agy 대화 세션으로는 확인하지 않았다.
@@ -897,10 +905,10 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
 `antigravity/`를 더한다. 저장소 루트는 지금처럼 Claude Code·Codex 플러그인이고 기본 훅 정의(`hooks/hooks.json`)는
 바뀌지 않는다. 실제 agy 대화 세션으로는 확인하지 않았다.
 
-- 패키지에는 Antigravity CLI용 스킬 17개(공용 스킬 둘과 명령 15개를 같은 이름으로 바꾼 스킬)와 훅
+- 패키지에는 Antigravity CLI용 스킬 16개(공용 스킬과 명령 15개를 같은 이름으로 바꾼 스킬; v0.48.0 당시 17개였으나 v0.57.0에서 `webapp-principles`를 `Technoetic/webapp6`로 분리)와 훅
   둘(SessionStart·Stop)이 들어 있다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
   폴더가 생성 결과와 같은지는 시험이 지킨다. 설치는 태그를 고정한 주소
-  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.56.0/antigravity`나 로컬 폴더로
+  `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity`나 로컬 폴더로
   한다([Antigravity CLI 안내](docs/antigravity.md)).
 - 세션 시작 훅은 생성 패키지가 주는 `--host antigravity` 플래그가 있을 때만 훅 입력의 `cwd`·`workspacePaths`에서
   볼트를 하나 찾아 인계·hot을 `injectSteps`로 넣는다. 도움말과 줄임 옵션 `--h`를 빼면 플래그 없는 기본 경로는
@@ -1306,9 +1314,9 @@ unchanged; new helpers require explicit selection. Active installations and vaul
 This release adds a package for Google's Antigravity CLI (`agy`), so that the same vault can be used
 there. The package lives in `antigravity/` and is generated from the repository's commands, skills,
 hooks and engine scripts by [`scripts/build_antigravity_package.py`](scripts/build_antigravity_package.py);
-it holds 17 Antigravity CLI skills (the two shared skills and one per command) and two hooks, and a test
+it holds 16 Antigravity CLI skills (the shared skill and one per command; reduced from 17 when `webapp-principles` moved to standalone `Technoetic/webapp6` in v0.57.0) and two hooks, and a test
 keeps the committed folder equal to the generator's output. Install it from the release tag with
-`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.56.0/antigravity` or from a local
+`agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity` or from a local
 copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit
 `--host antigravity` mode that finds the one vault named in the hook input and injects the handoff and
 hot note through `injectSteps`, and the checkpoint hook records Antigravity's `Stop` event; without the
@@ -1670,8 +1678,8 @@ publication gates are pending; see the [verification record](docs/verification/v
 [v0.35.1 검증 기록](docs/verification/v0.35.1.md)으로 확인한다.
 
 웹앱을 만들거나 수정·검토할 때 사용하는
-[공통 스킬](skills/webapp-principles/SKILL.md)과
-[여섯 원칙·검증 기준](docs/webapp-principles.md)을 추가했다.
+내장 `webapp-principles` 공통 스킬과 여섯 원칙·검증 기준을 추가했다
+(v0.57.0부터 독립 저장소 [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6)로 분리돼 `agentic-vault`에서 제거됐다).
 JS 모듈화, CSS 분리, 클래스별 책임, async/await, 화면별 URL,
 새 배포 자동 반영을 같은 계약으로 다룬다. 특히 캐시 헤더뿐 아니라
 열린 탭의 배포 감지와 다음 안전한 화면 이동에서의 자동 전체 로드,
@@ -1686,8 +1694,7 @@ Claude Code도 같은 `skills/` 문서를 탐색한다. 자동 선택 여부는 
 
 ## v0.35.1 source and certificate migration
 
-v0.35.1 adds the shared [webapp-principles skill](skills/webapp-principles/SKILL.md),
-[the six-rule guide](docs/webapp-principles.md) and stricter installed-skill discovery checks.
+v0.35.1 added the shared `webapp-principles` skill and six-rule guide (removed from `agentic-vault` in v0.57.0 after extraction to standalone `Technoetic/webapp6`) and stricter installed-skill discovery checks.
 It retains all seven certificate-bound checker files and the harmless corpus from v0.34.0.
 The measured `checker_sha256` remains
 `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`.
@@ -1802,14 +1809,13 @@ v0.19.0 adds `/vault-harden` / Codex `harden` for provenance,
 cooperative partial edits, temporal ledgers, lesson deltas, literal compile coverage
 and explicitly selected token calibration. See [usage and boundaries](docs/hardening.md).
 Compact constraints and model-free lifecycle checkpoints preserve existing startup
-budgets; new findings warn first. The installation refs in the install section target v0.56.0.
-Feature evidence and pending checks are in the [release verification](docs/verification/v0.56.0.md);
+budgets; new findings warn first. The installation refs in the install section target v0.57.0.
+Feature evidence and pending checks are in the [release verification](docs/verification/v0.57.0.md);
 final CI, release-asset and installation results go into the release's `verification.json`
 (the pre-publication receipt).
 Host installation is a separate step.
 
-**v0.35.1 additions:** the shared [webapp skill](skills/webapp-principles/SKILL.md) and
-[six-rule guide](docs/webapp-principles.md) cover JavaScript modules, layered CSS, screen/service
+**v0.35.1 additions:** the former shared `webapp-principles` skill and six-rule guide (extracted to standalone [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6) and removed from `agentic-vault` in v0.57.0) covered JavaScript modules, layered CSS, screen/service
 responsibility, async loading, screen URLs and safe deployment updates. A changed build in an open
 tab loads automatically on the next clean navigation; unsaved input and in-flight saves remain
 protected. Existing frameworks and user instructions take priority. The Codex verifier requires

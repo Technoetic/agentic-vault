@@ -136,7 +136,7 @@ class CatalogTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[1]
         report = build_catalog([('agentic-vault', repository / 'skills')])
         self.assertEqual({r['id'] for r in report['skills']},
-                         {'agentic-vault:agentic-vault', 'agentic-vault:webapp-principles'})
+                         {'agentic-vault:agentic-vault'})
 
     def test_advisory_similar_words_do_not_claim_collision(self):
         self.skill('one', 'one', 'Use for vault source recall')
