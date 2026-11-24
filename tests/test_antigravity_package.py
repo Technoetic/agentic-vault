@@ -92,18 +92,10 @@ INIT_REPLACEMENT = (
     "쓰지 않는다. 같은 볼트를 Claude Code에서도 쓰고 사용자가 따로 승인했을 때만 그 파일의 절차를 따른다."
 )
 UPGRADE_REPLACEMENT = (
-    "> 보강 helper bundle과 선택 이행 절차, 그리고 그 뒤에 이어지던 `0.9.0` 안내 목록 4개(Codex 진입점·세션 주입 "
-    "예산·`/vault-recall` 파일 셋·백업 스냅샷)는 [references/helper-bundle.md](references/helper-bundle.md)로 "
-    "옮겼다(Antigravity 스킬 본문 한도). 그 파일을 읽고 따른 뒤 아래 두 줄로 검증한다."
-)
-# The replacement when only the helper bundle paragraphs move (the v0.48.0 draft): the 0.9.0 list stays in
-# the skill body whenever the body then fits the limit.
-UPGRADE_HELPER_ONLY_REPLACEMENT = (
     "> 보강 helper bundle과 선택 이행 절차는 [references/helper-bundle.md](references/helper-bundle.md)로 "
     "옮겼다(Antigravity 스킬 본문 한도). 해당 단계에서 그 파일을 읽는다."
 )
-# commands/vault-upgrade.md, step 2: the first line of the 0.9.0 list and the first verification line,
-# which ends the moved section.
+# Step 2 keeps the 0.9.0 list and the following verification lines in the skill body.
 UPGRADE_LIST_START = "- `0.9.0`은 Codex에서도 같은 엔진을 사용한다."
 UPGRADE_VERIFY_START = "- 볼트가 git 저장소이고 훅을 설치했으면"
 UPGRADE_HEALTHCHECK = 'vault_healthcheck.py" --vault .'
@@ -639,44 +631,30 @@ class PackageBuildTests(unittest.TestCase):
     def _upgrade_source_lines(self) -> list[str]:
         return _placeholders(_frontmatter(_text(ROOT / "commands" / "vault-upgrade.md"))[1]).split("\n")
 
-    def test_vault_upgrade_keeps_its_verification_lines(self) -> None:
-        # The helper bundle section of commands/vault-upgrade.md has no heading after it before `## 3. 보고`,
-        # so the move ends at the step 2 verification lines; they stay in the skill body.
+    def test_vault_upgrade_keeps_the_090_list_and_verification_lines_in_step_two(self) -> None:
         source = self._upgrade_source_lines()
+        first = next(index for index, line in enumerate(source) if line.startswith(UPGRADE_LIST_START))
         start = next(index for index, line in enumerate(source) if line.startswith(UPGRADE_VERIFY_START))
+        listed = [line for line in source[first:start] if line.strip()]
+        self.assertEqual(len(listed), 4)
+        self.assertTrue(all(line.startswith("- ") for line in listed))
         verification = source[start:source.index("## 3. 보고")]
         verification = [line for line in verification if line.strip()]
         self.assertEqual(len(verification), 2, verification)
         self.assertIn(UPGRADE_HEALTHCHECK, verification[1])
-        lines = _frontmatter(self.text("skills/vault-upgrade/SKILL.md"))[1].split("\n")
+        skill = self.text("skills/vault-upgrade/SKILL.md")
+        self.assertLessEqual(_body_bytes(skill), MAX_BODY_BYTES)
+        lines = _frontmatter(skill)[1].split("\n")
         step = lines[lines.index("## 2. 검증"):lines.index("## 3. 보고")]
         self.assertEqual([line for line in step if line.strip()],
-                         ["## 2. 검증", UPGRADE_REPLACEMENT, *verification])
+                         ["## 2. 검증", UPGRADE_REPLACEMENT, *listed, *verification])
         self.assertEqual(sum(UPGRADE_HEALTHCHECK in line for line in lines), 1)
         reference = self.text("skills/vault-upgrade/references/helper-bundle.md")
         self.assertNotIn(UPGRADE_HEALTHCHECK, reference)
         self.assertNotIn(UPGRADE_VERIFY_START, reference)
-
-    def test_vault_upgrade_moves_the_090_list_only_because_the_body_would_not_fit(self) -> None:
-        # The 0.9.0 list stays in the skill body when the body then fits 23,500 bytes; it fits not, so it
-        # moves with the helper bundle paragraphs and the replacement line names it.
-        source = self._upgrade_source_lines()
-        first = source.index(next(line for line in source if line.startswith(UPGRADE_LIST_START)))
-        stop = next(index for index, line in enumerate(source) if line.startswith(UPGRADE_VERIFY_START))
-        listed = [line for line in source[first:stop] if line.strip()]
-        self.assertEqual(len(listed), 4, listed)
-        self.assertTrue(all(line.startswith("- ") for line in listed), listed)
-        body = _frontmatter(self.text("skills/vault-upgrade/SKILL.md"))[1]
-        reference = self.text("skills/vault-upgrade/references/helper-bundle.md").split("\n")
         for line in listed:
             with self.subTest(line=line[:40]):
-                self.assertNotIn(_masked(line), _masked(body).split("\n"))
-                self.assertIn(_masked(line), [_masked(kept) for kept in reference])
-        self.assertIn("`0.9.0` 안내 목록 4개", UPGRADE_REPLACEMENT)
-        kept = body.replace(UPGRADE_REPLACEMENT, UPGRADE_HELPER_ONLY_REPLACEMENT + "\n\n" + "\n".join(listed), 1)
-        self.assertGreater(len(kept.strip("\n").encode("utf-8")), MAX_BODY_BYTES,
-                           "the 0.9.0 list fits the vault-upgrade skill body again: keep it there (end the move "
-                           "before the list) and restore the helper-bundle-only replacement")
+                self.assertNotIn(_masked(line), _masked(reference).split("\n"))
 
     def test_references_and_docs_change_only_link_targets(self) -> None:
         for path, text in self.markdown().items():
@@ -845,15 +823,15 @@ class GeneratorRefusalTests(unittest.TestCase):
         self.assertFalse(out.exists())
 
     def test_missing_end_of_a_moved_section_fails(self) -> None:
-        # Without its end line the vault-upgrade move would take the step 2 verification lines along.
+        # Without its end line the vault-upgrade move would also take the list and verification lines.
         repo = self.variant()
         command = repo / "commands" / "vault-upgrade.md"
         text = _text(command)
-        self.assertEqual(text.count("\n" + UPGRADE_VERIFY_START), 1)
-        command.write_bytes(text.replace("\n" + UPGRADE_VERIFY_START, "\n- git 볼트에 훅을 설치했으면").encode("utf-8"))
+        self.assertEqual(text.count("\n" + UPGRADE_LIST_START), 1)
+        command.write_bytes(text.replace("\n" + UPGRADE_LIST_START, "\n- Codex에서도 같은 엔진을 사용한다.").encode("utf-8"))
         out = repo.parent / f"{repo.name}-out"
         self.assertRefused(_run("build", "--repo", str(repo), "--out", str(out)), "commands/vault-upgrade.md",
-                           UPGRADE_VERIFY_START.split(" 훅을")[0])
+                           UPGRADE_LIST_START)
         self.assertFalse(out.exists())
 
     def test_binary_assets_keep_their_bytes(self) -> None:

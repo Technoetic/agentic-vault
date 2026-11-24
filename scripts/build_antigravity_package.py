@@ -160,26 +160,21 @@ MOVES = (
         wanted="sections '## 4-2.' and '## 4-3.'",
         matches=lambda level, title: level == 2 and title.startswith(("4-2.", "4-3.")),
     ),
-    # In commands/vault-upgrade.md this `###` section is followed, without a heading, by the 0.9.0 list and
-    # the two verification lines of step 2. The verification lines always stay in the skill body (the move
-    # ends at the first of them). The 0.9.0 list moves too, because with it the skill body passes
-    # MAX_SKILL_BODY_BYTES; tests/test_antigravity_package.py measures that and fails once it would fit.
+    # Step 2 continues without a heading after the helper bundle. Keep its 0.9.0 list and verification
+    # lines together in the skill body.
     SectionMove(
         source="commands/vault-upgrade.md",
         target="skills/vault-upgrade/references/helper-bundle.md",
-        title="# vault-upgrade: 보강 helper bundle과 선택 이행, 0.9.0 안내 목록",
-        origin="> 원본은 저장소 `commands/vault-upgrade.md` 2단계의 '보강 helper bundle과 선택 이행' 절과 그 뒤의 "
-               "`0.9.0` 안내 목록이고(2단계의 검증 두 줄은 스킬 본문에 남겼다), Antigravity 스킬 본문 한도 때문에 "
+        title="# vault-upgrade: 보강 helper bundle과 선택 이행",
+        origin="> 원본은 저장소 `commands/vault-upgrade.md` 2단계의 '보강 helper bundle과 선택 이행' 절이다. Antigravity 스킬 본문 한도 때문에 "
                "`scripts/build_antigravity_package.py`가 이 파일로 옮겼다. 이 파일을 직접 고치지 않는다. "
                + REFERENCE_ROOT_NOTE,
-        replacement="> 보강 helper bundle과 선택 이행 절차, 그리고 그 뒤에 이어지던 `0.9.0` 안내 목록 4개(Codex 진입점·"
-                    "세션 주입 예산·`/vault-recall` 파일 셋·백업 스냅샷)는 "
-                    "[references/helper-bundle.md](references/helper-bundle.md)로 옮겼다(Antigravity 스킬 본문 한도). "
-                    "그 파일을 읽고 따른 뒤 아래 두 줄로 검증한다.",
+        replacement="> 보강 helper bundle과 선택 이행 절차는 [references/helper-bundle.md](references/helper-bundle.md)로 "
+                    "옮겼다(Antigravity 스킬 본문 한도). 해당 단계에서 그 파일을 읽는다.",
         wanted="section '### 보강 helper bundle과 선택 이행'",
         matches=lambda level, title: level == 3 and title == "보강 helper bundle과 선택 이행",
-        ends=lambda line: line.startswith("- 볼트가 git 저장소이고"),
-        end_wanted="the step 2 verification line '- 볼트가 git 저장소이고 …'",
+        ends=lambda line: line.startswith("- `0.9.0`은 Codex에서도 같은 엔진을 사용한다."),
+        end_wanted="the first step 2 list item '- `0.9.0`은 Codex에서도 같은 엔진을 사용한다.'",
     ),
 )
 MOVES_BY_SOURCE = {move.source: move for move in MOVES}
