@@ -87,13 +87,11 @@ any of them changes what agents do in every vault after the update.
 - `/vault-init` and `/vault-upgrade` copy `vault_healthcheck.py` and its helper bundle (`vault_*.py`,
   `jev_client.py`, `jev_ask.py`, `resources/lint-benign-v1.json`) to the vault's `00-meta/scripts/`, the git
   hooks to `00-meta/scripts/git-hooks/` and the rule templates to `.claude/rules/vault-*.md`. After the user
-  approves, they also copy the adapters (`aside-up.ps1`, `deny-guard.py` with `ps-parse.ps1`, `lesson-cues.py`)
-  and the `/aside-repl` procedure command (`.claude/commands/aside-repl.md`).
-- Every copied file except the helper bundle carries a stamp with `engine=X.Y.Z` at its head: on the first
-  line, on the second line after a `#!` line (the health check and the git hooks), or right after the front
-  matter (the `/aside-repl` command). `/vault-upgrade` and doctor compare it with the bundled file to offer an
-  update. The helper bundle carries no stamp; `/vault-upgrade` replaces a helper only when its hash matches
-  the previous install.
+  approves, they also copy the adapters (`aside-up.ps1`, `deny-guard.py` with `ps-parse.ps1`, `lesson-cues.py`).
+- Every copied file except the helper bundle carries a stamp with `engine=X.Y.Z` on its first line or, for the
+  health check and git hooks, on the line after the shebang. `/vault-upgrade` and doctor compare it with
+  the bundled file to offer an update. `/vault-upgrade` replaces an unstamped helper from the bundle only
+  when its hash matches the previous install.
 - Notes, `00-meta/vault-config.json`, the handoff and the ledgers in a vault are the user's data. The plugin
   ships no vault data. Tests build synthetic vaults in temporary folders; `tests/fixtures/` holds synthetic
   data only.

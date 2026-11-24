@@ -1870,21 +1870,14 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         "answer. Generation with authentication in bare mode and whether bare mode applies the effort level "
         "were not run.",
     )
-    # Files under assets/, hooks/ and skills/ that carry engine=0.47.0 in their first five lines.
-    DECLARED_STAMPS = {
-        "skills/agentic-vault/scripts/vault_healthcheck.py",
-        "assets/adapters/aside/aside-repl-command.md",
-        "assets/adapters/aside/browser-clause.md",
-    }
 
     def test_v0470_release_note_sections_and_install_ref(self) -> None:
         release = self.RELEASE.read_text(encoding="utf-8")
         lines = release.splitlines()
         self.assertEqual(lines[0], self.TITLE)
         headings = [line for line in lines if line.startswith("## ")]
-        self.assertEqual(tuple(headings), self.SECTIONS)
-        # The closing paragraph after the last section states the install ref and the stamp.
-        closing = _folded(release[release.index("\n" + self.SECTIONS[-1] + "\n"):])
+        self.assertEqual(tuple(headings), self.SECTIONS + ("## 정오표",))
+        closing = _folded(_section(release, self.SECTIONS[-1]))
         self.assertIn(self.INSTALL_REF, closing)
         self.assertIn("engine=0.47.0", closing)
         self.assertIn("--ref v0.47.0", closing)
@@ -1954,13 +1947,21 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         from urllib.parse import unquote
 
         for document in (self.RELEASE, self.VERIFICATION):
-            for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
+            text = document.read_text(encoding="utf-8")
+            for target in re.findall(r"\]\(([^)\s]+)\)", text):
                 if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
+                    continue
+                # This release note still links to the command as it exists in its published tag.
+                if document == self.RELEASE and target == "../../assets/adapters/aside/aside-repl-command.md":
+                    errata = _section(text, "## 정오표")
+                    self.assertIn("2026-11-24", errata)
+                    pinned = "https://github.com/Technoetic/agentic-vault/blob/v0.47.0/"
+                    self.assertIn(f"]({pinned}{target.removeprefix('../../')})", errata)
                     continue
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
 
-    def test_v0470_moves_only_the_declared_stamps(self) -> None:
+    def test_no_current_file_still_has_the_v0470_stamp(self) -> None:
         stamped = set()
         for top in ("assets", "hooks", "skills"):
             for path in (REPO_ROOT / top).rglob("*"):
@@ -1972,9 +1973,8 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
                     continue
                 if any("engine=0.47.0" in line for line in head):
                     stamped.add(path.relative_to(REPO_ROOT).as_posix())
-        # The health check's stamp follows the manifest version and moved to engine=0.48.0 in v0.48.0;
-        # the other two declared files still carry engine=0.47.0.
-        self.assertEqual(stamped, self.DECLARED_STAMPS - {"skills/agentic-vault/scripts/vault_healthcheck.py"})
+        # The health check and browser clause now have newer stamps. The bundled command was retired.
+        self.assertEqual(stamped, set())
 
     def test_v0470_default_changes_are_numbered(self) -> None:
         import re
@@ -2106,16 +2106,13 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
         self.assertIn(self.ENTRY_17_START_LINE + " 기존 조항은 바뀌지 않는다. 대상: 새로 Aside를 들이는 볼트.",
                       self._default_change_entry(17))
 
-    def test_v0470_python_route_statements_match_the_shipped_texts(self) -> None:
-        # The note describes the clause and the command file; they must say what the note says.
+    def test_aside_start_clause_accounts_for_the_python_route(self) -> None:
         hooks = (REPO_ROOT / "assets/adapters/aside/settings-hooks.json").read_text(encoding="utf-8")
         self.assertIn('"if": "Bash(aside *)"', hooks)
         self.assertIn('"if": "PowerShell(aside *)"', hooks)
         clause = (REPO_ROOT / "assets/adapters/aside/browser-clause.md").read_text(encoding="utf-8")
         start = next(line for line in clause.splitlines() if line.startswith("- **기동(Windows):**"))
         self.assertIn("Python으로 `aside repl`을 부를 때는 훅이 있어도 먼저 아래 도우미를 실행한다.", start)
-        command = (REPO_ROOT / "assets/adapters/aside/aside-repl-command.md").read_text(encoding="utf-8")
-        self.assertIn("Windows에서는 훅이 있어도 이 도우미를 먼저 실행한다.", _folded(command))
 
     def test_v0470_entry_3_names_the_retire_condition_of_session_end(self) -> None:
         # /vault-session-end now proposes RETIRE only on evidence seen in the session (finding RD-7).
@@ -2402,7 +2399,6 @@ class V0470SharedSurfaceTests(unittest.TestCase):
     LESSON_DELTA = REPO_ROOT / "skills/agentic-vault/scripts/vault_lesson_delta.py"
     HARDENING = REPO_ROOT / "docs/hardening.md"
     SECURITY = REPO_ROOT / "SECURITY.md"
-    UPGRADE = REPO_ROOT / "commands/vault-upgrade.md"
     OWNERSHIP_HEADING = "### Engine copy ownership line (tried, not shipped)"
     OWNERSHIP_ROWS = (
         ("None (v0.46.0)", "15/16", "8/8", "3/4", "0/4"),
@@ -2726,24 +2722,7 @@ class V0470SharedSurfaceTests(unittest.TestCase):
             "적용된다. 다만 상태 칸이 이미 `상태: retired(…, YYYY-MM-DD)`인 줄은 그 칸을 그대로 두므로, 그런 줄에 "
             "v0.46.0이 준비한 사유 없는 제안은 `proposal_changed_or_stale`로 거부되고 다시 준비해야 한다.", hardening)
 
-    def test_upgrade_passes_the_offer_flag_once(self) -> None:
-        # Among the command lines that run the adapter report, exactly one passes the flag: step 6.
-        lines = [line for line in self.UPGRADE.read_text(encoding="utf-8").splitlines()
-                 if "vault_adapters.py" in line and "--vault" in line]
-        flagged = [line for line in lines if "--offer-aside-command" in line]
-        self.assertEqual(len(flagged), 1)
-        self.assertEqual(flagged[0].count("--offer-aside-command"), 1)
-        self.assertTrue(flagged[0].startswith("6. **도구 어댑터(선택)**"))
-
-    def test_upgrade_owns_the_stamped_copy_and_offers_one_clause_line(self) -> None:
-        text = self.UPGRADE.read_text(encoding="utf-8")
-        for literal in ("`offer_command`", "`offer_command_update`", "`review_command`",
-                        "`agentic-vault:adapter aside-repl engine=`", "**repl 스크립트 전달:**",
-                        "사용자가 승인한 Aside 조항 한 줄 추가"):
-            with self.subTest(literal=literal):
-                self.assertIn(literal, text)
-
-    def test_security_and_codex_doc_state_the_injection_observation(self) -> None:
+    def test_security_policy_states_the_injection_observation(self) -> None:
         security = self.SECURITY.read_text(encoding="utf-8")
         limits = _folded(_section(security, "## Known limitations"))
         for literal in ("**Commands that a command or skill body injects bypass PreToolUse hooks (observed).**",
@@ -2762,13 +2741,6 @@ class V0470SharedSurfaceTests(unittest.TestCase):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
         self.assertNotIn("문서상 권한 규칙만 거친다", summary)
-        scope = _section(security, "## Scope")
-        aside = scope[scope.index("- **Optional Aside adapter**"):]
-        aside = aside[:aside.index("\n- ")]
-        self.assertIn("/aside-repl", aside)
-        codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
-        self.assertIn("aside-repl-command.md", codex)
-        self.assertIn("subprocess", codex)
 
 
 # v0.48.0: six items that add a generated Antigravity CLI package (antigravity/) beside the unchanged
