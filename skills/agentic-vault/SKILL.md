@@ -13,7 +13,7 @@ description: "Use when working in an agentic-vault directory with Claude Code, C
 - 볼트에서 작업을 시작하기 전 `00-meta/vault-config.json`을 먼저 읽어라. 아래 규율의 구체 값(필수 키 목록·enum·deny zone·로그 태그·특수 노트 경로)은 전부 이 설정 파일이 원천이다. 이 문서의 예시는 기본값일 뿐이다.
 - `handoff_note`·`ssot_note`·`backup_target`이 빈 문자열이면 해당 기능은 생략한다(우아한 성능 저하 — 없는 기능을 요구하지 마라).
 - **Codex:** 먼저 [references/codex.md](references/codex.md)를 읽고 `$agentic-vault:agentic-vault <작업> [인자]`를 공통 명령 문서에 연결하라(독립 스킬 설치는 `$agentic-vault <작업>`). 세션 시작·검색·종료·검사·백업과 기존 노트 작업을 같은 엔진으로 수행한다. Claude Code의 `/vault-*` 진입점은 그대로 사용한다.
-- **Antigravity CLI:** 먼저 [references/antigravity.md](references/antigravity.md)를 읽는다. Antigravity용 패키지는 저장소의 `antigravity/` 폴더이며 명령 15개가 같은 이름의 스킬(예: `vault-session-start`)로 들어 있다. 훅은 플러그인 설치 폴더에서 실행되고 볼트는 작업 공간에서 찾는다.
+- **Antigravity CLI:** 먼저 [references/antigravity.md](references/antigravity.md)를 읽는다. Antigravity용 패키지는 저장소의 `antigravity/` 폴더이며 명령 14개가 같은 이름의 스킬(예: `vault-session-start`)로 들어 있다. 훅은 플러그인 설치 폴더에서 실행되고 볼트는 작업 공간에서 찾는다.
 - 쓰기는 사용자가 요청한 작업 범위에서만 수행한다. 조회만 요청한 세션에서 인계 저장·로그 추가·백업·설정 변경을 자동으로 시작하지 마라. 기존 세션에서 이미 받은 해당 작업의 승인을 다시 요구하지 않는다.
 
 ## 1. 이 볼트는 무엇인가 — 에이전틱 메모리의 4렌즈
@@ -45,9 +45,9 @@ description: "Use when working in an agentic-vault directory with Claude Code, C
 
 `ssot_note`가 설정된 볼트에서는 핵심 사실(연락처·식별번호·정격·가격 등)의 **값은 SSOT 노트 한 곳에만** 둔다. 새 노트는 값을 베끼지 말고 "→ `[[SSOT 노트]]` 참조"로 가리켜라 — 베끼는 순간 모순 원천이 생긴다. `ssot_facts`의 정규식 패턴이 볼트 전체에서 2종 이상의 값과 매치되면 모순이며 `/vault-lint`가 보고한다. 모순을 발견해도 **임의로 하나를 고르지 마라** — SSOT의 확정 여부에 따라 수렴시키거나 사용자에게 정합을 요청한다. 상세: [references/memory-tiers.md](references/memory-tiers.md)
 
-## 5. 명령 15종 — 언제 쓰는가
+## 5. 명령 14종 — 언제 쓰는가
 
-아래 `/vault-*` 표기는 Claude Code 명령이다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 `vault-`를 뺀 작업명을 사용하며, [Codex 연결 규약](references/codex.md)의 문서 경로를 따라 같은 절차를 읽는다. `backup`·`verify`·`restore`는 같은 규약의 기존 백업 CLI를 사용한다. Jarvis는 Claude CLI를 사용하는 별도 연동이다. Antigravity CLI에서는 같은 이름의 스킬(`vault-session-start` 등)을 쓴다([references/antigravity.md](references/antigravity.md)).
+아래 `/vault-*` 표기는 Claude Code 명령이다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 `vault-`를 뺀 작업명을 사용하며, [Codex 연결 규약](references/codex.md)의 문서 경로를 따라 같은 절차를 읽는다. `backup`·`verify`·`restore`는 같은 규약의 기존 백업 CLI를 사용한다. Antigravity CLI에서는 같은 이름의 스킬(`vault-session-start` 등)을 쓴다([references/antigravity.md](references/antigravity.md)).
 
 | 명령 | 언제 쓰는가 |
 |---|---|
@@ -65,7 +65,6 @@ description: "Use when working in an agentic-vault directory with Claude Code, C
 | `/vault-doctor` | 기억이 주입되지 않거나 설정·파일·예산 상태, 도구 어댑터(Aside) 상태와 선택형 deny zone 가드 설치 상태를 확인할 때 (읽기 전용, 원문 비출력) |
 | `/vault-upgrade` | 기존 볼트의 엔진 파일을 사용자 수정 보존 절차에 따라 갱신 |
 | `/vault-harden` | 출처·공유 상태·시간 대장·교훈 델타·정제 품질·토큰 보정을 명시적으로 실행 |
-| `/vault-jarvis-setup` | 사용자가 Telegram 연동을 요청했을 때 설정 |
 
 ### 출처·공유 상태 보강
 
@@ -195,7 +194,7 @@ Claude Code 전용 선택 설치이며 권고용이고 효과는 측정하지 �
 capture/check는 읽기 전용이고 설정·대장 저장·원문 삭제를 덧붙이지 않는다. 현재 승인 범위에
 구체적인 활성화가 포함될 때만 `memory_revocation_file`을 설정한다. 기존 경로 제외·RETIRE와
 구분하며, 합성 검사는 [세션 간 복구 평가](../../docs/memory-lifecycle.md)를 따른다.
-설정된 철회는 Jev 파일 근거·Jarvis 생성 문맥의 [두 전송 경계](../../docs/revocation-egress.md)에서도
+설정된 철회는 [Jev 파일 근거의 전송 경계](../../docs/revocation-egress.md)에서도
 원문 전체에 먼저 적용하고 같은 정책·원문을 전송 전후에 재확인한다. 이미 보낸 정보와 선언하지 않은
 의미상 사본은 거둘 수 없다. 다른 프로그램의 전송까지 집행한다고 해석하지 않는다.
 

@@ -15,10 +15,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 
 각 항목을 검사하고 상태를 기록하라: `이미 있음(건너뜀)` / `추가함` / `사용자 거부` / `승인 대기(기존 유지)`.
 
-1. **vault-config 일반 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `jarvis` 블록(기본 `enabled: false`), `stale_days`, `index_scopes`.
-   - 기존 config에 `jarvis` 블록 자체가 없으면 새 블록 전체를 템플릿 기본값으로 추가하는 기존 동작을 유지하라.
-   - **레거시 단일 브리핑 예외**: 기존 `jarvis` 블록에 `briefing_time`이 있고 `briefing_times`가 없으면, 일반 누락 키 보충에서 `briefing_times`를 제외해 단일 시각 fallback 일정을 그대로 보존하라.
-   - `briefing_times` 추가는 별도 **브리핑 일정 마이그레이션**이다. 기존 `briefing_time` 값을 배열의 유일한 값으로 사용하는 변경안을 보여주고, 사용자가 명시적으로 승인한 경우에만 추가하라. 템플릿 기본값 `07:30`으로 대체하지 마라.
+1. **vault-config 일반 누락 키 보충**: 템플릿 vault-config.json과 현재 파일을 키 수준에서 대조해 **없는 키만** 기본값으로 추가하라(Edit — 기존 키의 값은 절대 변경 금지). 대표 누락: `stale_days`, `index_scopes`.
    - **호환 범위 키 예외**: `frontmatter_roots`와 `frontmatter_exempt_paths`는 단순 기본값이 아니라 레거시 full 모드의 검사 범위를 선택하는 부재 marker다. 두 키를 일반 누락 키 보충에서 제외하라. 기존 config에 둘 중 하나라도 없으면 그 부재를 그대로 보존하고, 다른 키가 이미 있더라도 빠진 키를 자동 추가하지 마라.
    - `frontmatter_exempt_paths`가 없고 `fm_exempt_zones`가 있으면 기존 키가 호환 alias로 계속 적용된다. 템플릿 기본 `frontmatter_exempt_paths`를 넣어 alias를 가리지 마라.
    - 두 키 중 빠진 키를 추가하는 작업은 별도 **검사 범위 마이그레이션**이다. 추가 전 현재 full 모드의 유효 범위와 템플릿 값을 적용한 뒤의 범위를 비교해 보여주고, 범위가 넓어지거나 좁아지는 경로와 기존 alias 대체 여부를 설명하라. 그 뒤 사용자가 해당 키 추가를 명시적으로 승인한 경우에만 추가하고, 거부하거나 답이 없으면 config를 그대로 유지하라.
@@ -37,8 +34,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
    - 파일 처리가 끝나면 `git config --get core.hooksPath`로 현재 유효값을 확인한다. 값이 없으면 사용자 확인 후 `git config core.hooksPath 00-meta/scripts/git-hooks`를 실행하고, 이미 같은 값이면 유지한다. **다른 값**이면 현재 값을 보여주고 교체할지 **명시적 확인**을 받아라. 승인 없이는 설정과 기존 훅을 그대로 유지한다.
    - 효과 1줄 안내: "pre-commit은 설치된 staged 검사기의 결과를 그대로 반영하고 Python·검사기 부재 시 fail-closed, pre-push는 네트워크 push 차단(로컬 미러 허용)". 두 훅은 로컬 강제 장치이며 `--no-verify`로 명시 우회할 수 있다.
 4. **handoff anchor**: `handoff_note`가 설정돼 있고 그 파일 제목 아래에 "기준 커밋(anchor)" 줄이 없으면 삽입하라 — git 볼트면 `git rev-parse --short HEAD` 값으로, 아니면 `(없음)`으로.
-5. **Jarvis 안내** (설치는 하지 않음): `jarvis.enabled`가 false면 "Telegram 자비스를 켜려면 /vault-jarvis-setup" 한 줄만 안내하라 — 토큰 발급은 사용자 행위라 자동화 불가.
-6. **도구 어댑터(선택)**: `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행하고 `adapters.aside.actions`(Claude Code에서는 `adapters.deny_guard.actions`도)에 따라 처리하라. 진단은 읽기 전용이다. 교체·설치는 아래 각 항목의 조건을 따르며, 사용자 승인 없이 새로 설치하는 것은 없다.
+5. **도구 어댑터(선택)**: `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_adapters.py" --vault . --format json`을 실행하고 `adapters.aside.actions`(Claude Code에서는 `adapters.deny_guard.actions`도)에 따라 처리하라. 진단은 읽기 전용이다. 교체·설치는 아래 각 항목의 조건을 따르며, 사용자 승인 없이 새로 설치하는 것은 없다.
    - `offer_helper_update`: 설치된 `00-meta/scripts/aside-up.ps1`의 `agentic-vault:adapter aside-up engine=` 스탬프가 번들 원본보다 낮다. 엔진 소유 구버전이므로 원본과의 diff를 보여 주고, 릴리스 노트로 설명되지 않는 로컬 수정이 없을 때만 원본으로 교체한다. 판단이 불명확하면 기존 파일을 유지하고 `승인 대기(기존 유지)`로 기록한다.
    - `review_helper`: 스탬프가 없거나 숫자 버전이 아니거나(사용자 제작), 같은 스탬프인데 내용이 다르거나(로컬 수정), 더 높거나(다른 배포본), 읽을 수 없거나, 링크·정션을 거치는 경로다. 자동 덮어쓰기 금지 — diff만 보여 주고 기존 파일을 유지한다.
    - `offer_install`: Aside CLI가 있는데 어댑터가 없다. `/vault-init` 4-1과 같은 질문·순서로 제안만 하고, 승인할 때만 설치한다.
@@ -68,7 +64,7 @@ description: 기존 볼트를 현재 엔진 기능으로 업그레이드 — 레
 일치하는 엔진 파일만 교체하며 불명확한 파일은 기존 유지/검토로 보고한다.
 의존성이 빠진 단일 검사기는 기존 fatal 게이트를 유지하되 새 경고는 incomplete다.
 전체 bundle 확인 전에 훅을 활성화하지 않는다. 플러그인 checkpoint hook은 플러그인에
-설치되며 이 절차가 Codex trust·전역 설정·Jarvis 데몬을 변경하지 않는다.
+설치되며 이 절차가 Codex trust·전역 설정을 변경하지 않는다.
 
 기존 `.gitignore`에 `00-meta/.agentic-vault/runtime/`가 없으면 그 한 줄만 추가한다.
 runtime을 일반 노트 inventory나 백링크 대상으로 넣지 않는다. [시간 대장 템플릿](../assets/templates/ssot-ledger.md)은
@@ -76,10 +72,10 @@ runtime을 일반 노트 inventory나 백링크 대상으로 넣지 않는다. [
 dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한다. 이미 승인된 정확한 안에만
 `apply --approve`와 proposal stdin을 사용한다. 업그레이드가 지식/교훈 대장을 자동 이행하지 않는다.
 [보강 도구](../docs/hardening.md)의 출처·교훈 델타·literal 품질·토큰 보정은 명시적으로 선택한다.
-기존 budget 계수·warning severity·aliases·Jarvis 일정/인증/활성 범위는 유지한다.
+기존 budget 계수·warning severity·aliases는 유지한다.
 선택적으로 `python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_install_state.py" record --vault .`로 현재 엔진 소유 파일과 사용자 소유 파일의 소유권·SHA-256을 `00-meta/.vault-install-state.json`에 기록해 두면, 이후 `/vault-doctor --install-state`나 `vault_install_state.py uninstall`(기본 dry-run, 사용자 파일·수정본 자동 보존)으로 상태를 추적할 수 있다.
 
-- `0.9.0`은 Codex에서도 같은 엔진을 사용한다. `$agentic-vault:agentic-vault session-start`·`recall <질의>`·`session-end`·`lint`·`backup` 진입점을 안내하라. Codex 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰해야 실행되며, 주입이 없으면 스킬의 `session-start`로 복원한다. 생성 AGENTS의 사용자 규칙 참조와 rules 여섯 본문이 모두 보존됐는지 확인한다. 이 업그레이드로 Codex 전역 설정이나 Claude 권한 설정을 변경하지 않는다. Jarvis의 실행기는 계속 Claude CLI다.
+- `0.9.0`은 Codex에서도 같은 엔진을 사용한다. `$agentic-vault:agentic-vault session-start`·`recall <질의>`·`session-end`·`lint`·`backup` 진입점을 안내하라. Codex 플러그인 훅은 `/hooks`에서 현재 정의를 검토하고 신뢰해야 실행되며, 주입이 없으면 스킬의 `session-start`로 복원한다. 생성 AGENTS의 사용자 규칙 참조와 rules 여섯 본문이 모두 보존됐는지 확인한다. 이 업그레이드로 Codex 전역 설정이나 Claude 권한 설정을 변경하지 않는다.
 - `0.9.0`의 세션 주입은 예산을 실제 출력에 적용하며 0은 주입 비활성화다. 주입은 검사기 `validate_config` 전체를 통과해야 동작한다 — 어떤 키든 형식 오류(정수 키에 문자열·실수, `null`, `./` 접두·끝 슬래시 경로, 확장자가 `.md`가 아닌 `hot_note`·`handoff_note`, 빈 enum 등)면 handoff·hot이 둘 다 조용히 빠지고 stderr 한 줄만 남으니, 업그레이드 직후 healthcheck로 config 오류부터 확인하라. 구판 설정값은 유지하고 이 의미 변경을 안내하라. 절대경로·상위 경로·deny zone·심볼릭 링크/정션을 가리키는 상태 파일은 주입되지 않으므로, 설정 오류를 우회하지 말고 사용자에게 정상적인 볼트 내부 경로를 제시하라.
 - 새 `/vault-recall`은 플러그인 안의 `vault_recall.py`와 `vault_paths.py`, `vault_healthcheck.py`를 함께 사용한다. 스크립트 하나만 볼트에 복사하지 마라. 플러그인 갱신으로 세 파일을 같은 버전에서 로드한다. 기존 standalone healthcheck·git 훅 설치 절차는 유지한다.
 - 새 백업은 `backup_target/snapshots/`에 독립 사본을 추가한다. 기존 `mirror/`·`bundles/`를 삭제하거나 덮어쓰지 않는다. 새 스냅샷을 검증한 뒤 필요하면 새 디렉터리로 복구할 수 있음을 `docs/reliability.md`의 CLI로 안내하라.
@@ -94,5 +90,5 @@ dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한�
 ## 안전 규칙
 
 - 기존 파일·키·값을 덮어쓰지 마라. 충돌이 의심되면 멈추고 물어라.
-- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 6번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 6번에서 사용자가 승인한 aside-up 훅 명령 교체도 같은 예외에 든다. 6번의 `agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=` 스탬프가 있는 `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`(Claude Code)도 엔진 소유 파일이며, 사용자가 승인한 가드 훅 그룹 교체도 같은 예외에 든다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
-- 이 명령은 볼트 내용(지식 노트)에 손대지 않는다 — 엔진 표면(설정·훅·시스템 파일)만 다룬다. 단, 6번에서 사용자가 승인한 어댑터 설치(운영 가이드 노트 생성과 index·log 기록, CLAUDE.md 관리 블록 밖 조항 추가)는 예외다.
+- **예외(엔진 소유 표면)**: `agentic-vault:rule engine=` 헤더가 있는 `.claude/rules/vault-*.md`, `agentic-vault:generated` 헤더가 있는 `AGENTS.md`, 1-3의 올바른 `engine=` 스탬프가 있는 healthcheck·git 훅, 그리고 5번의 `agentic-vault:adapter aside-up engine=` 스탬프가 있는 `00-meta/scripts/aside-up.ps1`은 엔진 소유 파일이다. 5번에서 사용자가 승인한 aside-up 훅 명령 교체도 같은 예외에 든다. 5번의 `agentic-vault:adapter deny-guard engine=`·`agentic-vault:adapter ps-parse engine=` 스탬프가 있는 `00-meta/scripts/deny-guard.py`·`00-meta/scripts/ps-parse.ps1`(Claude Code)도 엔진 소유 파일이며, 사용자가 승인한 가드 훅 그룹 교체도 같은 예외에 든다. 구버전 교체 전에는 각 절의 로컬 편집분 보존 절차를 반드시 따른다. 스탬프가 없거나 동일·신버전인 파일은 자동 교체 예외에 포함되지 않는다.
+- 이 명령은 볼트 내용(지식 노트)에 손대지 않는다 — 엔진 표면(설정·훅·시스템 파일)만 다룬다. 단, 5번에서 사용자가 승인한 어댑터 설치(운영 가이드 노트 생성과 index·log 기록, CLAUDE.md 관리 블록 밖 조항 추가)는 예외다.

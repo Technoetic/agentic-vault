@@ -71,7 +71,7 @@ DEFAULT_KEYS = {
 OPTIONAL_KEYS = {
     "frontmatter_roots", "frontmatter_exempt_paths", "fm_exempt_zones", "warning_policy",
     "sync_conflict_check", "checkpoint_drift_check", "sync_conflict_patterns",
-    "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
+    "staged_growth_check", "staged_growth_max_tokens", "recall",
     "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
     "constraints_note", "lint_max_warnings", "promotion_review_sessions",
     "checked_at_stale_days", "checked_at_annual_rollover",
@@ -149,14 +149,15 @@ def section_zero(report: str) -> list[str]:
 
 
 class KnownKeyTests(unittest.TestCase):
-    def test_known_keys_are_the_45_engine_keys(self) -> None:
-        self.assertEqual(len(DEFAULT_KEYS | OPTIONAL_KEYS), 45)
+    def test_known_keys_are_the_44_engine_keys(self) -> None:
+        self.assertEqual(len(DEFAULT_KEYS | OPTIONAL_KEYS), 44)
         self.assertIsInstance(vault_healthcheck.KNOWN_CONFIG_KEYS, frozenset)
         self.assertEqual(vault_healthcheck.KNOWN_CONFIG_KEYS, DEFAULT_KEYS | OPTIONAL_KEYS)
         self.assertEqual(set(vault_healthcheck.DEFAULT_CONFIG), DEFAULT_KEYS)
 
     def test_template_and_default_keys_are_known(self) -> None:
         template = json.loads(TEMPLATE_CONFIG.read_text(encoding="utf-8"))
+        self.assertNotIn("jarvis", template)
         self.assertEqual(vault_healthcheck.unknown_config_keys(template), [])
         self.assertEqual(vault_healthcheck.unknown_config_keys(vault_healthcheck.DEFAULT_CONFIG), [])
 
@@ -200,7 +201,7 @@ class KnownKeyTests(unittest.TestCase):
 
         optional = sorted(vault_healthcheck.KNOWN_CONFIG_KEYS
                           - set(vault_healthcheck.DEFAULT_CONFIG))
-        self.assertEqual(len(optional), 20)
+        self.assertEqual(len(optional), 19)
         for name in optional:
             with self.subTest(name=name):
                 self.assertTrue(name in constants or f"`{name}`" in commands,
@@ -208,6 +209,13 @@ class KnownKeyTests(unittest.TestCase):
 
 
 class SuggestionTests(unittest.TestCase):
+    def test_retired_bridge_configuration_is_an_ordinary_unapplied_key(self) -> None:
+        for legacy in ({"enabled": True, "briefing_time": "09:30"}, "local extension"):
+            raw = {"jarvis": legacy}
+            vault_healthcheck.validate_config(raw)
+            self.assertEqual(vault_healthcheck.unknown_config_keys(raw), [("jarvis", None)])
+            self.assertEqual(raw, {"jarvis": legacy})
+
     def test_suggestions(self) -> None:
         for name, expected in SUGGESTIONS:
             with self.subTest(name=name):

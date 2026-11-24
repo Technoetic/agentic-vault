@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills/agentic-vault/scripts'
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-import jarvis_bridge as bridge
 import vault_judge as judge
 from vault_evidence import EvidenceError, decode, encode
 from vault_healthcheck import HealthcheckError
@@ -28,7 +27,7 @@ from vault_recall import recall
 PACK = ROOT / 'tests/fixtures/revocation_egress/pack.json'
 SCOPE = 'fresh_actual_reads_rebuilt_context_and_simulated_sink_only'
 REQUIRED_CONSUMERS = frozenset(('vault_recall.recall', 'vault_memory.compile_units',
-    'jarvis_bridge._generation_envelope', 'simulated_memory_sink', 'vault_judge._prepare'))
+    'simulated_memory_sink', 'vault_judge._prepare'))
 KNOWN_CONSUMERS = REQUIRED_CONSUMERS | {'negative_control_unfiltered_prefix'}
 
 
@@ -105,11 +104,20 @@ class SyntheticVault:
                 'sources': [{'path': source['path'], 'line': line, 'quote': quote + '\r'}]}
 
     def request(self, *, poison=False):
-        return {'schema_version': 1, 'task': 'support', 'sources': [{
-            'path': '20-knowledge/source.md',
-            'excerpt': 'POISON_ROOT fixture instruction' if poison else 'BENIGN_ROOT checkpoint'}],
+        sources = [{'path': source['path'],
+                    'excerpt': '\n'.join(source['lines'][1:]) if poison else source['benign']}
+                   for source in self.pack['sources']]
+        return {'schema_version': 1, 'task': 'support', 'sources': sources,
             'questions': [{'id': 'fixture', 'instructions': 'Is this fixture supported?',
                 'choices': {'yes': 'Supported', 'unknown': 'Insufficient evidence'}, 'abstain': 'unknown'}]}
+
+    def prepare_evidence(self, *, poison=False):
+        """Use the Jev adapter's actual outbound evidence and its pre-dispatch guard."""
+        prepared, context = judge._prepare(self.root, self.request(poison=poison))
+        if prepared['status'] != 'prepared' or context is None:
+            raise ValueError('fixture evidence was not prepared')
+        _store, _request, state, _questions, guard = context
+        return '\n'.join(state['evidence']), guard
 
 
 def assess_observations(observations):
@@ -144,20 +152,17 @@ def observe(fixture, consumer, text, *, phase='after_revoke', outcome='observed'
 def evaluate_revocation_egress(*, negative_control=False):
     with tempfile.TemporaryDirectory() as temporary:
         fixture = SyntheticVault(temporary)
-        config = {'_include_activity': True}
         observations, simulated_sink = [], []
-        before = bridge._generation_envelope(fixture.root, config, 'BENIGN')
-        before.recheck()
-        simulated_sink.append(before.payload)
-        _before_meta, before_jev = judge._prepare(fixture.root, fixture.request(poison=True))
-        baseline_observations = [observe(fixture, 'jarvis_bridge._generation_envelope',
-            before.payload, phase='before_revoke'), observe(fixture, 'vault_judge._prepare',
-            '\n'.join(before_jev[2]['evidence']), phase='before_revoke')]
+        before, original_guard = fixture.prepare_evidence(poison=True)
+        original_guard.recheck()
+        simulated_sink.append(before)
+        baseline_observations = [observe(fixture, 'vault_judge._prepare', before, phase='before_revoke'),
+            observe(fixture, 'simulated_memory_sink', simulated_sink[-1], phase='before_revoke')]
         historical_digest = sha(simulated_sink[0].encode('utf-8'))
         fixture.revoke()
         stale_refused = False
         try:
-            before.recheck()
+            original_guard.recheck()
         except (ValueError, EvidenceError, OSError, HealthcheckError):
             stale_refused = True
         rebuilt = recall(fixture.root, 'BENIGN POISON_ROOT DERIVED_HOT FRAGMENT_ONE DERIVED_LOG')
@@ -165,21 +170,18 @@ def evaluate_revocation_egress(*, negative_control=False):
             outcome='observed' if rebuilt['diagnostics']['status'] == 'ok' else 'unavailable'))
         compiled = compile_units(fixture.root, [fixture.unit(poison=True), fixture.unit()])
         observations.append(observe(fixture, 'vault_memory.compile_units', compiled['context']))
-        current = bridge._generation_envelope(fixture.root, config, 'BENIGN')
-        observations.append(observe(fixture, 'jarvis_bridge._generation_envelope', current.payload))
-        current.recheck()
-        simulated_sink.append(current.payload)
+        current, guard = fixture.prepare_evidence()
+        observations.append(observe(fixture, 'vault_judge._prepare', current))
+        guard.recheck()
+        simulated_sink.append(current)
         observations.append(observe(fixture, 'simulated_memory_sink', simulated_sink[-1]))
-        prepared, context = judge._prepare(fixture.root, fixture.request())
-        observations.append(observe(fixture, 'vault_judge._prepare', '\n'.join(context[2]['evidence']),
-            outcome='observed' if prepared['status'] == 'prepared' else 'unavailable'))
         poison_result = judge.prepare(fixture.root, fixture.request(poison=True))
         poison_refused = (poison_result['status'] == 'unverified'
                           and poison_result.get('error') == 'excerpt_not_found')
         outside = recall(fixture.root, 'UNDECLARED_COPY')
         outside_visible = 'UNDECLARED_COPY' in outside['context']
         if negative_control:
-            raw_prefix, _truncated = bridge._read_context_prefix(fixture.root / '00-meta/hot.md')
+            raw_prefix = (fixture.root / '00-meta/hot.md').read_text(encoding='utf-8-sig')[:1024]
             observations.append(observe(fixture, 'negative_control_unfiltered_prefix', raw_prefix))
         assessment = assess_observations(observations)
         checks = (assessment['safe_useful'] and stale_refused and poison_refused and outside_visible

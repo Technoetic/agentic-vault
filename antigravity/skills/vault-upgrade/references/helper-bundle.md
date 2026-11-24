@@ -11,7 +11,7 @@
 일치하는 엔진 파일만 교체하며 불명확한 파일은 기존 유지/검토로 보고한다.
 의존성이 빠진 단일 검사기는 기존 fatal 게이트를 유지하되 새 경고는 incomplete다.
 전체 bundle 확인 전에 훅을 활성화하지 않는다. 플러그인 checkpoint hook은 플러그인에
-설치되며 이 절차가 Codex trust·전역 설정·Jarvis 데몬을 변경하지 않는다.
+설치되며 이 절차가 Codex trust·전역 설정을 변경하지 않는다.
 
 기존 `.gitignore`에 `00-meta/.agentic-vault/runtime/`가 없으면 그 한 줄만 추가한다.
 runtime을 일반 노트 inventory나 백링크 대상으로 넣지 않는다. [시간 대장 템플릿](../../../assets/templates/ssot-ledger.md)은
@@ -19,5 +19,5 @@ runtime을 일반 노트 inventory나 백링크 대상으로 넣지 않는다. [
 dry-run을 준비하고 값·추가 열·본문의 보존과 diff를 검토한다. 이미 승인된 정확한 안에만
 `apply --approve`와 proposal stdin을 사용한다. 업그레이드가 지식/교훈 대장을 자동 이행하지 않는다.
 [보강 도구](../../../docs/hardening.md)의 출처·교훈 델타·literal 품질·토큰 보정은 명시적으로 선택한다.
-기존 budget 계수·warning severity·aliases·Jarvis 일정/인증/활성 범위는 유지한다.
+기존 budget 계수·warning severity·aliases는 유지한다.
 선택적으로 `python "<PLUGIN_ROOT>/skills/agentic-vault/scripts/vault_install_state.py" record --vault .`로 현재 엔진 소유 파일과 사용자 소유 파일의 소유권·SHA-256을 `00-meta/.vault-install-state.json`에 기록해 두면, 이후 `/vault-doctor --install-state`나 `vault_install_state.py uninstall`(기본 dry-run, 사용자 파일·수정본 자동 보존)으로 상태를 추적할 수 있다.

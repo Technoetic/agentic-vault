@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "agentic-vault" / "scripts"
 CLI = SCRIPTS / "vault_connectors.py"
 KEY = "synthetic-connector-test-key"
-TOKEN = "123456789:" + "x" * 35
 
 
 class ConnectorTests(unittest.TestCase):
@@ -77,6 +76,21 @@ class ConnectorTests(unittest.TestCase):
             "state": "not_checked", "checked": False, "reason_code": "offline_default"})
         self.assertEqual(jev["operation"]["state"], "not_checked")
         self.assertNotIn(KEY, json.dumps(report))
+
+    def test_retired_bridge_configuration_does_not_enable_a_connector(self):
+        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [17]})
+        before = self.config_path.read_bytes()
+        environment = mock.MagicMock(spec=dict)
+        environment.get.return_value = None
+        with mock.patch("subprocess.Popen", side_effect=AssertionError("unexpected process")):
+            report, code = self.diagnose(env=environment, transport=self.never_send)
+            self.assertEqual(code, 0)
+            self.assertEqual(set(report["connectors"]), {"jev"})
+            refused, code = self.diagnose(probe="jarvis", env=environment, transport=self.never_send)
+            self.assertEqual(code, 2)
+            self.assertEqual(refused["status"], "invalid_arguments")
+        environment.get.assert_called_once_with("TYPESAFE_API_KEY")
+        self.assertEqual(self.config_path.read_bytes(), before)
 
     def test_missing_credentials_remain_missing_and_do_not_send_on_probe(self):
         report, code = self.diagnose(probe="jev", transport=self.never_send)
@@ -173,83 +187,6 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(report["connectors"]["jev"]["provider"], "typesafe_systemone")
         self.assertNotIn("private.invalid", json.dumps(report))
 
-    def test_jarvis_disabled_and_missing_configuration_are_separate(self):
-        report, _code = self.diagnose()
-        self.assertEqual(report["connectors"]["jarvis"]["configured"]["state"], "absent")
-        self.write_config(jarvis={"enabled": False})
-        report, _code = self.diagnose()
-        self.assertEqual(report["connectors"]["jarvis"]["configured"]["state"], "disabled")
-
-    def test_jarvis_bare_api_credentials_are_distinct_from_subscription_login(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345]})
-        report, code = self.diagnose(env={"JARVIS_TELEGRAM_TOKEN": TOKEN,
-            "CLAUDE_CODE_OAUTH_TOKEN": KEY})
-        self.assertEqual(code, 0)
-        jarvis = report["connectors"]["jarvis"]
-        self.assertEqual(jarvis["configured"]["state"], "configured")
-        self.assertEqual(jarvis["credentials"]["telegram_token"]["state"], "available")
-        self.assertEqual(jarvis["credentials"]["bare_claude_api"]["state"], "missing")
-        self.assertEqual(jarvis["credential_available"]["state"], "partial")
-        self.assertEqual(jarvis["authentication"]["state"], "not_checked")
-        self.assertNotIn(TOKEN, json.dumps(report))
-        self.assertNotIn(KEY, json.dumps(report))
-
-    def test_jarvis_env_api_credentials_do_not_imply_working_connection(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345]})
-        for env_name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-            with self.subTest(env_name=env_name):
-                report, _code = self.diagnose(env={"JARVIS_TELEGRAM_TOKEN": TOKEN, env_name: KEY})
-                jarvis = report["connectors"]["jarvis"]
-                self.assertEqual(jarvis["credential_available"]["state"], "available")
-                self.assertEqual(jarvis["authentication"]["state"], "not_checked")
-                self.assertFalse(jarvis["operation"]["checked"])
-
-    def test_jarvis_unknown_auth_provider_remains_unknown(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345]})
-        for override in ({"CLAUDE_CODE_USE_BEDROCK": "1"}, {"CLAUDE_CODE_USE_VERTEX": "1"},
-                         {"CLAUDE_CODE_USE_FOUNDRY": "1"}, {"ANTHROPIC_BASE_URL": "https://private.invalid"}):
-            with self.subTest(override_name=next(iter(override))):
-                report, _code = self.diagnose(env={"JARVIS_TELEGRAM_TOKEN": TOKEN,
-                    "ANTHROPIC_API_KEY": KEY, **override})
-                jarvis = report["connectors"]["jarvis"]
-                self.assertEqual(jarvis["credentials"]["bare_claude_api"]["state"], "unknown")
-                self.assertEqual(jarvis["credential_available"]["state"], "unknown")
-                self.assertEqual(jarvis["authentication"]["state"], "not_checked")
-
-    def test_jarvis_unsupported_probe_cannot_launch_a_process(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345],
-                                 "claude_cmd": "arbitrary-command --write-secret"})
-        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("launch")):
-            report, code = self.diagnose(probe="jarvis", env={"JARVIS_TELEGRAM_TOKEN": TOKEN,
-                "ANTHROPIC_API_KEY": KEY}, transport=self.never_send)
-        self.assertEqual(code, 1)
-        self.assertFalse(report["network_attempted"])
-        jarvis = report["connectors"]["jarvis"]
-        self.assertFalse(jarvis["probe_supported"])
-        self.assertEqual(jarvis["authentication"], {
-            "state": "not_checked", "checked": False, "reason_code": "probe_unsupported"})
-        self.assertEqual(jarvis["operation"]["state"], "not_checked")
-        self.assertNotIn("arbitrary-command", json.dumps(report))
-
-    def test_invalid_jarvis_settings_are_reported_without_values(self):
-        for block in ({"enabled": "yes"}, {"enabled": True, "telegram_user_ids": [-1]},
-                      {"enabled": True, "claude_cmd": "private\ncommand"},
-                      {"enabled": True, "qa_timeout_sec": 0},
-                      {"enabled": True, "briefing_times": ["25:00"]},
-                      {"enabled": True, "model": "private model"},
-                      {"enabled": True, "model": "-private"},
-                      {"enabled": True, "effort": "private"}):
-            with self.subTest(block=block):
-                self.write_config(jarvis=block)
-                report, _code = self.diagnose()
-                self.assertEqual(report["connectors"]["jarvis"]["configured"]["state"], "invalid")
-                self.assertNotIn("private", json.dumps(report))
-
-    def test_empty_allowlist_is_incomplete_configuration(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": []})
-        report, _code = self.diagnose()
-        self.assertEqual(report["connectors"]["jarvis"]["configured"]["state"], "incomplete")
-
     def test_missing_installation_does_not_probe(self):
         with mock.patch.object(self.module, "SCRIPTS_DIR", Path(self.temp.name) / "missing"):
             report, code = self.diagnose(probe="jev", env={"TYPESAFE_API_KEY": KEY}, transport=self.never_send)
@@ -266,7 +203,7 @@ class ConnectorTests(unittest.TestCase):
         opened = []
         def checked_open(path, *args, **kwargs):
             opened.append(Path(path))
-            self.assertIn(Path(path), (self.config_path, SCRIPTS / "jarvis_bridge.py"))
+            self.assertEqual(Path(path), self.config_path)
             return original_open(path, *args, **kwargs)
         with mock.patch.object(os, "open", side_effect=checked_open):
             report, code = self.diagnose()
@@ -332,8 +269,7 @@ class ConnectorTests(unittest.TestCase):
     def run_cli(self, *args, script=None):
         env = {name: os.environ[name] for name in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATH")
                if name in os.environ}
-        # Jarvis's import-time state root needs a home; use the temporary root,
-        # without inheriting any real login or credential store locations.
+        # Keep real login and credential stores outside the test environment.
         env["USERPROFILE"] = self.temp.name
         env["HOME"] = self.temp.name
         env["TYPESAFE_API_KEY"] = KEY
@@ -348,67 +284,47 @@ class ConnectorTests(unittest.TestCase):
         # Copy only the helper's fixed source dependencies. No installed plugin
         # is changed and no inherited module cache can mask a missing file.
         for name in ("vault_connectors.py", "vault_evidence.py", "vault_healthcheck.py",
-                     "vault_paths.py", "vault_state.py", "vault_worktrees.py", "jev_ask.py", "jev_client.py",
-                     "jarvis_bridge.py"):
+                     "vault_paths.py", "vault_state.py", "vault_worktrees.py", "jev_ask.py", "jev_client.py"):
             if name != omit:
                 shutil.copyfile(SCRIPTS / name, directory / name)
         return directory
 
-    def assert_missing_dependency(self, filename, connector):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345]})
+    def assert_missing_dependency(self, filename):
         scripts = self.isolated_scripts("without-" + filename, omit=filename)
         completed = self.run_cli("--format", "json", script=scripts / CLI.name)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         report = json.loads(completed.stdout)
-        self.assertEqual(report["connectors"][connector]["installed"], {
+        self.assertEqual(report["connectors"]["jev"]["installed"], {
             "state": "missing", "reason_code": "installed_script_missing"})
-        other = "jarvis" if connector == "jev" else "jev"
-        self.assertEqual(report["connectors"][other]["configured"]["state"], "configured")
-        self.assertEqual(report["connectors"][other]["authentication"]["state"], "not_checked")
         self.assertFalse(report["network_attempted"])
         self.assertNotIn("Traceback", completed.stdout + completed.stderr)
-        probe = self.run_cli("--probe", connector, "--format", "json", script=scripts / CLI.name)
+        probe = self.run_cli("--probe", "jev", "--format", "json", script=scripts / CLI.name)
         self.assertEqual(probe.returncode, 1, probe.stderr)
         self.assertFalse(json.loads(probe.stdout)["network_attempted"])
 
-    def test_fresh_process_missing_jarvis_bridge_preserves_jev_diagnosis(self):
-        self.assert_missing_dependency("jarvis_bridge.py", "jarvis")
-
-    def test_fresh_process_missing_jev_ask_preserves_jarvis_diagnosis(self):
-        self.assert_missing_dependency("jev_ask.py", "jev")
-
-    def test_fresh_process_missing_jev_client_preserves_jarvis_diagnosis(self):
-        self.assert_missing_dependency("jev_client.py", "jev")
+    def test_fresh_process_missing_jev_dependencies_prevents_probe(self):
+        for name in ("jev_ask.py", "jev_client.py"):
+            with self.subTest(dependency=name):
+                self.assert_missing_dependency(name)
 
     def test_fresh_process_unimportable_dependencies_are_unknown_and_redacted(self):
-        self.write_config(jarvis={"enabled": True, "telegram_user_ids": [12345]})
-        for name, connector in (("jarvis_bridge.py", "jarvis"), ("jev_ask.py", "jev"),
-                                ("jev_client.py", "jev")):
+        for name in ("jev_ask.py", "jev_client.py"):
             with self.subTest(dependency=name):
                 scripts = self.isolated_scripts("unimportable-" + name)
                 (scripts / name).write_text("raise RuntimeError('synthetic-private-import-error')\n",
                                             encoding="utf-8")
-                arguments = ("--format", "json")
-                if connector == "jev":
-                    # Loading Jev is explicitly lazy: only a requested probe
-                    # checks importability, and import failure cancels the call.
-                    arguments += ("--probe", "jev")
-                completed = self.run_cli(*arguments, script=scripts / CLI.name)
-                self.assertEqual(completed.returncode, 1 if connector == "jev" else 0,
-                                 completed.stderr)
+                completed = self.run_cli("--format", "json", "--probe", "jev", script=scripts / CLI.name)
+                self.assertEqual(completed.returncode, 1, completed.stderr)
                 self.assertTrue(completed.stdout.strip(), "Structured dependency report missing")
                 report = json.loads(completed.stdout)
-                self.assertEqual(report["connectors"][connector]["installed"], {
+                self.assertEqual(report["connectors"]["jev"]["installed"], {
                     "state": "unknown", "reason_code": "installed_dependency_unavailable"})
-                other = "jarvis" if connector == "jev" else "jev"
-                self.assertEqual(report["connectors"][other]["configured"]["state"], "configured")
                 self.assertFalse(report["network_attempted"])
                 self.assertNotIn("synthetic-private-import-error", completed.stdout + completed.stderr)
                 self.assertNotIn("Traceback", completed.stdout + completed.stderr)
 
     def test_fresh_process_hardlinked_provider_modules_are_never_executed(self):
-        for name, connector in (("jarvis_bridge.py", "jarvis"), ("jev_ask.py", "jev"),
-                                ("jev_client.py", "jev")):
+        for name in ("jev_ask.py", "jev_client.py"):
             with self.subTest(dependency=name):
                 scripts = self.isolated_scripts("hardlinked-" + name, omit=name)
                 target = scripts / "unsafe-source.py"
@@ -417,15 +333,11 @@ class ConnectorTests(unittest.TestCase):
                     "Path(__file__).with_name('executed-marker').write_text('unsafe')\n"
                     "raise RuntimeError('synthetic-private-linked-module')\n", encoding="utf-8")
                 os.link(target, scripts / name)
-                arguments = ("--format", "json")
-                if connector == "jev":
-                    arguments += ("--probe", "jev")
-                completed = self.run_cli(*arguments, script=scripts / CLI.name)
-                self.assertEqual(completed.returncode, 1 if connector == "jev" else 0,
-                                 completed.stderr)
+                completed = self.run_cli("--format", "json", "--probe", "jev", script=scripts / CLI.name)
+                self.assertEqual(completed.returncode, 1, completed.stderr)
                 self.assertTrue(completed.stdout.strip(), "Structured unsafe-module report missing")
                 report = json.loads(completed.stdout)
-                self.assertEqual(report["connectors"][connector]["installed"]["state"], "unsafe")
+                self.assertEqual(report["connectors"]["jev"]["installed"]["state"], "unsafe")
                 self.assertFalse(report["network_attempted"])
                 self.assertFalse((scripts / "executed-marker").exists())
                 self.assertNotIn("synthetic-private-linked-module", completed.stdout + completed.stderr)
@@ -441,13 +353,13 @@ class ConnectorTests(unittest.TestCase):
         text = self.run_cli("--format", "text")
         self.assertEqual(text.returncode, 0, text.stderr)
         self.assertIn("jev.authentication: not_checked", text.stdout)
-        self.assertIn("jarvis.operation: not_checked", text.stdout)
+        self.assertNotIn("jarvis", text.stdout)
         self.assertEqual(before, self.config_path.read_bytes())
         self.assertFalse((self.vault / "00-meta" / ".agentic-vault").exists())
 
     def test_cli_unknown_and_duplicate_arguments_do_not_echo_sensitive_values(self):
         for args in (("--probe", KEY), ("--url", "https://private.invalid/" + KEY),
-                     ("--probe", "jarvis", "--probe", "jev"), ("--timeout", KEY)):
+                     ("--probe", "jarvis"), ("--probe", "jev", "--probe", "jev"), ("--timeout", KEY)):
             with self.subTest(option_names=args[::2]):
                 completed = self.run_cli(*args)
                 self.assertEqual(completed.returncode, 2)

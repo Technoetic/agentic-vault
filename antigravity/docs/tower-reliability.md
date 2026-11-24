@@ -228,8 +228,7 @@ reconcile은 `id`, 현재 영수증의 `expected_sha256`, `outcome: succeeded|no
 읽어 출력하지 않는다. 키가 있다는 사실만으로 인증 성공이나 정상 운용으로 표시하지 않는다.
 
 지원하는 명시적 probe만 기존 승인 범위에서 수행한다. 시험하지 않았거나 지원하지 않는
-단계는 미확인으로 남긴다. Jarvis를 시작하거나 Telegram 메시지를 보내지 않으며,
-구독 로그인만으로 bare-Claude의 API 인증 요건을 충족했다고 추정하지 않는다.
+단계는 미확인으로 남긴다.
 
 ```text
 python skills/agentic-vault/scripts/vault_connectors.py --vault PATH --format json
@@ -240,11 +239,9 @@ python skills/agentic-vault/scripts/vault_connectors.py --vault PATH --probe jev
 연결로 보내며 원문 노트·개인 자료를 전송하지 않는다. 한 번의 요청만 수행하고 재시도·
 redirect는 허용하지 않는다. 인증/연산 단계에는 `checked`도 표시한다. 연결 거절은
 failed, 응답 유실·timeout·rate-limit·잘못된 응답은 인증을 unknown으로 남긴다.
-Jarvis live probe는 지원하지 않으며 `--probe jarvis`는 미확인 상태와 종료 코드 1을
-반환한다. 아무 probe도 하지 않은 기본 진단의 종료 코드 0은 ‘진단 완료’라는 뜻이다.
+아무 probe도 하지 않은 기본 진단의 종료 코드 0은 ‘진단 완료’라는 뜻이다.
 어댑터 파일이 빠졌거나 안전하게 읽고 불러올 수 없으면 해당 연결의 설치 단계는
-missing/unknown으로 남기고 의존하는 probe를 취소한다. 다른 연결의 진단은 계속한다.
-Jarvis가 설정되어 있어도 설정 해석 모듈을 불러올 수 없으면 configured는 unknown이다.
+missing/unknown으로 남기고 의존하는 probe를 취소한다.
 
 ## 기존 도구와 연결
 

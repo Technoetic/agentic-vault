@@ -49,7 +49,6 @@ for folder in (str(SCRIPTS), str(HOOKS)):
     sys.path.insert(0, folder)
 try:
     import backup_vault
-    import jarvis_bridge
     import session_start
     import vault_capacity
     import vault_doctor
@@ -287,10 +286,6 @@ class NamedPathTests(unittest.TestCase):
                                                          budget_key="hot_max_tokens", header="hot")
         self.assertEqual(section["status"], "unsafe_path")
         self.assertIsNone(source)
-
-    def test_bridge_prompt(self) -> None:
-        self.configured(hot_note=self.zone)
-        self.assertNotIn(MARK, jarvis_bridge._generation_prompt(self.vault, {}, "needle"))
 
     def test_healthcheck_stops_on_a_configured_note_in_a_copy_zone(self) -> None:
         self.configured(hot_note=self.zone)

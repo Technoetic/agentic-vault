@@ -9,9 +9,9 @@ into a zone, the guard's own controls, code inside exempt shell words, moves
 that may replace a zone file, and the process contract (exit 0, only deny or
 ask and never allow, nothing without CLAUDE_PROJECT_DIR). The
 PowerShell branch is tested twice: with a stand-in for its parser on every
-system, and on Windows with the real ps-parse.ps1 child process. The last
-class pins that the default install does not change: no PreToolUse hook in
-hooks/hooks.json and the permission and config templates as in v0.31.0.
+system, and on Windows with the real ps-parse.ps1 child process. The default
+install checks pin the permission and config templates and verify that
+hooks/hooks.json contains no PreToolUse hook.
 """
 from __future__ import annotations
 
@@ -49,12 +49,9 @@ HOOK_MATCHER = "Read|Grep|Glob|Edit|Write|NotebookEdit|Bash|PowerShell|Monitor"
 V0310_TEMPLATE_SHA256 = {
     "assets/templates/settings-permissions.json": "54ae16fa421b9759e27b3bdc51b902ea94a549ee490aaee22a299f50cc50ae6a",
 }
-# The config template changed twice in v0.47.0 and in no other way since v0.31.0:
-# the jarvis block gained the empty optional keys "model" and "effort", and the
-# gates.note_move note now separates inbox quarantine from archive moves.
-# SHA-256 of the result with LF line ends (folded the same way).
-V0470_CONFIG_TEMPLATE_SHA256 = {
-    "assets/templates/vault-config.json": "fcca4f3c3d5b2a63e93016c6a728d758ef1a5230e2464b1ccf3ddcb784646e62",
+# The config template pins the default policy without optional retired integrations.
+CONFIG_TEMPLATE_SHA256 = {
+    "assets/templates/vault-config.json": "acfb8cb11957919bbf3e2a7df4079b980985f9dc6f3c31fe8a06ec3eb3d76e47",
 }
 _LOADED: dict = {}
 
@@ -1531,8 +1528,8 @@ class DefaultInstallUnchangedTests(unittest.TestCase):
         self.assertNotIn("deny-guard", text)
         self.assertNotIn("ps-parse", text)  # the PowerShell parser runs only under the opt-in guard
 
-    def test_permission_and_config_templates_are_unchanged_except_v0470_notes_and_keys(self) -> None:
-        for rel_path, expected in {**V0310_TEMPLATE_SHA256, **V0470_CONFIG_TEMPLATE_SHA256}.items():
+    def test_default_permission_and_config_templates_match_pinned_hashes(self) -> None:
+        for rel_path, expected in {**V0310_TEMPLATE_SHA256, **CONFIG_TEMPLATE_SHA256}.items():
             with self.subTest(path=rel_path):
                 data = (ROOT / rel_path).read_bytes().replace(b"\r\n", b"\n")
                 self.assertEqual(hashlib.sha256(data).hexdigest(), expected)

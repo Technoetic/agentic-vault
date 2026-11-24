@@ -440,11 +440,18 @@ class PackageBuildTests(unittest.TestCase):
         self.assertEqual(sorted(package.skill_bodies), sorted(path for path in self.files
                                                               if re.fullmatch(r"skills/[^/]+/SKILL\.md", path)))
 
+    def test_jarvis_bridge_and_setup_are_absent_from_both_packages(self) -> None:
+        script = "skills/agentic-vault/scripts/jarvis_bridge.py"
+        self.assertFalse((ROOT / script).exists())
+        self.assertFalse((ROOT / "commands/vault-jarvis-setup.md").exists())
+        self.assertNotIn(script, self.files)
+        self.assertFalse(any(path.startswith("skills/vault-jarvis-setup/") for path in self.files))
+
     def test_layout_is_exact(self) -> None:
         self.assertEqual({path.split("/", 1)[0] for path in self.files}, TOP_LEVEL)
         self.assertEqual({path.split("/", 1)[1] for path in self.files if path.startswith("hooks/")}, HOOK_FILES)
         expected_skills = set(SHARED_SKILLS) | set(_commands())
-        self.assertEqual(len(expected_skills), 16)
+        self.assertEqual(len(expected_skills), 15)
         self.assertEqual({path.split("/")[1] for path in self.files if path.startswith("skills/")}, expected_skills)
         for name in expected_skills:
             with self.subTest(skill=name):

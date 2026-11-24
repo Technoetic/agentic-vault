@@ -227,7 +227,7 @@ KNOWN_CONFIG_KEYS = frozenset({
     *DEFAULT_CONFIG,
     "frontmatter_roots", "frontmatter_exempt_paths", "fm_exempt_zones", "warning_policy",
     "sync_conflict_check", "checkpoint_drift_check", "sync_conflict_patterns",
-    "staged_growth_check", "staged_growth_max_tokens", "jarvis", "recall",
+    "staged_growth_check", "staged_growth_max_tokens", "recall",
     "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
     "constraints_note", "lint_max_warnings", "promotion_review_sessions",
     "checked_at_stale_days", "checked_at_annual_rollover",
@@ -612,9 +612,6 @@ def validate_config(raw: object) -> dict:
             raise HealthcheckError(f"ssot_facts[{index}].pattern must be a non-empty string")
         normalized_facts.append(deepcopy(fact))
     config["ssot_facts"] = normalized_facts
-
-    if "jarvis" in config and not isinstance(config["jarvis"], dict):
-        raise HealthcheckError("jarvis must be an object")
 
     if "frontmatter_exempt_paths" not in raw and "fm_exempt_zones" in raw:
         config["frontmatter_exempt_paths"] = list(config["fm_exempt_zones"])

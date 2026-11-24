@@ -21,7 +21,7 @@ agy plugin install "C:/path/to/agentic-vault/antigravity"
 ```
 
 설치한 뒤 `agy plugin list --json`에서 `agentic-vault` 항목의 `source`가 `"antigravity"`, `version`이 `0.57.0`이고
-스킬 16개와 훅 묶음 `agentic-vault`가 보이는지 확인한다.
+훅 묶음 `agentic-vault`가 보이는지 확인한다. 위 태그의 공개 패키지는 스킬 16개, 현재 소스에서 만든 로컬 패키지는 15개다.
 
 저장소 루트 주소(태그만 고정한 주소 포함)로는 설치하지 않는다. agy는 루트를 Claude Code 플러그인으로 보고 자동
 변환해 설치한다. 이때 명령은 `agentic-vault-cmd-*` 스킬이 되고 본문의 `${CLAUDE_PLUGIN_ROOT}`·`$ARGUMENTS`가 그대로
@@ -39,7 +39,7 @@ agy plugin install "C:/path/to/agentic-vault/antigravity"
 | 구성 | 내용 |
 |---|---|
 | `plugin.json` | 이름 `agentic-vault`, 판, 호스트 중립 설명, 제안 프롬프트 셋 |
-| 스킬 16개 | 공용 스킬 `agentic-vault`와, 명령 15개를 같은 이름으로 바꾼 스킬(`vault-init`, `vault-upgrade`, `vault-session-start`, `vault-session-end`, `vault-recall`, `vault-lint`, `vault-day`, `vault-ingest`, `vault-process-inbox`, `vault-trace`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-harden`, `vault-jarvis-setup`). 명령 스킬에는 `disable-model-invocation: true`가 붙는다 |
+| 스킬 15개 | 공용 스킬 `agentic-vault`와, 명령 14개를 같은 이름으로 바꾼 스킬(`vault-init`, `vault-upgrade`, `vault-session-start`, `vault-session-end`, `vault-recall`, `vault-lint`, `vault-day`, `vault-ingest`, `vault-process-inbox`, `vault-trace`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-harden`). 명령 스킬에는 `disable-model-invocation: true`가 붙는다 |
 | 훅 둘 | `SessionStart`(인계 주입)와 `Stop`(체크포인트). agy 목록에는 훅 묶음 `agentic-vault` 하나로 보인다 |
 | 엔진과 자료 | `skills/agentic-vault/scripts/`의 엔진 스크립트, `hooks/`의 훅 파일 넷, `assets/` 전체, 스킬이 가리키는 `docs/` 문서의 사본 |
 
@@ -117,7 +117,7 @@ Antigravity CLI는 시작 폴더부터 저장소 루트까지의 `AGENTS.md`·`G
    handoff 노트에 알아보기 쉬운 문장 하나를 적는다.
 2. 그 볼트 폴더에서 agy를 직접 연다.
 3. `/hooks`에서 훅 묶음 `agentic-vault`와 `SessionStart`·`Stop`이 보이는지, `/skills`에서 `agentic-vault`와
-   `vault-session-start` 등 16개 스킬이 보이는지 확인한다.
+   `vault-session-start`를 포함해 설치한 버전에 맞는 스킬 수가 보이는지 확인한다(위 설치 절 참조).
 4. 첫 메시지로 "세션 시작 때 주입된 인계 내용을 그대로 알려 줘"처럼 묻는다. 에이전트가 답하기 전에
    도구(`view_file`·`run_command`·`grep_search` 등)를 하나도 부르지 않았고 1에서 적은 문장이 나오면 SessionStart
    주입이 동작한 것으로 본다. 도구를 불렀다면 에이전트가 handoff를 직접 읽었을 수 있으므로(주입이 없으면 볼트의
@@ -132,8 +132,6 @@ Antigravity CLI는 시작 폴더부터 저장소 루트까지의 `AGENTS.md`·`G
 
 ## 하지 않는 것
 
-- Jarvis(Telegram) 브리지는 Claude CLI(`claude`)로만 응답을 만든다. agy만 설치한 환경에서 Jarvis 진단은 Claude
-  CLI가 없다고 보고한다(`jarvis_claude_cli_unavailable`).
 - deny zone 가드, 교훈 단서 훅, Aside 자동 기동 훅은 Claude Code의 PreToolUse 훅이라 패키지에 넣지 않았다.
   Antigravity 세션에서는 이 훅들이 돌지 않는다. `vault-init`의 가드·단서 설치 절은 그 스킬의
   `references/claude-code-hooks.md`로 옮겨 두었고, 같은 볼트를 Claude Code에서도 쓰며 사용자가 따로 승인했을 때만
@@ -171,8 +169,8 @@ Antigravity CLI는 개인 Google 계정에서 상호작용 데이터 수집에 �
 
 Antigravity FAQ는 소비자 요금제에서 agy를 제3자 코딩 에이전트·앱으로 감싸 쓰는 것을 지원하지 않으며, 제3자
 소프트웨어로 Antigravity 로그인에 접근하면 약관 위반이라고 적는다. 제3자 에이전트에는 Gemini Enterprise나 AI Studio
-API 키를 권한다. 소비자 요금제에서는 agy를 다른 앱·에이전트(Claude Code, Codex, Jarvis 브리지 등) 안에서 실행하지
-않는다. 이 플러그인의 스킬·훅·Jarvis 브리지는 agy를 실행하지 않는다. 유지관리용
+API 키를 권한다. 소비자 요금제에서는 agy를 다른 앱·에이전트(Claude Code, Codex 등) 안에서 실행하지
+않는다. 이 플러그인의 스킬·훅은 agy를 실행하지 않는다. 유지관리용
 `scripts/verify_antigravity_plugin.py`는 격리한 가짜 홈 폴더에서 `agy --version`과 로그인이 필요 없는 `agy plugin`
 명령(검사·설치·목록)만 실행하며, 대화와 `-p` 실행은 하지 않는다.
 

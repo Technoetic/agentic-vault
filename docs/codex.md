@@ -159,10 +159,8 @@ See [release scope](releases/v0.45.0.md) and [verification](verification/v0.45.0
 source line or paragraph with its candidate record. This is literal record preservation,
 not semantic truth or permission to edit. Omitted probes keep the existing checks.
 [Configured revocation](revocation-egress.md) now filters full raw source text for Jev
-file-grounded judgments and Jarvis generation before normalization or truncation. The
-same policy/source envelope is rechecked around dispatch. This covers the two named
-consumers and declared derivatives; already-sent data and unregistered semantic copies
-remain outside that guarantee. No configuration keeps the existing behavior.
+file-grounded judgments before normalization or truncation. The host rechecks the same
+policy and source around dispatch. Already-sent data and undeclared copies are outside this check.
 
 Generated tests extend the existing development-only Hypothesis dependency. Their sink
 is simulated and their inputs are synthetic; no persistent outbox or actual-model
@@ -509,10 +507,7 @@ v0.17.0은 선택형 Aside 어댑터와 browser 규칙 9번을 더했다. Codex�
 보고받고, Claude Code 전용 자동 기동 훅 대신 CLAUDE.md의 Aside 조항에 적힌 기동 절차를 따른다.
 v0.17.1은 세션 시작 주입을 호스트 출력 상한 아래로 묶고 recall이 건너뛴 파일 이름을 밝히는
 결함 수정이다. 두 클라이언트는 같은 훅 출력을 받으며, Codex 진입점과 명령 대응은 그대로다.
-v0.18.0은 하드링크·구조화된 비밀값·자원 상한을 보강하고 Jarvis 생성에 호스트가
-선택한 근거만 전달한다. **Jarvis의 `--bare` 모드는 구독 OAuth 대신 API/제공자 인증이
-필요하다.** 일반 플러그인 명령·Codex 대화에는 이 Jarvis 인증 조건을 적용하지 않는다.
-기존 Jarvis를 전환하기 전에 [릴리스의 인증 전환 안내](releases/v0.18.0.md)를 확인한다.
+v0.18.0은 하드링크·구조화된 비밀값·자원 상한을 보강했다. [당시의 변경과 검증](releases/v0.18.0.md)
 v0.19.0은 compact 제약 재주입, 모델 없이 기록하는 수명주기 체크포인트, 출처 검증,
 공유 상태 부분 수정, 시간 대장, 교훈 델타, 정제 품질·전송 경고와 명시적 토큰 보정을
 더한다. 기억 단위·교훈 관측·연속 작업 평가와 선택형 검색 확장도 포함한다.
@@ -725,5 +720,4 @@ python scripts/evaluate_memory_workflows.py --backend deterministic
 대조한다.
 
 실제 모델이 초기화·마감을 수행하는 대화, 신뢰 후 자동 훅 실행, Codex의 출력
-축약 동작은 통합 실세션으로 검증하지 않았다. Telegram Jarvis는 계속 Claude CLI를
-호출하며 Codex 기반 Telegram 실행기는 포함하지 않는다.
+축약 동작은 통합 실세션으로 검증하지 않았다.

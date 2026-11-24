@@ -43,10 +43,6 @@ EXPECTED_JARVIS_BOUNDARY_LINE = (
     "건너뛸 수 있고, Telegram 수락 후 응답 유실·일부 청크 전송·전송 성공 후 "
     "`fired` 기록 실패에서는 중복될 수 있다."
 )
-REQUIRED_README_LITERALS = (
-    '`chat.type == "private"`',
-    "`chat.id == from.id`",
-)
 REQUIRED_V082_RELEASE_SECTIONS = (
     "## 보안 수정",
     "## 데이터 내구성",
@@ -59,6 +55,8 @@ REQUIRED_V082_RELEASE_SECTIONS = (
 )
 REQUIRED_V082_RELEASE_LITERALS = (
     "`briefing_times`",
+    '`chat.type == "private"`',
+    "`chat.id == from.id`",
     "private chat",
     "process-then-ack",
     "offset",
@@ -245,12 +243,7 @@ REQUIRED_V0160_WIRING = (
     ("commands/vault-process-inbox.md", "덮어쓰지 않는 이동"),
     ("commands/vault-ingest.md", "그림 자체를 판독해"),
     ("commands/vault-upgrade.md", "`승인 대기(기존 유지)`"),
-    ("commands/vault-jarvis-setup.md", "텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며"),
     ("docs/reliability.md", "`hot_max_tokens`·`handoff_max_tokens`를 잠시 0으로"),
-    # Keep the approval-first briefing contract and hook disablement wired to
-    # current behavior; the old ambient-settings warning was superseded by bare mode.
-    ("skills/agentic-vault/scripts/jarvis_bridge.py", "내 결정·승인 대기를 먼저"),
-    ("SECURITY.md", "--settings '{\"disableAllHooks\":true}'"),
 )
 FORBIDDEN_V0160_STALE_LITERALS = (
     ("commands/vault-init.md", "rules 5개"),
@@ -279,7 +272,7 @@ REQUIRED_V0170_WIRING = (
     ("commands/vault-init.md", "## 4-1. 도구 어댑터 (선택 — 사용자 승인 후에만)"),
     ("commands/vault-init.md", "관리 블록 **밖**에 둔다"),
     ("commands/vault-init.md", "Codex에서는 이 단계를 생략하고"),
-    ("commands/vault-upgrade.md", "6. **도구 어댑터(선택)**"),
+    ("commands/vault-upgrade.md", "**도구 어댑터(선택)**"),
     ("commands/vault-upgrade.md", "`offer_helper_update`"),
     ("commands/vault-upgrade.md", "자동 덮어쓰기 금지 — diff만 보여 주고"),
     ("commands/vault-upgrade.md", "`review_settings`"),
@@ -596,6 +589,19 @@ FORBIDDEN_V0310_STALE_STATEMENTS = (
 def _folded(text: str) -> str:
     """Text with every whitespace run, wrapped Markdown line breaks included, folded to one space."""
     return " ".join(text.split())
+
+
+def _published_text(tag: str, relative: str) -> str:
+    """Read a released source without requiring an archived component in today's package."""
+    tag_ref = f"refs/tags/{tag}"
+    try:
+        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", tag_ref],
+                               cwd=REPO_ROOT, capture_output=True)
+    except FileNotFoundError:
+        raise unittest.SkipTest(f"cannot inspect {tag}: Git is unavailable") from None
+    if found.returncode:
+        raise unittest.SkipTest(f"release tag {tag} is not in the local checkout")
+    return subprocess.check_output(["git", "show", f"{tag_ref}:{relative}"], cwd=REPO_ROOT).decode("utf-8")
 
 
 def _module_constant(path: Path, name: str) -> object:
@@ -993,9 +999,6 @@ class ReleaseMetadataTests(unittest.TestCase):
         for origin in EXPECTED_HISTORICAL_ORIGINS:
             with self.subTest(origin=origin):
                 self.assertIn(origin, readme)
-        for literal in REQUIRED_README_LITERALS:
-            with self.subTest(literal=literal):
-                self.assertIn(literal, readme)
 
     def test_release_note_records_v082_contract(self) -> None:
         self.assertTrue(
@@ -1699,6 +1702,11 @@ class V0460ReleaseMetadataTests(unittest.TestCase):
             for target in re.findall(r"\]\(([^)\s]+)\)", document.read_text(encoding="utf-8")):
                 if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
                     continue
+                if document == self.RELEASE and target == "../../commands/vault-jarvis-setup.md":
+                    errata = _section(document.read_text(encoding="utf-8"), self.ERRATA)
+                    self.assertIn("](https://github.com/Technoetic/agentic-vault/blob/v0.46.0/"
+                                  "commands/vault-jarvis-setup.md)", errata)
+                    continue
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
 
@@ -1951,8 +1959,9 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
             for target in re.findall(r"\]\(([^)\s]+)\)", text):
                 if target.startswith("#") or re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", target):
                     continue
-                # This release note still links to the command as it exists in its published tag.
-                if document == self.RELEASE and target == "../../assets/adapters/aside/aside-repl-command.md":
+                # These release-note links refer to commands present in the published tag.
+                if document == self.RELEASE and target in (
+                        "../../assets/adapters/aside/aside-repl-command.md", "../../commands/vault-jarvis-setup.md"):
                     errata = _section(text, "## 정오표")
                     self.assertIn("2026-11-24", errata)
                     pinned = "https://github.com/Technoetic/agentic-vault/blob/v0.47.0/"
@@ -2081,7 +2090,7 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
 
     def test_v0470_note_states_the_shared_briefing_backoff(self) -> None:
         # The retry backoff is shared by all pending slots and returns to its base only when `pending` is
-        # empty (finding BR-1; the behaviour is pinned in tests/test_jarvis_bridge.py).
+        # empty (finding BR-1 in the published release).
         changes = _folded(_section(self.RELEASE.read_text(encoding="utf-8"), "## 변경"))
         self.assertIn(
             "최대 1시간)을 따른다. 이 간격은 회차마다 따로 두지 않고 `pending`이 빌 때만 60초로 돌아가므로, 두 회차 "
@@ -2394,8 +2403,8 @@ class V0470ReleaseMetadataTests(unittest.TestCase):
 # v0.47.0 shared surfaces: README, SECURITY.md, docs/codex.md, docs/hardening.md, docs/README.md and
 # commands/vault-upgrade.md carry the parts of items 1-5 and 9 that other phases leave to the release.
 class V0470SharedSurfaceTests(unittest.TestCase):
-    JARVIS_BRIDGE = REPO_ROOT / "skills/agentic-vault/scripts/jarvis_bridge.py"
-    JARVIS_SETUP = REPO_ROOT / "commands/vault-jarvis-setup.md"
+    JARVIS_BRIDGE = "skills/agentic-vault/scripts/jarvis_bridge.py"
+    JARVIS_SETUP = "commands/vault-jarvis-setup.md"
     LESSON_DELTA = REPO_ROOT / "skills/agentic-vault/scripts/vault_lesson_delta.py"
     HARDENING = REPO_ROOT / "docs/hardening.md"
     SECURITY = REPO_ROOT / "SECURITY.md"
@@ -2547,7 +2556,7 @@ class V0470SharedSurfaceTests(unittest.TestCase):
     def test_v0470_note_describes_the_skip_notice_as_the_bridge_sends_it(self) -> None:
         # The notice names the slot as well as its date, time and attempt count, and guesses no cause
         # (jarvis_bridge._briefing_skip_notice); the note must not say it holds only date, time and count.
-        bridge = self.JARVIS_BRIDGE.read_text(encoding="utf-8")
+        bridge = _published_text("v0.47.0", self.JARVIS_BRIDGE)
         notice = bridge[bridge.index("def _briefing_skip_notice"):bridge.index("def _briefing_prompt")]
         self.assertIn("{name}", notice)
         changes = _folded(_section(V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8"), "## 변경"))
@@ -2630,22 +2639,23 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         self.assertNotIn("x/", section)
 
     def test_readme_describes_optional_model_and_effort(self) -> None:
-        readme = README.read_text(encoding="utf-8")
+        readme = _published_text("v0.47.0", "README.md")
         for literal in ("`jarvis.model`·`jarvis.effort`", "`low`·`medium`·`high`·`xhigh`·`max`",
                         "비어 있으면 브리지는 `--model`·`--effort`를 넘기지 않아",
                         "`--bare`에서 인증된 응답 생성과 노력 수준 적용은 확인하지 않았다"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, readme)
         self.assertIn("(선택 키 `model`·`effort` 포함, 기본 빈 값)", readme)
-        limits = _section(self.SECURITY.read_text(encoding="utf-8"), "## Known limitations")
+        limits = _section(_published_text("v0.47.0", "SECURITY.md"), "## Known limitations")
         bullets = [_folded(bullet) for bullet in ("\n" + limits).split("\n- ")[1:]]
         named = [bullet for bullet in bullets if "`jarvis.model`" in bullet]
         self.assertEqual(len(named), 1)
         self.assertIn("were not run", named[0])
 
     def test_readme_states_the_briefing_attempt_limit_and_refusal_limit(self) -> None:
-        attempts = _module_constant(self.JARVIS_BRIDGE, "BRIEFING_MAX_ATTEMPTS")
-        readme = README.read_text(encoding="utf-8")
+        attempts = 8
+        self.assertIn(f"BRIEFING_MAX_ATTEMPTS = {attempts}", _published_text("v0.47.0", self.JARVIS_BRIDGE).splitlines())
+        readme = _published_text("v0.47.0", "README.md")
         for literal in (f"같은 회차가 {attempts}번 연속 실패하면",
                         "이 안내가 전달되지 않아도 다시 보내지 않고 로그에만 남긴다.",
                         "날이 바뀔 때 전날의 `pending` 회차는 한 번만 더 시도하고",
@@ -2659,7 +2669,7 @@ class V0470SharedSurfaceTests(unittest.TestCase):
             end = text.index("0부터 센다.", start) + len("0부터 센다.")
             return text[start:end]
 
-        self.assertEqual(block(readme), block(self.JARVIS_SETUP.read_text(encoding="utf-8")))
+        self.assertEqual(block(readme), block(_published_text("v0.47.0", self.JARVIS_SETUP)))
         self.assertIn(f"since v0.47.0 a scheduled briefing slot that fails {attempts} times in a row is skipped",
                       readme)
 
@@ -2667,8 +2677,8 @@ class V0470SharedSurfaceTests(unittest.TestCase):
         # The notice also names the slot and guesses no cause (jarvis_bridge._briefing_skip_notice), so no
         # text may say it holds only the date, time and attempt count (host result HR-7, finding BR-4).
         phrase = "회차의 날짜·시각·이름과 시도 횟수를 적고 원인은 짐작하지 않는 안내를 한 번 보낸다"
-        readme = README.read_text(encoding="utf-8")
-        setup = self.JARVIS_SETUP.read_text(encoding="utf-8")
+        readme = _published_text("v0.47.0", "README.md")
+        setup = _published_text("v0.47.0", self.JARVIS_SETUP)
         release = V0470ReleaseMetadataTests.RELEASE.read_text(encoding="utf-8")
         for name, text in (("readme", readme), ("setup", setup)):
             with self.subTest(text=name):
@@ -3272,7 +3282,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn(f"| 0.56.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
-        self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI,", _folded(scope))
+        self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI", _folded(scope))
         limits = _section(security, "## Known limitations")
         bullets = [_folded(bullet) for bullet in ("\n" + limits).split("\n- ")[1:]]
         named = [bullet for bullet in bullets if bullet.startswith("**Antigravity CLI")]
@@ -3303,7 +3313,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         for literal in ("`fullyIdle`", "`injectSteps`", "`/hooks`", "`/skills`", "`read_file`", "(opt-out)",
                         "1.5.6 이상", "1.5.7", "`workspacePaths`", "`cwd`", "agentic-vault-hook-claims",
                         "에이전트가 agy를 감싸 실행하지 않는다", "Google로 전송된다",
-                        "`<PLUGIN_ROOT>`", "`<ARGUMENTS>`", "`jarvis_claude_cli_unavailable`"):
+                        "`<PLUGIN_ROOT>`", "`<ARGUMENTS>`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, folded)
 
@@ -3558,7 +3568,7 @@ class V0510ReleaseMetadataTests(unittest.TestCase):
     def test_english_overview_is_unbroken_and_precedes_folded_history(self) -> None:
         readme = README.read_text(encoding="utf-8")
         overview = readme[readme.index("## 🌐 English overview"):readme.index("<details>", readme.index("## 🌐 English overview"))]
-        self.assertIn("**Core commands** (all 15 are in [commands/](commands/)):\n\n- `/vault-init <name>`", overview)
+        self.assertIn("**Core commands** (all 14 are in [commands/](commands/)):\n\n- `/vault-init <name>`", overview)
         self.assertNotIn("**v0.32.0:**", overview)
         self.assertLess(readme.index("## 🌐 English overview"), readme.index("📜 이전 버전 변경 이력"))
 
@@ -4247,7 +4257,7 @@ class V0532ReleaseMetadataTests(unittest.TestCase):
         self.assertNotIn("Stop에 정수 `executionNum`이", antigravity)
         self.assertIn("원시 이벤트 SHA-256", antigravity)
         self.assertIn("tree/v0.57.0/antigravity", antigravity)
-        jarvis = (REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "jarvis_bridge.py").read_text(encoding="utf-8")
+        jarvis = _published_text("v0.53.2", "skills/agentic-vault/scripts/jarvis_bridge.py")
         self.assertNotIn("D:/NS", jarvis)
 
     def test_readme_and_codex_guide_and_manifest_name_v0532(self) -> None:
@@ -4557,7 +4567,7 @@ class V0570ReleaseMetadataTests(unittest.TestCase):
         self.assertFalse((REPO_ROOT / "antigravity" / "skills" / "webapp-principles").exists())
         self.assertFalse((REPO_ROOT / "antigravity" / "docs" / "webapp-principles.md").exists())
         antigravity_skills = sorted(p.parent.name for p in (REPO_ROOT / "antigravity" / "skills").glob("*/SKILL.md"))
-        self.assertEqual(len(antigravity_skills), 16)
+        self.assertIn("17개에서 16개", self.RELEASE.read_text(encoding="utf-8"))
         self.assertNotIn("webapp-principles", antigravity_skills)
 
     def test_readme_codex_and_manifest_name_v0570(self) -> None:

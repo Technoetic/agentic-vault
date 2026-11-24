@@ -26,17 +26,6 @@
   "rules_max_lines": 120,
   "hot_max_tokens": 2500,
   "handoff_max_tokens": 4000,
-  "jarvis": {
-    "enabled": false,
-    "telegram_user_ids": [],
-    "briefing_times": ["07:30"],
-    "butler_interval_hours": 24,
-    "qa_hourly_limit": 6,
-    "qa_timeout_sec": 180,
-    "claude_cmd": "claude",
-    "model": "",
-    "effort": ""
-  },
   "gates": {
     "note_create": { "confirm": false },
     "note_move": { "confirm": false, "log": true, "note": "처리한 인박스 원본의 격리 이동(_processed)은 확인 없이 한다. /vault-lint 관리성 이슈의 아카이브 이동은 사용자 승인 뒤에 한다. 어느 이동이든 파일명을 바꾸지 않는다 — 위키링크가 파일명 기반이다" },
