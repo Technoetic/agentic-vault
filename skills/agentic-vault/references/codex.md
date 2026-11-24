@@ -208,6 +208,3 @@ pending·stale은 종료 코드가 0이 아니며 인계의 `preserve`가 비어
 `init`의 `.claude/settings.json` 권한 병합은 Claude Code 전용이다. Codex에서 시작한
 초기화는 이 단계를 생략하며, 사용자가 Claude 권한 설정도 명시적으로 요청하면 공통
 절차를 따른다. Claude deny 항목을 Codex 권한 설정으로 번역하지 않는다.
-Jarvis는 `claude` CLI를 호출하는 별도 연동이며 Codex 실행기로 대체하지 않는다.
-Telegram 설정을 요청한 경우에만 [vault-jarvis-setup.md](../../../commands/vault-jarvis-setup.md)의
-Claude 의존성을 설명하고 해당 절차를 사용한다.

@@ -19,10 +19,10 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
 
 ## 스킬 이름
 
-스킬은 16개다. `agentic-vault`(이 스킬)와 명령 15개와 같은 이름의 스킬이다:
+스킬은 15개다. `agentic-vault`(이 스킬)와 명령 14개와 같은 이름의 스킬이다:
 `vault-init`, `vault-session-start`, `vault-session-end`, `vault-day`, `vault-ingest`, `vault-process-inbox`,
 `vault-lint`, `vault-trace`, `vault-recall`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-upgrade`,
-`vault-harden`, `vault-jarvis-setup`.
+`vault-harden`.
 
 - 명령 스킬에는 `disable-model-invocation: true`를 넣어 사용자가 부르는 명령으로 두었다.
 - 슬래시 명령: Plugins·Build plugins 문서는 플러그인 스킬을 `/<스킬 이름>`으로 부른다고 적고(예: `/vault-day`),
@@ -92,7 +92,6 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
   `.claude/settings.json`·`.claude/settings.local.json`에 병합하는 단계는 Antigravity 세션에서 실행하지 않는다.
   `.claude/rules/`와 CLAUDE.md 스텁, AGENTS.md는 공통 절차대로 만든다.
 - 가드 훅이 없으므로 deny zone·`exclude_dirs`를 지키는 것은 에이전트의 몫이다.
-- Jarvis(Telegram)는 Claude CLI만 쓴다. agy로 바꾸지 않는다.
 - `vault-doctor`는 Antigravity 설치와 훅 상태를 진단하지 않는다.
 
 ## 데이터

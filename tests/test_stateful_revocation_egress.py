@@ -44,7 +44,7 @@ if HAVE_HYPOTHESIS:
             self.revoked = False
             self.registry_valid = True
             self.hot_binding_valid = True
-            self.envelope = None
+            self.prepared_evidence = None
             self.prepared_generation = None
             self.simulated_sink = []
             self.extra_markers = []
@@ -77,33 +77,19 @@ if HAVE_HYPOTHESIS:
             record('vault_memory.compile_units', compiled['context'],
                    'observed' if compiled['context'] else 'unavailable')
             try:
-                envelope = evaluation.bridge._generation_envelope(self.fixture.root,
-                    {'_include_activity': True}, 'BENIGN')
-            except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
-                envelope = None
+                evidence, guard = self.fixture.prepare_evidence()
+            except evaluation.judge.EXPECTED_ERRORS:
                 assert not self.registry_valid or (self.revoked and not self.hot_binding_valid)
-                record('jarvis_bridge._generation_envelope', '', 'unavailable')
-            else:
-                record('jarvis_bridge._generation_envelope', envelope.payload)
-
-            try:
-                prepared, context = evaluation.judge._prepare(self.fixture.root, self.fixture.request())
-            except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
-                assert not self.registry_valid
                 record('vault_judge._prepare', '', 'unavailable')
-            else:
-                assert prepared['status'] == 'prepared' and context is not None
-                record('vault_judge._prepare', '\n'.join(context[2]['evidence']))
-
-            if envelope is None:
                 record('simulated_memory_sink', '', 'refused')
             else:
-                envelope.recheck()  # The actual current envelope's freshness guard.
-                self.simulated_sink.append(envelope.payload)
+                record('vault_judge._prepare', evidence)
+                guard.recheck()
+                self.simulated_sink.append(evidence)
                 record('simulated_memory_sink', self.simulated_sink[-1])
             self.terminal_observations = rows
             self.terminal_assessment = evaluation.assess_observations(rows)
-            assert len(rows) == 5 and self.terminal_assessment['unavailable_count'] <= 5
+            assert len(rows) == len(evaluation.REQUIRED_CONSUMERS)
             available = self.registry_valid and (not self.revoked or self.hot_binding_valid)
             # Before withdrawal, declared fixture markers are intentionally
             # visible. That exposure is a baseline, not a masking success.
@@ -162,29 +148,29 @@ if HAVE_HYPOTHESIS:
         @rule()
         def prepare(self):
             try:
-                envelope = evaluation.bridge._generation_envelope(self.fixture.root,
-                    {'_include_activity': True}, 'BENIGN')
-            except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
+                evidence, guard = self.fixture.prepare_evidence()
+            except evaluation.judge.EXPECTED_ERRORS:
                 assert not self.registry_valid or (self.revoked and not self.hot_binding_valid)
-                self.envelope = None
+                self.prepared_evidence = None
             else:
                 assert self.registry_valid
-                self.assert_observed_context(envelope.payload)
-                self.envelope = envelope
+                self.assert_observed_context(evidence)
+                self.prepared_evidence = (evidence, guard)
                 self.prepared_generation = self.generation
 
         @rule()
         def simulated_send(self):
-            if self.envelope is None:
+            if self.prepared_evidence is None:
                 return  # No observation; never counted as a successful send.
+            evidence, guard = self.prepared_evidence
             try:
-                self.envelope.recheck()
+                guard.recheck()
             except (ValueError, evaluation.EvidenceError, evaluation.HealthcheckError, OSError):
                 assert self.generation != self.prepared_generation
             else:
                 assert self.generation == self.prepared_generation, 'stale envelope was reused'
-                self.assert_observed_context(self.envelope.payload)
-                self.simulated_sink.append(self.envelope.payload)
+                self.assert_observed_context(evidence)
+                self.simulated_sink.append(evidence)
 
         @rule(change=st.sampled_from(('configuration', 'registry', 'source')))
         def change_between_prepare_and_send(self, change):
@@ -217,9 +203,10 @@ if HAVE_HYPOTHESIS:
             if not self.registry_valid or (self.revoked and not self.hot_binding_valid):
                 return
             if self.unfiltered_reader:
-                text, _ = evaluation.bridge._read_context_prefix(self.fixture.root / '00-meta/hot.md')
+                text = (self.fixture.root / '00-meta/hot.md').read_text(encoding='utf-8-sig')[:1024]
             else:
-                text = evaluation.bridge._generation_prompt(self.fixture.root, {}, 'BENIGN')
+                text, guard = self.fixture.prepare_evidence()
+                guard.recheck()
             self.assert_observed_context(text)
 
     TestEgressLifecycle = EgressLifecycleMachine.TestCase
@@ -233,27 +220,24 @@ if HAVE_HYPOTHESIS:
                 machine.change_between_prepare_and_send(change='registry')
             with mock.patch.object(evaluation, 'recall', wraps=evaluation.recall) as retrieved, \
                     mock.patch.object(evaluation, 'compile_units', wraps=evaluation.compile_units) as compiled, \
-                    mock.patch.object(evaluation.bridge, '_generation_envelope',
-                                      wraps=evaluation.bridge._generation_envelope) as prepared, \
                     mock.patch.object(evaluation.judge, '_prepare', wraps=evaluation.judge._prepare) as judged:
                 machine.teardown()
             self.assertGreater(retrieved.call_count, 0, 'terminal trace had no actual retrieval observation')
             self.assertGreater(compiled.call_count, 0, 'terminal trace had no actual compile observation')
-            self.assertGreater(prepared.call_count, 0, 'terminal trace had no actual guarded preparation')
             self.assertGreater(judged.call_count, 0, 'terminal trace had no actual Jev preparation')
-            self.assertEqual(len(machine.terminal_observations), 5)
+            self.assertEqual(len(machine.terminal_observations), 4)
             return machine
 
         def test_short_revoke_trace_must_observe_consumers_and_guarded_simulated_send(self):
             machine = self.run_terminal()
             self.assertTrue(machine.terminal_assessment['safe_useful'])
-            self.assertEqual(machine.terminal_assessment['benign_retained_count'], 5)
+            self.assertEqual(machine.terminal_assessment['benign_retained_count'], 4)
             self.assertTrue(machine.simulated_sink)
 
         def test_invalid_terminal_state_is_observed_refusal_not_useful_safe_success(self):
             machine = self.run_terminal(invalid=True)
             self.assertEqual(machine.terminal_assessment['observed_count'], 0)
-            self.assertEqual(machine.terminal_assessment['unavailable_count'], 5)
+            self.assertEqual(machine.terminal_assessment['unavailable_count'], 4)
             self.assertFalse(machine.terminal_assessment['safe_useful'])
             self.assertEqual(machine.simulated_sink, [])
 

@@ -494,4 +494,4 @@ Claude CLI의 `plugin validate`는 정적 manifest·컴포넌트 검증이다. �
 CI는 Linux/Windows/macOS의 지원 Python 조합을 실행하도록 구성한다. 로컬에서
 CI 파일을 추가한 것과 원격 CI가 실제 통과한 것은 구분한다. 실제 모델의 규칙
 상속 테스트는 별도 `scripts/manual_rules_inheritance_probe.py`가 있으며 API를 호출할 수 있다.
-Telegram 송수신과 실제 Claude 실세션 검증도 별도다.
+실제 Claude 세션에서의 검증도 별도다.

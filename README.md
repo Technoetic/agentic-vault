@@ -19,7 +19,7 @@ English: [overview](#-english-overview) · [security policy](SECURITY.md)
 [![Platform](https://img.shields.io/badge/Platform-Windows_·_macOS_·_Linux-0EA5E9?style=for-the-badge)](#-설치)
 [![Python](https://img.shields.io/badge/Python_3.10+-stdlib_only-3776AB?style=for-the-badge&logo=python&logoColor=white)](#%EF%B8%8F-한계-정직성)
 
-[![Commands](https://img.shields.io/badge/Commands-15-F59E0B?style=for-the-badge)](commands/)
+[![Commands](https://img.shields.io/badge/Commands-14-F59E0B?style=for-the-badge)](commands/)
 [![Templates](https://img.shields.io/badge/Templates-15%2B6_rules-22C55E?style=for-the-badge)](assets/templates/)
 [![Hook](https://img.shields.io/badge/SessionStart-기억_자동_주입-7C3AED?style=for-the-badge)](hooks/hooks.json)
 [![Lint](https://img.shields.io/badge/Healthcheck-fail--closed-EF4444?style=for-the-badge)](skills/agentic-vault/scripts/vault_healthcheck.py)
@@ -71,7 +71,7 @@ flowchart TB
 
 Apart from this section, the README is in Korean, and so are the commands, rule files and note templates (Korean-first). Start here if you read English.
 
-**What it is.** agentic-vault is a Claude Code and Codex plugin that keeps agent memory in a plain-Markdown Obsidian vault instead of the context window. A SessionStart hook injects the previous session's handoff and a short hot-context note within an estimated token budget; everything else is read on demand through the index and grep. The core uses only the Python 3.10+ standard library and runs on Windows, macOS and Linux. Outside a vault (no `00-meta/vault-config.json`) the hooks stay silent. Since v0.48.0 the repository also carries a generated package for Antigravity CLI in `antigravity/`.
+**What it is.** agentic-vault is a Claude Code and Codex plugin that keeps agent memory in a plain-Markdown Obsidian vault instead of the context window. A SessionStart hook injects the previous session's handoff and a short hot-context note within an estimated token budget; everything else is read on demand through the index and grep. The core uses only the Python 3.10+ standard library and runs on Windows, macOS and Linux. Outside a vault (no `00-meta/vault-config.json`) the hooks stay silent. Since v0.48.0 the repository also carries a generated package for Antigravity CLI in `antigravity/`. The current source builds 15 Antigravity CLI skills from the shared skill and 14 commands. The published v0.57.0 package has 16 skills.
 
 **Install.** In Claude Code, type these two commands yourself (Claude cannot run `/plugin` for you), then restart Claude Code:
 
@@ -84,27 +84,27 @@ For Codex, register the release tag and add the plugin as described in [the Code
 
 Claude Code 2.1.295 or later is recommended. Its [changelog](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md) lists "Fixed an async SessionStart hook's unchanged context being added to the conversation again on every resume", and this plugin registers an async health-check SessionStart hook for startup, clear and resume. `hooks/hooks.json` is unchanged and does not adopt `onFailure` (only the opt-in deny-zone guard template described below sets it, in its own settings fragment); `vault_doctor.py --host-version` reports the local `claude --version` only when asked.
 
-**Core commands** (all 15 are in [commands/](commands/)):
+**Core commands** (all 14 are in [commands/](commands/)):
 
 - `/vault-init <name>` creates the standard folder tree, `vault-config.json`, templates and engine rules, and installs the git hooks when git is enabled.
 - `/vault-session-start` restores the last state; `/vault-session-end` updates the handoff, hot note and log, then commits locally.
 - `/vault-ingest`, `/vault-process-inbox` and `/vault-day` turn sources and captures into atomic, wikilinked notes.
 - `/vault-recall <query>` is a read-only source search with optional time filters, two-hop filename links and BM25/RRF; see [memory patterns](docs/memory-patterns.md).
 - `/vault-lint` runs the fail-closed checker (exit 1 on critical frontmatter or log errors); `/vault-upgrade` replaces only engine-owned files by version stamp.
-- `/vault-jarvis-setup` enables the optional Telegram bridge: briefings, inbox capture and read-only Q&A for whitelisted user IDs.
 
 **Limits.**
 
+- The current source drops the Telegram bridge. If you ran an older copy, retire its bot, token and scheduled task or service separately. Updating the plugin does not stop those processes or change your vault.
+
 - Summaries, lessons and upgrade decisions still depend on the model. The checker enforces schema and links, not judgement.
 - The git hooks are local gates that `--no-verify` bypasses, not a security boundary.
-- Since v0.18.0 the Jarvis bridge passes host-selected bounded evidence on stdin and runs with no model tools, ambient settings, skills, automatic memory or session persistence. Its `--bare` mode requires API authentication rather than subscription OAuth. This is not an OS sandbox; v0.17.1 and earlier bridges have broader Read/Grep/Glob access (see [SECURITY.md](SECURITY.md)). It reads only the CLI's text output and exit code, so it cannot tell a provider refusal from an outage or an empty answer; since v0.47.0 a scheduled briefing slot that fails 8 times in a row is skipped and the owner is told once.
 - Built-in search is lexical/BM25; an optional qmd path/rank sidecar is reread from originals. No embeddings or models are installed by core. Token budgets use a character-based estimate.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 <details>
 <summary><b>Full feature summary (English)</b></summary>
 
-*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 15 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), an optional Telegram "Jarvis" layer (morning briefings, remote capture to inbox, read-only vault Q&A, and a butler that reports health/mirror/inbox status — whitelisted user IDs only, prompts passed on stdin, and since v0.18.0 LLM sessions receive host-selected context with no model tools and require API authentication — a CLI boundary, not an OS sandbox), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), an opt-in deny-zone PreToolUse guard template for Claude Code that answers only deny or ask and is never installed by default (a guard, not a sandbox), and 15 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
+*agentic-vault* turns a plain-Markdown Obsidian vault into a persistent, file-based memory layer for Claude Code and Codex. Codex uses the shared `$agentic-vault:agentic-vault` skill and requires hook trust for automatic injection; see [the Codex guide](docs/codex.md). It combines four ideas: **file-based agentic memory** (plain text as ground truth), an **LLM Wiki** (wikilink graph traversal), **tiered memory** (a budgeted hot context, a session handoff cache, and grep/index paging over the full vault), and **Zettelkasten discipline** (atomic notes, dense linking). Ships 14 slash commands, a SessionStart hook that auto-injects the previous session's handoff, a stdlib-only fail-closed health checker, git pre-commit/pre-push guards (frontmatter & YAML-wikilink validation at commit time, **backlink-aware deletion blocking** — deleting a note that others still link to is refused until the links are cleaned in the same commit — and local-only push blocking), a handoff commit anchor for deterministic session diffs, **a session-injection token budget** enforced on the emitted handoff/hot sections (measured with a character-based estimate, not a provider tokenizer), a self-improvement lessons ledger that proposes skill promotion after repeated lessons (never auto-promotes; since v0.8.3 promoted clauses pass a probation window before confirmation and can be rolled back with ledger lines never deleted — statuses flip to rolled-back, history retained — while rejected drafts are preserved verbatim so only improved re-proposals return), verified independent backup snapshots, deterministic lexical recall with source attribution, authorized Jev-first direct Noul/Choice/Score questions even outside a vault, plus compatible source-bound Jev judgments (advisory results; host skill routing, not a universal interception hook), an optional tool adapter for the Aside AI browser (a CLAUDE.md clause, an operations note, a Windows helper that minimizes the new Aside window at once and hands the focus back, and an opt-in PreToolUse hook filtered to `aside` commands), an opt-in deny-zone PreToolUse guard template for Claude Code that answers only deny or ask and is never installed by default (a guard, not a sandbox), and 15 note/system templates plus six engine-owned rule files. Since v0.6.0 the behavioral contract is split by ownership into three layers: the engine-owned rule files (six since v0.12.0) installed to `.claude/rules/` (wholesale-replaced on `/vault-upgrade` via `engine=` version stamps), a slim user-owned `CLAUDE.md` stub for vault-specific rules, and a generated `AGENTS.md` for non-Claude agents — turning upgrades from diff-merging into file replacement. Machine-checked schema and path policy live in `00-meta/vault-config.json`; workflow instructions remain in commands and rules. Non-vault session hooks are silent. Default recall is lexical; optional time filters, filename-link expansion, BM25/RRF and external path/rank candidates extend it. Source-bound structured memory and lesson outcome observations are opt-in. Summarization and lesson judgment still depend on the model. Engine and data are strictly separated — the plugin is generic, your vault is yours.
 
 </details>
 
@@ -193,7 +193,9 @@ These changes ship for the first time as v0.52.1. The independent release review
 
 </div>
 
-Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 같은 절차를 공유 스킬로 호출한다. [Codex 설치·사용법](docs/codex.md)에 전체 대응표가 있다. Telegram Jarvis는 Claude CLI를 사용한다.
+Claude Code는 아래 `/vault-*` 명령을 사용한다. Codex는 `$agentic-vault:agentic-vault session-start`, `$agentic-vault:agentic-vault recall <질의>`처럼 같은 절차를 공유 스킬로 호출한다. [Codex 설치·사용법](docs/codex.md)에 전체 대응표가 있다. 현재 소스의 Antigravity CLI용 스킬 15개는 공용 스킬 하나와 명령 14개로 구성된다.
+
+현재 소스는 Telegram 브리지를 제공하지 않는다. 예전에 연결한 봇과 토큰, 예약 작업·서비스는 운영자가 직접 중지하거나 폐기한다. 사용자 볼트와 기존 수집 노트는 업그레이드로 정리되지 않는다. [다음 릴리스 변경 사항](docs/releases/unreleased.md)
 
 v0.10.0에는 **읽기 전용 기억 진단**과 **대상 해시를 확인하는 교훈 수정안 기록·적용**이 추가됐다. `/vault-doctor`와 [교훈 제안 도구](docs/lesson-proposals.md)로 기억 상태와 실제 수정안을 확인한다.
 
@@ -227,11 +229,8 @@ v0.13.0에는 선택 설정 `gates`의 행동별 정책 스키마와 8개 템플
 미지원·실패이면 **호스트 대체 + 사유**를 표시하고 낮은 확신도·보류를 공개한다. 결과는
 참고용이며 PASS나 행동 승인이 아니다. SDK·설정 마이그레이션·시작 시 네트워크 호출은 없다.
 
-v0.18.0은 사용자 제공 OWASP 2026 PDF를 기준으로 파일 읽기·외부 판단 전송·무인 Jarvis의
+v0.18.0은 사용자 제공 OWASP 2026 PDF를 기준으로 파일 읽기와 외부 판단 전송의
 경계를 보강한다. 하드링크를 읽기 전에 거부하고, 구조화된 비밀값과 순환·과대 입력을 차단한다.
-Jarvis는 호스트가 고른 제한된 근거만 받고 모델 도구와 자동 컨텍스트를 끈다.
-**Jarvis의 `--bare` 모드는 API 인증이 필요하며 구독 로그인만으로는 실행되지 않는다.**
-입력과 stdout/stderr에 각각 64KiB 상한을 적용하고, 시간 초과 뒤 파이프 읽기를 정리한다.
 이는 OS 샌드박스나 OWASP 준수 인증이 아니다. [변경·업그레이드와 검증](docs/releases/v0.18.0.md)
 
 v0.17.1은 결함 수정 릴리스다. 세션 시작 주입을 호스트의 훅 출력 상한(Claude Code 10,000자)
@@ -262,8 +261,7 @@ v0.17.0에는 선택형 **도구 어댑터**가 추가됐다. 첫 어댑터는 A
 | `/vault-doctor` | 기억 주입의 설정·파일·예산 상태와 다음 조치를 원문 없이 진단 + 도구 어댑터(Aside)와 선택형 deny zone 가드의 설치 상태 (읽기 전용) |
 | `/vault-lint` | fail-closed 무결성 검사 → 치명 즉시 치유, 관리성은 사용자 확인 후 처리 |
 | `/vault-session-end` | handoff·hot·log 갱신 + **기준 커밋(anchor) 고정** + **교훈 루프**(반복 3회 → 스킬 승격 제안, 승격 후 **관찰 검증 → 확정/롤백 제안**, 기각 초안 전문 보존) + git 커밋(로컬) — **다음 세션 예약** |
-| `/vault-jarvis-setup` | 🤖 Telegram 자비스 활성화 — 아침 브리핑·원격 캡처·읽기전용 Q&A·집사 보고 |
-| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장(+기각 대장 섹션)·jarvis 블록·git 훅·anchor 멱등 설치 + **`.claude/rules/` 3층 계약 마이그레이션**(사용자 값 불변, 엔진 소유 rules만 스탬프 비교 교체) |
+| `/vault-upgrade` | ⬆️ **기존 볼트**를 현재 엔진으로 — 누락된 lessons 대장(+기각 대장 섹션)·git 훅·anchor 멱등 설치 + **`.claude/rules/` 3층 계약 마이그레이션**(사용자 값 불변, 엔진 소유 rules만 스탬프 비교 교체) |
 
 ---
 
@@ -280,11 +278,10 @@ flowchart TB
     end
 
     subgraph plugin["🔧 플러그인 = 엔진 (이 리포)"]
-        CMD["commands/<br/><i>슬래시 명령 15종</i>"]
+        CMD["commands/<br/><i>슬래시 명령 14종</i>"]
         HOOK["hooks/<br/><i>SessionStart 자동 주입</i>"]
         HC["vault_healthcheck.py<br/><i>fail-closed 무결성</i>"]
         BK["backup_vault.py<br/><i>검증 가능한 세대별 스냅샷</i>"]
-        JB["jarvis_bridge.py<br/><i>Telegram 자비스 🤖</i>"]
         TPL["assets/templates/<br/><i>노트·시스템 템플릿 15종 + 엔진 rules 6종</i>"]
         SK["SKILL.md<br/><i>작업 규율</i>"]
     end
@@ -307,8 +304,6 @@ flowchart TB
     HOOK -.컨텍스트 주입.-> U
     HC -->|검사| vault
     vault -->|독립 스냅샷| BK
-    JB -->|캡처: 10-inbox만| vault
-    JB <-.->|브리핑·Q&A| U
 
     style CFG fill:#A855F7,color:#fff
     style HOOK fill:#7C3AED,color:#fff
@@ -454,7 +449,7 @@ agentic-vault/
 ├── AGENTS.md                          ← 이 저장소를 고치는 기여자·에이전트 안내 (볼트에 설치하지 않음)
 ├── .claude/CLAUDE.md                  ← Claude Code가 위 안내를 불러오는 한 줄 (@../AGENTS.md)
 │
-├── commands/                          ← 15개 슬래시 커맨드
+├── commands/                          ← 14개 슬래시 커맨드
 │   ├── vault-harden.md                ← 출처·공유 상태·시간 대장·교훈·품질·보정
 │   ├── vault-init.md                  ← 볼트 스캐폴딩 (1회)
 │   ├── vault-session-start.md         ← 세션 복원 — handoff→hot→index 브리핑
@@ -468,7 +463,6 @@ agentic-vault/
 │   ├── vault-judge.md                 ← 선택 근거의 Jev 의미 판단 + 보류·출처 보고
 │   ├── jev-ask.md                     ← 볼트 없는 직접 질문 · 승인된 Jev-first 라우팅
 │   ├── vault-doctor.md                ← 기억 주입 상태의 읽기 전용 진단
-│   ├── vault-jarvis-setup.md          ← Telegram 자비스 설정  🤖
 │   └── vault-upgrade.md               ← 기존 볼트를 현재 엔진으로 (멱등)  ⬆️
 │
 ├── hooks/
@@ -511,8 +505,7 @@ agentic-vault/
 │       ├── vault_ontology.py          ← 명시적 유형·연결·지표 정의의 출처 캡처·현재성 확인
 │       ├── vault_ontology_query.py    ← 검토된 정확 일치 조회·구조화 계획의 정의·슬롯 점검
 │       ├── vault_ontology_cli.py      ← 선택형 온톨로지 계약의 읽기 전용 CLI
-│       ├── vault_paths.py             ← 경로·deny zone·링크 규칙 단일 출처 (healthcheck·deny zone 가드는 테스트로 고정한 사본)
-│       └── jarvis_bridge.py           ← Telegram 자비스 브리지 (stdlib-only 상시 데몬)  🤖
+│       └── vault_paths.py             ← 경로·deny zone·링크 규칙 단일 출처 (healthcheck·deny zone 가드는 테스트로 고정한 사본)
 │
 ├── assets/templates/                  ← 노트·시스템 템플릿 + 엔진 rules
 │   ├── vault-config.json              ← 볼트 정책 단일 출처
@@ -556,7 +549,7 @@ agentic-vault/
 
 현재 버전은 **v0.57.0**이며 **Claude Code, Codex 겸용**이고, 같은 저장소의 `antigravity/` 폴더에 Antigravity CLI용 생성 패키지를 함께 싣는다([Antigravity CLI 안내](docs/antigravity.md), 실제 agy 대화 세션으로는 확인하지 않았다). v0.57.0은 `scripts/eval_stats.py`(평면·층화 매크로 짝 부트스트랩 95% 신뢰구간·결정론적 2-폴드 교차 적합, `evaluate_recall.py --bootstrap-ci`), `scripts/eval_recall_hygiene.py`(분할 간 근사 중복 질의 누수 감사·격리 사본 마크다운 레이아웃 불변성 프로브, `evaluate_recall.py --check-split-leakage`·`--layout-invariance`), `scripts/sync_result_tables.py`(JSON-마크다운 결과 표 fail-closed 동기화), `commands/vault-recall.md`의 멀티턴 후속 질의 보완 지침, 선택형 `scripts/rerank_candidates.py`(TypeSafe Jev·BizRouter 단일 `choice` 기반 2단계 후보 재정렬)를 추가하고, 독립 저장소 [`Technoetic/webapp6`](https://github.com/Technoetic/webapp6)로 분리된 내장 `webapp-principles` 스킬과 문서를 제거한다(Antigravity CLI 스킬 17→16개). 인증서가 묶는 일곱 파일(`checker_sha256`)은 v0.55.0부터 v0.57.0까지 바이트 단위로 유지한다([이번 변경·검증 범위](docs/releases/v0.57.0.md)). v0.56.0은 `scripts/verify_eval_plan.py`(사전 등록 평가 계획 봉인·사후 개정 이중 판정), `vault_install_state.py`(자체 `manifest_sha256` 검증·`near_misses` 드리프트 진단), `vault_coverage_matrix.py`(`vault_doctor --coverage` 호스트×OS×어댑터 지원/비지원/미측정 표), `scripts/eval_activation.py`(선택형 `--check-activation` 사일런트 노옵 방지 감사, 종료 코드 `70`)를 추가하며 인증서가 묶는 일곱 파일(`checker_sha256`)은 v0.55.0과 바이트 단위로 유지한다([v0.56.0 변경 범위](docs/releases/v0.56.0.md)). v0.55.0은 `vault_lint_extensions.py`의 검증일 노화·연도 경계 경고(`checked-at-stale`·`review-by-passed`)와 결정론적 별칭 충돌 린트(`alias-collision`), `vault_egress.py`의 URL 쿼리 비밀키·서명 검사(`egress-url-secret`), `vault_cloud_sync.py`의 읽기 전용 클라우드 동기화 경고·첫 실행 기능 요약(`vault_doctor --cloud-sync`·`--summary`, `backup_vault.py`·`vault_okf.py` `stderr` 안내), 그리고 반증 가능한 ADR 템플릿과 무근거 결론 번복 점검을 추가하며 `checker_sha256`를 계획적으로 전환했다([v0.55.0 변경 범위](docs/releases/v0.55.0.md), [인증서 전환 안내](docs/releases/v0.55.0.md#하위호환업그레이드)). v0.54.1은 `SessionStart`·`vault_doctor`·저장소 정적 위생 검사에 `Default_Ignorable` 불가시 유니코드 7종(`U+00AD`, `U+034F`, `U+061C`, `U+200E`, `U+200F`, `U+3164`, `U+FFA0`) 차단을 보강하고, 추적 텍스트 파일 5개의 선두 UTF-8 BOM 정리·CI BOM 검사, `backup_vault.py` POSIX 부모 디렉터리 `fsync`, 그리고 CI 경고 전용 SHA-256 고정 `actionlint v1.7.12`와 저장소 Dependabot 보안 업데이트를 추가했다([v0.54.1 변경 범위](docs/releases/v0.54.1.md)). v0.54.0은 `SessionStart`·`vault_doctor` 불가시 유니코드 밀수·양방향 제어 차단, 읽기 전용 훅 배선 감사(`vault_hook_wiring.py` · `--hook-wiring`), 결정론적 설치 상태 원장과 소유권 보호 안전 제거(`vault_install_state.py` · `--install-state`), 저장소 CI 정적 보안·이식성 시험 4종, 그리고 출처 고정 릴리스 주장 검증기(`scripts/verify_release_claims.py`)를 추가했다([v0.54.0 변경 범위](docs/releases/v0.54.0.md)). v0.53.2는 공개하지 않은 v0.53.1 후보 태그를 대체해 v0.53.0 외부 평가에서 나온 보안·문서 정합성, `vault_doctor` 비밀 마스킹 일치, `first_handoff.py` CLI 인자, Hypothesis 긴 경로 읽기, `jarvis_bridge.py` 개인 경로 정리, 표준 라이브러리 병렬 시험 실행기(`scripts/run_unittest_parallel.py --workers 4`), 그리고 시험·잠금 경합 수정 2건을 함께 공개했다([v0.53.2 변경 범위](docs/releases/v0.53.2.md)). v0.53.0은 명시적인 한국어 절차 순서 질의의 검색 동점 처리, 두 세션의 인계 결과를 채점하는 실험, 첫 인계 실습을 제공한다([v0.53.0 변경 범위](docs/releases/v0.53.0.md)). v0.52.1은 healthcheck의 같은 번호 결정·실수 항목 보고(섹션 14d, 보고 전용), `SessionStart`의 가짜 머리글 줄 무력화, `jev_ask.py --escalate-bizrouter`의 Jev 원답 보존과 BizRouter 모델 축소(`google/gemini-decision-1`만), 저장소의 `v*` 태그 규칙 집합과 비공개 취약점 제보를 다루며 [v0.52.1 변경 범위](docs/releases/v0.52.1.md)에 적었다. 이 변경은 공개하지 않은 v0.52.0 후보에 처음 들어갔으며, v0.52.1은 긴 Windows TEMP 폴더에서 실패하던 저장소 도구·평가 스크립트·`vault_lesson_metrics.py`·시험 fixture를 고쳐 함께 공개했다. v0.51.0은 독립 평가 결함 수정(Windows 긴 경로·`SessionStart` 비밀 마스킹·Antigravity `Stop` 중복 방지·초기 `/vault-init` 청결성·시험 격리·문서 복구)과 선택형 BizRouter Decisions 어댑터(`google/gemini-decision-1`)를 다뤘다([v0.51.0 변경 범위](docs/releases/v0.51.0.md)). v0.50.0은 저장소 CI의 낡은 풀 리퀘스트 실행 취소와 healthcheck의 선택형 `--worktree-heads`(어느 로컬 분기·태그에도 없는 HEAD를 가진 연결 작업 트리 확인) 두 항목을 다뤘다([v0.50.0 변경 범위](docs/releases/v0.50.0.md)). v0.49.0의 선택형 작업 명세·단계별 검증·개선 반복 관찰은 유지한다. v0.48.0의 Antigravity CLI 겸용 패키지: 세션 시작 훅의 Antigravity 모드, Stop 사건의 체크포인트, 패키지 생성기와 생성 패키지, 격리 설치 확인 도구, 호스트 중립 공용 문구, 문서와 판 표면의 여섯 항목을 다뤘다. Claude Code·Codex의 기본 훅 정의와 설치 구조는 그대로다. v0.47.0의 안내서 대조 검토 반영과 aside-repl 절차 명령: 열한 항목(기여자 안내, 브리지의 선택형 모델·노력 수준과 실패하는 정기 브리핑의 시도 상한, 교훈 은퇴 사유, 인박스 처리의 완료 조건, 종료 기록의 독자, 문구 정리, `/aside-repl` 절차 명령, 시험 fixture의 경합, v0.46.0 문서 정정)을 다뤘다. 여덟은 대조 검토가 찾은 것이고, `/aside-repl` 절차 명령은 같은 검토에서 함께 다룬 요청이며, 마지막 둘은 v0.46.0 릴리스에서 넘어온 것이다. 엔진 사본 소유 줄은 시험 뒤 넣지 않았다. v0.46.0의 금지 구역 정규화와 검사 빈틈 보강은 유지하며, v0.45.1 이하에서 올 때의 경고 승격 인증서 전환 순서는 [v0.46.0 업그레이드 안내](docs/releases/v0.46.0.md#하위호환업그레이드)에 있다. v0.45.1의 검색 근거 관찰과 교훈 효과 평가는 유지한다.
 
-사용자 제공 OWASP 2026 PDF를 기준으로 하드링크 읽기, 구조화된 비밀값 전송, 순환·과대 입력과 무인 Jarvis의 도구·자동 컨텍스트 접근을 제한한다. **Jarvis는 이제 API 인증이 필요하다. 구독 로그인만으로는 Q&A·예약 브리핑을 실행할 수 없다.** API 인증이 없는 기존 운영은 갱신 전에 인증을 마련하거나 Jarvis 생성을 비활성화해야 한다. 일반 세션 주입·검색·진단·Jev 사용의 인증 방식은 바뀌지 않는다. git 볼트의 healthcheck 스탬프는 `engine=0.57.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
+하드링크 읽기, 구조화된 비밀값 전송과 순환·과대 입력을 제한한다. git 볼트의 healthcheck 스탬프는 `engine=0.57.0`이다. deny zone 가드와 PowerShell 구문 분석기는 `engine=0.46.0` 그대로다. 규칙 6종은 기존 스탬프를 유지하며(`vault-architecture.md`·`vault-linking.md`·`vault-frontmatter.md`는 `engine=0.6.0`) `vault-workflow.md`는 `engine=0.43.0`이다. Aside 도우미 `aside-up.ps1`은 `engine=0.17.0`이다. 기존 행동 정책은 설정 형식만 검증하며 실행 시 자동 집행은 제공하지 않는다.
 
 아래 GitHub 설치 ref와 [Release의 ZIP](https://github.com/Technoetic/agentic-vault/releases/tag/v0.57.0) 경로는 v0.57.0을 가리킨다. 기능 검증과 게시 전 대기 항목은 [v0.57.0 검증 기록](docs/verification/v0.57.0.md)에 있다. 최종 CI·자산·설치 확인 결과는 릴리스의 게시 전 영수증(`verification.json`)에 남는다. 플러그인 게시, 활성 설치 캐시 갱신과 실제 볼트 upgrade는 각각 별도 작업이다. [보안 정책·제보 경로](SECURITY.md), [공통 엔진 사용법](docs/reliability.md), [문서 색인](docs/README.md), 이전 [v0.56.0](docs/releases/v0.56.0.md)·[v0.55.0](docs/releases/v0.55.0.md)·[v0.54.1](docs/releases/v0.54.1.md)·[v0.54.0](docs/releases/v0.54.0.md)·[v0.53.2](docs/releases/v0.53.2.md)·[v0.53.0](docs/releases/v0.53.0.md)·[v0.52.1](docs/releases/v0.52.1.md)·[v0.51.0](docs/releases/v0.51.0.md)·[v0.50.0](docs/releases/v0.50.0.md)·[v0.49.0](docs/releases/v0.49.0.md)·[v0.48.0](docs/releases/v0.48.0.md)·[v0.47.0](docs/releases/v0.47.0.md)·[v0.46.0](docs/releases/v0.46.0.md)·[v0.45.1](docs/releases/v0.45.1.md)·[v0.44.0](docs/releases/v0.44.0.md)·[v0.43.0](docs/releases/v0.43.0.md)·[v0.42.0](docs/releases/v0.42.0.md)·[v0.41.0](docs/releases/v0.41.0.md)·[v0.34.0](docs/releases/v0.34.0.md)·[v0.33.1](docs/releases/v0.33.1.md)·[v0.32.0](docs/releases/v0.32.0.md)·[v0.31.0](docs/releases/v0.31.0.md)·[v0.30.0](docs/releases/v0.30.0.md)·[v0.29.0](docs/releases/v0.29.0.md)·[v0.28.0](docs/releases/v0.28.0.md)·[v0.27.0](docs/releases/v0.27.0.md)·[v0.26.0](docs/releases/v0.26.0.md)·[v0.25.0](docs/releases/v0.25.0.md)·[v0.24.0](docs/releases/v0.24.0.md)·[v0.23.0](docs/releases/v0.23.0.md)·[v0.22.1](docs/releases/v0.22.1.md)·[v0.21.0](docs/releases/v0.21.0.md)·[v0.20.0](docs/releases/v0.20.0.md)·[v0.19.0](docs/releases/v0.19.0.md)·[v0.18.0](docs/releases/v0.18.0.md)·[v0.17.1](docs/releases/v0.17.1.md)·[v0.17.0](docs/releases/v0.17.0.md)·[v0.16.0](docs/releases/v0.16.0.md)·[v0.15.1](docs/releases/v0.15.1.md)·[v0.15.0](docs/releases/v0.15.0.md)·[v0.14.0](docs/releases/v0.14.0.md)·[v0.13.0](docs/releases/v0.13.0.md)·[v0.12.0](docs/releases/v0.12.0.md)·[v0.11.0](docs/releases/v0.11.0.md)·[v0.10.0](docs/releases/v0.10.0.md)·[v0.9.0 변경 기록](docs/releases/v0.9.0.md)을 참고한다.
 
@@ -676,7 +669,7 @@ claude
 ### 볼트 정책 선언 — vault-config.json
 
 <details>
-<summary><b>📋 기본 템플릿 설정 키 25개 전체 — 클릭하여 펼치기</b></summary>
+<summary><b>📋 기본 템플릿 설정 키 24개 전체 — 클릭하여 펼치기</b></summary>
 
 | 키 | 설명 |
 |:---|:---|
@@ -703,7 +696,6 @@ claude
 | `rules_max_lines` | rules 파일별 권장 최대 줄 수 |
 | `hot_max_tokens` | hot 노트의 세션 주입 토큰 예산 |
 | `handoff_max_tokens` | handoff 노트의 세션 주입 토큰 예산 |
-| `jarvis` | Telegram 자비스 활성화·허용 사용자·브리핑·Q&A 설정 객체(선택 키 `model`·`effort` 포함, 기본 빈 값) |
 | `gates` | **행동별 정책 선언** — 확인·기록·반복·수습·금지 요건의 설정 형식 검증. 기본 `{}`이며 실행 시 행동 차단은 미연동 |
 
 `gates`는 현재 설정 스키마와 템플릿 예시를 제공한다. `confirm`·`log`·`repeat`·`probation_days`·`deny` 값으로 사용자 확인, 기록, 반복 횟수, 관찰 기간, 행동 금지를 자동 집행하지 않는다. 기존 pre-push 훅의 네트워크 원격 차단은 이 설정과 독립적으로 동작한다. 행동 이름은 사용자 정의 문자열이며 앞뒤 공백을 제거한 뒤 이름이 겹치면 설정 오류로 거부한다.
@@ -734,39 +726,6 @@ claude
 위 두 표의 키와 `fm_exempt_zones`·`warning_policy`·`memory_revocation_file`·`privileged_notes`·`lint_max_warnings`·`promotion_review_sessions` 밖의 최상위 키는 적용되지 않는다. full 헬스체크는 그런 키 이름을 리포트 §0(설정 경고)에, Doctor는 `config_warnings`에 가장 가까운 알려진 키와 함께 적고(값은 적지 않는다), 헬스체크 콘솔 요약 줄에는 그 건수를 붙인다. 종료 코드는 바뀌지 않는다. `deny_zone`을 `deny_zones`로 고칠 때는 `deny_zones`가 기본 금지 구역 5개를 대체하므로 그 5개도 함께 적는다.
 
 </details>
-
----
-
-<div align="center">
-
-## 🤖 Jarvis 계층 — 먼저 말 걸고, 받아적고, 물으면 답하는 (선택)
-
-</div>
-
-`/vault-jarvis-setup`으로 Telegram 봇을 연결하면 볼트가 개인 비서가 된다 — 몸통은 최소(브리지 1개·채널 1개), 두뇌(기억·지식)는 볼트 4축이 담당한다.
-
-| 능력 | 동작 | LLM |
-|:---|:---|:---:|
-| 📋 정기 브리핑 | 매일 지정한 하나 이상의 시각, hot·handoff·log·git 활동을 종합해 푸시 (`/brief`로 즉석 호출) | 읽기전용 |
-| 📝 원격 캡처 | `기억해: ...` → `10-inbox/jarvis/`에 저장, `/vault-process-inbox`로 정제 | **무관여** |
-| 💬 볼트 Q&A | 자유 질문 → hot→index→grep 탐색 후 근거 노트 인용 답변 | 읽기전용 |
-| 🧹 집사 보고 | 주기적으로 healthcheck·mirror push·인박스 현황 보고 (치유는 안 함). healthcheck는 `--json-summary` 요약으로 읽어 치명 건수를 알리고, 읽지 못한 노트나 건너뛴 링크·정션이 있으면 `일부 미검사`와 그 건수를 붙인다. ✅는 빠짐없이 검사했고 치명이 0건일 때만 붙는다(연결 작업 트리 사본과 근거 용량 한도로 빠진 노트는 미검사로 세지 않는다) | 무관여 |
-
-메시지 기반 직접 쓰기는 `10-inbox/jarvis/` 캡처뿐이다. 사진·파일·음성 등 텍스트가 아닌 메시지는 캡처·Q&A 대상이 아니며 응답·로그 없이 무시된다. 예약 집사는 설정된 `health_report`를 갱신하고 설정된 `mirror` 원격으로 push할 수 있다. 거부된 텍스트 메시지는 `미승인 또는 비공개 아닌 발신자 폐기`를 콘솔과 `~/.vault-jarvis/jarvis.log`에 기록하며 본문은 기록하지 않는다. 캡처 파일명에는 정제된 Telegram `update_id` 접미사가 붙는다.
-
-수신 업데이트는 `process-then-ack` 순서를 지킨다. 라우팅·저장·응답이 성공한 뒤에만 `offset`을 원자적으로 전진시키며, 응답 전송이 실패하거나 처리 중 예외가 나면 그 업데이트부터 다음 poll에서 재시도한다. 따라서 손실보다 중복을 택하는 at-least-once 전달이고, 동일 `update_id` 캡처는 같은 파일로 수렴한다. 이 보장에는 조건이 하나 붙는다. 같은 업데이트에서 처리 예외가 3회 연속 나면 같은 오류로 뒤 메시지까지 막지 않도록 본문 없이 로그를 남기고 소유자에게 알린 뒤 그 업데이트만 건너뛴다. 이 안내가 전달되지 않으면 건너뛰지 않고 계속 재시도한다. 수신 재시도 대기는 5초에서 시작해 연속 실패마다 두 배로 늘고 60초에서 멈춘다. 실패한 정기 브리핑·집사 보고는 60초에서 시작해 최대 1시간 간격으로 재시도한다.
-
-**접근·운영 정책:** 볼트 응답은 `chat.type == "private"`이고 `chat.id == from.id`이며 숫자 user ID가 화이트리스트에 있을 때만 생성한다. 그 외 발신자는 무응답 폐기 · deny zone과 `.env`는 탐색 금지 · 봇 토큰은 env `JARVIS_TELEGRAM_TOKEN`(볼트 밖). `jarvis` 블록이 없거나 `enabled: false`면 전 기능 침묵. Q&A·브리핑 세션은 호스트가 선택한 근거와 질문을 표준 입력으로 넘기고 `--tools ""`·`--strict-mcp-config`로 모델 도구와 MCP를 제한한다. 0.18.0은 `--bare`·`--setting-sources ""`·`--disable-slash-commands`·`--no-session-persistence`도 사용한다. **`--bare`는 구독 OAuth/키체인 대신 API 인증이 필요하다.** 이 제한은 Claude CLI의 도구 가용성과 프롬프트 정책이며 OS 수준 샌드박스가 아니다. 훅은 도구가 아니라 이 제한으로 막히지 않으므로 `--settings '{"disableAllHooks":true}'`로 사용자·플러그인·볼트 훅도 끈다. Windows에서는 cmd.exe가 메시지를 다시 해석하는 `.cmd`·`.bat` 런처(npm 설치의 `claude.cmd`)를 실행하지 않으므로 네이티브 `claude.exe`가 필요하다. deny zone 제한은 호스트의 경로 정책이며 OS 수준 보안 경계가 아니다. 민감 자료에는 별도 파일 권한이나 샌드박스를 적용해야 한다. 모델이 직접 파일을 읽는 대신 호스트가 경로·파일·크기·알려진 비밀을 검사한 근거를 공급한다([SECURITY.md](SECURITY.md) 참조).
-
-브리핑 시각은 `jarvis.briefing_times`에 `HH:MM` 문자열 배열로 지정한다(예: `["07:30", "13:30", "19:30"]`). 기존 단일 `briefing_time`은 `briefing_times`가 없을 때만 하위 호환 fallback으로 사용한다.
-
-응답에 쓸 모델과 노력 수준은 선택 키 `jarvis.model`·`jarvis.effort`로 정한다. 두 키의 기본값은 빈 문자열이며, 비어 있으면 브리지는 `--model`·`--effort`를 넘기지 않아 claude CLI의 기본값을 쓴다. 값이 있으면 `--model <값>`·`--effort <값>`을 더한다. `effort`는 `low`·`medium`·`high`·`xhigh`·`max` 중 하나이고, `model`은 ASCII 영문자·숫자로 시작해 영문자·숫자와 `. _ : @ / + [ ] -`만 쓴 256자 이하의 이름이다. 다른 값은 설정 오류로 브리지를 시작하지 않는다. 브리지는 모델 이름이 CLI에서 쓸 수 있는지는 검사하지 않으므로, 지정했으면 `/brief`로 응답을 확인한다. claude CLI 2.1.252에서 브리지의 `--bare` 실행으로는 두 옵션이 인자 검사를 통과하는 것까지만 확인했고(API 키가 없어 응답은 만들지 못했다), `--bare` 없이 로그인한 상태에서는 응답했다. `--bare`에서 인증된 응답 생성과 노력 수준 적용은 확인하지 않았다.
-
-볼트·봇 네임스페이스마다 자비스 데몬을 정확히 하나만 실행해야 한다. 작업 스케줄러를 활성화하기 전에 수동으로 실행한 브리지를 중지한다. 예약 브리핑은 due 배치가 `pending`으로 기록된 뒤에 한해 at-least-once로 전송한다. Telegram 수락 후 응답 유실, 일부 청크 전송, 전송 성공 후 `fired` 기록 실패에서는 중복될 수 있다. `pending` 기록 전 프로세스가 중단되면 재시작 시 지난 슬롯은 cold-start miss로 건너뛴다. 이 보장에도 조건이 붙는다. 같은 회차가 8번 연속 실패하면(응답 생성 실패, 생성 중 예외, Telegram 전송 실패를 모두 센다) 그 회차를 `pending`에서 빼고 그날은 다시 시도하지 않으며, 소유자에게 회차의 날짜·시각·이름과 시도 횟수를 적고 원인은 짐작하지 않는 안내를 한 번 보낸다. 이 안내가 전달되지 않아도 다시 보내지 않고 로그에만 남긴다. 날이 바뀔 때 전날의 `pending` 회차는 한 번만 더 시도하고, 실패하면 같은 방식으로 건너뛴 뒤 그날 회차를 이어서 처리한다. 시도 횟수는 브리지 메모리에만 두므로 브리지를 다시 시작하면 0부터 센다.
-
-브리지는 claude CLI의 텍스트 출력과 종료 코드만 읽는다. 그래서 모델 제공자의 요청 거절과 장애·빈 응답을 구별하지 못하며, 실패 안내에도 원인을 적지 않는다. CLI가 거절을 0이 아닌 종료 코드나 빈 출력으로 끝내면 다른 실패와 같이 처리하고, 종료 코드 0의 텍스트로 끝내면 그 텍스트를 답으로 전달한다. 실제 거절이 어느 쪽으로 출력되는지는 확인하지 않았다.
-
-절충의 이유: 채널 20종·음성 같은 몸통 인프라는 OpenClaw의 영역이라 재발명하지 않는다 — 이 계층은 "볼트를 두뇌로 쓰는 최소 자비스"다.
 
 ---
 
@@ -836,7 +795,6 @@ full 모드는 개별 노트의 읽기 실패(클라우드 하이드레이션·�
 | MemGPT · A-MEM | OS 메모리 계층을 본뜬 티어드 메모리 — hot(캐시) → handoff(세션) → 볼트(디스크) |
 | [Anthropic — Effective context engineering](https://www.anthropic.com/engineering) | structured note-taking(파일 기반 에이전틱 메모리) 패턴의 공식 명명 |
 | [MemoryHub](https://memoryhub.ai) | 기억 3계층 경계의 실전 원형 — 볼트(진실의 원천) vs 장기 기억 MCP(세션 횡단 기계 회상)의 역할 분리와 "모순 시 볼트 우선" 원칙 |
-| [OpenClaw](https://github.com/openclaw/openclaw) | 🤖 Jarvis 계층의 "몸통" 사상 — 메신저 편재성·상시 데몬·cron 선발화. 우리는 채널 20종 대신 **1채널 최소판**으로 흡수하고 몸통 인프라 재발명은 의도적으로 포기 |
 | [hermes-agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | 에이전트 **선별** 메모리 사상(캡처→인박스→사람 있는 세션 정제)과 **자기개선 스킬 루프** — 후자는 `lessons.md` 대장 + 반복 3회 승격 제안으로 파일 기반 흡수(자동 승격 없음, v0.4.0) |
 | [WikiSkill](https://arxiv.org/abs/2608.27454) (Google Research) | 스킬 진화의 **영속 위키 계층**과 승격 게이팅 — v0.8.3이 3건 흡수: index 서술 규격("설명만 읽고 열지 말지 결정") · 기각 초안 전문 보존 · 승격 후 관찰 검증→확정/롤백("스킬은 가역, 위키는 영속" 비대칭) |
 | [MoAI-ADK](https://github.com/modu-ai/moai-adk/tree/2aab5f797b75983e132af451da68f69e3426557b) | v0.21.0: 전체 지침의 정적 분량 진단·완료 인덱스 원문 보존 미리보기·명시한 요구별 검증 누락 확인. 기존 Doctor/기억/근거 도구에 맞춰 Python 표준 라이브러리로 구현했으며 upstream Go 코드는 복사하지 않았다. MoAI main의 설계 참고이며 공개 v3.1.2의 전체 기능·성능 재현은 아니다 ([근거·사용법·한계](docs/moai-diagnostics.md)) |
@@ -904,8 +862,8 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
 `antigravity/`를 더한다. 저장소 루트는 지금처럼 Claude Code·Codex 플러그인이고 기본 훅 정의(`hooks/hooks.json`)는
 바뀌지 않는다. 실제 agy 대화 세션으로는 확인하지 않았다.
 
-- 패키지에는 Antigravity CLI용 스킬 16개(공용 스킬과 명령 15개를 같은 이름으로 바꾼 스킬; v0.48.0 당시 17개였으나 v0.57.0에서 `webapp-principles`를 `Technoetic/webapp6`로 분리)와 훅
-  둘(SessionStart·Stop)이 들어 있다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
+- v0.48.0의 패키지는 스킬 17개였다. v0.57.0은 `webapp-principles`를 `Technoetic/webapp6`로 분리해 16개가 되었다. 두 릴리스 모두 훅
+  둘(SessionStart·Stop)을 제공했다. [생성기](scripts/build_antigravity_package.py)가 저장소에서 만들고, 커밋한
   폴더가 생성 결과와 같은지는 시험이 지킨다. 설치는 태그를 고정한 주소
   `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity`나 로컬 폴더로
   한다([Antigravity CLI 안내](docs/antigravity.md)).
@@ -918,7 +876,7 @@ Google Antigravity CLI(`agy`)에서도 같은 볼트를 쓰도록, 저장소의 
   확인할 뿐 대화는 하지 않는다.
 - 공용 스킬과 볼트 AGENTS.md 스텁이 Antigravity CLI를 함께 적고, `/vault-session-start`·`/vault-lint`는 생성 패키지(`antigravity/`)에서 동명의 스킬로 변환된다.
   Antigravity CLI의 훅 사건에는 압축·세션 종료가 없고, deny zone 가드·교훈 단서·Aside 훅은 Antigravity CLI에서
-  돌지 않으며, Jarvis 브리지는 Claude CLI로만 응답을 만든다.
+  돌지 않는다. 당시 Jarvis 브리지의 응답 생성은 Claude CLI 전용이었다.
 
 새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.48.0.md)의 `기본 결과 변경` 절에 모두
 적었다. 인증서가 묶는 일곱 파일은 v0.46.0·v0.47.0과 같아, 그 판에서 올 때는 경고 승격 인증서를 다시 만들 필요가
@@ -940,7 +898,7 @@ v0.46.0 릴리스에서 넘어온 것이다.
 - 엔진 사본 소유를 밝히는 계약 한 줄은 규칙 문구 시험을 통과하지 못해 넣지 않았다
   ([시험 결과](docs/hardening.md#engine-copy-ownership-line-tried-not-shipped)). `vault-architecture.md`는
   v0.46.0과 같다.
-- Telegram 브리지([설정](commands/vault-jarvis-setup.md))는 선택 키 `jarvis.model`·`jarvis.effort`가 비어
+- Telegram 브리지([설정](https://github.com/Technoetic/agentic-vault/blob/v0.47.0/commands/vault-jarvis-setup.md))는 선택 키 `jarvis.model`·`jarvis.effort`가 비어
   있지 않을 때만 `--model`·`--effort`를 넘긴다. 같은 정기 브리핑 회차가 8번 연속 실패하면 그 회차를
   건너뛰고 소유자에게 한 번 알린다.
 - 교훈 대장의 RETIRE는 선택형 사유와 날짜를 상태 칸에 남긴다([교훈 은퇴 사유](docs/hardening.md#교훈-은퇴-사유)).
@@ -980,7 +938,7 @@ v0.45.1에 대한 외부 검토가 찾은 결함 일곱 가지를 고친다.
 - 템플릿 그대로의 handoff 기준 커밋 `(없음)`은 더 이상 session-end 계약 위반이 아니다. git
   볼트에서 볼트 폴더를 바꾼 커밋이 `anchor_drift_threshold`개 이상 쌓였을 때만 알린다.
 - Telegram 집사는 완전하고 깨끗한 검사에만 ✅를 붙이고 치명 건수와 `일부 미검사`를 밝힌다
-  ([Jarvis 설정](commands/vault-jarvis-setup.md)). healthcheck에는 선택형 `--json-summary`가 생겼다.
+  ([Jarvis 설정](https://github.com/Technoetic/agentic-vault/blob/v0.46.0/commands/vault-jarvis-setup.md)). healthcheck에는 선택형 `--json-summary`가 생겼다.
 
 새 옵션 없이도 결과가 바뀌는 곳은 [이번 변경·검증 범위](docs/releases/v0.46.0.md)의
 `기본 결과 변경` 절에 모두 적었다. `vault_paths.py`·`vault_lint_extensions.py`가 바뀌어 경고 승격
@@ -1313,7 +1271,7 @@ unchanged; new helpers require explicit selection. Active installations and vaul
 This release adds a package for Google's Antigravity CLI (`agy`), so that the same vault can be used
 there. The package lives in `antigravity/` and is generated from the repository's commands, skills,
 hooks and engine scripts by [`scripts/build_antigravity_package.py`](scripts/build_antigravity_package.py);
-it holds 16 Antigravity CLI skills (the shared skill and one per command; reduced from 17 when `webapp-principles` moved to standalone `Technoetic/webapp6` in v0.57.0) and two hooks, and a test
+the package had 17 skills in v0.48.0 and 16 in v0.57.0 after `webapp-principles` moved to standalone `Technoetic/webapp6`. Both releases shipped two hooks, and a test
 keeps the committed folder equal to the generator's output. Install it from the release tag with
 `agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity` or from a local
 copy of the folder ([guide](docs/antigravity.md)). The session-start hook gains an explicit

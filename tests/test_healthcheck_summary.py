@@ -1,17 +1,8 @@
 """The health check's opt-in one-line JSON summary (`--json-summary`).
 
-The Telegram butler used to report `치명 없음 ✅` from the exit code alone, so a
-check that skipped linked folders or could not read notes still looked clean.
-With `--json-summary` the full check ends its stdout with one JSON object that
-says whether the check ran (`status`), its counts and whether it was complete;
-the bridge reads that line instead of the exit code.
-
-Counts only: no path, note name or value reaches the line. Notes left out only
-because the extension evidence byte budget was spent are counted apart
-(`evidence_skipped`) and never make the check incomplete, but they do make the
-warning extensions' input incomplete (`extension_input_complete`), which the
-bridge mentions when certified warning promotion is active
-(`warning_promotion_active`).
+The summary distinguishes a completed scan from ignored or unreadable notes.
+Its counts expose no path, note name or value. Notes omitted by the extension
+evidence byte budget have a separate count and affect extension input coverage.
 
 Contract test (passes before and after the change): without the flag no stdout
 line starts with `{"`. The byte comparison with and without the flag needs the

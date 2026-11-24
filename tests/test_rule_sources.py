@@ -60,7 +60,7 @@ SECRETS = (
     # Shapes only the earlier vault_judge copy caught; the union keeps them.
     "authorization:bearerXXXXXXXX", "api_key: 'abc,defgh'",
     # Shapes both earlier copies let through (review of 0.15.1): the Telegram
-    # bot token the bridge itself uses, Slack, Google, URL credentials, Korean
+    # bot token found in legacy vaults, Slack, Google, URL credentials, Korean
     # labels, and full-width or zero-width disguises of a known label.
     "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawZ",
     "xoxb-123456789012-1234567890123-AbCdEfGh",

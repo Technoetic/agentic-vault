@@ -514,8 +514,7 @@ def _found_only_in_current_directory(executable: str) -> bool:
 
     Windows ``shutil.which`` may search the current directory before PATH, so
     a ``claude`` placed in the working directory (for example the vault root)
-    is not run unless that directory is an explicit PATH entry. Same rule as
-    the Jarvis bridge's claude resolution.
+    is not run unless that directory is an explicit PATH entry.
     """
     current = os.path.normcase(os.path.abspath(os.getcwd()))
     if os.path.normcase(os.path.dirname(executable)) != current:
@@ -534,7 +533,7 @@ def _resolve_host_executable() -> tuple[str | None, str]:
     if _found_only_in_current_directory(executable):
         return None, "current_directory_executable_refused"
     # CreateProcess hands .cmd/.bat launchers to cmd.exe, which re-parses the
-    # command line; only a native executable runs, as in the Jarvis bridge.
+    # command line; only a native executable runs.
     if _is_windows() and os.path.splitext(executable)[1].lower() != ".exe":
         return None, "windows_non_exe_launcher_not_run"
     return executable, "resolved"
@@ -551,8 +550,7 @@ def _stop_host_probe(process: subprocess.Popen) -> None:
 
 def _run_host_version(executable: str) -> tuple[str, bytes]:
     """Run ``<executable> --version``: fixed argv, no shell, bounded time."""
-    # Windows: never open a console window for the probe, as the Jarvis bridge
-    # does for claude; other platforms keep the Popen default of 0.
+    # Windows: never open a console window for the probe.
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if _is_windows() else 0
     try:
         process = subprocess.Popen(

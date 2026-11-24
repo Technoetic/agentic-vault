@@ -582,6 +582,8 @@ python -m unittest tests.test_vault_period_metamorphic -v
 
 ## 제목·frontmatter 파싱과 코드·링크 스캔의 선형 시간
 
+아래 Telegram 관련 구현·시험은 당시 배포된 브리지의 측정 기록이다.
+
 기본 lint·`check-support`·healthcheck와 recall이 노트마다 읽는 제목·frontmatter 줄의 정규식 가운데 게으른 묶음 뒤에 생략 가능한 공백 꼬리가 오는 꼴
 (`(.+?)\s*#*$`, `(.*?)\s*$`)과 그 값에 이어 쓰는 공백 런 스캔(`\s+#`, `\s*\(` 등)을, 같은 값을 내는 선형 처리로 바꿨다. 같은 경로에서 인라인 코드, 위키링크,
 Markdown 링크, frontmatter 블록을 찾던 다른 꼴의 정규식 일곱 개도 같은 결과를 내는 선형 스캔으로 바꿨다(아래 **인라인 코드·링크·frontmatter 블록 스캔**).
@@ -863,15 +865,14 @@ atomic group·possessive quantifier("Added in version 3.11"). [VULCANBOOST](http
 
 ## 수집과 경고
 
-Jarvis 수집은 `captured_via`, `content_origin`, `captured_at`, `body_sha256`을 호스트가 만든다.
+구판 Jarvis 브리지는 수집할 때 `captured_via`, `content_origin`, `captured_at`, `body_sha256`을 기록했다.
 직접 작성한 메모는 own, 전달 자료는 forwarded, 인라인 봇을 거친 메시지(`via_bot`)는 via_bot, 호스트가 선택한 URL 수집은 url이다. 링크를 포함한 직접 메모 전체를 외부 자료로 낮추지 않는다.
 판정 순서는 forwarded → via_bot → url → own이다. 전달 정보가 원래 작성자를 가리키므로 먼저 본다.
 via_bot은 허용된 사용자가 보냈더라도 본문을 제3자 봇이 만들었다는 뜻이라 forwarded·url처럼 신뢰하지 않는다. 사용자가 일부러 인라인 봇으로 보낸 메모도 같다.
-privileged 노트가 via_bot 수집을 참조하면 `provenance-unresolved`가 붙는다. 브리지는 `getUpdates`에 `message`만 요청한다. `guest_message` 등 다른 업데이트는 받지 않고, 와도 무시한다.
-Jarvis를 인증된 채널로 옮기는 작업은 아직 남아 있다.
+privileged 노트가 via_bot 수집을 참조하면 `provenance-unresolved`가 붙는다.
 이미 저장한 수집은 다시 분류하지 않는다. v0.26.0 이전 브리지가 인라인 봇 메시지를 받았다면 own(링크가 있으면 url)으로 남아 있다. 인라인 봇을 썼다면 `10-inbox/jarvis/`의 이전 수집과 그것으로 만든 노트를 직접 검토한다.
 v0.26.0 이전 엔진은 via_bot을 모른다. 그런 엔진은 via_bot 수집을 `provenance-invalid`(`invalid_origin`)로 보고하고, 이 코드를 fatal로 승격했으면 검사가 멈춘다.
-볼트를 읽는 Claude Code와 Codex 설치본을 함께 갱신한 뒤 새 브리지를 쓴다. 이전 버전으로 되돌리기 전에는 남은 via_bot 수집을 정제·격리하거나 `provenance-invalid`를 warning으로 둔다.
+이전 버전으로 되돌리기 전에는 남은 via_bot 수집을 정제·격리하거나 `provenance-invalid`를 warning으로 둔다.
 파생 노트의 manifest 참조는 `provenance_manifest: "00-meta/provenance/<ID>.json"`으로 둘 수 있다.
 기본 frontmatter 상한을 넘기지 않도록 긴 manifest는 별도 JSON으로 보존한다. `verified_by` 문자열은 증명이 아니다.
 Git staged 검사는 index 원문만 사용한다. JSON 근거를 직접 확인할 수 없는 privileged 파생 자료는
@@ -1037,8 +1038,8 @@ one pass per wording and invented cases; they measure neither hosted models nor 
 config 파싱 실패(exit 1)다. 이 검증은 엔진의 공용 설정 검사기(`validate_config`)에 들어 있다. 그래서 형식이 잘못된 선택 키 하나가
 다른 설정 오류와 똑같이 이 검사기를 거치는 구성 요소를 멈춘다. healthcheck full 모드는 exit 1로 끝나고, Git index의 설정을 읽는
 `--staged`도 그 설정에 키가 있으면 exit 1이라 볼트 pre-commit 훅이 커밋을 막는다. SessionStart 훅은 진단 한 줄만 남기고 handoff·hot을 주입하지 않고,
-PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색(recall)·doctor는 설정 오류(exit 2)로 끝난다. Jarvis 브리지는 설정 로더가
-오류 없이 설정을 돌려주지만 캡처와 Q&A·브리핑의 근거 구성이 실패한다. 반면 자체 로더로 `backup_target`·`exclude_dirs`만 검사하는
+PreCompact·SessionEnd 훅은 checkpoint를 남기지 않으며, 검색(recall)·doctor는 설정 오류(exit 2)로 끝난다.
+반면 자체 로더로 `backup_target`·`exclude_dirs`만 검사하는
 `backup_vault.py`는 스냅숏을 계속 만든다(2026-10-19 측정).
 키를 고치거나 지우면 돌아온다. 패턴은 경로가 아니라 파일 이름 하나와 비교한다. Python `fnmatch.fnmatchcase`를 쓰므로 대소문자를 구분하고
 `*`·`?`·`[...]`만 특수 문자다. 이름과 패턴은 NFC로 맞춘 뒤 비교한다.
@@ -1143,7 +1144,7 @@ so its copy fell outside the zone, and copied notes pushed real notes out of rec
   `vault_lesson_delta.py`, `vault_lesson_cues.py`, `vault_lesson_clusters.py`, `vault_capacity.py`
   `vault_ssot.py` and `vault_operations.py` all follow it. `vault_memory.py` (with `vault_impact.py` and
   `vault_ontology.py`), `vault_links.py`, `vault_revocation.py`, `vault_index_fold.py`,
-  `vault_doctor.py`, `hooks/session_start.py`, `jarvis_bridge.py`, `vault_query_expansion.py` and
+  `vault_doctor.py`, `hooks/session_start.py`, `vault_query_expansion.py` and
   the `vault_retrieval.py` sidecar call it directly. `vault_evidence.py`, `vault_proposals.py` and
   `vault_lesson_metrics.py` keep the same check next to their own call, and `vault_commit.py` is
   stricter: it refuses every path inside a linked tree with `denied_path`, so a shared note cannot

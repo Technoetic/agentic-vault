@@ -2,7 +2,7 @@
 
 The former patterns live only here, as oracles: the lazy-suffix heading and
 frontmatter-line patterns, the backtick code-span, wiki-link (lint,
-healthcheck, privileged-note and Telegram bridge), Markdown-link and
+healthcheck and privileged-note), Markdown-link and
 frontmatter-block patterns that the scanners replaced, and the credential
 pattern jev_client.SENSITIVE before four of its fragments were rewritten in
 place (callers use only whether it matches). The acceptance gates
@@ -39,7 +39,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'skills' / 'agentic-vault' / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
-import jarvis_bridge  # noqa: E402
 import jev_ask  # noqa: E402
 import jev_client  # noqa: E402
 import vault_egress  # noqa: E402  (lint also loads it lazily)
@@ -76,7 +75,6 @@ OLD_FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n?', re.DOTALL)       # va
 OLD_CODE_SPAN = re.compile(r'(`+)(.+?)\1')                                  # vault_ssot.py:70 (CODE_SPAN_RE)
 OLD_WIKILINK = re.compile(r'\[\[((?:[^\]|#]|\](?!\]))+)(?:[#|][^\]]*)?\]\]')  # vault_healthcheck.py:796 (WIKILINK_RE)
 OLD_PRIVILEGED_LINK = re.compile(r'\[\[([^\]\n]+)\]\]')                     # vault_provenance.py:520 (finditer)
-OLD_TELEGRAM_LINK = re.compile(r'\[\[([^\]]+)\]\]')                         # jarvis_bridge.py:1237 (re.sub)
 # jev_client.py:29 (SENSITIVE), the whole v0.31.0 credential pattern. Every
 # caller uses only whether search() finds a match (jev_client._matches_sensitive;
 # jev_ask and vault_judge hold the same object), so verdicts are compared.
@@ -189,10 +187,6 @@ def oracle_privileged_link_texts(text, limit=128):
     return [match[1] for match in list(OLD_PRIVILEGED_LINK.finditer(text))[:limit]]
 
 
-def oracle_telegram_links(text):
-    return OLD_TELEGRAM_LINK.sub(r'<i>\1</i>', text)
-
-
 def former_verdict(text):
     return OLD_SENSITIVE.search(text) is not None
 
@@ -270,14 +264,10 @@ PAIRS = (
          ((LINKS, 6), ('[]|#a', 9)), newline_free=False, special='[]|#a'),
     Pair('provenance link texts', vault_provenance, '_wiki_link_texts', oracle_privileged_link_texts,
          ((LINKS, 6), ('[]\na', 10)), newline_free=False, special='[]a'),
-    # The opt-in Telegram bridge turns the wiki links of each message line into
-    # italics; its pattern tells only '[' and ']' apart from other characters.
-    Pair('telegram wiki links', jarvis_bridge, '_italic_wiki_links', oracle_telegram_links,
-         ((LINKS, 6), ('[]a', 11)), newline_free=False, special='[]a'),
 )
 PAIR = {pair.name: pair for pair in PAIRS}
 SCANNERS = ('lint code removal', 'lint link texts', 'lint heading link text', 'healthcheck frontmatter',
-            'ssot code spans', 'healthcheck wikilinks', 'provenance link texts', 'telegram wiki links')
+            'ssot code spans', 'healthcheck wikilinks', 'provenance link texts')
 
 
 def strings(alphabet, length, prefixes=('',)):
@@ -905,13 +895,6 @@ class TierACasesTests(unittest.TestCase):
             'provenance link texts': (
                 ('[[a]] ![[b]] [[c#d|e]]', ['a', 'b', 'c#d|e']), ('[[[a]]', ['[a']), ('[[a]b]]', []),
                 ('[[a\n]]', []), ('[[a\n[[b]]', ['b']), ('[[]]', []), ('[[x]]' * 130, ['x'] * 128)),
-            # The bridge's substitution closed a '[[' only at the first ']' after it,
-            # line feeds included, and left everything else as it was.
-            'telegram wiki links': (
-                ('[[a]] b [[c|d]]', '<i>a</i> b <i>c|d</i>'), ('[[[a]]', '<i>[a</i>'), ('[[a]b]]', '[[a]b]]'),
-                ('[[]] [[a]]]', '[[]] <i>a</i>]'), ('[[a\n]]', '<i>a\n</i>'), ('[[a', '[[a'), ('[[a]', '[[a]'),
-                ('&lt;[[x]]&gt; [[y]][[z]]', '&lt;<i>x</i>&gt; <i>y</i><i>z</i>'),
-                ('[' * 9 + 'a]]', '<i>' + '[' * 7 + 'a</i>')),
         }
         self.assertEqual(tuple(cases), SCANNERS)
         for name, values in cases.items():
@@ -1226,16 +1209,6 @@ class CallerPreconditionTests(unittest.TestCase):
             lint.analyze_notes(notes, config)
         self.assertEqual(calls, privileged)
 
-    def test_telegram_messages_reach_the_wiki_link_conversion(self):
-        # tg_send cuts a message into chunks of at most TG_CHUNK characters and
-        # converts each chunk line by line.
-        message = '\n'.join(LINK_LINES[:40]) + '\n' + '[' * 5_000 + '[[a]]\n[[b]]'
-        with mock.patch.object(jarvis_bridge, 'tg_call', return_value={'ok': True}), \
-                mock.patch.object(jarvis_bridge, 'log'), recorded(self, PAIR['telegram wiki links']) as calls:
-            self.assertTrue(jarvis_bridge.tg_send('fake-token', 111, message))
-        self.assertIn('[' * jarvis_bridge.TG_CHUNK, calls)
-        self.assertIn('[[b]]', calls)
-
     def test_egress_lint_and_jev_paths_search_with_the_detector(self):
         # The egress scan searches each line, then the whole note, and the path
         # label of a finding; jev_ask and vault_judge search each string they
@@ -1433,29 +1406,6 @@ class DefaultOutputUnchangedTests(unittest.TestCase):
         warnings = self.same_with_oracles(names, lambda: lint.analyze_notes(notes, config))
         self.assertEqual({item['path'] for item in warnings if item['code'] == 'provenance-unresolved'}, flagged)
 
-    def test_telegram_html_and_sent_messages_are_unchanged(self):
-        lines = LINK_LINES + SCAN_LINES + ('## [[제목]] **굵게** `코드` a<b & [[x|y]]', '| a | [[b]] |', '|---|---|',
-                                           '[' * 300 + 'a]] [[c]')
-        html = self.same_with_oracles(('telegram wiki links',), lambda: [
-            jarvis_bridge.md_to_telegram_html(text) for text in (*lines, '\n'.join(lines))])
-        self.assertTrue(sum('<i>' in item for item in html) > 10)
-
-        def sent():
-            calls = []
-
-            def fake_call(_token, _method, **kwargs):
-                calls.append(kwargs)
-                return {'ok': True}
-
-            with mock.patch.object(jarvis_bridge, 'tg_call', side_effect=fake_call), \
-                    mock.patch.object(jarvis_bridge, 'log'):
-                status = jarvis_bridge.tg_send('fake-token', 111, '\n'.join(lines) + '\n' + '[' * 5_000 + '[[a]]')
-            return status, calls
-
-        status, calls = self.same_with_oracles(('telegram wiki links',), sent)
-        self.assertTrue(status)
-        self.assertTrue(len(calls) > 2 and any(call.get('parse_mode') == 'HTML' for call in calls))
-
     def test_egress_and_lint_warnings_are_unchanged(self):
         # Chunks keep each run under the egress (128) and lint (200) warning caps.
         notes = sorted(egress_notes().items())
@@ -1544,9 +1494,6 @@ SHAPES = {
     'healthcheck wikilinks': (lambda n: '[' * n, lambda n: '[' * (n - 3) + '|]x', lambda n: '[[a#' * (n // 4) + ']',
                               lambda n: '[[a]]' * (n // 5)),
     'provenance link texts': (lambda n: '[' * n, lambda n: '[[a]x' * (n // 5), lambda n: '[[a]]' * (n // 5)),
-    # Every '[[' of the second shape stops at the same ']' and fails there.
-    'telegram wiki links': (lambda n: '[' * n, lambda n: '[' * (n - 2) + ']x', lambda n: '[[a' * (n // 3),
-                            lambda n: '[[a]x' * (n // 5), lambda n: '[[]' * (n // 3), lambda n: '[[a]]' * (n // 5)),
 }
 SHAPES['state ATX heading'] = SHAPES['ssot ATX heading']
 # The credential pattern's slowest shapes before the rewrite (scheme runs, JWT
@@ -1609,7 +1556,7 @@ class TimingGateTests(unittest.TestCase):
                 self.read += max(0, (found if found >= 0 else len(self)) - start)
                 return found
 
-        for name in ('healthcheck wikilinks', 'provenance link texts', 'telegram wiki links'):
+        for name in ('healthcheck wikilinks', 'provenance link texts'):
             for shape in SHAPES[name]:
                 text = CountingText(shape(64_000))
                 with self.subTest(pair=name, text=text[:12]):
@@ -1676,7 +1623,7 @@ class NoLazySuffixLeftTests(unittest.TestCase):
         # Nor a backtick run closed by a backreference, which retries every
         # opening length against every later position.
         former = {OLD_LINT_CODE.pattern, OLD_LINT_LINKS.pattern, OLD_KEY_LINK.pattern, OLD_FRONTMATTER.pattern,
-                  OLD_CODE_SPAN.pattern, OLD_WIKILINK.pattern, OLD_PRIVILEGED_LINK.pattern, OLD_TELEGRAM_LINK.pattern}
+                  OLD_CODE_SPAN.pattern, OLD_WIKILINK.pattern, OLD_PRIVILEGED_LINK.pattern}
         shape = re.compile(r'\(`\+\).*\\[1-9]')
         self.assertTrue(shape.search(OLD_LINT_CODE.pattern) and shape.search(OLD_CODE_SPAN.pattern))
         self.assertEqual([where for where, value in shipped_code_strings()
@@ -1761,8 +1708,7 @@ class SlowEquivalenceTests(unittest.TestCase):
                 'lint code removal': ('`a\n', 14, ('',)), 'ssot code spans': ('`a\n', 14, ('',)),
                 'lint link texts': ('[]!a\n', 10, ('',)), 'lint heading link text': ('[]()a\n', 9, ('',)),
                 'healthcheck frontmatter': ('-\n\r a', 10, ('---',)),
-                'healthcheck wikilinks': ('[]|#a', 11, ('',)), 'provenance link texts': ('[]\na', 12, ('',)),
-                'telegram wiki links': ('[]a', 14, ('',))}.items():
+                'healthcheck wikilinks': ('[]|#a', 11, ('',)), 'provenance link texts': ('[]\na', 12, ('',))}.items():
             pair = PAIR[name]
             with self.subTest(pair=name):
                 _, found = mismatches(pair, strings(alphabet, length, prefixes))

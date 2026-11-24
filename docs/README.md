@@ -22,7 +22,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [recall-support-evaluation.md](recall-support-evaluation.md) | 실제 recall의 분산 근거·혼동·조건 누락·출력 예산·512KiB 경계 합성 평가(v0.45.0) |
 | [lesson-cue-effects.md](lesson-cue-effects.md) | 관찰 기록의 짝·측정 조건·낡은 교훈·누락을 검사하고 scripted와 실제 호스트 보고를 분리(v0.45.0) |
 | [relation-preservation.md](relation-preservation.md) | 선택한 원문 줄·문단 전체의 anchor 기반 보존 검사와 고정 합성 짝 비교; 의미·진실·편집 권한은 검증하지 않음(v0.44.0) |
-| [revocation-egress.md](revocation-egress.md) | 기존 철회 설정을 Jev 파일 근거·Jarvis 생성 문맥의 두 전송 경계에 적용하고 같은 정책·원문을 재확인; 선언된 파생 관계·모의 전송 시험의 경계(v0.44.0) |
+| [revocation-egress.md](revocation-egress.md) | 기존 철회 설정을 Jev 파일 근거의 전송 경계에 적용하고 같은 정책·원문을 재확인; 선언된 파생 관계·모의 전송 시험의 경계(v0.44.0) |
 | [recall-scope.md](recall-scope.md) | 선택형 `recall.max_total_read_bytes`·`recall.priority_paths`, 모든 결과의 `omitted_paths_sample`·`scope_state`·`answer_state`, 큰 볼트의 미완료 검색 해석(v0.43.0) |
 | [capacity.md](capacity.md) | 엔진 읽기·쓰기 상한 표, 읽기 전용 `vault_doctor.py --capacity`와 상한 도달 일수 추정, 선택형 `staged_growth_check`·`staged_growth_max_tokens`(v0.43.0) |
 | [handoff-fold.md](handoff-fold.md) | 오래된 handoff 절의 바이트 보존 접기·복원 확인·미결 줄 끌어올리기, 오프라인 소실 경보 평가, 강제 종료 뒤 복구 절차; 기본 문턱·자동 실행 없음(v0.43.0) |
@@ -45,7 +45,7 @@ point-in-time plans, designs and verification logs and may not match current beh
 | [okf-export.md](okf-export.md) | 선택 노트의 OKF v0.2 교환 묶음·원본 메타데이터 보존·해시·손실 보고 |
 | [knowledge-evolution.md](knowledge-evolution.md) | 합성 이력에서 실제 변경 조회·내보내기와 구조화 사실의 시간축 판정을 재생 |
 | [codex.md](codex.md) | Claude Code · Codex 겸용 설치, 명령 대응, 훅 신뢰, 기존 설치 갱신 |
-| [antigravity.md](antigravity.md) | Antigravity CLI용 생성 패키지(`antigravity/`)의 설치·갱신, 스킬 16개와 훅 둘(SessionStart 인계 주입·Stop 체크포인트)의 동작, 사용자가 직접 하는 확인 절차, 하지 않는 것, 권한·데이터·약관 메모, 확인하지 않은 것, 권장 agy 판(v0.48.0), v0.57.0에서 `webapp-principles`를 별도 저장소 `Technoetic/webapp6`로 분리 |
+| [antigravity.md](antigravity.md) | Antigravity CLI용 생성 패키지(`antigravity/`)의 설치·갱신, 스킬 15개와 훅 둘(SessionStart 인계 주입·Stop 체크포인트)의 동작, 사용자가 직접 하는 확인 절차, 하지 않는 것, 권한·데이터·약관 메모, 확인하지 않은 것, 권장 agy 판(v0.48.0), v0.57.0에서 `webapp-principles`를 별도 저장소 `Technoetic/webapp6`로 분리 |
 | [reliability.md](reliability.md) | 세션 주입 예산, 기억 주입 진단, Claude Code 권장 버전(2.1.295 이상)·선택형 호스트 버전 확인·SessionStart 실측 절차(미실행), 세션 기록으로 SessionStart 훅의 실행·실패·잘림 확인(`--session-evidence`, v0.31.0), 출처가 있는 로컬 검색, 세대별 백업의 보장 범위와 사용법, [이중 주입·깨진 출력·비동기 훅 실패 값과 선택형 `--plugin-scope`·`--plugin-scope-host`](reliability.md#double-injection-broken-output-and-plugin-scope-optional)(v0.43.0), SessionStart 머리글 줄 무력화(v0.52.0) |
 | [evidence.md](evidence.md) | 검증 근거·인계 CLI (v0.11.0+) |
 | [lesson-proposals.md](lesson-proposals.md) | 교훈 수정안 기록·검토·적용 (v0.10.0+), 선택형 유지 문구 확인 `preserve-check`(v0.29.0, 읽기 전용) |

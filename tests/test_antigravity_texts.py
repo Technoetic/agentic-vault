@@ -4,7 +4,7 @@ The shared skill, `/vault-session-start`, `/vault-lint` and the AGENTS stub carr
 v0.48.0 specification (section 3.6), and `skills/agentic-vault/references/antigravity.md` says how the generated
 Antigravity package is installed and used and what was not checked. Reverting the published v0.48.0 replacements
 gives back the published v0.47.0 skill and stub byte for byte. The current skill additionally permits the explicit
-v0.49.0 task-workflow routing section; removing only that section must preserve the complete v0.48.0 skill.
+v0.49.0 task-workflow routing section and the documented removal of webapp-principles and Jarvis.
 
 No Python function in the repository builds a vault's AGENTS.md: the agent follows `/vault-upgrade` step 1-1 (and
 `/vault-init` step 4-3). `build_vault_agents_md` below follows that text, and the size test bounds the result.
@@ -49,13 +49,12 @@ CODEX_BULLET = (
 )
 ANTIGRAVITY_BULLET = (
     "- **Antigravity CLI:** 먼저 " + REFERENCE_LINK + "를 읽는다. Antigravity용 패키지는 저장소의 `antigravity/` 폴더이며 "
-    "명령 15개가 같은 이름의 스킬(예: `vault-session-start`)로 들어 있다. 훅은 플러그인 설치 폴더에서 실행되고 볼트는 "
+    "명령 14개가 같은 이름의 스킬(예: `vault-session-start`)로 들어 있다. 훅은 플러그인 설치 폴더에서 실행되고 볼트는 "
     "작업 공간에서 찾는다."
 )
 TIERS_OLD = "(Claude Code의 CLAUDE.md·rules, Codex의 AGENTS.md)"
 TIERS_NEW = "(Claude Code의 CLAUDE.md·rules, Codex·Antigravity CLI의 AGENTS.md)"
 NOTATION_START = "아래 `/vault-*` 표기는 Claude Code 명령이다."
-NOTATION_OLD_END = "Jarvis는 Claude CLI를 사용하는 별도 연동이다."
 NOTATION_APPENDIX = (
     " Antigravity CLI에서는 같은 이름의 스킬(`vault-session-start` 등)을 쓴다(" + REFERENCE_LINK + ")."
 )
@@ -215,9 +214,9 @@ class SkillTextTests(unittest.TestCase):
         self.assertIn(TIERS_NEW, _section(self.text, "## 1. 이 볼트는 무엇인가 — 에이전틱 메모리의 4렌즈"))
 
     def test_command_notation_paragraph_names_the_skills(self) -> None:
-        section = _section(self.text, "## 5. 명령 15종 — 언제 쓰는가")
+        section = _section(self.text, "## 5. 명령 14종 — 언제 쓰는가")
         paragraph = next(line for line in section.split("\n") if line.startswith(NOTATION_START))
-        self.assertTrue(paragraph.endswith(NOTATION_OLD_END + NOTATION_APPENDIX))
+        self.assertTrue(paragraph.endswith(NOTATION_APPENDIX))
         self.assertEqual(self.text.count(NOTATION_APPENDIX), 1)
 
     def test_host_cap_sentence_names_inject_steps(self) -> None:
@@ -241,7 +240,7 @@ class SkillTextTests(unittest.TestCase):
         historical = _tagged_skill("v0.47.0")
         self.assertEqual(_sha256(historical), V0470_SKILL_SHA256)
         text = _replace_once(self, _tagged_skill("v0.48.0"), DESCRIPTION_NEW, DESCRIPTION_OLD)
-        text = _replace_once(self, text, ANTIGRAVITY_BULLET + "\n", "")
+        text = _replace_once(self, text, ANTIGRAVITY_BULLET.replace("14개", "15개") + "\n", "")
         text = _replace_once(self, text, TIERS_NEW, TIERS_OLD)
         text = _replace_once(self, text, NOTATION_APPENDIX, "")
         text = _replace_once(self, text, CAP_NEW, CAP_OLD)
@@ -249,16 +248,22 @@ class SkillTextTests(unittest.TestCase):
         self.assertEqual(text, historical)
         self.assertEqual(_sha256(text), V0470_SKILL_SHA256)
 
-    def test_current_skill_only_adds_task_workflow_routing_to_v048(self) -> None:
+    def test_current_skill_preserves_the_unaffected_v048_text(self) -> None:
         route = _section(self.text, "## 선택형 작업 명세와 검토")
         # v0.49.0 intentionally adds one opt-in route, and v0.57.0 intentionally removes the embedded
-        # webapp-principles routing bullet (extracted to standalone Technoetic/webapp6); every other
-        # pre-existing byte must still equal v0.48.0.
+        # webapp-principles routing bullet. Retiring Jarvis removes its route and reduces the command count.
         historical = _tagged_skill("v0.48.0")
         webapp_bullet = next(
             line for line in historical.splitlines() if line.startswith("- **웹앱 작업:**")
         )
         expected = _replace_once(self, historical, webapp_bullet + "\n\n", "")
+        expected = _replace_once(self, expected, "명령 15개", "명령 14개")
+        expected = _replace_once(self, expected, "명령 15종", "명령 14종")
+        expected = _replace_once(self, expected, " Jarvis는 Claude CLI를 사용하는 별도 연동이다.", "")
+        jarvis_row = next(line for line in historical.splitlines() if line.startswith("| `/vault-jarvis-setup` |"))
+        expected = _replace_once(self, expected, jarvis_row + "\n", "")
+        expected = _replace_once(self, expected, "Jev 파일 근거·Jarvis 생성 문맥의 [두 전송 경계]",
+                                 "[Jev 파일 근거의 전송 경계]")
         self.assertEqual(_replace_once(self, self.text, route, ""), expected)
 
     def test_task_workflow_routes_are_opt_in_and_data_only(self) -> None:
@@ -421,11 +426,11 @@ class ReferenceTests(unittest.TestCase):
     def test_skill_names_cover_every_command(self) -> None:
         section = self.section("## 스킬 이름")
         commands = sorted(path.stem for path in (ROOT / "commands").glob("*.md"))
-        self.assertEqual(len(commands), 15)
+        self.assertEqual(len(commands), 14)
         for name in ("agentic-vault", *commands):
             with self.subTest(skill=name):
                 self.assertIn(f"`{name}`", section)
-        for literal in ("16개", "`/vault-day`", "`/agentic-vault:vault-day`", "agy가 보여 주는 표기",
+        for literal in ("15개", "`/vault-day`", "`/agentic-vault:vault-day`", "agy가 보여 주는 표기",
                         "`disable-model-invocation: true`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, section)
@@ -460,8 +465,7 @@ class ReferenceTests(unittest.TestCase):
 
     def test_what_is_not_done(self) -> None:
         section = self.section("## 하지 않는 것")
-        for literal in ("deny zone 가드", "교훈 단서 훅", "Aside 자동 기동 훅", "Claude Code 전용", "Jarvis",
-                        "Claude CLI"):
+        for literal in ("deny zone 가드", "교훈 단서 훅", "Aside 자동 기동 훅", "Claude Code 전용"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, section)
 

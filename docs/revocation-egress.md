@@ -1,34 +1,23 @@
-# Configured revocation at Jev and Jarvis context boundaries
+# Configured revocation for file-grounded judgments
 
-v0.44.0 extends the existing opt-in source-span registry to Jev's selected vault
-excerpts and Jarvis's direct hot, handoff and optional activity-log context. The
+The file-grounded judgment adapter applies the opt-in revocation registry to selected vault excerpts. The
 registry and declared derivation semantics are described in
 [memory revocation](memory-revocation.md). No configuration is enabled by an
 update, and no new runtime dependency is required.
 
-Jev projects the **complete raw UTF-8 source before removing BOM or normalizing
+The adapter projects the **complete raw UTF-8 source before removing BOM or normalizing
 CRLF**. An excerpt must exist in that projected source; a withdrawn excerpt is
 unavailable rather than replaced with another quote. Reported source hashes still
-identify the original raw bytes. Jarvis projects whole sources before byte,
-character, token and log-line output limits. Its selected recall snippets are
-rebuilt from current projected sources bound to the same envelope.
+identify the original raw bytes.
 
 An internal `ContextGuard` retains the original `Store`, `RevocationPolicy` and
-selected raw source hashes. Jev carries that guard from preparation to
-`request_judgments`; Jarvis carries it with its prompt to `run_with_stdin`. Both
-recheck immediately before dispatch and after completion. A changed source,
-configuration or registry, or a malformed configured registry, rejects the
-request/result without an unfiltered fallback. A check is a point-in-time
-observation, not a filesystem lock. Changes during an external call withhold its
-answer; they cannot retract bytes already sent.
-
-The compatibility `_generation_prompt` API still returns a string. Actual Jarvis
-generation retains the envelope and checks its original guard, rather than
-constructing a new policy after generation. With revocation absent or disabled,
-the existing prompt format and direct-prefix behavior remain unchanged. Every
-envelope still binds the original raw configuration identity or its absence;
-enabling revocation or creating a vault configuration before dispatch rejects the
-old prompt rather than authorizing it under the newly enabled policy.
+selected raw source hashes. The judgment adapter retains that guard during preparation,
+checks it before dispatch to the selected provider, and checks it again after the response.
+Changes to a selected source, the configuration or the registry invalidate the request or its result.
+A malformed configured registry also stops the request. The checks take place at specific points and do not lock the files.
+The host withholds a response if the inputs change during a call. Bytes already sent remain at the destination.
+The request binds the original raw configuration identity or its absence. Enabling
+revocation or creating a configuration after preparation invalidates the old request.
 
 Configured whole-source reads retain the existing 4 MiB file bound and 32 MiB
 cumulative revocation-reader budget. The guard's additional selected-source reads
@@ -36,7 +25,7 @@ and hash rechecks have their own 32 MiB cumulative bound; existing consumer inpu
 and output limits also apply. Errors and empty results are availability outcomes,
 never evidence of useful selective preservation.
 
-## Original synthetic lifecycle checks
+## Synthetic lifecycle checks
 
 From a clean checkout, with the existing development requirements installed:
 
@@ -54,12 +43,10 @@ the guarantee. UTF-8 BOM and CRLF are deliberately preserved in the temporary
 source bytes. Reports include fixture, raw-source, registry, output and trace
 fingerprints, consumer names, phase/session, observed poison and benign flags.
 
-The evaluator executes actual fresh `recall`, `compile_units`, Jev preparation
-and Jarvis envelope construction in a temporary vault. It prepares an envelope,
-records an in-memory simulated send, revokes the root, refuses the old envelope,
-rebuilds current context and records a later simulated send. The earlier sink
-entry remains present. There is no persistent engine index or real outbox, and
-no model, network, database, company input or real message delivery is used.
+The evaluator records four consumers in a temporary vault: fresh `vault_recall.recall`, `vault_memory.compile_units`, `vault_judge._prepare`, and an in-memory sink for the prepared evidence.
+It records a simulated send, revokes the root, and calls the original Jev guard’s `recheck`, which rejects the stale evidence. It then
+prepares current evidence and records a second simulated send. The first entry is retained;
+the test uses no persistent outbox, network, database, model or real message delivery.
 
 The generated state machine varies revoke, authored derivative declaration,
 fresh retrieval, compile rebuild, prepare, simulated send, source/configuration/
@@ -67,7 +54,7 @@ registry changes and authored synthetic rebind orders. Direct execution requires
 Hypothesis and errors if it is missing; ordinary unittest discovery can skip the
 optional generated module when the development dependency is absent.
 Each generated trace finishes with mandatory actual fresh retrieval, compile,
-Jev/Jarvis preparation and a guarded simulated-send checkpoint. Missing context
+Jev preparation and a guarded simulated-send checkpoint. Missing context
 and invalid/stale evidence are recorded as unavailable/refused observations and
 do not earn useful safe success.
 
@@ -85,6 +72,6 @@ required in addition to absence of declared withdrawn markers.
 
 This is declared read-context withdrawal, not poison detection, semantic
 descendant discovery or validation of model-generated answers. User prompts,
-supplied git activity, arbitrary host reads, unregistered copies, already-sent
+arbitrary host reads, unregistered copies, already-sent
 information and model paraphrases are outside this boundary. These checks do not
 reproduce a published benchmark or establish real-model safety or utility.

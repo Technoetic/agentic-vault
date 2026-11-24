@@ -41,10 +41,10 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/agentic-vault/scripts/vault_doctor.py" --va
    `$CLAUDE_PROJECT_DIR`), 컴파일 목록의 존재(`compiled_present`). Doctor는 이 훅도 제안하지 않는다.
    `--offer-lesson-cues`를 붙이지 않으므로 `offer_lesson_cues`는 나오지 않는다. `actions`(`offer_cues_update`·
    `review_lesson_cues`·`review_settings`·`build_lesson_cues`)는 그대로 보고하고 교체·수정은 `/vault-upgrade`로 안내한다.
-7. 사용자가 Jev/Jarvis 연결 준비 상태도 요청하면 [단계별 연결 진단](../docs/tower-reliability.md)의
+7. 사용자가 Jev 연결 준비 상태도 요청하면 [단계별 연결 진단](../docs/tower-reliability.md)의
    `vault_connectors.py --vault PATH --format json`을 추가로 사용한다. 기본은 오프라인이며
    키 존재를 인증 성공으로 해석하지 않는다. live probe는 명시한 지원 연결과 기존 승인
-   범위에서만 수행하며, 진단 요청만으로 Jarvis를 시작하거나 메시지를 보내지 않는다.
+   범위에서만 수행한다.
 8. 전체 지침 분량도 요청하면 같은 Doctor에 `--instructions`를 추가한다.
    [지침 진단 안내](../docs/moai-diagnostics.md)에 따라 루트 지침·참조·중첩 규칙의 정적 분량과
    조건·누락을 보고한다. 본문을 출력하지 않으며 실제 호스트 로드나 제공자 비용으로 해석하지 않는다.
