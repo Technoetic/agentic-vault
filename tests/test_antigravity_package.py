@@ -63,7 +63,7 @@ MANIFEST_KEYS = ("$schema", "name", "displayName", "version", "description", "su
 COPIED_MANIFEST_KEYS = ("author", "homepage", "repository", "license")
 HOOK_FILES = {"antigravity_hook.py", "run_python_hook.sh", "session_checkpoint.py", "session_start.py"}
 TOP_LEVEL = {"plugin.json", "README.md", "hooks.json", "hooks", "skills", "assets", "docs"}
-SHARED_SKILLS = ("agentic-vault", "webapp-principles")
+SHARED_SKILLS = ("agentic-vault",)
 MAX_BODY_BYTES = 23_500
 MAX_DESCRIPTION_CHARS = 1_024
 EXCLUDED_DOC_FOLDERS = ("releases", "verification", "superpowers", "plans", "screenshots")
@@ -452,7 +452,7 @@ class PackageBuildTests(unittest.TestCase):
         self.assertEqual({path.split("/", 1)[0] for path in self.files}, TOP_LEVEL)
         self.assertEqual({path.split("/", 1)[1] for path in self.files if path.startswith("hooks/")}, HOOK_FILES)
         expected_skills = set(SHARED_SKILLS) | set(_commands())
-        self.assertEqual(len(expected_skills), 17)
+        self.assertEqual(len(expected_skills), 16)
         self.assertEqual({path.split("/")[1] for path in self.files if path.startswith("skills/")}, expected_skills)
         for name in expected_skills:
             with self.subTest(skill=name):

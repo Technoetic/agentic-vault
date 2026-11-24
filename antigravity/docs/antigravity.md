@@ -4,14 +4,14 @@ agentic-vault v0.48.0부터 저장소의 `antigravity/` 폴더에 Google Antigra
 있다. 이 폴더는 저장소의 명령·스킬·훅·엔진 스크립트로 만든 생성물이며, 저장소 루트는 지금처럼 Claude Code·Codex
 플러그인이다. 같은 볼트를 세 호스트(Claude Code·Codex·Antigravity CLI)에서 쓰도록 만든 패키지다. 이 패키지는 실제
 agy 대화 세션으로는 확인하지 않았다(아래 [확인하지 않은 것](#확인하지-않은-것)). 변경 범위는
-[v0.48.0 릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.56.0/docs/releases/v0.48.0.md)에 있다.
+[v0.48.0 릴리스 노트](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/docs/releases/v0.48.0.md)에 있다.
 
 ## 설치
 
 터미널에서 릴리스 태그와 패키지 폴더를 고정한 주소로 설치한다.
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.56.0/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더를 지정해도 된다. 경로는 실제 위치로 바꾼다.
@@ -20,8 +20,8 @@ Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity`
 agy plugin install "C:/path/to/agentic-vault/antigravity"
 ```
 
-설치한 뒤 `agy plugin list --json`에서 `agentic-vault` 항목의 `source`가 `"antigravity"`, `version`이 `0.56.0`이고
-스킬 17개와 훅 묶음 `agentic-vault`가 보이는지 확인한다.
+설치한 뒤 `agy plugin list --json`에서 `agentic-vault` 항목의 `source`가 `"antigravity"`, `version`이 `0.57.0`이고
+스킬 16개와 훅 묶음 `agentic-vault`가 보이는지 확인한다.
 
 저장소 루트 주소(태그만 고정한 주소 포함)로는 설치하지 않는다. agy는 루트를 Claude Code 플러그인으로 보고 자동
 변환해 설치한다. 이때 명령은 `agentic-vault-cmd-*` 스킬이 되고 본문의 `${CLAUDE_PLUGIN_ROOT}`·`$ARGUMENTS`가 그대로
@@ -39,7 +39,7 @@ agy plugin install "C:/path/to/agentic-vault/antigravity"
 | 구성 | 내용 |
 |---|---|
 | `plugin.json` | 이름 `agentic-vault`, 판, 호스트 중립 설명, 제안 프롬프트 셋 |
-| 스킬 17개 | 공용 스킬 `agentic-vault`·`webapp-principles`와, 명령 15개를 같은 이름으로 바꾼 스킬(`vault-init`, `vault-upgrade`, `vault-session-start`, `vault-session-end`, `vault-recall`, `vault-lint`, `vault-day`, `vault-ingest`, `vault-process-inbox`, `vault-trace`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-harden`, `vault-jarvis-setup`). 명령 스킬에는 `disable-model-invocation: true`가 붙는다 |
+| 스킬 16개 | 공용 스킬 `agentic-vault`와, 명령 15개를 같은 이름으로 바꾼 스킬(`vault-init`, `vault-upgrade`, `vault-session-start`, `vault-session-end`, `vault-recall`, `vault-lint`, `vault-day`, `vault-ingest`, `vault-process-inbox`, `vault-trace`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-harden`, `vault-jarvis-setup`). 명령 스킬에는 `disable-model-invocation: true`가 붙는다 |
 | 훅 둘 | `SessionStart`(인계 주입)와 `Stop`(체크포인트). agy 목록에는 훅 묶음 `agentic-vault` 하나로 보인다 |
 | 엔진과 자료 | `skills/agentic-vault/scripts/`의 엔진 스크립트, `hooks/`의 훅 파일 넷, `assets/` 전체, 스킬이 가리키는 `docs/` 문서의 사본 |
 
@@ -117,7 +117,7 @@ Antigravity CLI는 시작 폴더부터 저장소 루트까지의 `AGENTS.md`·`G
    handoff 노트에 알아보기 쉬운 문장 하나를 적는다.
 2. 그 볼트 폴더에서 agy를 직접 연다.
 3. `/hooks`에서 훅 묶음 `agentic-vault`와 `SessionStart`·`Stop`이 보이는지, `/skills`에서 `agentic-vault`와
-   `vault-session-start` 등 17개 스킬이 보이는지 확인한다.
+   `vault-session-start` 등 16개 스킬이 보이는지 확인한다.
 4. 첫 메시지로 "세션 시작 때 주입된 인계 내용을 그대로 알려 줘"처럼 묻는다. 에이전트가 답하기 전에
    도구(`view_file`·`run_command`·`grep_search` 등)를 하나도 부르지 않았고 1에서 적은 문장이 나오면 SessionStart
    주입이 동작한 것으로 본다. 도구를 불렀다면 에이전트가 handoff를 직접 읽었을 수 있으므로(주입이 없으면 볼트의
@@ -210,5 +210,5 @@ agy 1.5.6 이상을 권장한다. 패키지는 agy 1.5.7의 검사기(`agy plugi
 [Settings](https://antigravity.google/docs/settings), [CLI reference](https://antigravity.google/docs/cli/reference),
 [Skills](https://antigravity.google/docs/skills), [FAQ](https://antigravity.google/docs/faq),
 [antigravity-cli README·CHANGELOG](https://github.com/google-antigravity/antigravity-cli)(2026-11-13에 읽음). 보안
-범위와 알려진 한계는 [SECURITY.md](https://github.com/Technoetic/agentic-vault/blob/v0.56.0/SECURITY.md), Claude Code·Codex 설치는 [README](https://github.com/Technoetic/agentic-vault/blob/v0.56.0/README.md#-설치)와
+범위와 알려진 한계는 [SECURITY.md](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/SECURITY.md), Claude Code·Codex 설치는 [README](https://github.com/Technoetic/agentic-vault/blob/v0.57.0/README.md#-설치)와
 [Codex 안내](codex.md)에 있다.

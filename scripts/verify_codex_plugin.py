@@ -298,7 +298,6 @@ def inspect_host(
                            if hook.get("pluginId") == PLUGIN_ID]
             required_skills = {
                 "agentic-vault:agentic-vault": "skills/agentic-vault/SKILL.md",
-                "agentic-vault:webapp-principles": "skills/webapp-principles/SKILL.md",
             }
             resource_root = _resolved(installed_root) if installed_root is not None else None
             discovered_paths = set()
@@ -382,7 +381,6 @@ def verify(codex: str) -> dict:
         report = inspect_host(codex, vault, environment, home, installed_root=cached)
         for relative in ("hooks/session_start.py", "hooks/session_checkpoint.py", "hooks/hooks.json", "hooks/run_python_hook.sh",
                          "skills/agentic-vault/SKILL.md",
-                         "skills/webapp-principles/SKILL.md", "docs/webapp-principles.md",
                          "skills/agentic-vault/references/codex.md",
                          "skills/agentic-vault/scripts/vault_recall.py",
                          # the shared deny-zone matcher, the health check and the Telegram
@@ -502,6 +500,9 @@ def verify(codex: str) -> dict:
                          "scripts/import_qmd_candidates.py",
                          "scripts/evaluate_recall.py",
                          "scripts/eval_stats.py",
+                         "scripts/eval_recall_hygiene.py",
+                         "scripts/sync_result_tables.py",
+                         "scripts/rerank_candidates.py",
                          "scripts/evaluate_memory_workflows.py",
                          "docs/evidence.md",
                          "docs/link-proposals.md",

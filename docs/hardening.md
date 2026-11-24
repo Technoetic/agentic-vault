@@ -49,8 +49,7 @@ engine copy is updated by release preparation.
 
 ## v0.35.1 source and certificate migration
 
-v0.35.1 adds the shared [webapp-principles skill](../skills/webapp-principles/SKILL.md),
-[the six-rule guide](webapp-principles.md) and stricter installed-skill discovery checks.
+v0.35.1 added the shared `webapp-principles` skill and six-rule guide (removed from `agentic-vault` in v0.57.0 after extraction to standalone `Technoetic/webapp6`) and stricter installed-skill discovery checks.
 It retains all seven certificate-bound checker files and the harmless corpus from v0.34.0.
 The measured `checker_sha256` remains
 `be02b141ffed91cbe34f8cb2317a790c60075740bfe5d8dc435ef202f113174f`.

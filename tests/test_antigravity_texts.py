@@ -251,9 +251,15 @@ class SkillTextTests(unittest.TestCase):
 
     def test_current_skill_only_adds_task_workflow_routing_to_v048(self) -> None:
         route = _section(self.text, "## 선택형 작업 명세와 검토")
-        # v0.49.0 intentionally adds one opt-in route; every pre-existing byte, including host-specific text,
-        # must still equal v0.48.0. Unknown removals or additions outside this section continue to fail.
-        self.assertEqual(_replace_once(self, self.text, route, ""), _tagged_skill("v0.48.0"))
+        # v0.49.0 intentionally adds one opt-in route, and v0.57.0 intentionally removes the embedded
+        # webapp-principles routing bullet (extracted to standalone Technoetic/webapp6); every other
+        # pre-existing byte must still equal v0.48.0.
+        historical = _tagged_skill("v0.48.0")
+        webapp_bullet = next(
+            line for line in historical.splitlines() if line.startswith("- **웹앱 작업:**")
+        )
+        expected = _replace_once(self, historical, webapp_bullet + "\n\n", "")
+        self.assertEqual(_replace_once(self, self.text, route, ""), expected)
 
     def test_task_workflow_routes_are_opt_in_and_data_only(self) -> None:
         # Current instruction checks run even without release history, and target only the new routing section.
@@ -416,10 +422,10 @@ class ReferenceTests(unittest.TestCase):
         section = self.section("## 스킬 이름")
         commands = sorted(path.stem for path in (ROOT / "commands").glob("*.md"))
         self.assertEqual(len(commands), 15)
-        for name in ("agentic-vault", "webapp-principles", *commands):
+        for name in ("agentic-vault", *commands):
             with self.subTest(skill=name):
                 self.assertIn(f"`{name}`", section)
-        for literal in ("17개", "`/vault-day`", "`/agentic-vault:vault-day`", "agy가 보여 주는 표기",
+        for literal in ("16개", "`/vault-day`", "`/agentic-vault:vault-day`", "agy가 보여 주는 표기",
                         "`disable-model-invocation: true`"):
             with self.subTest(literal=literal):
                 self.assertIn(literal, section)

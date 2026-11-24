@@ -19,7 +19,7 @@ Codex 연결은 [codex.md](codex.md), 기억 계층은 [memory-tiers.md](memory-
 
 ## 스킬 이름
 
-스킬은 17개다. `agentic-vault`(이 스킬)와 `webapp-principles`, 그리고 명령 15개와 같은 이름의 스킬이다:
+스킬은 16개다. `agentic-vault`(이 스킬)와 명령 15개와 같은 이름의 스킬이다:
 `vault-init`, `vault-session-start`, `vault-session-end`, `vault-day`, `vault-ingest`, `vault-process-inbox`,
 `vault-lint`, `vault-trace`, `vault-recall`, `vault-judge`, `jev-ask`, `vault-doctor`, `vault-upgrade`,
 `vault-harden`, `vault-jarvis-setup`.
