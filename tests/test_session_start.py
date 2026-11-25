@@ -1736,12 +1736,14 @@ class HiddenMarkupSanitizationTests(unittest.TestCase):
             '<div style="' + "/*a" * 80000 + '">x</div>',
             " ".join("`" * (k + 1) for k in range(600)) + " <",
         )
+        # 2.0s gives headroom for shared 2-vCPU CI runners under --workers 4 while
+        # still catching O(N^2) regressions (> 100s at 256 KiB) by >50x.
         for idx, payload in enumerate(payloads):
             t0 = time.perf_counter()
             session_hook._strip_hidden_markup(payload)
             elapsed = time.perf_counter() - t0
             with self.subTest(case=idx):
-                self.assertLess(elapsed, 0.5, f"payload {idx} took {elapsed:.3f}s")
+                self.assertLess(elapsed, 2.0, f"payload {idx} took {elapsed:.3f}s")
 
     def test_all_hidden_note_is_omitted_without_bare_section_header(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
