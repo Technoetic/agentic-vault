@@ -40,7 +40,9 @@ EXACT_PAIRED_METHOD = ('paired sign-flip; two-sided; exact enumeration of all 2^
 HYPERGEOMETRIC_METHOD = 'hypergeometric_exact_inversion; integer bisection over K'
 PAIRED_BOOTSTRAP_METHOD = 'paired percentile bootstrap; deterministic seed; flat and optional stratified macro'
 CROSS_FIT_METHOD = 'deterministic two-fold SHA-256 hash cross-fitting; out-of-fold evaluation'
+HOLM_BONFERRONI_SCHEMA = 'agentic-vault/holm-bonferroni/v1'
 HOLM_BONFERRONI_METHOD = 'Holm (1979) step-down sequentially rejective FWER adjustment'
+PPI_PP_SCHEMA = 'agentic-vault/ppi-pp-mean/v1'
 PPI_PP_METHOD = 'PPI++ power-tuned prediction-powered mean estimator and asymptotic normal CI (Angelopoulos, Duchi & Zrnic)'
 HOLM_MAX_HYPOTHESES = 10000
 
@@ -506,6 +508,7 @@ def holm_bonferroni_adjust(p_values, *, alpha: float = 0.05) -> dict:
         for i in range(m)
     ]
     return {
+        'schema': HOLM_BONFERRONI_SCHEMA,
         'method': HOLM_BONFERRONI_METHOD,
         'alpha': alpha,
         'hypothesis_count': m,
@@ -552,41 +555,51 @@ def ppi_pp_mean_ci(
 
     n = len(y_gold)
     N = len(f_unlab)
-    y_bar = math.fsum(y_gold) / n
-    f_bar = math.fsum(f_gold) / n
-    f_tilde_bar = math.fsum(f_unlab) / N
+    try:
+        y_bar = math.fsum(y_gold) / n
+        f_bar = math.fsum(f_gold) / n
+        f_tilde_bar = math.fsum(f_unlab) / N
 
-    var_y = math.fsum((y - y_bar) ** 2 for y in y_gold) / (n - 1)
-    var_f_tilde = math.fsum((f - f_tilde_bar) ** 2 for f in f_unlab) / (N - 1)
-    cov_yf = math.fsum((y - y_bar) * (f - f_bar) for y, f in zip(y_gold, f_gold)) / (n - 1)
+        var_y = math.fsum((y - y_bar) ** 2 for y in y_gold) / (n - 1)
+        var_f_tilde = math.fsum((f - f_tilde_bar) ** 2 for f in f_unlab) / (N - 1)
+        cov_yf = math.fsum((y - y_bar) * (f - f_bar) for y, f in zip(y_gold, f_gold)) / (n - 1)
 
-    if power_tuning:
-        all_f = f_gold + f_unlab
-        all_f_bar = math.fsum(all_f) / (n + N)
-        var_f_all = math.fsum((f - all_f_bar) ** 2 for f in all_f) / (n + N - 1)
-        if var_f_all > 0.0:
-            lam_hat = cov_yf / ((1.0 + n / N) * var_f_all)
+        if power_tuning:
+            all_f = f_gold + f_unlab
+            all_f_bar = math.fsum(all_f) / (n + N)
+            var_f_all = math.fsum((f - all_f_bar) ** 2 for f in all_f) / (n + N - 1)
+            if var_f_all > 0.0:
+                lam_hat = cov_yf / ((1.0 + n / N) * var_f_all)
+            else:
+                lam_hat = 0.0
         else:
-            lam_hat = 0.0
-    else:
-        lam_hat = lam_val
+            lam_hat = lam_val
 
-    rectifiers = [y - lam_hat * f for y, f in zip(y_gold, f_gold)]
-    rect_bar = math.fsum(rectifiers) / n
-    var_rect = math.fsum((r - rect_bar) ** 2 for r in rectifiers) / (n - 1)
+        rectifiers = [y - lam_hat * f for y, f in zip(y_gold, f_gold)]
+        rect_bar = math.fsum(rectifiers) / n
+        var_rect = math.fsum((r - rect_bar) ** 2 for r in rectifiers) / (n - 1)
 
-    theta_hat = lam_hat * f_tilde_bar + rect_bar
-    se_ppi = math.sqrt(max(0.0, (lam_hat ** 2) * var_f_tilde / N + var_rect / n))
-    se_cls = math.sqrt(max(0.0, var_y / n))
-    z = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+        theta_hat = lam_hat * f_tilde_bar + rect_bar
+        se_ppi = math.sqrt(max(0.0, (lam_hat ** 2) * var_f_tilde / N + var_rect / n))
+        se_cls = math.sqrt(max(0.0, var_y / n))
+        z = NormalDist().inv_cdf(1.0 - alpha / 2.0)
 
-    ci_low = theta_hat - z * se_ppi
-    ci_high = theta_hat + z * se_ppi
-    cls_low = y_bar - z * se_cls
-    cls_high = y_bar + z * se_cls
-    width_ratio = (se_ppi / se_cls) if se_cls > 0.0 else (1.0 if se_ppi == 0.0 else None)
+        ci_low = theta_hat - z * se_ppi
+        ci_high = theta_hat + z * se_ppi
+        cls_low = y_bar - z * se_cls
+        cls_high = y_bar + z * se_cls
+        width_ratio = (se_ppi / se_cls) if se_cls > 0.0 else (1.0 if se_ppi == 0.0 else None)
+    except OverflowError as exc:
+        raise ValueError('numeric overflow in ppi_pp_mean_ci inputs') from exc
+
+    if not all(
+        math.isfinite(val)
+        for val in (lam_hat, theta_hat, se_ppi, ci_low, ci_high, y_bar, se_cls, cls_low, cls_high)
+    ) or (width_ratio is not None and not math.isfinite(width_ratio)):
+        raise ValueError('non-finite intermediate value in ppi_pp_mean_ci')
 
     return {
+        'schema': PPI_PP_SCHEMA,
         'method': PPI_PP_METHOD,
         'confidence': confidence,
         'power_tuning': power_tuning,

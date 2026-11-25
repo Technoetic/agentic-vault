@@ -1664,6 +1664,102 @@ class HiddenMarkupSanitizationTests(unittest.TestCase):
             # Source file on disk is never modified.
             self.assertEqual(hot_path.read_text(encoding="utf-8"), raw_hot)
 
+    def test_blocks_html5_and_commonmark_bypasses_and_nested_breakouts(self) -> None:
+        # B2-1 multi-line tags, B2-2 non-void self-closing, B2-3 escaped backticks,
+        # B2-4 unclosed CSS comments + HTML entities + .0/0% zero values,
+        # B2-5 CommonMark §4.7 hidden link refs, W1 breakouts, W2 unquoted style=display:none/>, M1 <!-->/<!--->
+        long_label = "a" * 65
+        note = (
+            "Visible intro\n"
+            "<div\n  style=\"display:none\">\nEVIL_MULTILINE_DIV\n</div>\n"
+            "<span\nhidden>\nEVIL_MULTILINE_HIDDEN\n</span>\n"
+            "<script\n>\nEVIL_MULTILINE_SCRIPT\n</script>\n"
+            "<div style=\"display:none\"/>EVIL_NONVOID_DIV</div>\n"
+            "<span hidden/>EVIL_NONVOID_SPAN</span>\n"
+            "<script/>EVIL_NONVOID_SCRIPT</script>\n"
+            "<img hidden/>VISIBLE_AFTER_VOID\n"
+            "\\`<!-- EVIL_ESCAPED_BT_COMMENT -->\\`\n"
+            "\\`<span style=\"display:none\">EVIL_ESCAPED_BT_TAG</span>\\`\n"
+            "<span style=\"display:none /*\">EVIL_UNCLOSED_CSS_COMMENT</span>\n"
+            "<span style=\"display&#58;none\">EVIL_HTML_ENTITY</span>\n"
+            "<span style=\"opacity: .0\">EVIL_DOT_ZERO_OPACITY</span>\n"
+            "<span style=\"opacity: 0%\">EVIL_ZERO_PCT_OPACITY</span>\n"
+            "<span style=\"font-size: .0px\">EVIL_DOT_ZERO_FONT</span>\n"
+            "<div style=display:none/>EVIL_UNQUOTED_SOLIDUS</div>\n"
+            "[//]: #\n(EVIL_UNINDENTED_CONT_TITLE)\n"
+            "[//]: # (\nEVIL_MULTILINE_TITLE\n)\n"
+            "[//]:\n  # (EVIL_NEXTLINE_DEST)\n"
+            f"[{long_label}]: # (EVIL_LONG_LABEL)\n"
+            "[//]: <#> (EVIL_ANGLE_HASH)\n"
+            "[//]: #foo (EVIL_FRAG_DEST)\n"
+            "<div style=\"display:none\">\n<!--\n</div>\n-->\nEVIL_COMMENT_BREAKOUT\n</div>\n"
+            "<div style=\"display:none\">\n<span title=\"\n</div>\n\">EVIL_ATTR_BREAKOUT\n</div>\n"
+            "<!-->VISIBLE_AFTER_EMPTY1\n"
+            "<!--->VISIBLE_AFTER_EMPTY2\n"
+            "Visible outro\n"
+        )
+        cleaned = session_hook._strip_hidden_markup(note)
+        for visible in ("Visible intro", "VISIBLE_AFTER_VOID", "VISIBLE_AFTER_EMPTY1",
+                        "VISIBLE_AFTER_EMPTY2", "Visible outro"):
+            self.assertIn(visible, cleaned)
+        for leaked in (
+            "EVIL_MULTILINE_DIV", "EVIL_MULTILINE_HIDDEN", "EVIL_MULTILINE_SCRIPT",
+            "EVIL_NONVOID_DIV", "EVIL_NONVOID_SPAN", "EVIL_NONVOID_SCRIPT",
+            "EVIL_ESCAPED_BT_COMMENT", "EVIL_ESCAPED_BT_TAG",
+            "EVIL_UNCLOSED_CSS_COMMENT", "EVIL_HTML_ENTITY",
+            "EVIL_DOT_ZERO_OPACITY", "EVIL_ZERO_PCT_OPACITY", "EVIL_DOT_ZERO_FONT",
+            "EVIL_UNQUOTED_SOLIDUS", "EVIL_UNINDENTED_CONT_TITLE",
+            "EVIL_MULTILINE_TITLE", "EVIL_NEXTLINE_DEST", "EVIL_LONG_LABEL",
+            "EVIL_ANGLE_HASH", "EVIL_FRAG_DEST",
+            "EVIL_COMMENT_BREAKOUT", "EVIL_ATTR_BREAKOUT",
+        ):
+            self.assertNotIn(leaked, cleaned)
+
+    def test_linear_time_under_adversarial_inputs(self) -> None:
+        import time
+
+        payloads = (
+            "<" * 16000,
+            "<a " * 8000,
+            '<a "' + "<" * 8000 + ">",
+            '<a "' * 4000 + ">",
+            '<a "' * 3999 + "<a '>",
+            '<div style="' + "/*a" * 20000 + '">x</div>',
+            " ".join("`" * (k + 1) for k in range(500)) + " <",
+        )
+        for idx, payload in enumerate(payloads):
+            t0 = time.perf_counter()
+            session_hook._strip_hidden_markup(payload)
+            elapsed = time.perf_counter() - t0
+            with self.subTest(case=idx):
+                self.assertLess(elapsed, 0.5, f"payload {idx} took {elapsed:.3f}s")
+
+    def test_all_hidden_note_is_omitted_without_bare_section_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp) / "vault"
+            (vault / "00-meta").mkdir(parents=True)
+            (vault / "00-meta" / "vault-config.json").write_text(
+                json.dumps({"handoff_note": "00-meta/handoff.md", "hot_note": "00-meta/hot.md", "deny_zones": ["90-assets"]}),
+                encoding="utf-8",
+            )
+            (vault / "00-meta" / "hot.md").write_text("<!-- hidden only -->\n", encoding="utf-8")
+            (vault / "00-meta" / "handoff.md").write_text("Real handoff.\n", encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if not k.upper().startswith("CLAUDE_")}
+            env["CLAUDE_PROJECT_DIR"] = str(vault)
+            proc = subprocess.run(
+                [sys.executable, str(SESSION_HOOK)],
+                cwd=REPO_ROOT,
+                env=env,
+                input='{"source":"startup"}',
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("Real handoff.", proc.stdout)
+            self.assertNotIn("=== HOT CONTEXT ===", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

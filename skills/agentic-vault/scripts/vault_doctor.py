@@ -251,6 +251,13 @@ def _diagnose_section(
     neutralize = getattr(session_hook, "_neutralize_header_lines", None)
     if neutralize is not None:
         text = neutralize(text)
+    if not text.strip():
+        section = _base_section(
+            "empty", "note_empty", budget,
+            "add_context_or_disable_the_section",
+        )
+        section["effective_token_budget"] = budget
+        return section, None
     source = session_hook.SectionSource(header, text, budget, source_truncated, rel_path)
     # This section alone, under the same token budget and host output cap.
     rendered = session_hook.compose_context([source]).sections[0]

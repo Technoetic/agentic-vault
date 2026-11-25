@@ -172,6 +172,19 @@ class HolmBonferroniTests(unittest.TestCase):
             with self.subTest(alpha=bad_alpha), self.assertRaises(ValueError):
                 self.stats.holm_bonferroni_adjust([0.01], alpha=bad_alpha)
 
+    def test_clamping_at_one_ties_and_schema(self) -> None:
+        clamped = self.stats.holm_bonferroni_adjust([0.6, 0.7], alpha=0.05)
+        self.assertEqual(clamped["schema"], "agentic-vault/holm-bonferroni/v1")
+        self.assertEqual([item["adjusted_p"] for item in clamped["items"]], [1.0, 1.0])
+        self.assertEqual(clamped["rejected_count"], 0)
+
+        tied = self.stats.holm_bonferroni_adjust([0.02, 0.02, 0.5], alpha=0.05)
+        # step 0: 3*0.02=0.06; step 1: max(0.06, 2*0.02)=0.06; step 2: max(0.06, 1*0.5)=0.5
+        self.assertAlmostEqual(tied["items"][0]["adjusted_p"], 0.06, places=12)
+        self.assertAlmostEqual(tied["items"][1]["adjusted_p"], 0.06, places=12)
+        self.assertAlmostEqual(tied["items"][2]["adjusted_p"], 0.5, places=12)
+        self.assertEqual(tied["rejected_count"], 0)
+
 
 class PpiPlusPlusTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -184,6 +197,7 @@ class PpiPlusPlusTests(unittest.TestCase):
         unlab_f = [float(i % 5) + 0.2 for i in range(400)]
 
         res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f, confidence=0.95)
+        self.assertEqual(res["schema"], "agentic-vault/ppi-pp-mean/v1")
         self.assertFalse(res["small_sample_warning"])
         self.assertAlmostEqual(res["point_estimate"], 2.0, places=2)
         self.assertGreater(res["lambda_hat"], 0.85)
@@ -204,6 +218,20 @@ class PpiPlusPlusTests(unittest.TestCase):
         self.assertAlmostEqual(res["ci_low"], res["classical_ci_low"], places=12)
         self.assertAlmostEqual(res["ci_high"], res["classical_ci_high"], places=12)
         self.assertAlmostEqual(res["ci_width_ratio"], 1.0, places=12)
+
+    def test_uncorrelated_varying_proxy_sets_lambda_zero_and_extreme_overflow_raises_value_error(self) -> None:
+        # Varying proxy with exact zero sample covariance with gold_y
+        gold_y = [0.0, 0.0, 1.0, 1.0] * 10
+        gold_f = [0.0, 1.0, 0.0, 1.0] * 10
+        unlab_f = [0.0, 1.0] * 100
+
+        res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f)
+        self.assertAlmostEqual(res["lambda_hat"], 0.0, places=12)
+        self.assertAlmostEqual(res["point_estimate"], res["classical_mean"], places=12)
+        self.assertAlmostEqual(res["ci_width_ratio"], 1.0, places=12)
+
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1e200, -1e200], [1.0, 2.0], [1.0, 2.0])
 
     def test_fixed_standard_ppi_lambda_and_validation(self) -> None:
         gold_y = [1.0, 2.0, 3.0, 4.0]

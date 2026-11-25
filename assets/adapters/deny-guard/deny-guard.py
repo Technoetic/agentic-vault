@@ -1685,10 +1685,9 @@ def _next_legal_steps(decision: str) -> str:
 def hook_output(decision: str, reason: str) -> dict:
     if decision not in (DENY, ASK):  # never widen: anything else becomes a question
         decision = ASK
-    guidance = "" if "Next legal steps:" in reason else _next_legal_steps(decision)
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": decision,
-                                   "permissionDecisionReason": "deny-guard: " + reason + guidance}}
+                                   "permissionDecisionReason": "deny-guard: " + reason + _next_legal_steps(decision)}}
 
 
 def _warn(message: str) -> None:

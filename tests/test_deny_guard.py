@@ -1576,6 +1576,45 @@ class RefusalRecoveryGuidanceTests(unittest.TestCase):
             self.assertIn("Next legal steps:", reason)
             self.assertIn(expected_phrase, reason)
 
+    def test_end_to_end_process_paths_emit_next_legal_steps_on_deny_and_ask_and_stay_silent_on_allow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp).resolve() / "vault"
+            (vault / "00-meta").mkdir(parents=True)
+            (vault / "00-meta" / "vault-config.json").write_text(
+                json.dumps({"deny_zones": list(TEMPLATE_ZONES)}), encoding="utf-8"
+            )
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+            env["CLAUDE_PROJECT_DIR"] = str(vault)
+
+            def run_payload(tool: str, tool_input: dict) -> subprocess.CompletedProcess:
+                stdin = json.dumps(
+                    {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                return subprocess.run(
+                    [sys.executable, "-X", "utf8", "-I", str(GUARD)],
+                    input=stdin, capture_output=True, env=env, timeout=60,
+                )
+
+            deny_proc = run_payload("Read", {"file_path": str(vault / "90-assets" / "spec.pdf")})
+            self.assertEqual(deny_proc.returncode, 0, deny_proc.stderr)
+            deny_out = json.loads(deny_proc.stdout)["hookSpecificOutput"]
+            self.assertEqual(deny_out["permissionDecision"], "deny")
+            deny_out["permissionDecisionReason"].encode("ascii")
+            self.assertIn("Next legal steps:", deny_out["permissionDecisionReason"])
+            self.assertIn("outside deny_zones", deny_out["permissionDecisionReason"])
+
+            ask_proc = run_payload("Write", {"file_path": str(vault / "00-meta" / "vault-config.json")})
+            self.assertEqual(ask_proc.returncode, 0, ask_proc.stderr)
+            ask_out = json.loads(ask_proc.stdout)["hookSpecificOutput"]
+            self.assertEqual(ask_out["permissionDecision"], "ask")
+            ask_out["permissionDecisionReason"].encode("ascii")
+            self.assertIn("Next legal steps:", ask_out["permissionDecisionReason"])
+            self.assertIn("explicit user confirmation", ask_out["permissionDecisionReason"])
+
+            ok_proc = run_payload("Read", {"file_path": str(vault / "notes" / "normal.md")})
+            self.assertEqual((ok_proc.returncode, ok_proc.stdout, ok_proc.stderr), (0, b"", b""))
+
 
 if __name__ == "__main__":
     unittest.main()

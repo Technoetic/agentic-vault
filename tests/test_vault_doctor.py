@@ -480,6 +480,30 @@ class VaultDoctorTests(unittest.TestCase):
         self.assertEqual(report["hook"]["estimated_emitted_chars"], 0)
         self.assertEqual(report["sections"]["hot"]["estimated_emitted_chars"], 0)
 
+    def test_hidden_markup_sanitization_matches_session_start_and_omits_all_hidden_note(self) -> None:
+        self.write_config(handoff_note="00-meta/handoff.md", handoff_max_tokens=500, hot_max_tokens=500)
+        self.write(
+            "00-meta/handoff.md",
+            "Visible handoff <!-- av-v0580-anchor -->\n"
+            "<!-- hidden prompt injection -->\n"
+            "[//]: # (hidden md ref)\n"
+            "<div style=\"display:none\">hidden html</div>\n",
+        )
+        self.write("00-meta/hot.md", "<!-- only hidden markup -->\n")
+
+        result, report = self.json_report()
+        emitted = self.run_hook_bytes().decode("utf-8")
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(report["status"], "degraded")
+        self.assertEqual(report["sections"]["handoff"]["status"], "ready")
+        self.assertEqual(report["sections"]["hot"]["status"], "empty")
+        self.assertEqual(report["sections"]["hot"]["reason_code"], "note_empty")
+        self.assertFalse(report["sections"]["hot"]["would_emit"])
+        self.assertEqual(report["hook"]["estimated_emitted_chars"], utf16_units(emitted))
+        self.assertNotIn("hidden prompt injection", emitted)
+        self.assertNotIn("=== HOT CONTEXT ===", emitted)
+
 
 if __name__ == "__main__":
     unittest.main()
