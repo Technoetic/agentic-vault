@@ -1559,5 +1559,23 @@ class ModuleLayoutTests(unittest.TestCase):
                          ["unittest.skipUnless(os.name == 'nt', 'Windows path forms')"])
 
 
+class RefusalRecoveryGuidanceTests(unittest.TestCase):
+    """v0.58.0 SkillCFI (arXiv:2611.24185v1) actionable next-legal-steps recovery hints."""
+
+    def test_deny_and_ask_outputs_include_ascii_next_legal_steps_without_widening_schema(self) -> None:
+        guard = load_guard()
+        for decision, expected_phrase in (
+            (guard.DENY, "outside deny_zones"),
+            (guard.ASK, "explicit user confirmation"),
+        ):
+            out = guard.hook_output(decision, "sample reason.")
+            specific = out["hookSpecificOutput"]
+            self.assertEqual(set(specific), {"hookEventName", "permissionDecision", "permissionDecisionReason"})
+            reason = specific["permissionDecisionReason"]
+            reason.encode("ascii")
+            self.assertIn("Next legal steps:", reason)
+            self.assertIn(expected_phrase, reason)
+
+
 if __name__ == "__main__":
     unittest.main()

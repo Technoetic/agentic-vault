@@ -99,6 +99,22 @@ _LEADING_BLANKS = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]*")
 _DANGEROUS_INVISIBLE_RE = re.compile(
     r"[\u00ad\u034f\u061c\u115f\u1160\u180e\u200e\u200f\u202a-\u202e\u2061-\u2064\u2066-\u2069\u3164\uffa0\U000e0000-\U000e007f\U000e0100-\U000e01ef]+"
 )
+# Hidden non-rendered markup patterns stripped from injected session context
+# outside fenced code blocks and inline code spans (v0.58.0, per
+# arXiv:2611.28763v1 — hidden AI-directed text on GitHub). Benign single-token
+# machine anchors such as <!-- av-v0570-release-20261124 --> stay intact.
+_SAFE_ANCHOR_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
+_MD_HIDDEN_REF_LINE_RE = re.compile(r"^[ \t]{0,3}\[[^\]\n]{0,64}\]:[ \t]*(?:#|<>)(?:[ \t]+.*)?\Z")
+_MD_HIDDEN_REF_BARE_RE = re.compile(r"^[ \t]{0,3}\[[^\]\n]{0,64}\]:[ \t]*(?:#|<>)[ \t]*\Z")
+_MD_HIDDEN_REF_CONT_RE = re.compile(r"^[ \t]+(?:\([^)\n]*\)|\"[^\"\n]*\"|'[^'\n]*')[ \t]*\Z")
+_ALWAYS_HIDDEN_TAGS = frozenset({"script", "style", "template"})
+_HTML_TAG_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,31}")
+_HTML_ATTR_RE = re.compile(
+    r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
+)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_CSS_ZERO_OPACITY_RE = re.compile(r"0+(?:\.0+)?(?:!important)?\Z")
+_CSS_ZERO_FONT_RE = re.compile(r"0+(?:\.0+)?(?:px|pt|em|rem|ex|ch|vw|vh|%)?(?:!important)?\Z")
 
 
 def _strip_invisible_smuggling(text: str) -> str:
@@ -106,6 +122,247 @@ def _strip_invisible_smuggling(text: str) -> str:
     if not text or not _DANGEROUS_INVISIBLE_RE.search(text):
         return text
     return _DANGEROUS_INVISIBLE_RE.sub("", text)
+
+
+def _style_hides_element(style_value: str) -> bool:
+    """Return True when an inline CSS style hides text (display:none, visibility:hidden/collapse, opacity:0, font-size:0)."""
+    cleaned = _CSS_COMMENT_RE.sub("", style_value).lower()
+    for decl in cleaned.split(";"):
+        if ":" not in decl:
+            continue
+        prop, raw_val = decl.split(":", 1)
+        prop = prop.strip()
+        val = "".join(raw_val.split())
+        if prop == "display" and (val == "none" or val == "none!important"):
+            return True
+        if prop == "visibility" and val in ("hidden", "hidden!important", "collapse", "collapse!important"):
+            return True
+        if prop == "opacity" and _CSS_ZERO_OPACITY_RE.fullmatch(val):
+            return True
+        if prop == "font-size" and _CSS_ZERO_FONT_RE.fullmatch(val):
+            return True
+    return False
+
+
+def _find_tag_end(line: str, start: int) -> int:
+    """Find closing '>' of an HTML tag starting at index 'start', respecting quoted attribute values."""
+    quote = ""
+    i = start + 1
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == ">":
+            return i
+        i += 1
+    return -1
+
+
+def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:
+    if tag_name in _ALWAYS_HIDDEN_TAGS:
+        return True
+    if not attrs.strip():
+        return False
+    for match in _HTML_ATTR_RE.finditer(attrs):
+        attr_name = match.group(1).lower()
+        if attr_name == "hidden":
+            return True
+        if attr_name == "style":
+            style_val = next((g for g in match.groups()[1:] if g is not None), "")
+            if _style_hides_element(style_val):
+                return True
+    return False
+
+
+def _strip_hidden_markup(text: str) -> str:
+    """Strip non-rendered HTML comments, hidden Markdown link-ref comments, and hidden HTML elements.
+
+    Runs only on the injected SessionStart buffer (never mutating vault files).
+    Preserves fenced code blocks, inline code spans, trailing/standalone benign
+    single-token HTML anchor comments (e.g. ``<!-- av-v0570-release-20261124 -->``),
+    and normal Markdown link references whose destination is not ``#`` or ``<>``.
+    Returns the exact same string object when nothing is stripped.
+    """
+    if not text or ("<!--" not in text and "]:" not in text and "<" not in text):
+        return text
+
+    out: list[str] = []
+    changed = False
+    fence_char = ""
+    fence_len = 0
+    in_html_comment = False
+    hidden_tag: str | None = None
+    hidden_depth = 0
+    expect_ref_cont = False
+
+    for raw_line in text.splitlines(keepends=True):
+        if raw_line.endswith("\r\n"):
+            line, ending = raw_line[:-2], "\r\n"
+        elif raw_line.endswith("\n"):
+            line, ending = raw_line[:-1], "\n"
+        else:
+            line, ending = raw_line, ""
+
+        # Code fences are only recognized outside active multi-line hidden blocks.
+        if not in_html_comment and hidden_tag is None:
+            if fence_char:
+                close_m = _FENCE_CLOSE.fullmatch(line)
+                if close_m and close_m.group(1)[0] == fence_char and len(close_m.group(1)) >= fence_len:
+                    fence_char = ""
+                    fence_len = 0
+                out.append(raw_line)
+                expect_ref_cont = False
+                continue
+            open_m = _FENCE_OPEN.fullmatch(line)
+            if open_m:
+                token = open_m.group(1) or open_m.group(2)
+                fence_char = token[0]
+                fence_len = len(token)
+                out.append(raw_line)
+                expect_ref_cont = False
+                continue
+
+        # Multi-line continuation title after bare `[//]: #`
+        if expect_ref_cont:
+            expect_ref_cont = False
+            if not in_html_comment and hidden_tag is None and _MD_HIDDEN_REF_CONT_RE.fullmatch(line):
+                changed = True
+                continue
+
+        # Full-line Markdown hidden link-reference comment outside hidden blocks
+        if not in_html_comment and hidden_tag is None and "]:" in line and _MD_HIDDEN_REF_LINE_RE.fullmatch(line):
+            changed = True
+            expect_ref_cont = bool(_MD_HIDDEN_REF_BARE_RE.fullmatch(line))
+            continue
+
+        # Scan line linearly for HTML comments, hidden HTML elements, and inline code spans.
+        orig_nonempty = bool(line.strip())
+        buf: list[str] = []
+        i = 0
+        n = len(line)
+        line_changed = False
+
+        while i < n:
+            if in_html_comment:
+                end = line.find("-->", i)
+                if end == -1:
+                    line_changed = True
+                    i = n
+                    break
+                in_html_comment = False
+                line_changed = True
+                i = end + 3
+                continue
+
+            if hidden_tag is not None:
+                lt = line.find("<", i)
+                if lt == -1:
+                    line_changed = True
+                    i = n
+                    break
+                line_changed = True
+                tag_end = _find_tag_end(line, lt)
+                if tag_end == -1:
+                    i = n
+                    break
+                inner = line[lt + 1:tag_end].strip()
+                if inner.startswith("/"):
+                    m_close = _HTML_TAG_NAME_RE.match(inner[1:].lstrip())
+                    if m_close and m_close.group(0).lower() == hidden_tag:
+                        hidden_depth -= 1
+                        if hidden_depth <= 0:
+                            hidden_tag = None
+                            hidden_depth = 0
+                else:
+                    m_open = _HTML_TAG_NAME_RE.match(inner)
+                    if m_open and m_open.group(0).lower() == hidden_tag and not inner.endswith("/"):
+                        hidden_depth += 1
+                i = tag_end + 1
+                continue
+
+            ch = line[i]
+            # Preserve CommonMark inline code spans when matching closing backticks exist on this line.
+            if ch == "`":
+                j = i
+                while j < n and line[j] == "`":
+                    j += 1
+                run = j - i
+                # Find an exact-length closing backtick run on the same line.
+                search = j
+                close_pos = -1
+                while search < n:
+                    k = line.find("`", search)
+                    if k == -1:
+                        break
+                    k2 = k
+                    while k2 < n and line[k2] == "`":
+                        k2 += 1
+                    if k2 - k == run:
+                        close_pos = k2
+                        break
+                    search = k2
+                if close_pos != -1:
+                    buf.append(line[i:close_pos])
+                    i = close_pos
+                    continue
+                buf.append(line[i:j])
+                i = j
+                continue
+
+            if ch == "<":
+                if line.startswith("<!--", i):
+                    end = line.find("-->", i + 4)
+                    if end == -1:
+                        in_html_comment = True
+                        line_changed = True
+                        i = n
+                        break
+                    inner_comment = line[i + 4:end].strip()
+                    if _SAFE_ANCHOR_TOKEN_RE.fullmatch(inner_comment) and not line[end + 3:].strip():
+                        buf.append(line[i:end + 3])
+                    else:
+                        line_changed = True
+                    i = end + 3
+                    continue
+
+                # Check for hidden HTML opening tag
+                tag_end = _find_tag_end(line, i)
+                if tag_end != -1:
+                    inner = line[i + 1:tag_end]
+                    m_open = _HTML_TAG_NAME_RE.match(inner)
+                    if m_open:
+                        tname = m_open.group(0).lower()
+                        rest = inner[m_open.end():]
+                        if (not rest or rest[0].isspace() or rest[0] == "/") and _is_hidden_open_tag(tname, rest):
+                            line_changed = True
+                            if not inner.rstrip().endswith("/"):
+                                hidden_tag = tname
+                                hidden_depth = 1
+                            i = tag_end + 1
+                            continue
+
+            # Advance linearly to next interesting character ('<' or '`')
+            next_lt = line.find("<", i + 1)
+            next_bt = line.find("`", i + 1)
+            candidates = [p for p in (next_lt, next_bt) if p != -1]
+            nxt = min(candidates) if candidates else n
+            buf.append(line[i:nxt])
+            i = nxt
+
+        if line_changed:
+            changed = True
+            rebuilt = "".join(buf)
+            if orig_nonempty and not rebuilt.strip():
+                continue
+            out.append(rebuilt + ending)
+        else:
+            out.append(raw_line)
+
+    return "".join(out) if changed else text
 
 
 def _redact_sensitive_lines(text: str) -> str:
@@ -673,7 +930,7 @@ def _compact_extra_source(vault: Path, config: dict, key: str, fallback: str = '
         raise ValueError('runtime_is_not_context')
     path = checked_note_path(vault, value, (*config['deny_zones'], '.git'))
     text, truncated = _revocation_note(path, value, revocations)
-    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), 0, truncated, value)
+    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(_strip_hidden_markup(_strip_invisible_smuggling(text)))), 0, truncated, value)
 
 
 def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSource | None], *, revocations=None) -> SectionSource | None:
@@ -800,7 +1057,7 @@ def _configured_source(
     text, source_truncated = _revocation_note(path, rel_path, revocations)
     if text is None:
         return None
-    return SectionSource(header, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), budget, source_truncated, rel_path)
+    return SectionSource(header, _neutralize_header_lines(_redact_sensitive_lines(_strip_hidden_markup(_strip_invisible_smuggling(text)))), budget, source_truncated, rel_path)
 
 
 def _write_stdout(text: str) -> None:

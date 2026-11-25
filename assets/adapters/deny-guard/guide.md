@@ -109,7 +109,7 @@
 - 결정이 없으면 아무것도 출력하지 않고 종료 코드 0으로 끝난다. Claude Code의 일반 권한 흐름(Read deny 규칙·승인 창)이 그대로 진행된다.
 - 결정이 있으면 JSON 한 줄을 출력하고 0으로 끝난다:
   `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "deny-guard: ..."}}`
-  (`permissionDecision`은 `deny` 또는 `ask`). 이유는 고정 문구에 구역 이름만 넣는다. `deny` 이유는 Claude에게, `ask` 이유는 승인 창에서
+  (`permissionDecision`은 `deny` 또는 `ask`). 이유는 고정 문구에 구역 이름과 순수 ASCII `Next legal steps: ...` 복구 안내를 붙인다(v0.58.0부터). `deny` 이유는 Claude에게, `ask` 이유는 승인 창에서
   사용자에게 보인다.
 - `allow`는 내지 않는다. 그래서 이 가드는 권한을 넓히지 못하고 좁히기만 한다. 여러 훅의 결정은 deny > defer > ask > allow 순서로
   합쳐지고, 설정 파일의 deny·ask 규칙은 훅 결과와 상관없이 평가된다.

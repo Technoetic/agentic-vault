@@ -290,6 +290,60 @@ def _current(store, receipt, *, supersession=True):
     store.policy.fresh()
 
 
+ERROR_NEXT_LEGAL_STEPS = {
+    'invalid_cli_arguments': ['run_with_--vault_and_one_of_capture_inspect_check_revise'],
+    'unsafe_public_path': ['select_a_non_credential_path_outside_deny_and_exclude_zones'],
+    'noncanonical_path': ['pass_a_canonical_relative_posix_path_without_backslashes_or_dot_segments'],
+    'invalid_task_contract': ['supply_json_object_with_version_task_fields_and_questions'],
+    'invalid_version': ['set_contract_version_to_integer_1'],
+    'invalid_fields': ['supply_a_bounded_list_of_valid_field_objects'],
+    'invalid_field': ['use_allowed_kind_origin_and_status_values_for_each_field'],
+    'invalid_questions': ['supply_a_bounded_list_of_valid_question_objects'],
+    'invalid_question': ['use_bool_blocking_and_status_in_open_resolved_unknown'],
+    'invalid_or_duplicate_id': ['use_unique_identifier_matching_ID_RE'],
+    'invalid_sources': ['supply_a_bounded_list_of_path_and_excerpt_source_objects'],
+    'invalid_source': ['supply_nonempty_path_and_excerpt_for_each_source'],
+    'missing_source': ['attach_at_least_one_source_excerpt_for_every_non_host_default_field'],
+    'duplicate_source': ['remove_duplicate_path_excerpt_entries_within_the_field'],
+    'source_overlaps_input': ['store_referenced_sources_separately_from_the_contract_input_file'],
+    'source_excerpt_mismatch': ['copy_an_exact_substring_from_the_referenced_source_file'],
+    'too_many_sources': ['keep_distinct_source_files_within_max_sources'],
+    'duplicate_file_binding': ['use_one_canonical_spelling_per_referenced_file'],
+    'file_set_too_large': ['keep_total_bound_source_bytes_within_max_total_bytes'],
+    'superseded_contract': ['inspect_existing_child_revision_and_revise_from_the_latest_contract'],
+    'parent_receipt_changed': ['verify_runtime_receipt_integrity_before_revising'],
+    'path_too_long': ['use_a_shorter_vault_or_relative_path_within_platform_limits'],
+}
+DEFAULT_ERROR_NEXT_LEGAL_STEPS = ['fix_contract_input_or_vault_state_and_retry_capture_or_inspect']
+
+
+def _next_legal_steps_for_result(*, stale: bool, ready: bool, accepted: list[dict],
+                                 acceptance_ids: list[str], questions: list[dict]) -> list[str]:
+    """Deterministic recovery steps for non-ready/stale states (SkillCFI)."""
+    if stale:
+        return [
+            'inspect_current_vault_sources_and_config',
+            'revise_contract_with_updated_input_or_capture_new_contract',
+        ]
+    if ready:
+        return ['present_contract_for_execution_review']
+    steps: list[str] = []
+    goal_count = sum(f['kind'] == 'goal' for f in accepted)
+    if goal_count == 0:
+        steps.append('declare_one_confirmed_user_goal_with_source')
+    elif goal_count > 1:
+        steps.append('reduce_confirmed_user_goals_to_exactly_one')
+    if not any(f['kind'] == 'scope' for f in accepted):
+        steps.append('declare_confirmed_user_scope_with_source')
+    if not acceptance_ids:
+        steps.append('declare_confirmed_user_acceptance_with_source')
+    blocking_ids = [q['id'] for q in questions if q['blocking'] and q['status'] != 'resolved']
+    if blocking_ids:
+        steps.append('resolve_blocking_questions:' + ','.join(blocking_ids))
+    steps.append('revise_or_recapture_contract_after_user_confirmation')
+    return steps
+
+
 def _result(contract_id, receipt=None, *, stale=False):
     payload = receipt['payload'] if receipt is not None and not stale else None
     definition = payload['definition'] if payload else dict(task=None, fields=[], questions=[])
@@ -299,6 +353,10 @@ def _result(contract_id, receipt=None, *, stale=False):
     ready = (sum(f['kind'] == 'goal' for f in accepted) == 1
              and any(f['kind'] == 'scope' for f in accepted) and bool(acceptance_ids)
              and not any(q['blocking'] and q['status'] != 'resolved' for q in definition['questions']))
+    next_steps = _next_legal_steps_for_result(
+        stale=stale, ready=ready, accepted=accepted,
+        acceptance_ids=acceptance_ids, questions=definition['questions'],
+    )
     return dict(contract_id=contract_id, fingerprint=contract_id,
                 status=('stale' if stale else 'ready_for_execution_review' if ready else 'needs_clarification'),
                 acceptance_ids=acceptance_ids, accepted_fields=accepted,
@@ -311,7 +369,7 @@ def _result(contract_id, receipt=None, *, stale=False):
                 receipt_sha256=receipt['receipt_sha256'] if receipt is not None and not stale else None,
                 path=runs.RUNTIME_DIR + '/' + _name(contract_id),
                 limits=dict(LIMITS), authority='data_only', historical_metadata=None,
-                limitations=list(LIMITATIONS))
+                limitations=list(LIMITATIONS), next_legal_steps=next_steps)
 
 
 @_public
@@ -393,7 +451,11 @@ def revise(vault, contract_id, input_path):
 
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message):
-        print(evidence.encode(dict(ok=False, error='invalid_cli_arguments')).decode('ascii'))
+        print(evidence.encode(dict(
+            ok=False,
+            error='invalid_cli_arguments',
+            next_legal_steps=list(ERROR_NEXT_LEGAL_STEPS['invalid_cli_arguments']),
+        )).decode('ascii'))
         self.exit(2)
 
 
@@ -418,7 +480,9 @@ def main(argv=None):
         print(evidence.encode(result).decode('ascii'))
         return 0
     except ContractError as exc:
-        print(evidence.encode(dict(ok=False, error=str(exc))).decode('ascii'))
+        code = str(exc)
+        steps = list(ERROR_NEXT_LEGAL_STEPS.get(code, DEFAULT_ERROR_NEXT_LEGAL_STEPS))
+        print(evidence.encode(dict(ok=False, error=code, next_legal_steps=steps)).decode('ascii'))
         return 2
 
 
