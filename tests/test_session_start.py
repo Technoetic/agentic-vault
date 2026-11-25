@@ -1694,6 +1694,12 @@ class HiddenMarkupSanitizationTests(unittest.TestCase):
             "[//]: #foo (EVIL_FRAG_DEST)\n"
             "<div style=\"display:none\">\n<!--\n</div>\n-->\nEVIL_COMMENT_BREAKOUT\n</div>\n"
             "<div style=\"display:none\">\n<span title=\"\n</div>\n\">EVIL_ATTR_BREAKOUT\n</div>\n"
+            "<div style=\"display:none\"><script>var x=\"</div>\";</script>EVIL_SCRIPT_BREAKOUT</div>\n"
+            "<div style=\"display:none\"><style>/*</div>*/</style>EVIL_STYLE_BREAKOUT</div>\n"
+            "<script data-x=\"a\n\nb\">\nEVIL_BLANKLINE_SCRIPT\n</script>\n"
+            "<span style=\"font-size:0vmin\">EVIL_ZERO_VMIN</span>\n"
+            "<span style=\"font-size:0cm\">EVIL_ZERO_CM</span>\n"
+            "<span style=\"\\64isplay:none\">EVIL_CSS_HEX_ESCAPE</span>\n"
             "<!-->VISIBLE_AFTER_EMPTY1\n"
             "<!--->VISIBLE_AFTER_EMPTY2\n"
             "Visible outro\n"
@@ -1712,6 +1718,8 @@ class HiddenMarkupSanitizationTests(unittest.TestCase):
             "EVIL_MULTILINE_TITLE", "EVIL_NEXTLINE_DEST", "EVIL_LONG_LABEL",
             "EVIL_ANGLE_HASH", "EVIL_FRAG_DEST",
             "EVIL_COMMENT_BREAKOUT", "EVIL_ATTR_BREAKOUT",
+            "EVIL_SCRIPT_BREAKOUT", "EVIL_STYLE_BREAKOUT", "EVIL_BLANKLINE_SCRIPT",
+            "EVIL_ZERO_VMIN", "EVIL_ZERO_CM", "EVIL_CSS_HEX_ESCAPE",
         ):
             self.assertNotIn(leaked, cleaned)
 
@@ -1719,13 +1727,14 @@ class HiddenMarkupSanitizationTests(unittest.TestCase):
         import time
 
         payloads = (
-            "<" * 16000,
-            "<a " * 8000,
-            '<a "' + "<" * 8000 + ">",
+            "<" * 262144,
+            "\\a" * 131071 + "<",
+            "<a " * 43000 + "x" * 133000 + '">',
+            "<div hidden>" + "<a " * 43000 + "x" * 133000 + '"></div>',
             '<a "' * 4000 + ">",
             '<a "' * 3999 + "<a '>",
-            '<div style="' + "/*a" * 20000 + '">x</div>',
-            " ".join("`" * (k + 1) for k in range(500)) + " <",
+            '<div style="' + "/*a" * 80000 + '">x</div>',
+            " ".join("`" * (k + 1) for k in range(600)) + " <",
         )
         for idx, payload in enumerate(payloads):
             t0 = time.perf_counter()
