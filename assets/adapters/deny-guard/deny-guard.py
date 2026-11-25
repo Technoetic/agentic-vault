@@ -1,4 +1,4 @@
-# agentic-vault:adapter deny-guard engine=0.46.0
+# agentic-vault:adapter deny-guard engine=0.58.0
 """deny-guard.py - opt-in deny-zone guard for Claude Code PreToolUse hooks.
 
 ASCII only, Python 3.10+ standard library only. The plugin ships this file in
@@ -1672,12 +1672,22 @@ def evaluate(payload: object, vault: str, warn=None) -> tuple[str, str] | None:
     return _strongest(guard.bash(command))  # Bash, and Monitor, whose command runs in the Bash tool's shell
 
 
+def _next_legal_steps(decision: str) -> str:
+    """Actionable legal recovery guidance appended to every refusal/escalation (SkillCFI)."""
+    if decision == DENY:
+        return (" Next legal steps: read or search notes outside deny_zones, use mv -n or "
+                "git mv only when quarantining into a zone, or ask the user to move/approve "
+                "the target outside deny_zones.")
+    return (" Next legal steps: wait for explicit user confirmation, or rewrite the tool "
+            "call with literal paths outside deny_zones and without modifying guard controls.")
+
+
 def hook_output(decision: str, reason: str) -> dict:
     if decision not in (DENY, ASK):  # never widen: anything else becomes a question
         decision = ASK
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": decision,
-                                   "permissionDecisionReason": "deny-guard: " + reason}}
+                                   "permissionDecisionReason": "deny-guard: " + reason + _next_legal_steps(decision)}}
 
 
 def _warn(message: str) -> None:

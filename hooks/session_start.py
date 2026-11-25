@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 from bisect import bisect_left
+from collections import deque
 import hashlib
+import html
 import json
 import math
 import os
@@ -99,6 +101,30 @@ _LEADING_BLANKS = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]*")
 _DANGEROUS_INVISIBLE_RE = re.compile(
     r"[\u00ad\u034f\u061c\u115f\u1160\u180e\u200e\u200f\u202a-\u202e\u2061-\u2064\u2066-\u2069\u3164\uffa0\U000e0000-\U000e007f\U000e0100-\U000e01ef]+"
 )
+# Hidden non-rendered markup patterns stripped from injected session context
+# outside fenced code blocks and inline code spans (v0.58.0, per
+# arXiv:2611.28763v1 — hidden AI-directed text on GitHub). Trailing or
+# standalone single-token machine anchors such as
+# <!-- av-v0570-release-20261124 --> stay intact.
+_SAFE_ANCHOR_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
+_ALWAYS_HIDDEN_TAGS = frozenset({"script", "style", "template"})
+_HTML_VOID_TAGS = frozenset({
+    "area", "base", "br", "col", "embed", "hr", "img",
+    "input", "link", "meta", "source", "track", "wbr",
+})
+_RAW_TEXT_CLOSE_RE = {
+    "script": re.compile(r"</script(?=[\s/>])", re.IGNORECASE),
+    "style": re.compile(r"</style(?=[\s/>])", re.IGNORECASE),
+}
+_HTML_TAG_NAME_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,31}")
+_HTML_ATTR_RE = re.compile(
+    r"""([A-Za-z_:][A-Za-z0-9_.:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?"""
+)
+_CSS_ZERO_OPACITY_RE = re.compile(r"(?:0+(?:\.0+)?|\.0+)%?(?:!important)?\Z")
+_CSS_ZERO_FONT_RE = re.compile(r"(?:0+(?:\.0+)?|\.0+)(?:[a-z]{1,6}|%)?(?:!important)?\Z")
+_BLANK_LINE_RE = re.compile(r"\r?\n[ \t]*\r?\n")
+_DELIM_RE = re.compile(r"[<`\\]")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
 def _strip_invisible_smuggling(text: str) -> str:
@@ -106,6 +132,678 @@ def _strip_invisible_smuggling(text: str) -> str:
     if not text or not _DANGEROUS_INVISIBLE_RE.search(text):
         return text
     return _DANGEROUS_INVISIBLE_RE.sub("", text)
+
+
+def _unescape_css(value: str) -> str:
+    """Decode CSS Syntax Level 3 backslash escapes in guaranteed O(N) time."""
+    if "\\" not in value:
+        return value
+    parts: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        bs = value.find("\\", i)
+        if bs == -1:
+            parts.append(value[i:])
+            break
+        parts.append(value[i:bs])
+        j = bs + 1
+        if j >= n:
+            break
+        if value[j] in _HEX_DIGITS:
+            end_hex = j + 1
+            while end_hex < n and end_hex - j < 6 and value[end_hex] in _HEX_DIGITS:
+                end_hex += 1
+            code = int(value[j:end_hex], 16)
+            if 0 < code <= 0x10FFFF and not (0xD800 <= code <= 0xDFFF):
+                parts.append(chr(code))
+            i = end_hex
+            if i < n and value[i] == "\r" and i + 1 < n and value[i + 1] == "\n":
+                i += 2
+            elif i < n and value[i] in (" ", "\t", "\r", "\n", "\f"):
+                i += 1
+        elif value[j] in ("\r", "\n", "\f"):
+            i = j + 2 if (value[j] == "\r" and j + 1 < n and value[j + 1] == "\n") else j + 1
+        else:
+            parts.append(value[j])
+            i = j + 1
+    return "".join(parts)
+
+
+def _strip_css_comments(value: str) -> str:
+    """Strip CSS /* ... */ comments in guaranteed O(N) time; unclosed /* closes at EOF (CSS Syntax L3)."""
+    if "/*" not in value:
+        return value
+    parts: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        start = value.find("/*", i)
+        if start == -1:
+            parts.append(value[i:])
+            break
+        parts.append(value[i:start])
+        end = value.find("*/", start + 2)
+        if end == -1:
+            break
+        i = end + 2
+    return "".join(parts)
+
+
+def _style_hides_element(style_value: str) -> bool:
+    """Return True when an inline CSS style hides text (display:none, visibility:hidden/collapse, opacity:0, font-size:0)."""
+    cleaned = _unescape_css(_strip_css_comments(html.unescape(style_value))).lower()
+    for decl in cleaned.split(";"):
+        if ":" not in decl:
+            continue
+        prop, raw_val = decl.split(":", 1)
+        prop = prop.strip()
+        val = "".join(raw_val.split())
+        if prop == "display" and (val == "none" or val == "none!important"):
+            return True
+        if prop == "visibility" and val in ("hidden", "hidden!important", "collapse", "collapse!important"):
+            return True
+        if prop == "opacity" and _CSS_ZERO_OPACITY_RE.fullmatch(val):
+            return True
+        if prop == "font-size" and _CSS_ZERO_FONT_RE.fullmatch(val):
+            return True
+    return False
+
+
+class _TagScanner:
+    """Amortized O(N) HTML tag-end scanner using monotonic delimiter cursors and dead-state memoization."""
+
+    __slots__ = ("text", "limit", "dead_states", "dead_until", "next_gt", "next_dq", "next_sq")
+
+    def __init__(self, text: str, limit: int) -> None:
+        self.text = text
+        self.limit = -1
+        self.dead_states: set[tuple[int, str]] = set()
+        self.dead_until = -1
+        self.next_gt = -1
+        self.next_dq = -1
+        self.next_sq = -1
+        self.set_limit(limit, 0)
+
+    def set_limit(self, limit: int, start: int) -> None:
+        if limit == self.limit:
+            return
+        self.limit = limit
+        self.dead_states.clear()
+        self.dead_until = -1
+        self.next_gt = self.text.find(">", start, limit)
+        self.next_dq = self.text.find('"', start, limit)
+        self.next_sq = self.text.find("'", start, limit)
+
+    def find_tag_end(self, scan_from: int) -> int:
+        if scan_from <= self.dead_until or self.next_gt == -1:
+            return -1
+        text = self.text
+        limit = self.limit
+        if self.next_gt < scan_from:
+            self.next_gt = text.find(">", scan_from, limit)
+            if self.next_gt == -1:
+                self.dead_until = limit
+                return -1
+        gt = self.next_gt
+        if self.next_dq != -1 and self.next_dq < scan_from:
+            self.next_dq = text.find('"', scan_from, limit)
+        if self.next_sq != -1 and self.next_sq < scan_from:
+            self.next_sq = text.find("'", scan_from, limit)
+        dq = self.next_dq if (self.next_dq != -1 and self.next_dq < gt) else -1
+        sq = self.next_sq if (self.next_sq != -1 and self.next_sq < gt) else -1
+        if dq == -1 and sq == -1:
+            return gt
+
+        if dq != -1 and (sq == -1 or dq < sq):
+            first_q, quote = dq, '"'
+        else:
+            first_q, quote = sq, "'"
+        first_state = (first_q, quote)
+        if first_state in self.dead_states:
+            self.dead_until = first_q
+            return -1
+
+        visited: list[tuple[int, str]] = [first_state]
+        pos = first_q + 1
+        while pos < limit:
+            if quote:
+                q_end = text.find(quote, pos, limit)
+                if q_end == -1:
+                    self.dead_states.update(visited)
+                    self.dead_until = first_q
+                    return -1
+                pos = q_end + 1
+                quote = ""
+            else:
+                gt2 = text.find(">", pos, limit)
+                if gt2 == -1:
+                    self.dead_states.update(visited)
+                    self.dead_until = first_q
+                    return -1
+                dq2 = text.find('"', pos, gt2)
+                sq2 = text.find("'", pos, gt2)
+                if dq2 == -1 and sq2 == -1:
+                    return gt2
+                if dq2 != -1 and (sq2 == -1 or dq2 < sq2):
+                    q_state = (dq2, '"')
+                    if q_state in self.dead_states:
+                        self.dead_states.update(visited)
+                        self.dead_until = first_q
+                        return -1
+                    visited.append(q_state)
+                    pos = dq2 + 1
+                    quote = '"'
+                else:
+                    q_state = (sq2, "'")
+                    if q_state in self.dead_states:
+                        self.dead_states.update(visited)
+                        self.dead_until = first_q
+                        return -1
+                    visited.append(q_state)
+                    pos = sq2 + 1
+                    quote = "'"
+        self.dead_states.update(visited)
+        self.dead_until = first_q
+        return -1
+
+
+def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:
+    if tag_name in _ALWAYS_HIDDEN_TAGS:
+        return True
+    stripped_attrs = attrs.rstrip()
+    if not stripped_attrs:
+        return False
+    attrs_end = len(stripped_attrs)
+    for match in _HTML_ATTR_RE.finditer(stripped_attrs):
+        attr_name = match.group(1).lower()
+        if attr_name == "hidden":
+            return True
+        if attr_name == "style":
+            style_val = next((g for g in match.groups()[1:] if g is not None), "")
+            if match.group(4) is not None and match.end() == attrs_end:
+                style_val = style_val.rstrip("/")
+            if _style_hides_element(style_val):
+                return True
+    return False
+
+
+def _line_end(text: str, pos: int) -> tuple[int, int]:
+    """Return (eol_index, next_line_start) for the line containing pos."""
+    n = len(text)
+    nl = text.find("\n", pos)
+    if nl == -1:
+        return n, n
+    if nl > pos and text[nl - 1] == "\r":
+        return nl - 1, nl + 1
+    return nl, nl + 1
+
+
+def _consume_md_title(text: str, start: int) -> int:
+    """Parse a CommonMark §4.7 delimited link title starting at 'start'; return index after closing line or -1."""
+    n = len(text)
+    if start >= n or text[start] not in ('"', "'", "("):
+        return -1
+    opener = text[start]
+    closer = ")" if opener == "(" else opener
+    i = start + 1
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "\n":
+            # CommonMark forbids blank lines inside link titles.
+            j = i + 1
+            while j < n and text[j] in (" ", "\t"):
+                j += 1
+            if j < n and text[j] in ("\r", "\n"):
+                return -1
+            i += 1
+            continue
+        if opener == "(" and ch == "(":
+            return -1
+        if ch == closer:
+            j = i + 1
+            while j < n and text[j] in (" ", "\t"):
+                j += 1
+            if j == n:
+                return n
+            if text[j] == "\r" and j + 1 < n and text[j + 1] == "\n":
+                return j + 2
+            if text[j] == "\n":
+                return j + 1
+            return -1
+        i += 1
+    return -1
+
+
+def _consume_hidden_md_ref(text: str, pos: int) -> int:
+    """Consume a CommonMark §4.7 link-reference definition with a hidden destination (#, #frag, <>, <#...>).
+
+    Returns index after the consumed definition (including its trailing newline) or -1 if not a hidden ref.
+    Guaranteed O(consumed) time.
+    """
+    n = len(text)
+    cur = pos
+    spaces = 0
+    while cur < n and spaces < 3 and text[cur] in (" ", "\t"):
+        cur += 1
+        spaces += 1
+    if cur >= n or text[cur] != "[":
+        return -1
+
+    # CommonMark §4.7 allows link labels up to 999 chars without blank lines or unescaped '['.
+    cur += 1
+    label_start = cur
+    close_bracket = -1
+    while cur < n and cur - label_start <= 999:
+        ch = text[cur]
+        if ch == "\\":
+            cur += 2
+            continue
+        if ch == "[":
+            return -1
+        if ch == "]":
+            close_bracket = cur
+            break
+        if ch == "\n":
+            j = cur + 1
+            while j < n and text[j] in (" ", "\t"):
+                j += 1
+            if j < n and text[j] in ("\r", "\n"):
+                return -1
+        cur += 1
+    if close_bracket == -1 or close_bracket + 1 >= n or text[close_bracket + 1] != ":":
+        return -1
+
+    cur = close_bracket + 2
+    while cur < n and text[cur] in (" ", "\t"):
+        cur += 1
+    if cur < n and text[cur] in ("\r", "\n"):
+        if text[cur] == "\r" and cur + 1 < n and text[cur + 1] == "\n":
+            cur += 2
+        else:
+            cur += 1
+        while cur < n and text[cur] in (" ", "\t"):
+            cur += 1
+    if cur >= n or text[cur] in ("\r", "\n"):
+        return -1
+
+    # Destination: hidden iff <>, <#...>, #, or #<non-space>
+    if text[cur] == "<":
+        dest_start = cur + 1
+        j = dest_start
+        while j < n and text[j] not in (">", "\r", "\n"):
+            if text[j] == "\\":
+                j += 2
+                continue
+            if text[j] == "<":
+                return -1
+            j += 1
+        if j >= n or text[j] != ">":
+            return -1
+        dest = text[dest_start:j]
+        if dest != "" and not dest.startswith("#"):
+            return -1
+        cur = j + 1
+    elif text[cur] == "#":
+        while cur < n and text[cur] not in (" ", "\t", "\r", "\n"):
+            cur += 1
+    else:
+        return -1
+
+    # Optional same-line title or next-line (indented or unindented) title
+    ws_start = cur
+    while cur < n and text[cur] in (" ", "\t"):
+        cur += 1
+    if cur == n:
+        return n
+    if text[cur] in ("\r", "\n"):
+        next_line = cur + 2 if (text[cur] == "\r" and cur + 1 < n and text[cur + 1] == "\n") else cur + 1
+        t_cur = next_line
+        while t_cur < n and text[t_cur] in (" ", "\t"):
+            t_cur += 1
+        if t_cur < n and text[t_cur] in ('"', "'", "("):
+            title_end = _consume_md_title(text, t_cur)
+            if title_end != -1:
+                return title_end
+        return next_line
+
+    # Same-line trailing text after whitespace: parse CommonMark multi-line title if present,
+    # otherwise fail-closed and strip the rest of the destination line.
+    if cur > ws_start and text[cur] in ('"', "'", "("):
+        title_end = _consume_md_title(text, cur)
+        if title_end != -1:
+            return title_end
+    if cur > ws_start:
+        _, next_line = _line_end(text, cur)
+        return next_line
+    return -1
+
+
+def _consume_hidden_element(
+    text: str,
+    start: int,
+    tname: str,
+    hidden_scanner: _TagScanner,
+) -> int:
+    """Consume the body and matching closing tag of a hidden HTML element in guaranteed O(N) time."""
+    n = len(text)
+    raw_close = _RAW_TEXT_CLOSE_RE.get(tname)
+    if raw_close is not None:
+        m = raw_close.search(text, start)
+        if m is None:
+            return n
+        gt = text.find(">", m.end())
+        return n if gt == -1 else gt + 1
+
+    depth = 1
+    pos = start
+    while pos < n and depth > 0:
+        lt = text.find("<", pos)
+        if lt == -1:
+            return n
+        if text.startswith("<!--", lt):
+            if text.startswith("<!-->", lt):
+                pos = lt + 5
+                continue
+            if text.startswith("<!--->", lt):
+                pos = lt + 6
+                continue
+            cend = text.find("-->", lt + 4)
+            if cend == -1:
+                return n
+            pos = cend + 3
+            continue
+        if lt + 1 < n and text[lt + 1] == "/":
+            m_close = _HTML_TAG_NAME_RE.match(text, lt + 2)
+            if (
+                m_close is not None
+                and m_close.group(0).lower() == tname
+                and m_close.end() < n
+                and (text[m_close.end()] in ">/" or text[m_close.end()].isspace())
+            ):
+                gt = text.find(">", m_close.end())
+                if gt == -1:
+                    return n
+                depth -= 1
+                pos = gt + 1
+                continue
+        m_open = _HTML_TAG_NAME_RE.match(text, lt + 1)
+        if (
+            m_open is not None
+            and m_open.end() < n
+            and (text[m_open.end()] in ">/" or text[m_open.end()].isspace())
+        ):
+            tag_end = hidden_scanner.find_tag_end(m_open.end())
+            if tag_end != -1:
+                nested_name = m_open.group(0).lower()
+                nested_raw = _RAW_TEXT_CLOSE_RE.get(nested_name)
+                if nested_raw is not None:
+                    m_end = nested_raw.search(text, tag_end + 1)
+                    if m_end is None:
+                        return n
+                    gt = text.find(">", m_end.end())
+                    pos = n if gt == -1 else gt + 1
+                    continue
+                if nested_name == tname and nested_name not in _HTML_VOID_TAGS:
+                    depth += 1
+                pos = tag_end + 1
+                continue
+        pos = lt + 1
+    return pos
+
+
+def _index_line_backticks(text: str, start: int, end: int) -> dict[int, deque[int]]:
+    """Pre-index all backtick runs on text[start:end] in a single O(len) pass."""
+    runs: dict[int, deque[int]] = {}
+    i = start
+    while i < end:
+        k = text.find("`", i, end)
+        if k == -1:
+            break
+        k2 = k + 1
+        while k2 < end and text[k2] == "`":
+            k2 += 1
+        runs.setdefault(k2 - k, deque()).append(k)
+        i = k2
+    return runs
+
+
+def _strip_hidden_markup(text: str) -> str:
+    """Strip non-rendered HTML comments, hidden Markdown link-ref comments, and hidden HTML elements.
+
+    Runs only on the injected SessionStart buffer (never mutating vault files) in
+    guaranteed O(N) time. Preserves fenced code blocks, inline code spans (while
+    respecting backslash-escaped backticks), trailing/standalone benign single-token
+    HTML anchor comments (e.g. ``<!-- av-v0580-release-20261125 -->``), and normal
+    Markdown link references whose destination is not ``#``, ``#...``, ``<>``, or
+    ``<#...>``. Returns the exact same string object when nothing is stripped.
+    """
+    if not text or ("<!--" not in text and "]:" not in text and "<" not in text):
+        return text
+
+    n = len(text)
+    out: list[str] = []
+    line_buf: list[str] = []
+    line_had_strip = False
+    line_orig_nonempty = False
+    changed = False
+
+    blank_limit = -1
+    top_scanner = _TagScanner(text, 0)
+    full_scanner = _TagScanner(text, n)
+
+    # Cached current-line EOL and per-line backtick index for guaranteed O(N) scanning.
+    cur_eol = -1
+    bt_line_eol = -1
+    bt_runs: dict[int, deque[int]] = {}
+
+    def _flush_line(ending: str) -> None:
+        nonlocal line_had_strip, line_orig_nonempty
+        rebuilt = "".join(line_buf)
+        if line_had_strip:
+            if not (line_orig_nonempty and not rebuilt.strip()):
+                out.append(rebuilt + ending)
+        else:
+            out.append(rebuilt + ending)
+        line_buf.clear()
+        line_had_strip = False
+        line_orig_nonempty = False
+
+    i = 0
+    while i < n:
+        at_line_start = not line_buf and not line_had_strip and (i == 0 or text[i - 1] == "\n")
+        if at_line_start:
+            eol, next_line = _line_end(text, i)
+            cur_eol = eol
+            line = text[i:eol]
+
+            # Fenced code blocks are preserved verbatim.
+            open_m = _FENCE_OPEN.fullmatch(line)
+            if open_m:
+                token = open_m.group(1) or open_m.group(2)
+                fence_char = token[0]
+                fence_len = len(token)
+                out.append(text[i:next_line])
+                i = next_line
+                while i < n:
+                    f_eol, f_next = _line_end(text, i)
+                    f_line = text[i:f_eol]
+                    out.append(text[i:f_next])
+                    i = f_next
+                    close_m = _FENCE_CLOSE.fullmatch(f_line)
+                    if close_m and close_m.group(1)[0] == fence_char and len(close_m.group(1)) >= fence_len:
+                        break
+                continue
+
+            # CommonMark §4.7 hidden Markdown link-reference comments.
+            ref_end = _consume_hidden_md_ref(text, i)
+            if ref_end != -1:
+                changed = True
+                i = ref_end
+                continue
+
+        ch = text[i]
+        if ch == "\n":
+            _flush_line("\n")
+            i += 1
+            continue
+        if ch == "\r":
+            if i + 1 < n and text[i + 1] == "\n":
+                _flush_line("\r\n")
+                i += 2
+            else:
+                _flush_line("\r")
+                i += 1
+            continue
+
+        # Backslash escapes before '\' or '`' prevent escaped backticks (\`) from opening code spans.
+        if ch == "\\" and i + 1 < n and text[i + 1] in ("\\", "`"):
+            line_buf.append(text[i:i + 2])
+            line_orig_nonempty = True
+            i += 2
+            continue
+
+        # CommonMark inline code span on the current line in O(N) amortized time.
+        if ch == "`":
+            if i > cur_eol:
+                cur_eol, _ = _line_end(text, i)
+            if cur_eol != bt_line_eol:
+                bt_runs = _index_line_backticks(text, i, cur_eol)
+                bt_line_eol = cur_eol
+            j = i + 1
+            while j < cur_eol and text[j] == "`":
+                j += 1
+            run = j - i
+            q = bt_runs.get(run)
+            close_start = -1
+            if q:
+                while q and q[0] < j:
+                    q.popleft()
+                if q:
+                    close_start = q.popleft()
+            if close_start != -1:
+                close_end = close_start + run
+                line_buf.append(text[i:close_end])
+                line_orig_nonempty = True
+                i = close_end
+                continue
+            line_buf.append(text[i:j])
+            line_orig_nonempty = True
+            i = j
+            continue
+
+        if ch == "<":
+            if text.startswith("<!--", i):
+                # HTML5 abrupt-closing empty comments <!--> and <!--->
+                if text.startswith("<!-->", i):
+                    changed = True
+                    line_had_strip = True
+                    line_orig_nonempty = True
+                    i += 5
+                    continue
+                if text.startswith("<!--->", i):
+                    changed = True
+                    line_had_strip = True
+                    line_orig_nonempty = True
+                    i += 6
+                    continue
+                end = text.find("-->", i + 4)
+                if end == -1:
+                    changed = True
+                    line_had_strip = True
+                    line_orig_nonempty = True
+                    i = n
+                    break
+                raw_comment = text[i:end + 3]
+                inner_comment = text[i + 4:end].strip()
+                if end + 3 > cur_eol:
+                    cur_eol, _ = _line_end(text, end + 3)
+                trailing = text[end + 3:cur_eol]
+                if (
+                    "\n" not in raw_comment
+                    and _SAFE_ANCHOR_TOKEN_RE.fullmatch(inner_comment)
+                    and not trailing.strip()
+                ):
+                    line_buf.append(raw_comment)
+                    line_orig_nonempty = True
+                else:
+                    changed = True
+                    line_had_strip = True
+                    line_orig_nonempty = True
+                i = end + 3
+                continue
+
+            # HTML opening tag (CommonMark Type 1 <script>/<style> may span blank lines).
+            m_open = _HTML_TAG_NAME_RE.match(text, i + 1)
+            if (
+                m_open is not None
+                and m_open.end() < n
+                and (text[m_open.end()] in ">/" or text[m_open.end()].isspace())
+            ):
+                tname = m_open.group(0).lower()
+                if tname in _RAW_TEXT_CLOSE_RE:
+                    tag_end = full_scanner.find_tag_end(m_open.end())
+                else:
+                    if i >= blank_limit:
+                        blank_m = _BLANK_LINE_RE.search(text, i)
+                        blank_limit = blank_m.start() if blank_m is not None else n
+                        top_scanner.set_limit(blank_limit, i)
+                    tag_end = top_scanner.find_tag_end(m_open.end())
+                if tag_end != -1:
+                    attrs = text[m_open.end():tag_end]
+                    if _is_hidden_open_tag(tname, attrs):
+                        changed = True
+                        line_had_strip = True
+                        line_orig_nonempty = True
+                        if tname in _HTML_VOID_TAGS:
+                            i = tag_end + 1
+                        else:
+                            i = _consume_hidden_element(text, tag_end + 1, tname, full_scanner)
+                        continue
+                    # Non-hidden valid HTML tag: emit atomically so quotes inside it are never rescanned.
+                    segment = text[i:tag_end + 1]
+                    if "\n" not in segment:
+                        line_buf.append(segment)
+                        line_orig_nonempty = True
+                    else:
+                        parts = segment.splitlines(keepends=True)
+                        for part in parts[:-1]:
+                            if part.endswith("\r\n"):
+                                line_buf.append(part[:-2])
+                                line_orig_nonempty = True
+                                _flush_line("\r\n")
+                            elif part.endswith("\n"):
+                                line_buf.append(part[:-1])
+                                line_orig_nonempty = True
+                                _flush_line("\n")
+                            else:
+                                line_buf.append(part)
+                                line_orig_nonempty = True
+                        last_part = parts[-1]
+                        line_buf.append(last_part)
+                        if last_part.strip():
+                            line_orig_nonempty = True
+                    i = tag_end + 1
+                    continue
+
+        # Advance linearly to the next interesting delimiter on this line (single pass, O(N)).
+        if i > cur_eol:
+            cur_eol, _ = _line_end(text, i)
+        m_delim = _DELIM_RE.search(text, i + 1, cur_eol)
+        nxt = m_delim.start() if m_delim is not None else cur_eol
+        chunk = text[i:nxt]
+        line_buf.append(chunk)
+        if not line_orig_nonempty and chunk.strip():
+            line_orig_nonempty = True
+        i = nxt
+
+    if line_buf or line_had_strip:
+        _flush_line("")
+
+    return "".join(out) if changed else text
 
 
 def _redact_sensitive_lines(text: str) -> str:
@@ -673,7 +1371,7 @@ def _compact_extra_source(vault: Path, config: dict, key: str, fallback: str = '
         raise ValueError('runtime_is_not_context')
     path = checked_note_path(vault, value, (*config['deny_zones'], '.git'))
     text, truncated = _revocation_note(path, value, revocations)
-    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), 0, truncated, value)
+    return None if text is None else SectionSource(key, _neutralize_header_lines(_redact_sensitive_lines(_strip_hidden_markup(_strip_invisible_smuggling(text)))), 0, truncated, value)
 
 
 def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSource | None], *, revocations=None) -> SectionSource | None:
@@ -717,9 +1415,10 @@ def _compact_fixed_source(vault: Path, config: dict, sources: Sequence[SectionSo
         digest = hashlib.sha256(source.text.encode('utf-8')).hexdigest()
         bound.append(f'Source {_fixed_line(source.source_path)} normalized_excerpt_sha256={digest}'
                      + (' [source excerpt incomplete]' if source.source_truncated else ''))
-    # The digest binds the inspected normalized excerpt (credential lines masked,
-    # header-like lines defused), not raw bytes, factual accuracy, approval, or
-    # content beyond the configured byte limit.
+    # The digest binds the inspected normalized excerpt (invisible smuggling and
+    # hidden markup stripped, credential lines masked, header-like lines defused),
+    # not raw bytes, factual accuracy, approval, or content beyond the configured
+    # byte limit.
     # The block is atomic, so items go first and are counted: an over-budget
     # block would drop the policy lines and source hashes with them.
     text = ''
@@ -800,7 +1499,10 @@ def _configured_source(
     text, source_truncated = _revocation_note(path, rel_path, revocations)
     if text is None:
         return None
-    return SectionSource(header, _neutralize_header_lines(_redact_sensitive_lines(_strip_invisible_smuggling(text))), budget, source_truncated, rel_path)
+    cleaned = _neutralize_header_lines(_redact_sensitive_lines(_strip_hidden_markup(_strip_invisible_smuggling(text))))
+    if not cleaned.strip():
+        return None
+    return SectionSource(header, cleaned, budget, source_truncated, rel_path)
 
 
 def _write_stdout(text: str) -> None:

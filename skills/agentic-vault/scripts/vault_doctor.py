@@ -234,19 +234,30 @@ def _diagnose_section(
         section["effective_token_budget"] = budget
         return section, None
 
-    # The hook strips invisible smuggling chars (v0.54.0), redacts sensitive lines
+    # The hook strips invisible smuggling chars (v0.54.0), strips hidden HTML/
+    # Markdown comments and invisible tags (v0.58.0), redacts sensitive lines
     # (v0.51.0), and then prefixes note lines that open like its section headers
     # (v0.52.1) before rendering, so the counts follow the exact same text. An
     # older hook without any helper is reproduced as it is.
     strip_smuggling = getattr(session_hook, "_strip_invisible_smuggling", None)
     if strip_smuggling is not None:
         text = strip_smuggling(text)
+    strip_hidden = getattr(session_hook, "_strip_hidden_markup", None)
+    if strip_hidden is not None:
+        text = strip_hidden(text)
     redact = getattr(session_hook, "_redact_sensitive_lines", None)
     if redact is not None:
         text = redact(text)
     neutralize = getattr(session_hook, "_neutralize_header_lines", None)
     if neutralize is not None:
         text = neutralize(text)
+    if not text.strip():
+        section = _base_section(
+            "empty", "note_empty", budget,
+            "add_context_or_disable_the_section",
+        )
+        section["effective_token_budget"] = budget
+        return section, None
     source = session_hook.SectionSource(header, text, budget, source_truncated, rel_path)
     # This section alone, under the same token budget and host output cap.
     rendered = session_hook.compose_context([source]).sections[0]

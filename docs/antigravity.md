@@ -11,7 +11,7 @@ agy 대화 세션으로는 확인하지 않았다(아래 [확인하지 않은 �
 터미널에서 릴리스 태그와 패키지 폴더를 고정한 주소로 설치한다.
 
 ```text
-agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.57.0/antigravity
+agy plugin install https://github.com/Technoetic/agentic-vault/tree/v0.58.0/antigravity
 ```
 
 Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity` 폴더를 지정해도 된다. 경로는 실제 위치로 바꾼다.
@@ -20,8 +20,8 @@ Release ZIP을 풀었거나 저장소를 clone했다면 그 안의 `antigravity`
 agy plugin install "C:/path/to/agentic-vault/antigravity"
 ```
 
-설치한 뒤 `agy plugin list --json`에서 `agentic-vault` 항목의 `source`가 `"antigravity"`, `version`이 `0.57.0`이고
-훅 묶음 `agentic-vault`가 보이는지 확인한다. 위 태그의 공개 패키지는 스킬 16개, 현재 소스에서 만든 로컬 패키지는 15개다.
+설치한 뒤 `agy plugin list --json`에서 `agentic-vault` 항목의 `source`가 `"antigravity"`, `version`이 `0.58.0`이고
+훅 묶음 `agentic-vault`와 스킬 15개가 보이는지 확인한다.
 
 저장소 루트 주소(태그만 고정한 주소 포함)로는 설치하지 않는다. agy는 루트를 Claude Code 플러그인으로 보고 자동
 변환해 설치한다. 이때 명령은 `agentic-vault-cmd-*` 스킬이 되고 본문의 `${CLAUDE_PLUGIN_ROOT}`·`$ARGUMENTS`가 그대로

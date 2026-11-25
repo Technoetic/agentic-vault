@@ -40,6 +40,11 @@ EXACT_PAIRED_METHOD = ('paired sign-flip; two-sided; exact enumeration of all 2^
 HYPERGEOMETRIC_METHOD = 'hypergeometric_exact_inversion; integer bisection over K'
 PAIRED_BOOTSTRAP_METHOD = 'paired percentile bootstrap; deterministic seed; flat and optional stratified macro'
 CROSS_FIT_METHOD = 'deterministic two-fold SHA-256 hash cross-fitting; out-of-fold evaluation'
+HOLM_BONFERRONI_SCHEMA = 'agentic-vault/holm-bonferroni/v1'
+HOLM_BONFERRONI_METHOD = 'Holm (1979) step-down sequentially rejective FWER adjustment'
+PPI_PP_SCHEMA = 'agentic-vault/ppi-pp-mean/v1'
+PPI_PP_METHOD = 'PPI++ power-tuned prediction-powered mean estimator and asymptotic normal CI (Angelopoulos, Duchi & Zrnic)'
+HOLM_MAX_HYPOTHESES = 10000
 
 
 def paired_differences(baseline, improved) -> list:
@@ -432,4 +437,184 @@ def cross_fit_two_fold(
         'fold_means': [math.fsum(scores) / len(scores) for scores in fold_scores],
         'overall_mean': math.fsum(all_scores) / len(all_scores),
         'per_item': per_item,
+    }
+
+
+def _check_finite_numbers(values, name: str, *, min_len: int = 1) -> list[float]:
+    if not isinstance(values, (list, tuple)) or len(values) < min_len:
+        raise ValueError(f'{name} must be a list or tuple with at least {min_len} finite numbers')
+    out: list[float] = []
+    for val in values:
+        if type(val) not in (int, float) or not math.isfinite(val):
+            raise ValueError(f'{name} must contain only finite real numbers')
+        out.append(float(val))
+    return out
+
+
+def holm_bonferroni_adjust(p_values, *, alpha: float = 0.05) -> dict:
+    """Holm (1979) step-down sequentially rejective FWER adjustment (stdlib only).
+
+    Accepts a non-empty sequence of p-values or a dict mapping non-empty labels
+    to p-values in [0, 1]. Returns adjusted p-values and rejection indicators in
+    original order. Descriptive multiplicity summary; never turns into a gate.
+    """
+    if type(alpha) is not float or not math.isfinite(alpha) or not 0.0 < alpha < 1.0:
+        raise ValueError('alpha must be a finite float strictly between 0 and 1')
+    if isinstance(p_values, dict):
+        if not p_values or len(p_values) > HOLM_MAX_HYPOTHESES:
+            raise ValueError(f'p_values must have between 1 and {HOLM_MAX_HYPOTHESES} entries')
+        labels: list[str] = []
+        raw_list: list[float] = []
+        for label, val in p_values.items():
+            if type(label) is not str or not label.strip():
+                raise ValueError('p_values dict keys must be non-empty strings')
+            if type(val) not in (int, float) or not math.isfinite(val) or not 0.0 <= val <= 1.0:
+                raise ValueError('p-values must be finite numbers in [0, 1]')
+            labels.append(label)
+            raw_list.append(float(val))
+    elif isinstance(p_values, (list, tuple)):
+        if not p_values or len(p_values) > HOLM_MAX_HYPOTHESES:
+            raise ValueError(f'p_values must have between 1 and {HOLM_MAX_HYPOTHESES} entries')
+        labels = [str(i) for i in range(len(p_values))]
+        raw_list = []
+        for val in p_values:
+            if type(val) not in (int, float) or not math.isfinite(val) or not 0.0 <= val <= 1.0:
+                raise ValueError('p-values must be finite numbers in [0, 1]')
+            raw_list.append(float(val))
+    else:
+        raise ValueError('p_values must be a non-empty list, tuple, or dict')
+
+    m = len(raw_list)
+    order = sorted(range(m), key=lambda idx: (raw_list[idx], idx))
+    adjusted = [0.0] * m
+    ranks = [0] * m
+    running_max = 0.0
+    for step, idx in enumerate(order):
+        scaled = (m - step) * raw_list[idx]
+        if scaled > running_max:
+            running_max = scaled
+        adj = 1.0 if running_max > 1.0 else running_max
+        adjusted[idx] = adj
+        ranks[idx] = step + 1
+
+    items = [
+        {
+            'label': labels[i],
+            'raw_p': raw_list[i],
+            'adjusted_p': adjusted[i],
+            'rejected': adjusted[i] <= alpha,
+            'rank': ranks[i],
+        }
+        for i in range(m)
+    ]
+    return {
+        'schema': HOLM_BONFERRONI_SCHEMA,
+        'method': HOLM_BONFERRONI_METHOD,
+        'alpha': alpha,
+        'hypothesis_count': m,
+        'rejected_count': sum(1 for item in items if item['rejected']),
+        'unadjusted_rejected_count': sum(1 for val in raw_list if val <= alpha),
+        'items': items,
+    }
+
+
+def ppi_pp_mean_ci(
+    gold_labels,
+    gold_predictions,
+    unlabeled_predictions,
+    *,
+    confidence: float = 0.95,
+    power_tuning: bool = True,
+    lam: float | None = None,
+) -> dict:
+    """PPI++ power-tuned prediction-powered mean estimator and asymptotic normal CI.
+
+    Implements the closed-form PPI++ mean estimator of Angelopoulos, Duchi & Zrnic
+    (arXiv:2311.01453v2; Science 2023 doi:10.1126/science.adi6000) using only the
+    Python standard library. Combines a small gold-labeled sample (Y, f(X)) with a
+    larger unlabeled sample of proxy/model predictions f(X_unlabeled). When proxy
+    variance is zero, power tuning sets lambda = 0 and reduces to the classical
+    labeled-only estimator. Descriptive only; sets small_sample_warning when n < 30.
+    """
+    y_gold = _check_finite_numbers(gold_labels, 'gold_labels', min_len=2)
+    f_gold = _check_finite_numbers(gold_predictions, 'gold_predictions', min_len=2)
+    if len(y_gold) != len(f_gold):
+        raise ValueError('gold_labels and gold_predictions must have identical lengths')
+    f_unlab = _check_finite_numbers(unlabeled_predictions, 'unlabeled_predictions', min_len=2)
+    alpha = confidence_alpha(confidence)
+    if type(power_tuning) is not bool:
+        raise ValueError('power_tuning must be a bool')
+    if lam is not None:
+        if power_tuning:
+            raise ValueError('specify either power_tuning=True or an explicit lam, not both')
+        if type(lam) not in (int, float) or not math.isfinite(lam):
+            raise ValueError('lam must be a finite real number')
+        lam_val = float(lam)
+    else:
+        lam_val = 1.0
+
+    n = len(y_gold)
+    N = len(f_unlab)
+    try:
+        y_bar = math.fsum(y_gold) / n
+        f_bar = math.fsum(f_gold) / n
+        f_tilde_bar = math.fsum(f_unlab) / N
+
+        var_y = math.fsum((y - y_bar) ** 2 for y in y_gold) / (n - 1)
+        var_f_tilde = math.fsum((f - f_tilde_bar) ** 2 for f in f_unlab) / (N - 1)
+        cov_yf = math.fsum((y - y_bar) * (f - f_bar) for y, f in zip(y_gold, f_gold)) / (n - 1)
+
+        if power_tuning:
+            all_f = f_gold + f_unlab
+            all_f_bar = math.fsum(all_f) / (n + N)
+            var_f_all = math.fsum((f - all_f_bar) ** 2 for f in all_f) / (n + N - 1)
+            if var_f_all > 0.0:
+                lam_hat = cov_yf / ((1.0 + n / N) * var_f_all)
+            else:
+                lam_hat = 0.0
+        else:
+            lam_hat = lam_val
+
+        rectifiers = [y - lam_hat * f for y, f in zip(y_gold, f_gold)]
+        rect_bar = math.fsum(rectifiers) / n
+        var_rect = math.fsum((r - rect_bar) ** 2 for r in rectifiers) / (n - 1)
+
+        theta_hat = lam_hat * f_tilde_bar + rect_bar
+        se_ppi = math.sqrt(max(0.0, (lam_hat ** 2) * var_f_tilde / N + var_rect / n))
+        se_cls = math.sqrt(max(0.0, var_y / n))
+        z = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+
+        ci_low = theta_hat - z * se_ppi
+        ci_high = theta_hat + z * se_ppi
+        cls_low = y_bar - z * se_cls
+        cls_high = y_bar + z * se_cls
+        width_ratio = (se_ppi / se_cls) if se_cls > 0.0 else (1.0 if se_ppi == 0.0 else None)
+    except OverflowError as exc:
+        raise ValueError('numeric overflow in ppi_pp_mean_ci inputs') from exc
+
+    if not all(
+        math.isfinite(val)
+        for val in (lam_hat, theta_hat, se_ppi, ci_low, ci_high, y_bar, se_cls, cls_low, cls_high)
+    ) or (width_ratio is not None and not math.isfinite(width_ratio)):
+        raise ValueError('non-finite intermediate value in ppi_pp_mean_ci')
+
+    return {
+        'schema': PPI_PP_SCHEMA,
+        'method': PPI_PP_METHOD,
+        'confidence': confidence,
+        'power_tuning': power_tuning,
+        'lambda_hat': lam_hat,
+        'n_labeled': n,
+        'n_unlabeled': N,
+        'point_estimate': theta_hat,
+        'std_error': se_ppi,
+        'ci_low': ci_low,
+        'ci_high': ci_high,
+        'classical_mean': y_bar,
+        'classical_std_error': se_cls,
+        'classical_ci_low': cls_low,
+        'classical_ci_high': cls_high,
+        'ci_width_ratio': width_ratio,
+        'small_sample_warning': n < 30,
+        'caveat': 'asymptotic_normal_ci_descriptive_only',
     }

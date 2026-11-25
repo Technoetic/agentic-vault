@@ -425,6 +425,37 @@ class TaskContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['parent']['contract_id'], captured['contract_id'])
 
+    def test_next_legal_steps_guides_recovery_for_needs_clarification_stale_and_cli_errors(self):
+        ready = self.capture()
+        self.assertEqual(ready['next_legal_steps'], ['present_contract_for_execution_review'])
+
+        # Missing goal + open blocking question -> explicit steps for each missing requirement
+        incomplete = copy.deepcopy(self.definition)
+        incomplete['fields'] = [f for f in incomplete['fields'] if f['kind'] != 'goal']
+        incomplete['questions'] = [{'id': 'q-fmt', 'text': 'Format?', 'blocking': True, 'status': 'open'}]
+        res_inc = self.capture(incomplete)
+        self.assertEqual(res_inc['status'], 'needs_clarification')
+        self.assertIn('declare_one_confirmed_user_goal_with_source', res_inc['next_legal_steps'])
+        self.assertIn('resolve_blocking_questions:q-fmt', res_inc['next_legal_steps'])
+        self.assertIn('revise_or_recapture_contract_after_user_confirmation', res_inc['next_legal_steps'])
+
+        # Stale contract -> explicit inspection and revise/recapture steps
+        self.write('notes/request.md', 'Modified source.\n')
+        stale = contracts.inspect(self.vault, ready['contract_id'])
+        self.assertEqual(stale['status'], 'stale')
+        self.assertIn('revise_contract_with_updated_input_or_capture_new_contract', stale['next_legal_steps'])
+
+        # CLI ContractError remains content-free and includes next_legal_steps
+        script = str(SCRIPTS / 'vault_task_contracts.py')
+        bad = subprocess.run([sys.executable, script, '--vault', str(self.vault), 'inspect', 'secret-id'],
+                             capture_output=True, text=True)
+        self.assertEqual(bad.returncode, 2)
+        payload = json.loads(bad.stdout)
+        self.assertFalse(payload['ok'])
+        self.assertIsInstance(payload['next_legal_steps'], list)
+        self.assertTrue(payload['next_legal_steps'])
+        self.assertNotIn('secret-id', bad.stdout + bad.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

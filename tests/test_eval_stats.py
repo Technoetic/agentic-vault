@@ -130,5 +130,132 @@ class CrossFitTwoFoldTests(unittest.TestCase):
             )
 
 
+class HolmBonferroniTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.stats = _load_stats()
+
+    def test_step_down_monotonicity_and_order_preservation(self) -> None:
+        # Classic Holm (1979) example: sorted p = [0.005, 0.015, 0.02, 0.04]
+        # multipliers = [4, 3, 2, 1] -> raw scaled = [0.02, 0.045, 0.04, 0.04]
+        # step-down cummax -> [0.02, 0.045, 0.045, 0.045]
+        result = self.stats.holm_bonferroni_adjust([0.04, 0.005, 0.02, 0.015], alpha=0.05)
+        self.assertEqual(result["hypothesis_count"], 4)
+        self.assertEqual(result["rejected_count"], 4)
+        self.assertEqual(result["unadjusted_rejected_count"], 4)
+        adj = [item["adjusted_p"] for item in result["items"]]
+        self.assertAlmostEqual(adj[1], 0.02, places=12)
+        self.assertAlmostEqual(adj[3], 0.045, places=12)
+        self.assertAlmostEqual(adj[2], 0.045, places=12)
+        self.assertAlmostEqual(adj[0], 0.045, places=12)
+
+    def test_dict_input_controls_fwer_against_unadjusted_rejections(self) -> None:
+        result = self.stats.holm_bonferroni_adjust(
+            {"m1": 0.01, "m2": 0.03, "m3": 0.04, "m4": 0.50},
+            alpha=0.05,
+        )
+        self.assertEqual(result["unadjusted_rejected_count"], 3)
+        self.assertEqual(result["rejected_count"], 1)
+        by_label = {item["label"]: item for item in result["items"]}
+        self.assertTrue(by_label["m1"]["rejected"])
+        self.assertAlmostEqual(by_label["m1"]["adjusted_p"], 0.04, places=12)
+        self.assertFalse(by_label["m2"]["rejected"])
+        self.assertAlmostEqual(by_label["m2"]["adjusted_p"], 0.09, places=12)
+        self.assertFalse(by_label["m3"]["rejected"])
+        self.assertAlmostEqual(by_label["m3"]["adjusted_p"], 0.09, places=12)
+        self.assertAlmostEqual(by_label["m4"]["adjusted_p"], 0.50, places=12)
+
+    def test_validation_rejects_bad_inputs(self) -> None:
+        for bad in ([], {}, [-0.01], [1.01], [math.nan], [math.inf], [True], {"": 0.05}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.stats.holm_bonferroni_adjust(bad)
+        for bad_alpha in (0.0, 1.0, -0.05, math.nan, True, "0.05"):
+            with self.subTest(alpha=bad_alpha), self.assertRaises(ValueError):
+                self.stats.holm_bonferroni_adjust([0.01], alpha=bad_alpha)
+
+    def test_clamping_at_one_ties_and_schema(self) -> None:
+        clamped = self.stats.holm_bonferroni_adjust([0.6, 0.7], alpha=0.05)
+        self.assertEqual(clamped["schema"], "agentic-vault/holm-bonferroni/v1")
+        self.assertEqual([item["adjusted_p"] for item in clamped["items"]], [1.0, 1.0])
+        self.assertEqual(clamped["rejected_count"], 0)
+
+        tied = self.stats.holm_bonferroni_adjust([0.02, 0.02, 0.5], alpha=0.05)
+        # step 0: 3*0.02=0.06; step 1: max(0.06, 2*0.02)=0.06; step 2: max(0.06, 1*0.5)=0.5
+        self.assertAlmostEqual(tied["items"][0]["adjusted_p"], 0.06, places=12)
+        self.assertAlmostEqual(tied["items"][1]["adjusted_p"], 0.06, places=12)
+        self.assertAlmostEqual(tied["items"][2]["adjusted_p"], 0.5, places=12)
+        self.assertEqual(tied["rejected_count"], 0)
+
+
+class PpiPlusPlusTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.stats = _load_stats()
+
+    def test_strong_proxy_narrows_ci_and_matches_closed_form(self) -> None:
+        # High correlation proxy f(x) = y + constant bias (+0.2) + tiny noise
+        gold_y = [float(i % 5) for i in range(40)]
+        gold_f = [y + 0.2 + (0.05 if i % 2 == 0 else -0.05) for i, y in enumerate(gold_y)]
+        unlab_f = [float(i % 5) + 0.2 for i in range(400)]
+
+        res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f, confidence=0.95)
+        self.assertEqual(res["schema"], "agentic-vault/ppi-pp-mean/v1")
+        self.assertFalse(res["small_sample_warning"])
+        self.assertAlmostEqual(res["point_estimate"], 2.0, places=2)
+        self.assertGreater(res["lambda_hat"], 0.85)
+        self.assertLess(res["ci_width_ratio"], 0.45)
+        self.assertLess(res["ci_low"], res["point_estimate"])
+        self.assertGreater(res["ci_high"], res["point_estimate"])
+        self.assertEqual(res["caveat"], "asymptotic_normal_ci_descriptive_only")
+
+    def test_constant_proxy_falls_back_to_classical_interval(self) -> None:
+        gold_y = [0.0, 1.0, 0.0, 1.0, 1.0, 0.0]
+        gold_f = [0.5] * 6
+        unlab_f = [0.5] * 50
+
+        res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f)
+        self.assertTrue(res["small_sample_warning"])
+        self.assertEqual(res["lambda_hat"], 0.0)
+        self.assertAlmostEqual(res["point_estimate"], res["classical_mean"], places=12)
+        self.assertAlmostEqual(res["ci_low"], res["classical_ci_low"], places=12)
+        self.assertAlmostEqual(res["ci_high"], res["classical_ci_high"], places=12)
+        self.assertAlmostEqual(res["ci_width_ratio"], 1.0, places=12)
+
+    def test_uncorrelated_varying_proxy_sets_lambda_zero_and_extreme_overflow_raises_value_error(self) -> None:
+        # Varying proxy with exact zero sample covariance with gold_y
+        gold_y = [0.0, 0.0, 1.0, 1.0] * 10
+        gold_f = [0.0, 1.0, 0.0, 1.0] * 10
+        unlab_f = [0.0, 1.0] * 100
+
+        res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f)
+        self.assertAlmostEqual(res["lambda_hat"], 0.0, places=12)
+        self.assertAlmostEqual(res["point_estimate"], res["classical_mean"], places=12)
+        self.assertAlmostEqual(res["ci_width_ratio"], 1.0, places=12)
+
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1e200, -1e200], [1.0, 2.0], [1.0, 2.0])
+
+    def test_fixed_standard_ppi_lambda_and_validation(self) -> None:
+        gold_y = [1.0, 2.0, 3.0, 4.0]
+        gold_f = [1.5, 2.5, 3.5, 4.5]
+        unlab_f = [1.5, 2.5, 3.5, 4.5, 2.5, 3.5]
+
+        res = self.stats.ppi_pp_mean_ci(gold_y, gold_f, unlab_f, power_tuning=False)
+        self.assertEqual(res["lambda_hat"], 1.0)
+        # Rectifier y - f is constant -0.5 -> point estimate = mean(unlab_f) - 0.5 = 2.5
+        self.assertAlmostEqual(res["point_estimate"], 2.5, places=12)
+
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1.0], [1.0], [1.0, 2.0])
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1.0, 2.0], [1.0], [1.0, 2.0])
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1.0, 2.0], [1.0, 2.0], [1.0])
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([True, False], [1.0, 0.0], [1.0, 0.0])
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1.0, 2.0], [1.0, 2.0], [1.0, math.nan])
+        with self.assertRaises(ValueError):
+            self.stats.ppi_pp_mean_ci([1.0, 2.0], [1.0, 2.0], [1.0, 2.0], power_tuning=True, lam=0.5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,15 +22,15 @@ HEALTHCHECK_SCRIPT = (
     REPO_ROOT / "skills" / "agentic-vault" / "scripts" / "vault_healthcheck.py"
 )
 
-EXPECTED = "0.57.0"
-EXPECTED_PUBLIC_REF = "0.57.0"
+EXPECTED = "0.58.0"
+EXPECTED_PUBLIC_REF = "0.58.0"
 EXPECTED_BADGE_LINE = (
-    "[![Version](https://img.shields.io/badge/v0.57.0-10B981?style=for-the-badge)]"
-    "(docs/releases/v0.57.0.md)"
+    "[![Version](https://img.shields.io/badge/v0.58.0-10B981?style=for-the-badge)]"
+    "(docs/releases/v0.58.0.md)"
 )
 EXPECTED_TREE_LINE = (
     "├── .claude-plugin/                    "
-    "← plugin.json · marketplace.json (v0.57.0 · MIT)"
+    "← plugin.json · marketplace.json (v0.58.0 · MIT)"
 )
 EXPECTED_HISTORICAL_ORIGINS = (
     "그래서 v0.8.0부터 healthcheck 섹션 11",
@@ -1711,12 +1711,12 @@ class V0460ReleaseMetadataTests(unittest.TestCase):
                     self.assertTrue((document.parent / unquote(target.split("#", 1)[0])).exists(), target)
 
     def test_v0460_moves_only_the_guard_stamps(self) -> None:
-        # The deny guard carries the fold and its parser must match its stamp; rule templates,
-        # the Aside helper, the lesson cue hook and the git hooks did not change.
+        # At v0.46.0 the deny guard carried the fold and its parser matched its stamp; rule
+        # templates, the Aside helper, the lesson cue hook and the git hooks did not change.
         for relative in ("assets/adapters/deny-guard/deny-guard.py",
                          "assets/adapters/deny-guard/ps-parse.ps1"):
             with self.subTest(stamped=relative):
-                first = (REPO_ROOT / relative).read_text(encoding="utf-8-sig").splitlines()[0]
+                first = _published_text("v0.46.0", relative).splitlines()[0]
                 self.assertTrue(first.endswith(" engine=0.46.0"), first)
         unchanged = (*BROWSER_RULE.parent.glob("vault-*.md"),
                      REPO_ROOT / "assets/adapters/aside/aside-up.ps1",
@@ -2871,8 +2871,12 @@ class V0480ReleaseMetadataTests(unittest.TestCase):
         ("E5", "- Probe E5", ("`startup`", "`compact`", "`PreCompact`", "`SessionEnd`", "minus their time field",
                              "byte-identical", "`hooks/hooks.json`", "`assets/templates/settings-permissions.json`")),
     )
-    # Files under assets/, hooks/ and skills/ that carry engine=0.48.0 in their first five lines.
-    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+    # Files under assets/, hooks/ and skills/ that carry the active release engine stamp in their first five lines.
+    DECLARED_STAMPS = {
+        "skills/agentic-vault/scripts/vault_healthcheck.py",
+        "assets/adapters/deny-guard/deny-guard.py",
+        "assets/adapters/deny-guard/ps-parse.ps1",
+    }
 
     def test_v0480_release_note_sections_and_install_ref(self) -> None:
         release = self.RELEASE.read_text(encoding="utf-8")
@@ -3230,11 +3234,12 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         self.assertIn("## v0.50.0 — superseded pull-request CI runs and linked-worktree HEADs", headings)
         self.assertIn("## v0.51.0 — independent-evaluation fixes and opt-in BizRouter Decisions adapter", headings)
         self.assertIn(V0520ReleaseMetadataTests.ENGLISH, headings)
-        self.assertEqual(headings[:9], [V0570ReleaseMetadataTests.CODEX_EN,
-                                        V0560ReleaseMetadataTests.CODEX_EN, V0550ReleaseMetadataTests.CODEX_EN,
-                                        V0541ReleaseMetadataTests.CODEX_EN, V0540ReleaseMetadataTests.CODEX_EN,
-                                        V0532ReleaseMetadataTests.CODEX_EN, V0530ReleaseMetadataTests.ENGLISH,
-                                        V0521ReleaseMetadataTests.ENGLISH, V0520ReleaseMetadataTests.ENGLISH])
+        self.assertEqual(headings[:10], [V0580ReleaseMetadataTests.CODEX_EN,
+                                         V0570ReleaseMetadataTests.CODEX_EN,
+                                         V0560ReleaseMetadataTests.CODEX_EN, V0550ReleaseMetadataTests.CODEX_EN,
+                                         V0541ReleaseMetadataTests.CODEX_EN, V0540ReleaseMetadataTests.CODEX_EN,
+                                         V0532ReleaseMetadataTests.CODEX_EN, V0530ReleaseMetadataTests.ENGLISH,
+                                         V0521ReleaseMetadataTests.ENGLISH, V0520ReleaseMetadataTests.ENGLISH])
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("](antigravity.md)", "](releases/v0.48.0.md)", "](verification/v0.48.0.md)",
                         "unchanged from v0.46.0 and v0.47.0"):
@@ -3247,7 +3252,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
         self.assertIn(f"최신 소스는 [v{EXPECTED}](releases/v{EXPECTED}.md); [검증 기록](verification/v{EXPECTED}.md).", row)
-        self.assertIn("이전 [v0.56.0](releases/v0.56.0.md) / [v0.55.0](releases/v0.55.0.md) / [v0.54.1](releases/v0.54.1.md) / [v0.54.0](releases/v0.54.0.md) / [v0.53.2](releases/v0.53.2.md) / [v0.53.0](releases/v0.53.0.md) / [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
+        self.assertIn("이전 [v0.57.0](releases/v0.57.0.md) / [v0.56.0](releases/v0.56.0.md) / [v0.55.0](releases/v0.55.0.md) / [v0.54.1](releases/v0.54.1.md) / [v0.54.0](releases/v0.54.0.md) / [v0.53.2](releases/v0.53.2.md) / [v0.53.0](releases/v0.53.0.md) / [v0.52.1](releases/v0.52.1.md) / [v0.51.0](releases/v0.51.0.md) / [v0.50.0](releases/v0.50.0.md) / [v0.49.0](releases/v0.49.0.md) / [v0.48.0](releases/v0.48.0.md) / [v0.47.0](releases/v0.47.0.md)", row)
         guide = next(line for line in index.splitlines() if line.startswith("| [antigravity.md](antigravity.md) |"))
         self.assertIn("(v0.48.0)", guide)
 
@@ -3279,7 +3284,7 @@ class V0480SharedSurfaceTests(unittest.TestCase):
 
     def test_security_states_the_antigravity_limits(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(f"| 0.56.0 and earlier | No. Upgrade to {EXPECTED}.", security)
+        self.assertIn(f"| 0.57.0 and earlier | No. Upgrade to {EXPECTED}.", security)
         scope = _section(security, "## Scope")
         self.assertIn("- **Antigravity CLI package** (`antigravity/`", scope)
         self.assertIn("vulnerabilities in Claude Code, Codex, Antigravity CLI", _folded(scope))
@@ -3406,7 +3411,11 @@ class V0500ReleaseMetadataTests(unittest.TestCase):
         "https://openai.com/index/scaling-git-at-openai/",
         "https://github.blog/engineering/infrastructure/inside-githubs-new-git-storage-architecture/",
     )
-    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+    DECLARED_STAMPS = {
+        "skills/agentic-vault/scripts/vault_healthcheck.py",
+        "assets/adapters/deny-guard/deny-guard.py",
+        "assets/adapters/deny-guard/ps-parse.ps1",
+    }
 
     def test_release_note_title_and_sections_are_in_order(self) -> None:
         text = self.RELEASE.read_text(encoding="utf-8")
@@ -3816,7 +3825,7 @@ class V0520ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_keeps_the_candidate_section_behind_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[8], self.ENGLISH)
+        self.assertEqual(headings[9], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("The v0.52.0 candidate, which was not published (see v0.52.1 above), adds",
                         "](releases/v0.52.0.md)", "](verification/v0.52.0.md)",
@@ -3909,7 +3918,11 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     )
     KOREAN = "## v0.52.1 — 같은 번호 보고, 가짜 머리글 줄 무력화, 판단 올리기 원답 보존"
     ENGLISH = "## v0.52.1 — same-number report, defused header lines and kept Jev answers on escalation"
-    DECLARED_STAMPS = {"skills/agentic-vault/scripts/vault_healthcheck.py"}
+    DECLARED_STAMPS = {
+        "skills/agentic-vault/scripts/vault_healthcheck.py",
+        "assets/adapters/deny-guard/deny-guard.py",
+        "assets/adapters/deny-guard/ps-parse.ps1",
+    }
 
     def test_release_note_title_and_sections_are_in_order(self) -> None:
         text = self.RELEASE.read_text(encoding="utf-8")
@@ -4126,7 +4139,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_codex_guide_and_description_name_the_release(self) -> None:
         codex = (REPO_ROOT / "docs/codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[7], self.ENGLISH)
+        self.assertEqual(headings[8], self.ENGLISH)
         section = _folded(_section(codex, self.ENGLISH))
         for literal in ("v0.52.1 supersedes the unpublished v0.52.0 candidate", "](releases/v0.52.1.md)",
                         "](verification/v0.52.1.md)", "unchanged from v0.46.0 through v0.52.1",
@@ -4147,7 +4160,7 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
 
     def test_release_integrity_names_the_release_and_the_read_back(self) -> None:
         integrity = _folded((REPO_ROOT / "docs/release-integrity.md").read_text(encoding="utf-8"))
-        self.assertIn("현재 v0.57.0의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.57.0.md)",
+        self.assertIn("현재 v0.58.0의 최종 소스·CI·ZIP/blob 대조와 재빌드 명세는 [릴리스 검증](verification/v0.58.0.md)",
                       integrity)
         # The two settings applied for the candidate are read back for this release.
         self.assertIn("v0.52.1은 태그를 push하기 직전에 두 설정을 다시 읽어 그대로 켜져 있는지 확인한다"
@@ -4157,19 +4170,19 @@ class V0521ReleaseMetadataTests(unittest.TestCase):
     def test_security_and_docs_index_name_the_release_and_the_candidate(self) -> None:
         security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
         versions = _section(security, "## Supported versions")
-        self.assertIn("| 0.57.0 (latest) | Yes. Security fixes target the latest source version. |",
+        self.assertIn("| 0.58.0 (latest) | Yes. Security fixes target the latest source version. |",
                       versions.splitlines())
-        self.assertIn("| 0.56.0 and earlier | No. Upgrade to 0.57.0. From 0.55.0 to 0.57.0 the seven "
+        self.assertIn("| 0.57.0 and earlier | No. Upgrade to 0.58.0. From 0.55.0 to 0.58.0 the seven "
                       "certificate-bound checker files are unchanged", versions)
         self.assertIn("The unpublished v0.53.1, v0.52.0, v0.40.0,", versions)
         summary = next(line for line in security.splitlines() if line.startswith("- 보안 수정 대상은 최신"))
-        for literal in ("최신 0.57.0 소스다.", "0.56.0 이하는 0.57.0으로 갱신한다.", "0.55.0부터 0.57.0 사이는",
+        for literal in ("최신 0.58.0 소스다.", "0.57.0 이하는 0.58.0으로 갱신한다.", "0.55.0부터 0.58.0 사이는",
                         "0.52.0은", "게시하지 않은 후보다.", "태그는 그대로 있고 GitHub 릴리스는 없으며"):
             with self.subTest(summary=literal):
                 self.assertIn(literal, summary)
         index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
         row = next(line for line in index.splitlines() if line.startswith("| [releases/](releases/) |"))
-        self.assertIn("최신 소스는 [v0.57.0](releases/v0.57.0.md); [검증 기록](verification/v0.57.0.md). "
+        self.assertIn("최신 소스는 [v0.58.0](releases/v0.58.0.md); [검증 기록](verification/v0.58.0.md). "
                       "[v0.52.0](releases/v0.52.0.md)은 긴 Windows TEMP 경로 시험 문제로 대체한 미공개 후보이며 "
                       "태그와 당시 기록을 보존한다.", row)
 
@@ -4256,7 +4269,7 @@ class V0532ReleaseMetadataTests(unittest.TestCase):
         antigravity = (REPO_ROOT / "docs" / "antigravity.md").read_text(encoding="utf-8")
         self.assertNotIn("Stop에 정수 `executionNum`이", antigravity)
         self.assertIn("원시 이벤트 SHA-256", antigravity)
-        self.assertIn("tree/v0.57.0/antigravity", antigravity)
+        self.assertIn("tree/v0.58.0/antigravity", antigravity)
         jarvis = _published_text("v0.53.2", "skills/agentic-vault/scripts/jarvis_bridge.py")
         self.assertNotIn("D:/NS", jarvis)
 
@@ -4270,7 +4283,7 @@ class V0532ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.53.2.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[5], self.CODEX_EN)
+        self.assertEqual(headings[6], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.53.2:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4328,7 +4341,7 @@ class V0540ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.54.0.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[4], self.CODEX_EN)
+        self.assertEqual(headings[5], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.54.0:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4389,7 +4402,7 @@ class V0541ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.54.1.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[3], self.CODEX_EN)
+        self.assertEqual(headings[4], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.54.1:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4447,7 +4460,7 @@ class V0550ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.55.0.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[2], self.CODEX_EN)
+        self.assertEqual(headings[3], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.55.0:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4507,7 +4520,7 @@ class V0560ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.56.0.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[1], self.CODEX_EN)
+        self.assertEqual(headings[2], self.CODEX_EN)
         manifest = json.loads(subprocess.run(
             ["git", "-C", str(REPO_ROOT), "show", "v0.56.0:.codex-plugin/plugin.json"],
             check=True, capture_output=True).stdout)
@@ -4578,11 +4591,87 @@ class V0570ReleaseMetadataTests(unittest.TestCase):
             self.assertIn("](docs/verification/v0.57.0.md)", section)
         codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
         headings = [line for line in codex.splitlines() if line.startswith("## ")]
-        self.assertEqual(headings[0], self.CODEX_EN)
-        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(headings[1], self.CODEX_EN)
+        manifest = json.loads(subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", "v0.57.0:.codex-plugin/plugin.json"],
+            check=True, capture_output=True).stdout)
         description = manifest["interface"]["longDescription"]
         for literal in ("Release v0.57.0", "ai3inc/opentoolsearch", "eval_recall_hygiene.py",
                         "sync_result_tables.py", "rerank_candidates.py", "Technoetic/webapp6",
                         "byte-identical from v0.55.0 through v0.57.0", V0310_CODEX_UPGRADE_SENTENCE):
+            with self.subTest(description=literal):
+                self.assertIn(literal, description)
+
+
+class V0580ReleaseMetadataTests(unittest.TestCase):
+    RELEASE = REPO_ROOT / "docs" / "releases" / "v0.58.0.md"
+    VERIFICATION = REPO_ROOT / "docs" / "verification" / "v0.58.0.md"
+    README_KO = "## v0.58.0 — SessionStart 숨김 주석·태그 주입 차단, Holm·PPI++ 평가 통계, 결정론적 거부 복구 안내 및 `/aside-repl`·Jarvis Telegram 제거"
+    README_EN = "## v0.58.0 — Hidden markup injection sanitization, Holm & PPI++ evaluation statistics, deterministic refusal recovery guidance, and `/aside-repl` & Jarvis Telegram removal"
+    CODEX_EN = "## v0.58.0 — Hidden markup injection sanitization, Holm & PPI++ evaluation statistics, deterministic refusal recovery guidance, and `/aside-repl` & Jarvis Telegram removal"
+
+    def test_release_note_uses_only_absolute_links_and_pins_unchanged_checker(self) -> None:
+        import re
+
+        text = self.RELEASE.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.58.0 — SessionStart 숨김 주석·태그 주입 차단, Holm·PPI++ 평가 통계, 결정론적 거부 복구 안내 및 `/aside-repl`·Jarvis Telegram 제거")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## 변경", "## 기본 결과 변경", "## 하위호환·업그레이드", "## 검증", "## 알려진 경계"])
+        for literal in ("현재 설치 ref는 `v0.58.0`이다.", CHECKER_SHA256_V0550,
+                        "https://arxiv.org/abs/2611.28763",
+                        "https://doi.org/10.2307/4615733",
+                        "https://doi.org/10.1126/science.adi6000",
+                        "https://arxiv.org/abs/2311.01453",
+                        "https://arxiv.org/abs/2601.18777",
+                        "https://arxiv.org/abs/2611.24185",
+                        "_strip_hidden_markup", "holm_bonferroni_adjust", "ppi_pp_mean_ci",
+                        "Next legal steps:", "next_legal_steps", "engine=0.58.0"):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, text)
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            with self.subTest(link=target):
+                self.assertTrue(
+                    target.startswith("https://"),
+                    f"v0.58.0 release note must not contain relative links: {target}",
+                )
+
+    def test_verification_contract_pins_gates_and_v0580_features(self) -> None:
+        text = self.VERIFICATION.read_text(encoding="utf-8")
+        self.assertEqual(text.splitlines()[0], "# v0.58.0 verification contract")
+        headings = [line for line in text.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## Scope", "## Feature evidence", "## Default-result comparison",
+                                    "## Required release gates", "## Boundaries"])
+        folded = _folded(text)
+        for literal in ("_strip_hidden_markup", "holm_bonferroni_adjust", "ppi_pp_mean_ci",
+                        "Next legal steps:", "next_legal_steps", "engine=0.58.0",
+                        "scripts/verify_release_claims.py", "BEFORE publishing the GitHub Release",
+                        CHECKER_SHA256_V0550):
+            with self.subTest(literal=literal):
+                self.assertIn(literal, folded)
+
+    def test_v0580_moves_guard_stamps_and_retires_unreleased_note(self) -> None:
+        self.assertFalse((REPO_ROOT / "docs" / "releases" / "unreleased.md").exists())
+        for relative in ("assets/adapters/deny-guard/deny-guard.py",
+                         "assets/adapters/deny-guard/ps-parse.ps1"):
+            with self.subTest(stamped=relative):
+                first = (REPO_ROOT / relative).read_text(encoding="utf-8-sig").splitlines()[0]
+                self.assertTrue(first.endswith(" engine=0.58.0"), first)
+        antigravity_skills = sorted(p.parent.name for p in (REPO_ROOT / "antigravity" / "skills").glob("*/SKILL.md"))
+        self.assertEqual(len(antigravity_skills), 15)
+
+    def test_readme_codex_and_manifest_name_v0580(self) -> None:
+        readme = README.read_text(encoding="utf-8")
+        for heading in (self.README_KO, self.README_EN):
+            section = _section(readme, heading)
+            self.assertIn("](docs/releases/v0.58.0.md)", section)
+            self.assertIn("](docs/verification/v0.58.0.md)", section)
+        codex = (REPO_ROOT / "docs" / "codex.md").read_text(encoding="utf-8")
+        headings = [line for line in codex.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[0], self.CODEX_EN)
+        manifest = json.loads((REPO_ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["interface"]["longDescription"]
+        for literal in ("Release v0.58.0", "arXiv:2611.28763", "holm_bonferroni_adjust",
+                        "ppi_pp_mean_ci", "arXiv:2611.24185", "engine=0.58.0",
+                        "byte-identical from v0.55.0 through v0.58.0", V0310_CODEX_UPGRADE_SENTENCE):
             with self.subTest(description=literal):
                 self.assertIn(literal, description)
