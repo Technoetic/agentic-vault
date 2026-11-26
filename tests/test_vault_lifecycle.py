@@ -5,10 +5,13 @@ import ast
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+from tests._winfs import make_junction
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "agentic-vault" / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -359,12 +362,10 @@ class VaultLifecycleCLITests(unittest.TestCase):
     def test_refuses_junctioned_or_symlinked_vault_root_and_meta_dir(self) -> None:
         if os.name == "nt":
             junction_root = self.vault.parent / "vault-junction"
-            proc_j = subprocess.run(
-                ["cmd", "/c", "mklink", "/J", str(junction_root), str(self.vault)],
-                capture_output=True, text=True, check=False,
-            )
-            if proc_j.returncode != 0:
-                self.skipTest("mklink /J unavailable")
+            try:
+                make_junction(junction_root, self.vault)
+            except OSError:
+                self.skipTest("directory junction creation unavailable")
             with self.assertRaises(lifecycle.LifecycleError) as ctx1:
                 lifecycle.check_vault(junction_root)
             self.assertEqual(str(ctx1.exception), "vault_not_found")
@@ -375,11 +376,7 @@ class VaultLifecycleCLITests(unittest.TestCase):
             (ext_meta / "vault-config.json").write_text('{"deny_zones": []}', encoding="utf-8")
             evil_vault = self.vault.parent / "evil-vault"
             evil_vault.mkdir()
-            proc_m = subprocess.run(
-                ["cmd", "/c", "mklink", "/J", str(evil_vault / "00-meta"), str(ext_meta)],
-                capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(proc_m.returncode, 0, proc_m.stdout + proc_m.stderr)
+            make_junction(evil_vault / "00-meta", ext_meta)
             with self.assertRaises(lifecycle.LifecycleError) as ctx2:
                 lifecycle.check_vault(evil_vault)
             self.assertEqual(str(ctx2.exception), "not_a_vault")
@@ -402,7 +399,9 @@ class VaultLifecycleCLITests(unittest.TestCase):
     def test_long_path_vault_and_deep_nested_notes_do_not_fail_open(self) -> None:
         from vault_evidence import fs_path
         # Build a deep vault (> 245 chars) and a deep note (> 310 chars) safely via fs_path.
-        nested_base = self.vault.parent / ("a" * 60) / ("b" * 60) / ("c" * 60) / ("d" * 60) / "long-vault"
+        nested_top = self.vault.parent / ("a" * 60)
+        self.addCleanup(lambda: shutil.rmtree(fs_path(nested_top), ignore_errors=True))
+        nested_base = nested_top / ("b" * 60) / ("c" * 60) / ("d" * 60) / "long-vault"
         os.makedirs(fs_path(nested_base / "00-meta"), exist_ok=True)
         deep_dir = nested_base / "20-knowledge" / ("sub_" + "x" * 60)
         os.makedirs(fs_path(deep_dir), exist_ok=True)
