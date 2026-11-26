@@ -163,6 +163,102 @@ class VaultLifecycleUnitTests(unittest.TestCase):
         self.assertEqual(len(unresolved), 1)
         self.assertNotIn("Secret", json.dumps(report))
 
+    def test_frontmatter_wikilinks_dotted_names_and_yaml_edge_cases(self) -> None:
+        notes = {
+            "20-knowledge/Proof-v1.0.md": (
+                "---\n"
+                'title: "<!-- does not corrupt frontmatter"\n'
+                "status: withdrawn\n"
+                "withdrawn_reason: 'Proof doesn''t hold under edge case'\n"
+                f"withdrawn_revision: {VALID_SHA40}\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/MultilineReason.md": (
+                "---\n"
+                "status: withdrawn\n"
+                "withdrawn_reason:\n"
+                "  Sign error discovered in lemma 3\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/BlockWithFence.md": (
+                "---\n"
+                "status: withdrawn\n"
+                "withdrawn_reason: |\n"
+                "  ```\n"
+                "  actual reason line\n"
+                "  ```\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/NullReason.md": (
+                "---\n"
+                "status: withdrawn\n"
+                "withdrawn_reason: null\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/TildeReason.md": (
+                "---\n"
+                "status: withdrawn\n"
+                "withdrawn_reason: ~\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/EmptyBlock2.md": (
+                "---\n"
+                "status: withdrawn\n"
+                "withdrawn_reason: |2\n"
+                "---\n\nBody.\n"
+            ),
+            "20-knowledge/FmCiter.md": (
+                "---\n"
+                "status: active\n"
+                'sources: ["[[Proof-v1.0]]"]\n'
+                "---\n\nNo body links.\n"
+            ),
+        }
+        report = lifecycle.analyze_lifecycle(notes, self.config)
+        missing_reason_paths = {
+            w["path"] for w in report["warnings"] if w["code"] == "withdrawn-missing-reason"
+        }
+        self.assertEqual(
+            missing_reason_paths,
+            {
+                "20-knowledge/NullReason.md",
+                "20-knowledge/TildeReason.md",
+                "20-knowledge/EmptyBlock2.md",
+            },
+        )
+        cites = [w for w in report["warnings"] if w["code"] == "cites-withdrawn-note"]
+        self.assertEqual(len(cites), 1)
+        self.assertEqual(cites[0]["path"], "20-knowledge/FmCiter.md")
+        self.assertEqual(cites[0]["details"]["target"], "20-knowledge/Proof-v1.0.md")
+        cascade = {c["path"]: c for c in report["cascade"]}
+        self.assertEqual(
+            cascade["20-knowledge/Proof-v1.0.md"]["direct_dependents"],
+            ["20-knowledge/FmCiter.md"],
+        )
+
+    def test_superseded_chain_is_linear_time_and_handles_lollipops(self) -> None:
+        # 2500-node acyclic superseded chain plus a lollipop into a 2-cycle must complete quickly.
+        n = 2500
+        notes = {
+            f"20-knowledge/N{i:04d}.md": _note(
+                "superseded", "", superseded_by=f'"[[N{i + 1:04d}]]"'
+            )
+            for i in range(n)
+        }
+        notes[f"20-knowledge/N{n:04d}.md"] = _note("active", "final")
+        notes["20-knowledge/Lolli.md"] = _note("superseded", "", superseded_by='"[[C1]]"')
+        notes["20-knowledge/C1.md"] = _note("superseded", "", superseded_by='"[[C2]]"')
+        notes["20-knowledge/C2.md"] = _note("superseded", "", superseded_by='"[[C1]]"')
+
+        report = lifecycle.analyze_lifecycle(notes, self.config)
+        cycles = {w["path"] for w in report["warnings"] if w["code"] == "superseded-cycle"}
+        self.assertEqual(cycles, {"20-knowledge/Lolli.md", "20-knowledge/C1.md", "20-knowledge/C2.md"})
+        cascade = {c["path"]: c for c in report["cascade"]}
+        self.assertEqual(
+            cascade["20-knowledge/N0000.md"]["terminal_replacement"],
+            f"20-knowledge/N{n:04d}.md",
+        )
+
     def test_no_network_or_subprocess_imports(self) -> None:
         tree = ast.parse((SCRIPTS / "vault_lifecycle.py").read_text(encoding="utf-8"))
         forbidden = {"requests", "httpx", "aiohttp", "subprocess", "socket", "urllib", "openai", "anthropic"}
@@ -229,6 +325,96 @@ class VaultLifecycleCLITests(unittest.TestCase):
         proc = self._run_cli(self.vault)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(json.loads(proc.stdout)["counts"]["notes_scanned"], 0)
+
+    def test_registered_worktree_excluded_and_unregistered_worktree_deny_zone_blocked(self) -> None:
+        # Create a real git repository with a registered linked worktree inside the vault.
+        git_env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@e", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@e"}
+        subprocess.run(["git", "init", "-q"], cwd=self.vault, check=True, env=git_env)
+        (self.vault / "20-knowledge" / "Main.md").write_text(_note("active", "clean"), encoding="utf-8")
+        (self.vault / "20-knowledge" / "_archive").mkdir(exist_ok=True)
+        (self.vault / "20-knowledge" / "_archive" / "Secret.md").write_text(_note("withdrawn", "no reason"), encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.vault, check=True, env=git_env)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=self.vault, check=True, env=git_env)
+
+        wt_dir = self.vault / "linked-wt"
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", str(wt_dir)], cwd=self.vault, check=True, env=git_env)
+        # Put a broken withdrawn note inside the registered worktree; must be skipped entirely.
+        (wt_dir / "20-knowledge" / "WorktreeBad.md").write_text(_note("withdrawn", "missing"), encoding="utf-8")
+
+        report = lifecycle.check_vault(self.vault)
+        self.assertTrue(report["ok"], report["warnings"])
+        self.assertEqual(report["counts"]["notes_scanned"], 1)
+
+        # Unregistered linked worktree (stale .git file pointing to worktrees/ghost):
+        # its own deny zone (20-knowledge/_archive) must stay blocked.
+        unreg = self.vault / "stale-wt"
+        (unreg / "20-knowledge" / "_archive").mkdir(parents=True)
+        common_git = self.vault / ".git"
+        (unreg / ".git").write_text(f"gitdir: {common_git / 'worktrees' / 'ghost'}\n", encoding="utf-8")
+        (unreg / "20-knowledge" / "_archive" / "HiddenBad.md").write_text(_note("withdrawn", "missing"), encoding="utf-8")
+        report2 = lifecycle.check_vault(self.vault)
+        self.assertTrue(report2["ok"], report2["warnings"])
+        self.assertEqual(report2["counts"]["notes_scanned"], 1)
+
+    def test_refuses_junctioned_or_symlinked_vault_root_and_meta_dir(self) -> None:
+        if os.name == "nt":
+            junction_root = self.vault.parent / "vault-junction"
+            proc_j = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(junction_root), str(self.vault)],
+                capture_output=True, text=True, check=False,
+            )
+            if proc_j.returncode != 0:
+                self.skipTest("mklink /J unavailable")
+            with self.assertRaises(lifecycle.LifecycleError) as ctx1:
+                lifecycle.check_vault(junction_root)
+            self.assertEqual(str(ctx1.exception), "vault_not_found")
+
+            # Junctioned 00-meta inside a fresh vault pointing to external dir with permissive config.
+            ext_meta = self.vault.parent / "ext-meta"
+            ext_meta.mkdir()
+            (ext_meta / "vault-config.json").write_text('{"deny_zones": []}', encoding="utf-8")
+            evil_vault = self.vault.parent / "evil-vault"
+            evil_vault.mkdir()
+            proc_m = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(evil_vault / "00-meta"), str(ext_meta)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc_m.returncode, 0, proc_m.stdout + proc_m.stderr)
+            with self.assertRaises(lifecycle.LifecycleError) as ctx2:
+                lifecycle.check_vault(evil_vault)
+            self.assertEqual(str(ctx2.exception), "not_a_vault")
+        else:
+            sym_root = self.vault.parent / "vault-sym"
+            os.symlink(self.vault, sym_root)
+            with self.assertRaises(lifecycle.LifecycleError) as ctx1:
+                lifecycle.check_vault(sym_root)
+            self.assertEqual(str(ctx1.exception), "vault_not_found")
+            ext_meta = self.vault.parent / "ext-meta"
+            ext_meta.mkdir()
+            (ext_meta / "vault-config.json").write_text('{"deny_zones": []}', encoding="utf-8")
+            evil_vault = self.vault.parent / "evil-vault"
+            evil_vault.mkdir()
+            os.symlink(ext_meta, evil_vault / "00-meta")
+            with self.assertRaises(lifecycle.LifecycleError) as ctx2:
+                lifecycle.check_vault(evil_vault)
+            self.assertEqual(str(ctx2.exception), "not_a_vault")
+
+    def test_long_path_vault_and_deep_nested_notes_do_not_fail_open(self) -> None:
+        from vault_evidence import fs_path
+        # Build a deep vault (> 245 chars) and a deep note (> 310 chars) safely via fs_path.
+        nested_base = self.vault.parent / ("a" * 60) / ("b" * 60) / ("c" * 60) / ("d" * 60) / "long-vault"
+        os.makedirs(fs_path(nested_base / "00-meta"), exist_ok=True)
+        deep_dir = nested_base / "20-knowledge" / ("sub_" + "x" * 60)
+        os.makedirs(fs_path(deep_dir), exist_ok=True)
+        with open(fs_path(nested_base / "00-meta" / "vault-config.json"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"deny_zones": ["20-knowledge/_archive"], "exclude_dirs": [".git"]}))
+        with open(fs_path(deep_dir / "DeepBroken.md"), "w", encoding="utf-8") as fh:
+            fh.write(_note("withdrawn", "missing reason"))
+
+        report = lifecycle.check_vault(nested_base)
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["counts"]["notes_scanned"], 1)
+        self.assertEqual([w["code"] for w in report["warnings"]], ["withdrawn-missing-reason"])
 
 
 if __name__ == "__main__":

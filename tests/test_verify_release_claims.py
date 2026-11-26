@@ -263,6 +263,66 @@ class VerifyReleaseClaimsTests(unittest.TestCase):
         self.assertFalse(res_miss["ok"])
         self.assertIn("evidence/bad_records.txt", res_miss["missing_files"])
 
+    def test_zero_evidence_rejects_nested_nan_duplicate_keys_and_deep_json(self) -> None:
+        bundle = self.dir / "zero-hardening"
+        bundle.mkdir()
+        cases = [
+            ("nested_failures", '{"count": 0, "details": {"failures": ["LEAK"], "count": 5}}'),
+            ("findings_map", '{"count": 0, "findings_map": {"a": "bad"}}'),
+            ("unlisted_nonzero", '{"count": 0, "failed_items": 3, "ok": false, "status": "fail"}'),
+            ("nan_value", '{"count": 0, "score": NaN}'),
+            ("duplicate_keys", '{"count": 1, "count": 0}'),
+            ("deep_nesting", ("[" * 5000) + ("]" * 5000)),
+        ]
+        for label, payload in cases:
+            with self.subTest(case=label):
+                target = bundle / "zero.json"
+                target.write_text(payload, encoding="utf-8")
+                res = verify_release_claims.check_exact_tree_membership(
+                    bundle, ["zero.json"], required_zero_evidence=["zero.json"]
+                )
+                self.assertFalse(res["ok"], f"{label} unexpectedly passed: {res}")
+                self.assertEqual(res["nonzero_zero_evidence"][0]["path"], "zero.json")
+
+        # Clean nested/metadata zero JSON passes.
+        (bundle / "zero.json").write_text(
+            '{"schema": "test/v1", "count": 0, "leaks": [], "ok": true, "status": "pass", "details": {"errors": 0}}',
+            encoding="utf-8",
+        )
+        res_clean = verify_release_claims.check_exact_tree_membership(
+            bundle, ["zero.json"], required_zero_evidence=["zero.json"]
+        )
+        self.assertTrue(res_clean["ok"], res_clean)
+
+    def test_bundle_flags_without_bundle_dir_and_conflicting_review_status_fail_closed(self) -> None:
+        ver = _valid_verification()
+        ver["review_status"] = "independent_reviewed"
+        ver["review"] = {"status": "unchecked"}
+        vp, np, sp = self._write_bundle(ver=ver)
+
+        # Passing --required-zero-evidence without --bundle-dir must fail closed with exit 2.
+        proc_err = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--verification", str(vp),
+                "--release-note", str(np),
+                "--checksums", str(sp),
+                "--tag", "v0.54.0",
+                "--required-zero-evidence", "nonexistent.json",
+                "--json",
+            ],
+            capture_output=True, text=True, encoding="utf-8", check=False,
+        )
+        self.assertEqual(proc_err.returncode, 2, proc_err.stdout + proc_err.stderr)
+
+        # Conflicting top-level vs nested review_status must fail closed to 'unchecked'.
+        index = verify_release_claims.build_numbers_index(
+            vp, np, sp, tag="v0.54.0", require_independent_review=True
+        )
+        self.assertEqual(index["numbers"]["review_status"], "unchecked")
+        claims = verify_release_claims.evaluate_claims(index)
+        self.assertFalse(claims[-1]["passed"])
+
     def test_cli_bundle_tree_and_require_independent_review_gate(self) -> None:
         ver = _valid_verification()
         vp, np, sp = self._write_bundle(ver=ver)

@@ -25,8 +25,9 @@ import stat
 import sys
 import unicodedata
 
-from vault_evidence import fs_path, is_path_too_long
-from vault_paths import fold_path_part
+from vault_evidence import fs_path, is_path_too_long, plain_path
+from vault_paths import fold_path_part, unsafe_path_segment
+from vault_worktrees import WorktreeScope
 
 SCHEMA = "agentic-vault/lifecycle-audit/v1"
 AUTHORITY = "lifecycle_audit_only"
@@ -55,9 +56,13 @@ LIMITATIONS = (
 
 MAX_NOTES = 10_000
 MAX_NOTE_CHARS = 1_000_000
+MAX_NOTE_BYTES = MAX_NOTE_CHARS * 4
+MAX_CONFIG_BYTES = 256 * 1024
 MAX_TOTAL_CHARS = 8_000_000
 MAX_WARNINGS = 200
 MAX_CASCADE_DEPTH = 16
+MAX_CASCADE_ROOTS = 200
+MAX_CASCADE_VISITED = 2_000
 MAX_DETAIL_STRING = 256
 MAX_DETAIL_ITEMS = 64
 
@@ -68,7 +73,10 @@ _COMMENT_MARK_RE = re.compile(r"\s#")
 _TOP_FIELD_RE = re.compile(
     r"^(status|withdrawn_reason|withdrawn_revision|superseded_by):(.*)$"
 )
+_BLOCK_INDICATOR_RE = re.compile(r"^[|>](?:[+-]?[1-9]|[1-9][+-]?|[+-])?$")
+_YAML_NULL_LITERALS = frozenset({"", "null", "~", "[]", "{}"})
 _ACTIVE_CITING_STATUSES = frozenset({"active", "draft", ""})
+_REPARSE_FLAG = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
 
 
 class LifecycleError(Exception):
@@ -109,26 +117,30 @@ def _make_warning(code: str, path: str, line: int, message: str, *, details: dic
 
 
 def _valid_rel_path(path: str) -> bool:
-    return (
-        isinstance(path, str)
-        and bool(path)
-        and not path.startswith(("/", "\\"))
-        and ":" not in path
-        and "\\" not in path
-        and all(part not in ("", ".", "..") for part in path.split("/"))
-    )
+    if (
+        not isinstance(path, str)
+        or not path
+        or path.startswith(("/", "\\"))
+        or ":" in path
+        or "\\" in path
+    ):
+        return False
+    return not any(unsafe_path_segment(part) for part in path.split("/"))
 
 
 def _denied(path: str, config: dict) -> bool:
-    folded = "/".join(fold_path_part(p) for p in path.split("/"))
+    parts = [fold_path_part(p) for p in path.split("/")]
+    if ".git" in parts:
+        return True
+    folded = "/".join(parts)
     runtime = "00-meta/.agentic-vault/runtime"
     if folded == runtime or folded.startswith(runtime + "/"):
         return True
-    parts = folded.split("/")
     for zone in config.get("deny_zones", []) or []:
         norm_zone = "/".join(
             fold_path_part(p)
             for p in str(zone).replace("\\", "/").strip("/").split("/")
+            if p
         )
         if norm_zone and (
             ("/" in norm_zone and (folded == norm_zone or folded.startswith(norm_zone + "/")))
@@ -139,11 +151,15 @@ def _denied(path: str, config: dict) -> bool:
 
 
 def _before_comment(value: str) -> str:
+    stripped = value.lstrip()
+    if stripped.startswith("#"):
+        return ""
     mark = _COMMENT_MARK_RE.search(value)
     return value if mark is None else value[: mark.end() - 1].rstrip()
 
 
-def _unquote_scalar(value: str) -> str:
+def _parse_scalar(value: str) -> tuple[bool, str]:
+    """Return (is_quoted, unquoted_text) for a single-line YAML scalar value."""
     raw = value.strip()
     if raw and raw[0] in ('"', "'"):
         quote = raw[0]
@@ -155,23 +171,27 @@ def _unquote_scalar(value: str) -> str:
                 buf.append(raw[i + 1])
                 i += 2
                 continue
+            if quote == "'" and ch == "'" and i + 1 < len(raw) and raw[i + 1] == "'":
+                buf.append("'")
+                i += 2
+                continue
             if ch == quote:
                 tail = raw[i + 1 :].strip()
                 if not tail or tail.startswith("#"):
-                    return "".join(buf).strip()
+                    return True, "".join(buf).strip()
                 break
             buf.append(ch)
             i += 1
-        return ""
-    return _before_comment(raw).strip()
+        return True, ""
+    return False, _before_comment(raw).strip()
 
 
-def _clean_lines(text: str) -> list[str]:
-    """Strip fenced code blocks and HTML comments while preserving 1-based line indices."""
+def _clean_lines(raw_lines: list[str]) -> list[str]:
+    """Strip fenced code blocks and HTML comments from body lines, preserving count."""
     result: list[str] = []
     fence: tuple[str, int] | None = None
     comment = False
-    for raw in text.splitlines():
+    for raw in raw_lines:
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", raw)
         if fence:
             if (
@@ -298,8 +318,16 @@ def _resolve_target(
     return qualified.get(unicodedata.normalize("NFC", base), [])
 
 
-def _extract_lifecycle_meta(lines: list[str], end: int) -> dict:
-    """Parse top-level lifecycle keys from frontmatter without echoing prose."""
+def _is_nonempty_yaml_value(quoted: bool, scalar: str) -> bool:
+    if not scalar:
+        return False
+    if not quoted and scalar.casefold() in _YAML_NULL_LITERALS:
+        return False
+    return True
+
+
+def _extract_lifecycle_meta(raw_lines: list[str], end: int) -> dict:
+    """Parse top-level lifecycle keys from raw frontmatter without echoing prose."""
     meta = {
         "status": "",
         "status_line": 1,
@@ -313,33 +341,46 @@ def _extract_lifecycle_meta(lines: list[str], end: int) -> dict:
         return meta
     i = 1
     while i < end - 1:
-        line = lines[i]
+        line = raw_lines[i]
         match = _TOP_FIELD_RE.match(line)
         if not match:
             i += 1
             continue
         key, rest = match.group(1), match.group(2)
-        scalar = _unquote_scalar(rest)
+        quoted, scalar = _parse_scalar(rest)
         if key == "status":
-            meta["status"] = scalar.casefold()
-            meta["status_line"] = i + 1
+            if _is_nonempty_yaml_value(quoted, scalar):
+                meta["status"] = scalar.casefold()
+                meta["status_line"] = i + 1
+            else:
+                meta["status"] = ""
+                meta["status_line"] = i + 1
         elif key == "withdrawn_reason":
-            if scalar and scalar not in ("|", ">", "|-", ">-", "|+", ">+"):
-                meta["has_withdrawn_reason"] = True
-            elif scalar in ("|", ">", "|-", ">-", "|+", ">+"):
-                # Block scalar: verify at least one non-empty indented line follows.
+            if not quoted and _BLOCK_INDICATOR_RE.fullmatch(scalar):
+                # Block scalar: require at least one non-empty indented content line.
                 j = i + 1
-                while j < end - 1 and (not lines[j].strip() or lines[j].startswith((" ", "\t"))):
-                    if lines[j].strip():
+                while j < end - 1 and (not raw_lines[j].strip() or raw_lines[j].startswith((" ", "\t"))):
+                    if raw_lines[j].strip():
                         meta["has_withdrawn_reason"] = True
                         break
                     j += 1
+            elif not quoted and not scalar:
+                # Indented multiline plain scalar: scan continuation lines.
+                j = i + 1
+                while j < end - 1 and (not raw_lines[j].strip() or raw_lines[j].startswith((" ", "\t"))):
+                    cont_quoted, cont_scalar = _parse_scalar(raw_lines[j])
+                    if _is_nonempty_yaml_value(cont_quoted, cont_scalar):
+                        meta["has_withdrawn_reason"] = True
+                        break
+                    j += 1
+            elif _is_nonempty_yaml_value(quoted, scalar):
+                meta["has_withdrawn_reason"] = True
         elif key == "withdrawn_revision":
-            if scalar:
+            if _is_nonempty_yaml_value(quoted, scalar):
                 meta["withdrawn_revision_raw"] = scalar
                 meta["withdrawn_revision_line"] = i + 1
         elif key == "superseded_by":
-            if scalar:
+            if _is_nonempty_yaml_value(quoted, scalar):
                 meta["superseded_by_raw"] = scalar
                 meta["superseded_by_line"] = i + 1
         i += 1
@@ -354,25 +395,149 @@ def _parse_superseded_target_text(raw: str) -> str:
     return _link_target(text)
 
 
-def _is_symlink_or_reparse(path: Path) -> bool:
-    try:
-        st = os.lstat(fs_path(path))
-    except OSError:
-        return True
+def _stat_is_symlink_or_reparse(st: os.stat_result) -> bool:
     if stat.S_ISLNK(st.st_mode):
         return True
     attrs = getattr(st, "st_file_attributes", 0)
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
-    return bool(attrs & reparse)
+    return bool(attrs & _REPARSE_FLAG)
 
 
-def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
+def _classify_lstat(path: Path) -> tuple[str, os.stat_result | None]:
+    """Return ('dir'|'file'|'link'|'other'|'error', stat_result_or_None)."""
+    try:
+        st = os.lstat(fs_path(path))
+    except OSError:
+        return "error", None
+    if _stat_is_symlink_or_reparse(st):
+        return "link", st
+    if stat.S_ISDIR(st.st_mode):
+        return "dir", st
+    if stat.S_ISREG(st.st_mode):
+        return "file", st
+    return "other", st
+
+
+def _read_regular_file_bytes(path: Path, max_bytes: int) -> tuple[str, bytes | None]:
+    """Safely read a regular non-symlink file with O_NOFOLLOW + fstat verification.
+
+    Returns ('ok', data) | ('link', None) | ('non_regular', None) | ('too_large', None) | ('error', None).
+    """
+    kind, lst = _classify_lstat(path)
+    if kind == "link":
+        return "link", None
+    if kind == "error" or lst is None:
+        return "error", None
+    if kind != "file":
+        return "non_regular", None
+    if lst.st_size > max_bytes:
+        return "too_large", None
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = -1
+    try:
+        fd = os.open(os.fspath(fs_path(path)), flags)
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode):
+            return "non_regular", None
+        if os.name != "nt" and (fst.st_ino != lst.st_ino or fst.st_dev != lst.st_dev):
+            return "error", None
+        if fst.st_size > max_bytes:
+            return "too_large", None
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(65536, max_bytes - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                return "too_large", None
+            chunks.append(chunk)
+        # Re-check lstat after read on Windows where O_NOFOLLOW is absent.
+        if os.name == "nt":
+            post_kind, _ = _classify_lstat(path)
+            if post_kind == "link":
+                return "link", None
+        return "ok", b"".join(chunks)
+    except OSError:
+        return "error", None
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _resolve_superseded_chains(
+    superseded_edges: dict[str, str | None],
+) -> tuple[dict[str, str | None], set[str], dict[str, int]]:
+    """O(N) 3-color cycle detection and terminal replacement computation."""
+    # state: 0 = unvisited, 1 = visiting, 2 = done
+    visit_state: dict[str, int] = {}
+    terminal: dict[str, str | None] = {}
+    in_cycle: set[str] = set()
+    chain_len: dict[str, int] = {}
+
+    for start in sorted(superseded_edges):
+        if visit_state.get(start, 0) == 2:
+            continue
+        path_nodes: list[str] = []
+        path_index: dict[str, int] = {}
+        curr: str | None = start
+        while curr is not None and curr in superseded_edges:
+            st = visit_state.get(curr, 0)
+            if st == 2:
+                break
+            if st == 1:
+                # Cycle detected: every node on path_nodes reaches this cycle.
+                cycle_start_idx = path_index[curr]
+                total_len = len(path_nodes)
+                for idx, node in enumerate(path_nodes):
+                    visit_state[node] = 2
+                    in_cycle.add(node)
+                    terminal[node] = None
+                    chain_len[node] = total_len - idx if idx <= cycle_start_idx else total_len - cycle_start_idx
+                path_nodes.clear()
+                break
+            visit_state[curr] = 1
+            path_index[curr] = len(path_nodes)
+            path_nodes.append(curr)
+            curr = superseded_edges[curr]
+
+        if not path_nodes:
+            continue
+
+        # Reached either None, a non-superseded note, or an already-resolved superseded node.
+        if curr is not None and curr in superseded_edges and curr in in_cycle:
+            base_len = chain_len.get(curr, 1)
+            for offset, node in enumerate(reversed(path_nodes), start=1):
+                visit_state[node] = 2
+                in_cycle.add(node)
+                terminal[node] = None
+                chain_len[node] = base_len + offset
+        else:
+            term = terminal[curr] if (curr is not None and curr in superseded_edges) else curr
+            for node in reversed(path_nodes):
+                visit_state[node] = 2
+                terminal[node] = term
+
+    return terminal, in_cycle, chain_len
+
+
+def analyze_lifecycle(
+    notes: dict[str, str],
+    config: dict,
+    *,
+    extra_incomplete: list[str] | None = None,
+    read_errors: int = 0,
+) -> dict:
     """Analyze note withdrawal/supersession metadata, citations, and cascade impact."""
     if not isinstance(notes, dict) or not isinstance(config, dict):
         raise LifecycleError("invalid_input")
 
     approved: dict[str, str] = {}
-    incomplete: list[str] = []
+    incomplete: list[str] = list(extra_incomplete or [])
     total_chars = 0
 
     for path in sorted(notes):
@@ -394,7 +559,8 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
 
     stems: dict[str, list[str]] = {}
     qualified: dict[str, list[str]] = {}
-    cleaned: dict[str, list[str]] = {}
+    raw_frontmatter: dict[str, list[str]] = {}
+    cleaned_body: dict[str, list[str]] = {}
     fm_ends: dict[str, int] = {}
     metas: dict[str, dict] = {}
 
@@ -404,11 +570,13 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
         stems.setdefault(unicodedata.normalize("NFC", stem), []).append(path)
         qual = path[:-3] if path.lower().endswith(".md") else path
         qualified.setdefault(unicodedata.normalize("NFC", qual), []).append(path)
-        lines = _clean_lines(text)
-        cleaned[path] = lines
-        end = _frontmatter_end(lines)
+
+        raw_lines = text.splitlines()
+        end = _frontmatter_end(raw_lines)
         fm_ends[path] = end
-        metas[path] = _extract_lifecycle_meta(lines, end)
+        raw_frontmatter[path] = raw_lines[:end]
+        metas[path] = _extract_lifecycle_meta(raw_lines, end)
+        cleaned_body[path] = _clean_lines(raw_lines[end:])
 
     warnings: list[dict] = []
     cap = config.get("lint_max_warnings", MAX_WARNINGS)
@@ -500,57 +668,35 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
                     else:
                         superseded_edges[path] = dests[0]
 
-    # Pass 2: detect cycles and compute terminal replacements for superseded chains.
-    terminal_replacement: dict[str, str | None] = {}
-    cycle_nodes: set[str] = set()
-    for start in sorted(superseded_edges):
-        visited: list[str] = [start]
-        seen: set[str] = {start}
-        curr = superseded_edges[start]
-        is_cycle = False
-        while curr is not None:
-            if curr in seen:
-                is_cycle = True
-                break
-            visited.append(curr)
-            seen.add(curr)
-            if curr in superseded_edges:
-                curr = superseded_edges[curr]
-            else:
-                break
-        if is_cycle:
-            cycle_nodes.add(start)
-            terminal_replacement[start] = None
-            warnings.append(
-                _make_warning(
-                    "superseded-cycle",
-                    start,
-                    metas[start]["superseded_by_line"],
-                    "superseded_by forms a cycle without reaching a non-superseded replacement",
-                    details={"chain_length": len(visited)},
-                )
+    # Pass 2: O(N) cycle detection and terminal replacement computation.
+    terminal_replacement, cycle_nodes, cycle_lengths = _resolve_superseded_chains(superseded_edges)
+    for start in sorted(cycle_nodes):
+        warnings.append(
+            _make_warning(
+                "superseded-cycle",
+                start,
+                metas[start]["superseded_by_line"],
+                "superseded_by forms a cycle without reaching a non-superseded replacement",
+                details={"chain_length": cycle_lengths.get(start, 1)},
             )
-        else:
-            terminal_replacement[start] = curr
+        )
 
-    # Pass 3: collect resolved body/frontmatter wikilinks per note & build reverse edges.
+    # Pass 3: collect resolved frontmatter + body wikilinks per note & build reverse edges.
     note_links: dict[str, list[tuple[int, str]]] = {}
     note_target_set: dict[str, set[str]] = {}
     reverse_active_edges: dict[str, set[str]] = {}
 
     for path in sorted(approved):
-        lines = cleaned[path]
-        start_line = fm_ends[path]
         links: list[tuple[int, str]] = []
         targets_seen: set[str] = set()
-        for line_number in range(start_line + 1, len(lines) + 1):
-            body_line = _without_code_spans(lines[line_number - 1])
-            in_table = body_line.lstrip().startswith("|")
-            for raw in _wiki_link_texts(body_line):
+        is_active_citing = metas[path]["status"] in _ACTIVE_CITING_STATUSES
+
+        def _scan_line(line_number: int, text_line: str, is_body: bool) -> None:
+            scan_text = _without_code_spans(text_line) if is_body else text_line
+            in_table = is_body and scan_text.lstrip().startswith("|")
+            for raw in _wiki_link_texts(scan_text):
                 target = _link_target(raw, in_table)
                 if not target:
-                    continue
-                if re.search(r"\.[^./]+$", target) and not target.lower().endswith(".md"):
                     continue
                 policy_target = _destination_path(target, path)
                 if _denied(policy_target, config):
@@ -561,8 +707,22 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
                     if dest != path:
                         links.append((line_number, dest))
                         targets_seen.add(dest)
-                        if metas[path]["status"] in _ACTIVE_CITING_STATUSES:
+                        if is_active_citing:
                             reverse_active_edges.setdefault(dest, set()).add(path)
+
+        # Frontmatter wikilinks (lines 2 .. end - 1, excluding delimiter and comment lines).
+        fm_lines = raw_frontmatter[path]
+        if len(fm_lines) >= 3:
+            for idx in range(1, len(fm_lines) - 1):
+                if fm_lines[idx].lstrip().startswith("#"):
+                    continue
+                _scan_line(idx + 1, fm_lines[idx], is_body=False)
+
+        # Body wikilinks (after code fences / HTML comments stripped).
+        body_offset = fm_ends[path]
+        for offset, line in enumerate(cleaned_body[path], start=1):
+            _scan_line(body_offset + offset, line, is_body=True)
+
         note_links[path] = links
         note_target_set[path] = targets_seen
 
@@ -621,6 +781,9 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
     # Pass 5: bounded BFS cascade impact over active/draft dependents.
     cascade: list[dict] = []
     tracked_roots = sorted(set(withdrawn_info) | set(superseded_edges))
+    if len(tracked_roots) > MAX_CASCADE_ROOTS:
+        incomplete.append("cascade output limit")
+        tracked_roots = tracked_roots[:MAX_CASCADE_ROOTS]
     for root_path in tracked_roots:
         direct = sorted(reverse_active_edges.get(root_path, set()))
         visited_dep: set[str] = {root_path}
@@ -628,6 +791,9 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
         depth_truncated = False
         queue: deque[tuple[str, int]] = deque()
         for dep in direct:
+            if len(transitive) >= MAX_CASCADE_VISITED:
+                depth_truncated = True
+                break
             visited_dep.add(dep)
             transitive.append(dep)
             queue.append((dep, 1))
@@ -637,7 +803,7 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
             for nxt in next_nodes:
                 if nxt in visited_dep:
                     continue
-                if depth >= MAX_CASCADE_DEPTH:
+                if depth >= MAX_CASCADE_DEPTH or len(transitive) >= MAX_CASCADE_VISITED:
                     depth_truncated = True
                     continue
                 visited_dep.add(nxt)
@@ -666,14 +832,19 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
     if len(warnings) > cap:
         incomplete.append("warning output limit")
     warnings = warnings[:cap]
+    if read_errors > 0:
+        incomplete.append("read errors")
     if incomplete:
+        inc_details: dict[str, object] = {"reasons": sorted(set(incomplete))}
+        if read_errors > 0:
+            inc_details["read_errors"] = read_errors
         warnings.append(
             _make_warning(
                 "lifecycle-incomplete",
                 "",
                 0,
                 "Lifecycle audit is incomplete; omitted notes or diagnostics cannot certify clean citations",
-                details={"reasons": sorted(set(incomplete))},
+                details=inc_details,
             )
         )
 
@@ -697,101 +868,121 @@ def analyze_lifecycle(notes: dict[str, str], config: dict) -> dict:
 
 
 def check_vault(vault: Path) -> dict:
-    """Read-only vault scan enforcing deny/exclude zones, symlink refusal, and config."""
+    """Read-only vault scan enforcing deny/exclude zones, linked worktrees, symlink refusal, and config."""
     if not isinstance(vault, Path):
         raise LifecycleError("invalid_vault")
-    resolved = vault.resolve()
-    if not resolved.is_dir() or _is_symlink_or_reparse(resolved):
+
+    # Check vault root BEFORE resolving so symlinked/junctioned roots are refused.
+    raw_kind, _ = _classify_lstat(vault)
+    if raw_kind != "dir":
         raise LifecycleError("vault_not_found")
-    config_path = resolved / "00-meta" / "vault-config.json"
-    if not config_path.is_file() or _is_symlink_or_reparse(config_path):
-        raise LifecycleError("not_a_vault")
     try:
-        from vault_healthcheck import HealthcheckError, validate_config
-        raw_cfg = json.loads(Path(fs_path(config_path)).read_text(encoding="utf-8-sig"))
+        resolved = plain_path(fs_path(vault).resolve(strict=True))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise LifecycleError("vault_not_found") from exc
+    resolved_kind, _ = _classify_lstat(resolved)
+    if resolved_kind != "dir":
+        raise LifecycleError("vault_not_found")
+
+    meta_dir = resolved / "00-meta"
+    meta_kind, _ = _classify_lstat(meta_dir)
+    if meta_kind != "dir":
+        raise LifecycleError("not_a_vault")
+
+    config_path = meta_dir / "vault-config.json"
+    cfg_status, cfg_bytes = _read_regular_file_bytes(config_path, MAX_CONFIG_BYTES)
+    if cfg_status != "ok" or cfg_bytes is None:
+        raise LifecycleError("not_a_vault")
+
+    try:
+        from vault_healthcheck import validate_config
+        raw_cfg = json.loads(cfg_bytes.decode("utf-8-sig"))
         config = validate_config(raw_cfg)
-    except (ImportError, OSError, ValueError, TypeError, Exception) as exc:
+    except (ImportError, OSError, UnicodeDecodeError, ValueError, TypeError, Exception) as exc:
         raise LifecycleError("invalid_config") from exc
 
-    excluded_worktrees: set[str] = set()
-    try:
-        from vault_worktrees import registered_worktrees
-        for wt in registered_worktrees(resolved):
-            try:
-                rel = wt.resolve().relative_to(resolved).as_posix()
-                if rel and rel != ".":
-                    excluded_worktrees.add("/".join(fold_path_part(p) for p in rel.split("/")))
-            except ValueError:
-                pass
-    except Exception:
-        pass
+    worktree_scope = WorktreeScope(resolved)
+    all_zones = tuple(
+        str(z)
+        for z in (*(config.get("deny_zones") or ()), *(config.get("exclude_dirs") or ()))
+    )
 
     notes: dict[str, str] = {}
     read_errors = 0
+    walk_incomplete: list[str] = []
+    total_chars = 0
 
-    for dirpath, dirnames, filenames in os.walk(fs_path(resolved), followlinks=False):
-        cur_dir = Path(dirpath)
+    # Iterative scandir traversal applying fs_path() at every level (safe under Windows LongPathsEnabled=0).
+    dir_stack: list[tuple[Path, str]] = [(resolved, "")]
+    while dir_stack:
+        cur_dir, rel_dir = dir_stack.pop()
         try:
-            rel_dir = cur_dir.relative_to(Path(fs_path(resolved))).as_posix()
-        except ValueError:
-            dirnames[:] = []
+            with os.scandir(os.fspath(fs_path(cur_dir))) as it:
+                entries = sorted(it, key=lambda e: e.name)
+        except OSError:
+            read_errors += 1
             continue
-        if rel_dir == ".":
-            rel_dir = ""
 
-        kept_dirs: list[str] = []
-        for dname in sorted(dirnames):
-            rel = f"{rel_dir}/{dname}" if rel_dir else dname
-            folded = "/".join(fold_path_part(p) for p in rel.split("/"))
-            if _denied(rel, config) or folded in excluded_worktrees:
-                continue
-            cand = cur_dir / dname
-            if _is_symlink_or_reparse(cand):
-                continue
-            kept_dirs.append(dname)
-        dirnames[:] = kept_dirs
-
-        for fname in sorted(filenames):
-            if not fname.lower().endswith(".md"):
-                continue
-            rel = f"{rel_dir}/{fname}" if rel_dir else fname
-            if not _valid_rel_path(rel) or _denied(rel, config):
-                continue
-            fpath = cur_dir / fname
-            if _is_symlink_or_reparse(fpath):
-                continue
-            try:
-                st = os.lstat(fs_path(fpath))
-                if not stat.S_ISREG(st.st_mode):
-                    continue
-                if st.st_size > MAX_NOTE_CHARS * 4:
-                    read_errors += 1
-                    continue
-                raw = Path(fs_path(fpath)).read_text(encoding="utf-8", errors="replace")
-                notes[rel] = raw
-            except OSError as exc:
-                if is_path_too_long(exc):
-                    read_errors += 1
-                    continue
+        child_dirs: list[tuple[Path, str]] = []
+        for entry in entries:
+            name = entry.name
+            rel = f"{rel_dir}/{name}" if rel_dir else name
+            cand = cur_dir / name
+            kind, st = _classify_lstat(cand)
+            if kind == "error":
                 read_errors += 1
+                continue
+            if kind == "link":
+                continue
 
-    report = analyze_lifecycle(notes, config)
-    if read_errors > 0:
-        has_incomplete = any(w["code"] == "lifecycle-incomplete" for w in report["warnings"])
-        if not has_incomplete:
-            report["warnings"].append(
-                _make_warning(
-                    "lifecycle-incomplete",
-                    "",
-                    0,
-                    "Some vault notes could not be read; lifecycle audit is incomplete",
-                    details={"read_errors": read_errors},
-                )
-            )
-            report["counts"]["warnings"] = len(report["warnings"])
-            report["ok"] = False
-            report["status"] = "warnings"
-    return report
+            parts = rel.split("/")
+            if kind == "dir":
+                if not _valid_rel_path(rel) or _denied(rel, config):
+                    continue
+                if worktree_scope.registered(fs_path(cand)):
+                    continue
+                if worktree_scope.denied(parts, all_zones):
+                    continue
+                child_dirs.append((cand, rel))
+            elif kind == "file":
+                if not name.lower().endswith(".md"):
+                    continue
+                if not _valid_rel_path(rel) or _denied(rel, config):
+                    continue
+                if worktree_scope.denied(parts, all_zones):
+                    continue
+                if len(notes) >= MAX_NOTES:
+                    walk_incomplete.append("note input limit")
+                    continue
+                if st is not None and st.st_size > MAX_NOTE_BYTES:
+                    walk_incomplete.append("note input limit")
+                    continue
+                status, data = _read_regular_file_bytes(cand, MAX_NOTE_BYTES)
+                if status == "link":
+                    continue
+                if status == "too_large":
+                    walk_incomplete.append("note input limit")
+                    continue
+                if status != "ok" or data is None:
+                    read_errors += 1
+                    continue
+                raw = data.decode("utf-8", errors="replace")
+                if len(raw) > MAX_NOTE_CHARS or total_chars + len(raw) > MAX_TOTAL_CHARS:
+                    walk_incomplete.append("note input limit")
+                    continue
+                notes[rel] = raw
+                total_chars += len(raw)
+
+        # Push in reverse sorted order so DFS pops in sorted order.
+        for item in reversed(child_dirs):
+            dir_stack.append(item)
+
+    return analyze_lifecycle(
+        notes,
+        config,
+        extra_incomplete=walk_incomplete,
+        read_errors=read_errors,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -801,28 +992,29 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vault", required=True, type=Path, help="Vault root containing 00-meta/vault-config.json.")
-    subs = parser.add_subparsers(dest="command", required=True)
-    p_check = subs.add_parser("check", help="Run read-only withdrawal/supersession lifecycle audit.")
-    p_check.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON report.")
+    parser.add_argument("--vault", required=True, type=Path, help="Vault root directory.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    cmd = sub.add_parser("check", help="Run read-only withdrawal and supersession lifecycle audit.")
+    cmd.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON report.")
     args = parser.parse_args(argv)
     try:
         report = check_vault(args.vault)
     except LifecycleError as exc:
         err = {"schema": SCHEMA, "authority": AUTHORITY, "ok": False, "status": "error", "error": str(exc)}
-        print(json.dumps(err, ensure_ascii=True, sort_keys=True))
+        print(json.dumps(err, ensure_ascii=False))
         return 2
     if args.as_json:
-        print(json.dumps(report, ensure_ascii=True, sort_keys=True))
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         c = report["counts"]
         print(
-            f"[vault-lifecycle] scanned={c['notes_scanned']} withdrawn={c['withdrawn_notes']} "
-            f"superseded={c['superseded_notes']} warnings={c['warnings']} status={report['status']}"
+            f"Lifecycle audit ({report['status']}): scanned={c['notes_scanned']} "
+            f"withdrawn={c['withdrawn_notes']} superseded={c['superseded_notes']} "
+            f"warnings={c['warnings']}"
         )
         for w in report["warnings"]:
             loc = f"{w['path']}:{w['line']}" if w["path"] else "<vault>"
-            print(f"  - [{w['code']}] {loc} {w['message']}")
+            print(f"  [{w['code']}] {loc} - {w['message']}")
     return 0 if report["ok"] else 1
 
 

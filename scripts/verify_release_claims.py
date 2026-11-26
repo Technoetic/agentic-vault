@@ -25,6 +25,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -36,10 +37,18 @@ from typing import Iterable
 SCHEMA = "agentic-vault/release-claims/v1"
 EXACT_TREE_SCHEMA = "agentic-vault/exact-tree-membership/v1"
 REVIEW_STATUSES = frozenset({"unchecked", "independent_reviewed"})
+_ZERO_EVIDENCE_MAX_BYTES = 256 * 1024
+_ZERO_EVIDENCE_MAX_DEPTH = 32
+_ZERO_EVIDENCE_MAX_NODES = 4096
 _ZERO_EVIDENCE_KEYS = frozenset({
     "count", "total", "failures", "failed", "findings",
     "leaks", "errors", "unresolved", "false_positives", "bad",
 })
+_ZERO_CLEAN_STATUS_KEYS = frozenset({"status", "verdict", "result", "conclusion"})
+_ZERO_CLEAN_STATUS_VALUES = frozenset({"ok", "pass", "passed", "clean", "zero", "none", "empty"})
+_ZERO_CLEAN_BOOL_KEYS = frozenset({"ok", "passed", "clean", "valid"})
+_ZERO_METADATA_STRING_KEYS = frozenset({"schema", "tool", "version", "checked_at", "timestamp", "note", "kind"})
+_REPARSE_FLAG = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
 _MD_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)\s]+)\)")
 _LEAK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("windows_user_path", re.compile(r"[A-Za-z]:(?:\\{1,2}|/)Users(?:\\{1,2}|/)(?!yourname\b|username\b|user\b|example\b)[A-Za-z0-9._-]+", re.I)),
@@ -163,30 +172,110 @@ def _extract_unit_count(block: object) -> tuple[int | None, int | None]:
 
 
 def _normalize_bundle_rel(raw: str) -> str:
-    if not isinstance(raw, str) or not raw.strip() or "\\" in raw or ":" in raw or raw.startswith("/"):
+    if (
+        not isinstance(raw, str)
+        or not raw.strip()
+        or raw != raw.strip()
+        or "\\" in raw
+        or ":" in raw
+        or raw.startswith("/")
+        or any(ord(ch) < 32 for ch in raw)
+    ):
         raise ValueError(f"invalid relative bundle path: {raw!r}")
     parts = raw.split("/")
-    if any(p in ("", ".", "..") for p in parts):
+    if any(p in ("", ".", "..") or p != p.strip() for p in parts):
         raise ValueError(f"invalid relative bundle path: {raw!r}")
     return "/".join(parts)
 
 
-def _is_reparse_or_symlink(path: Path) -> bool:
-    st = os.lstat(path)
+def _stat_is_reparse_or_symlink(st: os.stat_result) -> bool:
     if stat.S_ISLNK(st.st_mode):
         return True
     attrs = getattr(st, "st_file_attributes", 0)
-    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
-    return bool(attrs & reparse)
+    return bool(attrs & _REPARSE_FLAG)
+
+
+def _is_reparse_or_symlink(path: Path) -> bool:
+    return _stat_is_reparse_or_symlink(os.lstat(path))
+
+
+def _strict_json_loads(text: str) -> object:
+    def _no_dupes(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for k, v in pairs:
+            if k in out:
+                raise ValueError(f"duplicate_json_key:{k}")
+            out[k] = v
+        return out
+
+    def _reject_const(token: str) -> object:
+        raise ValueError(f"non_finite_json:{token}")
+
+    def _finite_float(raw: str) -> float:
+        val = float(raw)
+        if not math.isfinite(val):
+            raise ValueError("non_finite_json")
+        return val
+
+    return json.loads(
+        text,
+        object_pairs_hook=_no_dupes,
+        parse_constant=_reject_const,
+        parse_float=_finite_float,
+    )
+
+
+def _read_bounded_regular(path: Path, max_bytes: int) -> tuple[str, bytes | None]:
+    try:
+        lst = os.lstat(path)
+    except OSError:
+        return "unreadable", None
+    if _stat_is_reparse_or_symlink(lst) or not stat.S_ISREG(lst.st_mode):
+        return "non_regular", None
+    if lst.st_size > max_bytes:
+        return "oversized", None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = -1
+    try:
+        fd = os.open(os.fspath(path), flags)
+        fst = os.fstat(fd)
+        if not stat.S_ISREG(fst.st_mode):
+            return "non_regular", None
+        if os.name != "nt" and (fst.st_ino != lst.st_ino or fst.st_dev != lst.st_dev):
+            return "changed_during_read", None
+        if fst.st_size > max_bytes:
+            return "oversized", None
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(65536, max_bytes - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                return "oversized", None
+            chunks.append(chunk)
+        if os.name == "nt":
+            if _stat_is_reparse_or_symlink(os.lstat(path)):
+                return "non_regular", None
+        return "ok", b"".join(chunks)
+    except OSError:
+        return "unreadable", None
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _check_zero_evidence_file(path: Path) -> tuple[bool, str]:
     """Verify a required negative-evidence file represents zero findings/failures."""
-    raw = path.read_bytes()
+    read_status, raw = _read_bounded_regular(path, _ZERO_EVIDENCE_MAX_BYTES)
+    if read_status != "ok" or raw is None:
+        return False, read_status
     if len(raw) == 0:
         return True, "empty_bytes"
-    if len(raw) > 256 * 1024:
-        return False, "oversized"
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -195,32 +284,68 @@ def _check_zero_evidence_file(path: Path) -> tuple[bool, str]:
     if not stripped:
         return True, "empty_text"
     try:
-        parsed = json.loads(stripped)
-    except ValueError:
-        return False, "nonempty_text"
+        parsed = _strict_json_loads(stripped)
+    except (ValueError, RecursionError):
+        return False, "nonempty_or_invalid_json"
     if parsed == [] or parsed == {}:
         return True, "empty_json"
-    if isinstance(parsed, dict):
-        matched_keys = [k for k in parsed if k in _ZERO_EVIDENCE_KEYS]
-        if not matched_keys:
-            return False, "no_zero_evidence_keys"
-        for key, val in parsed.items():
-            if isinstance(val, list) and len(val) != 0:
-                return False, f"nonempty_list:{key}"
-        for key in matched_keys:
-            val = parsed[key]
-            if isinstance(val, bool):
-                return False, f"invalid_bool:{key}"
-            if isinstance(val, int):
-                if val != 0:
-                    return False, f"nonzero:{key}"
-            elif isinstance(val, list):
-                if len(val) != 0:
-                    return False, f"nonempty_list:{key}"
+    if not isinstance(parsed, dict):
+        return False, "unsupported_json"
+    matched_keys = [k for k in parsed if k in _ZERO_EVIDENCE_KEYS]
+    if not matched_keys:
+        return False, "no_zero_evidence_keys"
+
+    # Iterative strict validation of all nested keys and values (fail-closed).
+    stack: list[tuple[str, str, object, int]] = [
+        (k, k, v, 1) for k, v in parsed.items()
+    ]
+    nodes = 0
+    while stack:
+        key_name, key_path, val, depth = stack.pop()
+        nodes += 1
+        if depth > _ZERO_EVIDENCE_MAX_DEPTH or nodes > _ZERO_EVIDENCE_MAX_NODES:
+            return False, "json_too_complex"
+        low_key = key_name.casefold()
+        is_zero_key = key_name in _ZERO_EVIDENCE_KEYS
+
+        if isinstance(val, bool):
+            if is_zero_key:
+                return False, f"invalid_bool:{key_path}"
+            if low_key in _ZERO_CLEAN_BOOL_KEYS:
+                if val is not True:
+                    return False, f"false_clean_flag:{key_path}"
             else:
-                return False, f"unsupported_type:{key}"
-        return True, "zero_json"
-    return False, "unsupported_json"
+                return False, f"unexpected_bool:{key_path}"
+        elif isinstance(val, int):
+            if val != 0:
+                return False, f"nonzero:{key_path}"
+        elif isinstance(val, float):
+            if not math.isfinite(val) or val != 0.0:
+                return False, f"nonzero:{key_path}"
+        elif isinstance(val, list):
+            if len(val) != 0:
+                return False, f"nonempty_list:{key_path}"
+        elif isinstance(val, dict):
+            if is_zero_key and len(val) != 0:
+                return False, f"nonempty_dict:{key_path}"
+            for child_k, child_v in val.items():
+                stack.append((str(child_k), f"{key_path}.{child_k}", child_v, depth + 1))
+        elif isinstance(val, str):
+            if is_zero_key:
+                return False, f"unsupported_type:{key_path}"
+            if low_key in _ZERO_CLEAN_STATUS_KEYS:
+                if val.strip().casefold() not in _ZERO_CLEAN_STATUS_VALUES:
+                    return False, f"non_clean_status:{key_path}"
+            elif depth == 1 and low_key in _ZERO_METADATA_STRING_KEYS:
+                continue
+            else:
+                return False, f"unexpected_string:{key_path}"
+        elif val is None:
+            if is_zero_key:
+                return False, f"unsupported_type:{key_path}"
+        else:
+            return False, f"unsupported_type:{key_path}"
+    return True, "zero_json"
 
 
 def check_exact_tree_membership(
@@ -235,7 +360,13 @@ def check_exact_tree_membership(
     rejects missing files, unexpected extra files/directories, and symlinks/non-regular
     entries, and treats empty/zero-count failure files as required negative evidence.
     """
-    if not isinstance(root, Path) or not root.exists() or not root.is_dir() or _is_reparse_or_symlink(root):
+    if not isinstance(root, Path):
+        raise ValueError("bundle root must be a Path")
+    try:
+        root_st = os.lstat(root)
+    except OSError as exc:
+        raise ValueError("bundle root must be an existing non-symlink directory") from exc
+    if _stat_is_reparse_or_symlink(root_st) or not stat.S_ISDIR(root_st.st_mode):
         raise ValueError("bundle root must be an existing non-symlink directory")
     expected_set: set[str] = set()
     for item in expected_files:
@@ -260,7 +391,18 @@ def check_exact_tree_membership(
     actual_dirs: set[str] = set()
     unsupported_entries: list[str] = []
 
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    def _on_walk_error(exc: OSError) -> None:
+        fname = getattr(exc, "filename", None)
+        if fname:
+            try:
+                rel = Path(fname).relative_to(root).as_posix()
+                unsupported_entries.append(rel or ".")
+                return
+            except ValueError:
+                pass
+        unsupported_entries.append("<unreadable-directory>")
+
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=_on_walk_error):
         cur = Path(dirpath)
         rel_dir = "" if cur == root else cur.relative_to(root).as_posix()
         kept_dirs: list[str] = []
@@ -272,7 +414,7 @@ def check_exact_tree_membership(
             except OSError:
                 unsupported_entries.append(rel)
                 continue
-            if _is_reparse_or_symlink(dpath) or not stat.S_ISDIR(st.st_mode):
+            if _stat_is_reparse_or_symlink(st) or not stat.S_ISDIR(st.st_mode):
                 unsupported_entries.append(rel)
                 continue
             actual_dirs.add(rel)
@@ -287,7 +429,7 @@ def check_exact_tree_membership(
             except OSError:
                 unsupported_entries.append(rel)
                 continue
-            if _is_reparse_or_symlink(fpath) or not stat.S_ISREG(st.st_mode):
+            if _stat_is_reparse_or_symlink(st) or not stat.S_ISREG(st.st_mode):
                 unsupported_entries.append(rel)
                 continue
             actual_files.add(rel)
@@ -337,9 +479,14 @@ def check_exact_tree_membership(
 
 
 def _extract_review_status(ver: dict) -> str:
-    raw = ver.get("review_status")
-    if raw is None and isinstance(ver.get("review"), dict):
-        raw = ver["review"].get("status")
+    top_present = "review_status" in ver
+    top_raw = ver.get("review_status")
+    nested_present = isinstance(ver.get("review"), dict) and "status" in ver["review"]
+    nested_raw = ver["review"].get("status") if nested_present else None
+    if top_present and nested_present:
+        if top_raw != nested_raw:
+            return "unchecked"
+    raw = top_raw if top_present else nested_raw
     if isinstance(raw, str) and raw in REVIEW_STATUSES:
         return raw
     return "unchecked"
@@ -438,14 +585,19 @@ def build_numbers_index(
     relative_links = _find_relative_links(note_raw)
     leaks = _find_leaks(ver_raw)
     review_status = _extract_review_status(ver)
+    zero_list = list(required_zero_evidence)
+    expected_list = list(expected_bundle_files) if expected_bundle_files is not None else None
     bundle_tree = None
-    if bundle_dir is not None:
-        if expected_bundle_files is None:
+    if bundle_dir is None:
+        if expected_list is not None or zero_list:
+            raise ValueError("bundle_dir is required when expected_bundle_files or required_zero_evidence are provided")
+    else:
+        if expected_list is None:
             raise ValueError("expected_bundle_files is required when bundle_dir is provided")
         bundle_tree = check_exact_tree_membership(
             bundle_dir,
-            expected_bundle_files,
-            required_zero_evidence=required_zero_evidence,
+            expected_list,
+            required_zero_evidence=zero_list,
         )
 
     return {

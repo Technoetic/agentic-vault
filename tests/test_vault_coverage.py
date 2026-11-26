@@ -481,6 +481,75 @@ class VaultCoverageTests(unittest.TestCase):
         self.assertFalse(unknown_gap['ok'])
         self.assertIn({'code': 'unknown_permitted_gap', 'id': 'C-UNKNOWN'}, unknown_gap['issues'])
 
+    def test_nfc_nfd_spec_solution_overlap_duplicate_null_and_toctou_fail_closed(self):
+        import unicodedata
+        nfc_rel = unicodedata.normalize('NFC', 'specs/명세.md')
+        nfd_rel = unicodedata.normalize('NFD', 'specs/명세.md')
+        spec_bytes = b'spec body\n'
+        self.write(nfc_rel, spec_bytes)
+        spec_sha = hashlib.sha256(spec_bytes).hexdigest()
+        record_id = self.receipt()
+
+        # NFC spec vs NFD solution must be detected as spec_solution_overlap.
+        self.manifest['spec_files'] = [{'path': nfc_rel, 'sha256': spec_sha}]
+        self.manifest['solution_files'] = [nfd_rel]
+        overlap = self.check(record_id)
+        self.assertFalse(overlap['ok'])
+        self.assertIn({'code': 'spec_solution_overlap', 'path': nfd_rel}, overlap['issues'])
+
+        # NFC + NFD duplicates in spec_files must raise duplicate_spec_file.
+        self.manifest['spec_files'] = [
+            {'path': nfc_rel, 'sha256': spec_sha},
+            {'path': nfd_rel, 'sha256': spec_sha},
+        ]
+        self.manifest['solution_files'] = []
+        with self.assertRaises(coverage.CoverageError) as dup_ctx:
+            self.check(record_id)
+        self.assertEqual(str(dup_ctx.exception), 'duplicate_spec_file')
+
+        # Explicit JSON null for optional keys must be rejected consistently.
+        for key in ('automation_methods', 'spec_files', 'solution_files', 'permitted_gaps', 'review_status'):
+            with self.subTest(null_key=key):
+                saved = copy.deepcopy(self.manifest)
+                self.manifest = {**saved, key: None}
+                self.manifest.pop('spec_files', None) if key != 'spec_files' else None
+                self.manifest.pop('solution_files', None) if key != 'solution_files' else None
+                with self.assertRaises(coverage.CoverageError):
+                    self.check(record_id)
+                self.manifest = saved
+
+        # TOCTOU: mutating a file shared between receipt artifacts and spec_files between bindings() and _check_spec_files()
+        # must fail closed with changed_during_check (never masked by marks.update(spec_marks)).
+        v1 = b'version-1-artifact\n'
+        v2 = b'version-2-mutated-spec\n'
+        self.write('notes/result.md', v1)
+        self.manifest.pop('spec_files', None)
+        self.manifest.pop('solution_files', None)
+        rec_toctou = self.receipt()
+        self.manifest['spec_files'] = [{'path': 'notes/result.md', 'sha256': hashlib.sha256(v2).hexdigest()}]
+        orig_bindings = evidence.bindings
+        mutated = False
+        def mutate_after_bindings(*args, **kwargs):
+            nonlocal mutated
+            res = orig_bindings(*args, **kwargs)
+            if not mutated:
+                mutated = True
+                self.write('notes/result.md', v2)
+            return res
+        with mock.patch.object(evidence, 'bindings', side_effect=mutate_after_bindings):
+            raced = self.check(rec_toctou)
+        self.assertFalse(raced['ok'])
+        self.assertEqual(raced['status'], 'stale')
+        self.assertIn('changed_during_check', self.codes(raced))
+
+        # Cumulative MAX_SET_BYTES cap includes spec_files.
+        self.write('specs/big.md', b'x' * 4096)
+        self.manifest['spec_files'] = [{'path': 'specs/big.md', 'sha256': hashlib.sha256(b'x' * 4096).hexdigest()}]
+        with mock.patch.object(evidence, 'MAX_SET_BYTES', 2048):
+            with self.assertRaises(coverage.CoverageError) as cap_ctx:
+                self.check(rec_toctou)
+        self.assertEqual(str(cap_ctx.exception), 'file_set_too_large')
+
 
 if __name__ == '__main__':
     unittest.main()

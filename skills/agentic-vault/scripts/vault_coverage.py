@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from functools import wraps
+import os
 from pathlib import Path
 import re
 
@@ -19,6 +20,7 @@ import vault_runs as runs
 import vault_state as state
 from jev_client import _matches_sensitive, contains_sensitive
 from vault_healthcheck import HealthcheckError
+from vault_paths import fold_path_part
 
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_DEPTH = 8
@@ -118,6 +120,10 @@ def _rel_path(value):
     return value
 
 
+def _folded_rel(rel):
+    return '/'.join(fold_path_part(part) for part in rel.split('/'))
+
+
 def _manifest(value):
     _bounded(value)
     if contains_sensitive(value):
@@ -148,9 +154,9 @@ def _manifest(value):
     review_status = value.get('review_status', 'unchecked')
     if not isinstance(review_status, str) or review_status not in REVIEW_STATUSES:
         raise CoverageError('invalid_review_status')
-    raw_methods = value.get('automation_methods')
     automation_methods = []
-    if raw_methods is not None:
+    if 'automation_methods' in value:
+        raw_methods = value['automation_methods']
         if (not isinstance(raw_methods, list) or not raw_methods
                 or len(raw_methods) > len(AUTOMATION_METHODS)):
             raise CoverageError('invalid_automation_methods')
@@ -160,9 +166,9 @@ def _manifest(value):
         if len(set(raw_methods)) != len(raw_methods):
             raise CoverageError('duplicate_automation_method')
         automation_methods = sorted(raw_methods)
-    raw_specs = value.get('spec_files')
     spec_files = []
-    if raw_specs is not None:
+    if 'spec_files' in value:
+        raw_specs = value['spec_files']
         if not isinstance(raw_specs, list) or len(raw_specs) > MAX_ITEMS:
             raise CoverageError('invalid_spec_files')
         seen_specs = set()
@@ -172,30 +178,29 @@ def _manifest(value):
             sha = item['sha256']
             if not isinstance(sha, str) or not HASH_RE.fullmatch(sha):
                 raise CoverageError('invalid_spec_files')
-            key = rel.casefold()
+            key = _folded_rel(rel)
             if key in seen_specs:
                 raise CoverageError('duplicate_spec_file')
             seen_specs.add(key)
             spec_files.append({'path': rel, 'sha256': sha})
         spec_files.sort(key=lambda entry: entry['path'])
-    raw_solutions = value.get('solution_files')
     solution_files = []
-    if raw_solutions is not None:
+    if 'solution_files' in value:
+        raw_solutions = value['solution_files']
         if not isinstance(raw_solutions, list) or len(raw_solutions) > MAX_ITEMS:
             raise CoverageError('invalid_solution_files')
         seen_solutions = set()
         for item in raw_solutions:
             rel = _rel_path(item)
-            key = rel.casefold()
+            key = _folded_rel(rel)
             if key in seen_solutions:
                 raise CoverageError('duplicate_solution_file')
             seen_solutions.add(key)
             solution_files.append(rel)
         solution_files.sort()
-    raw_gaps = value.get('permitted_gaps')
     permitted_gaps = []
-    if raw_gaps is not None:
-        permitted_gaps = _ids(raw_gaps, nonempty=False)
+    if 'permitted_gaps' in value:
+        permitted_gaps = _ids(value['permitted_gaps'], nonempty=False)
     return {'version': 1, 'task': task, 'requirements': requirements,
             'acceptance': sorted(acceptance, key=lambda item: item['id']),
             'required_checks': checks,
@@ -251,9 +256,9 @@ def _graph(manifest):
                   for ident in sorted(checks - mapped_checks))
     for ident in sorted(set(manifest['permitted_gaps']) - checks):
         issues.append({'code': 'unknown_permitted_gap', 'id': ident})
-    spec_keys = {entry['path'].casefold(): entry['path'] for entry in manifest['spec_files']}
+    spec_keys = {_folded_rel(entry['path']): entry['path'] for entry in manifest['spec_files']}
     for sol_path in manifest['solution_files']:
-        if sol_path.casefold() in spec_keys:
+        if _folded_rel(sol_path) in spec_keys:
             issues.append({'code': 'spec_solution_overlap', 'path': sol_path})
     return issues
 
@@ -327,16 +332,40 @@ def check(vault, manifest_path, evidence_id):
         raise CoverageError('sensitive_input')
     files = receipt['artifacts'] + receipt['evidence']
     sources = [receipt['report_source']] if receipt['report_source'] else []
-    if sum(item['size'] for item in files + sources) > evidence.MAX_SET_BYTES:
+    total_bytes = sum(item['size'] for item in files + sources)
+    if total_bytes > evidence.MAX_SET_BYTES:
         raise CoverageError('file_set_too_large')
     # Validate every selected public path before hashing any of its file bodies.
     for item in files + sources:
         store.path(item['path'])
+    canonical_specs = set()
     for item in manifest['spec_files']:
-        store.path(item['path'])
+        resolved_spec = store.path(item['path'])
+        canon_key = _folded_rel(evidence.rel_posix(resolved_spec, store.root))
+        if canon_key in canonical_specs:
+            raise CoverageError('duplicate_spec_file')
+        canonical_specs.add(canon_key)
+        try:
+            total_bytes += os.lstat(evidence.fs_path(resolved_spec)).st_size
+        except FileNotFoundError:
+            pass
+    if total_bytes > evidence.MAX_SET_BYTES:
+        raise CoverageError('file_set_too_large')
+    canonical_solutions = set()
+    canonical_overlap_paths = []
     for sol_path in manifest['solution_files']:
-        store.path(sol_path)
+        resolved_sol = store.path(sol_path)
+        canon_key = _folded_rel(evidence.rel_posix(resolved_sol, store.root))
+        if canon_key in canonical_solutions:
+            raise CoverageError('duplicate_solution_file')
+        canonical_solutions.add(canon_key)
+        if canon_key in canonical_specs:
+            canonical_overlap_paths.append(sol_path)
     issues = _graph(manifest)
+    reported_overlaps = {issue['path'] for issue in issues if issue['code'] == 'spec_solution_overlap'}
+    for sol_path in canonical_overlap_paths:
+        if sol_path not in reported_overlaps:
+            issues.append({'code': 'spec_solution_overlap', 'path': sol_path})
     outcome_issues, submitted_count, verified_count, permitted_gaps_used = _outcomes(manifest, receipt)
     issues.extend(outcome_issues)
     if receipt['task'] != manifest['task']:
@@ -350,13 +379,16 @@ def check(vault, manifest_path, evidence_id):
                   for item in stale)
     spec_issues, spec_marks, verified_specs = _check_spec_files(store, manifest['spec_files'])
     issues.extend(spec_issues)
-    marks.update(spec_marks)
     changed = False
     try:
+        for shared_key in set(marks) & set(spec_marks):
+            if marks[shared_key] != spec_marks[shared_key]:
+                raise CoverageError('changed_during_check')
         store.inputs.policy.fresh()
         store.fresh_policy()
         store.sweep({info['path']: manifest_mark})
         store.sweep(marks)
+        store.sweep(spec_marks)
         store.sweep(receipt_marks, internal=True)
         # A second stable manifest read also detects same-metadata byte changes.
         current, _, _ = store.fingerprint(info['path'], limit=MAX_MANIFEST_BYTES)

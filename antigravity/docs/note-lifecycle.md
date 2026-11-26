@@ -17,12 +17,13 @@ python skills/agentic-vault/scripts/vault_lifecycle.py --vault <vault> check [--
 
 ## Warning codes & cascade report
 
+- Output schema: `agentic-vault/lifecycle-audit/v1` (`authority`: `lifecycle_audit_only`).
 - `withdrawn-missing-reason`, `withdrawn-invalid-revision`
 - `superseded-missing-target`, `superseded-target-unresolved`, `superseded-cycle`
-- `cites-withdrawn-note` — an `active` or `draft` note links (`[[...]]`, outside code fences/spans/HTML comments) to a `withdrawn` note.
-- `cites-superseded-note` — an `active` or `draft` note links to a `superseded` note without also linking to its direct or terminal replacement.
+- `cites-withdrawn-note` — an `active`, `draft`, or omitted/empty-`status` note links (`[[...]]`, in frontmatter or body outside code fences/spans/HTML comments) to a `withdrawn` note.
+- `cites-superseded-note` — an `active`, `draft`, or omitted/empty-`status` note links to a `superseded` note without also linking to its direct or terminal replacement.
 - `lifecycle-incomplete` — input limits or unreadable files truncated coverage.
-- `cascade` — bounded BFS (`MAX_CASCADE_DEPTH = 16`) listing `direct_dependents` and `transitive_dependents` among active/draft notes for each withdrawn or superseded root.
+- `cascade` — bounded BFS (`MAX_CASCADE_DEPTH = 16`) listing `direct_dependents` and `transitive_dependents` among active/draft/omitted-status notes for each withdrawn or superseded root.
 
 Exit codes: `0` (clean), `1` (warnings or incomplete), `2` (invalid vault, config, or arguments).
 
