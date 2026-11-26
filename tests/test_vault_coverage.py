@@ -385,6 +385,171 @@ class VaultCoverageTests(unittest.TestCase):
         self.assertEqual(process.stderr, '')
         self.assertEqual(json.loads(process.stdout)['status'], 'error')
 
+    def test_review_status_and_automation_methods_default_unchecked_and_validate(self):
+        record_id = self.receipt()
+        default_result = self.check(record_id)
+        self.assertEqual(default_result['review_status'], 'unchecked')
+        self.assertFalse(default_result['independent_reviewed'])
+
+        self.manifest['review_status'] = 'independent_reviewed'
+        self.manifest['automation_methods'] = ['human', 'agent']
+        reviewed = self.check(record_id)
+        self.assertTrue(reviewed['ok'])
+        self.assertEqual(reviewed['review_status'], 'independent_reviewed')
+        self.assertTrue(reviewed['independent_reviewed'])
+        self.assertEqual(reviewed['automation_methods'], ['agent', 'human'])
+
+        for bad_patch in (
+            {'review_status': 'approved_by_magic'},
+            {'automation_methods': []},
+            {'automation_methods': ['agent', 'agent']},
+            {'automation_methods': ['unknown']},
+        ):
+            with self.subTest(bad_patch=bad_patch):
+                self.manifest = {**copy.deepcopy(self.manifest), **bad_patch}
+                with self.assertRaises(coverage.CoverageError):
+                    self.check(record_id)
+
+    def test_spec_solution_separation_pinned_digest_and_tamper_detection(self):
+        spec_bytes = b'theorem spec: output must match schema\n'
+        self.write('specs/challenge.md', spec_bytes)
+        spec_sha = hashlib.sha256(spec_bytes).hexdigest()
+        record_id = self.receipt()
+        self.manifest['spec_files'] = [{'path': 'specs/challenge.md', 'sha256': spec_sha}]
+        self.manifest['solution_files'] = ['notes/result.md']
+        ok_res = self.check(record_id)
+        self.assertTrue(ok_res['ok'], ok_res['issues'])
+        self.assertEqual(ok_res['spec_bindings'][0]['sha256'], spec_sha)
+        self.assertEqual(ok_res['solution_files'], ['notes/result.md'])
+
+        # Tampering with immutable spec file fails closed as stale/spec_hash_mismatch.
+        self.write('specs/challenge.md', b'weakened spec\n')
+        tampered = self.check(record_id)
+        self.assertFalse(tampered['ok'])
+        self.assertEqual(tampered['status'], 'stale')
+        self.assertIn({'code': 'spec_hash_mismatch', 'path': 'specs/challenge.md'}, tampered['issues'])
+
+        # Missing spec file fails closed as stale/spec_file_missing.
+        (self.vault / 'specs/challenge.md').unlink()
+        missing = self.check(record_id)
+        self.assertFalse(missing['ok'])
+        self.assertEqual(missing['status'], 'stale')
+        self.assertIn({'code': 'spec_file_missing', 'path': 'specs/challenge.md'}, missing['issues'])
+
+        # Overlap between spec_files and solution_files fails completeness.
+        self.write('specs/challenge.md', spec_bytes)
+        self.manifest['solution_files'] = ['specs/challenge.md']
+        overlap = self.check(record_id)
+        self.assertFalse(overlap['ok'])
+        self.assertEqual(overlap['status'], 'incomplete')
+        self.assertIn({'code': 'spec_solution_overlap', 'path': 'specs/challenge.md'}, overlap['issues'])
+
+        # Credential or denied spec path is rejected before open.
+        self.manifest['spec_files'] = [{'path': 'input/secrets.json', 'sha256': spec_sha}]
+        self.manifest['solution_files'] = ['notes/result.md']
+        with self.assertRaises(coverage.CoverageError):
+            self.check(record_id)
+
+    def test_permitted_gaps_allowlist_permits_only_listed_gap_not_failed_or_missing(self):
+        self.manifest['required_checks'] = ['C-001', 'C-002']
+        self.manifest['acceptance'][0]['checks'] = ['C-001', 'C-002']
+        self.manifest['permitted_gaps'] = ['C-002']
+
+        # Declared permitted gap passes and is transparently recorded.
+        ok_res = self.check(self.receipt([('C-001', 'verified'), ('C-002', 'gap')]))
+        self.assertTrue(ok_res['ok'], ok_res['issues'])
+        self.assertEqual(ok_res['permitted_gaps_used'], ['C-002'])
+
+        # Failed / regression cannot be waived by permitted_gaps.
+        for bad_status, code in (('failed', 'reported_failed'), ('regression', 'reported_regression')):
+            with self.subTest(bad_status=bad_status):
+                res = self.check(self.receipt([('C-001', 'verified'), ('C-002', bad_status)]))
+                self.assertFalse(res['ok'])
+                self.assertIn({'code': code, 'id': 'C-002'}, res['issues'])
+
+        # Unlisted gap or omitted check still fails closed.
+        unlisted = self.check(self.receipt([('C-001', 'gap'), ('C-002', 'gap')]))
+        self.assertFalse(unlisted['ok'])
+        self.assertIn({'code': 'unsupported_outcome', 'id': 'C-001'}, unlisted['issues'])
+        omitted = self.check(self.receipt([('C-001', 'verified')]))
+        self.assertFalse(omitted['ok'])
+        self.assertIn({'code': 'missing_check', 'id': 'C-002'}, omitted['issues'])
+
+        # Unknown check in permitted_gaps fails graph check.
+        self.manifest['permitted_gaps'] = ['C-UNKNOWN']
+        unknown_gap = self.check(self.receipt([('C-001', 'verified'), ('C-002', 'verified')]))
+        self.assertFalse(unknown_gap['ok'])
+        self.assertIn({'code': 'unknown_permitted_gap', 'id': 'C-UNKNOWN'}, unknown_gap['issues'])
+
+    def test_nfc_nfd_spec_solution_overlap_duplicate_null_and_toctou_fail_closed(self):
+        import unicodedata
+        nfc_rel = unicodedata.normalize('NFC', 'specs/명세.md')
+        nfd_rel = unicodedata.normalize('NFD', 'specs/명세.md')
+        spec_bytes = b'spec body\n'
+        self.write(nfc_rel, spec_bytes)
+        spec_sha = hashlib.sha256(spec_bytes).hexdigest()
+        record_id = self.receipt()
+
+        # NFC spec vs NFD solution must be detected as spec_solution_overlap.
+        self.manifest['spec_files'] = [{'path': nfc_rel, 'sha256': spec_sha}]
+        self.manifest['solution_files'] = [nfd_rel]
+        overlap = self.check(record_id)
+        self.assertFalse(overlap['ok'])
+        self.assertIn({'code': 'spec_solution_overlap', 'path': nfd_rel}, overlap['issues'])
+
+        # NFC + NFD duplicates in spec_files must raise duplicate_spec_file.
+        self.manifest['spec_files'] = [
+            {'path': nfc_rel, 'sha256': spec_sha},
+            {'path': nfd_rel, 'sha256': spec_sha},
+        ]
+        self.manifest['solution_files'] = []
+        with self.assertRaises(coverage.CoverageError) as dup_ctx:
+            self.check(record_id)
+        self.assertEqual(str(dup_ctx.exception), 'duplicate_spec_file')
+
+        # Explicit JSON null for optional keys must be rejected consistently.
+        for key in ('automation_methods', 'spec_files', 'solution_files', 'permitted_gaps', 'review_status'):
+            with self.subTest(null_key=key):
+                saved = copy.deepcopy(self.manifest)
+                self.manifest = {**saved, key: None}
+                self.manifest.pop('spec_files', None) if key != 'spec_files' else None
+                self.manifest.pop('solution_files', None) if key != 'solution_files' else None
+                with self.assertRaises(coverage.CoverageError):
+                    self.check(record_id)
+                self.manifest = saved
+
+        # TOCTOU: mutating a file shared between receipt artifacts and spec_files between bindings() and _check_spec_files()
+        # must fail closed with changed_during_check (never masked by marks.update(spec_marks)).
+        v1 = b'version-1-artifact\n'
+        v2 = b'version-2-mutated-spec\n'
+        self.write('notes/result.md', v1)
+        self.manifest.pop('spec_files', None)
+        self.manifest.pop('solution_files', None)
+        rec_toctou = self.receipt()
+        self.manifest['spec_files'] = [{'path': 'notes/result.md', 'sha256': hashlib.sha256(v2).hexdigest()}]
+        orig_bindings = evidence.bindings
+        mutated = False
+        def mutate_after_bindings(*args, **kwargs):
+            nonlocal mutated
+            res = orig_bindings(*args, **kwargs)
+            if not mutated:
+                mutated = True
+                self.write('notes/result.md', v2)
+            return res
+        with mock.patch.object(evidence, 'bindings', side_effect=mutate_after_bindings):
+            raced = self.check(rec_toctou)
+        self.assertFalse(raced['ok'])
+        self.assertEqual(raced['status'], 'stale')
+        self.assertIn('changed_during_check', self.codes(raced))
+
+        # Cumulative MAX_SET_BYTES cap includes spec_files.
+        self.write('specs/big.md', b'x' * 4096)
+        self.manifest['spec_files'] = [{'path': 'specs/big.md', 'sha256': hashlib.sha256(b'x' * 4096).hexdigest()}]
+        with mock.patch.object(evidence, 'MAX_SET_BYTES', 2048):
+            with self.assertRaises(coverage.CoverageError) as cap_ctx:
+                self.check(rec_toctou)
+        self.assertEqual(str(cap_ctx.exception), 'file_set_too_large')
+
 
 if __name__ == '__main__':
     unittest.main()

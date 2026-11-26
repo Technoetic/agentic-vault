@@ -238,8 +238,9 @@ capture/check는 읽기 전용이고 설정·대장 저장·원문 삭제를 덧
 `scripts/vault_task_contracts.py` capture / inspect / revise를 쓴다. 확인된 사용자 요청과
 호스트 가정을 구분하며, 준비 상태는 실행 승인이 아니다. 기존 근거의 단계별 점검은
 [단계별 검증](../../docs/staged-evaluation.md)의 `scripts/vault_staged_evaluation.py` evaluate,
-반복 기록 관찰은 [개선 반복](../../docs/improvement-cycles.md)의 `scripts/vault_improvement_cycles.py` audit다.
-세 도구는 자동 실행·모델 호출·게시·권한 부여를 하지 않는다. 이미 확정된 단순 작업에 새 인터뷰를 강제하지 않는다.
+반복 기록 관찰은 [개선 반복](../../docs/improvement-cycles.md)의 `scripts/vault_improvement_cycles.py` audit,
+철회·대체 노트 수명주기 및 연쇄 인용 감사는 [노트 수명주기](../../docs/note-lifecycle.md)의 `scripts/vault_lifecycle.py` check다.
+네 도구는 자동 실행·모델 호출·게시·권한 부여를 하지 않는다. 이미 확정된 단순 작업에 새 인터뷰를 강제하지 않는다.
 
 ## 7. 참조 문서
 

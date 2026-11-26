@@ -125,6 +125,8 @@ class CodexVerificationTests(unittest.TestCase):
             "skills/agentic-vault/scripts/vault_lesson_metrics.py",
             "skills/agentic-vault/scripts/vault_runs.py",
             "skills/agentic-vault/scripts/vault_task_contracts.py",
+            "skills/agentic-vault/scripts/vault_lifecycle.py",
+            "docs/note-lifecycle.md",
             "skills/agentic-vault/scripts/vault_staged_evaluation.py",
             "skills/agentic-vault/scripts/vault_improvement_cycles.py",
             "docs/task-contracts.md",

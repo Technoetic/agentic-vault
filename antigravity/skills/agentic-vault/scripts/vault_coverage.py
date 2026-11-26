@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from functools import wraps
+import os
 from pathlib import Path
 import re
 
@@ -19,13 +20,21 @@ import vault_runs as runs
 import vault_state as state
 from jev_client import _matches_sensitive, contains_sensitive
 from vault_healthcheck import HealthcheckError
+from vault_paths import fold_path_part
 
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_DEPTH = 8
 MAX_ITEMS = 64
 MAX_NODES = 16384
 LABEL_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}')
+HASH_RE = re.compile(r'[0-9a-f]{64}')
 AUTHORITY = 'coverage_data_only'
+REVIEW_STATUSES = frozenset(('unchecked', 'independent_reviewed'))
+AUTOMATION_METHODS = frozenset(('agent', 'human', 'hybrid', 'script'))
+REQUIRED_MANIFEST_KEYS = frozenset(('version', 'task', 'requirements', 'acceptance', 'required_checks'))
+OPTIONAL_MANIFEST_KEYS = frozenset((
+    'review_status', 'automation_methods', 'spec_files', 'solution_files', 'permitted_gaps',
+))
 SECRET_SEGMENTS = frozenset(('.git', '.ssh', '.aws', '.azure', '.gnupg', 'secrets', 'credentials'))
 SECRET_SUFFIXES = frozenset(('.key', '.pem', '.p12', '.pfx', '.jks', '.kdbx'))
 SECRET_BASENAMES = frozenset(('.npmrc', '.pypirc', '.netrc', '.dockercfg', '.git-credentials'))
@@ -40,6 +49,7 @@ LIMITATIONS = (
     'Missing results mean unexecuted or unreported; these alternatives are not distinguished.',
     'Fingerprints bind selected current bytes; checksums are not signatures or authorization.',
     'Only explicitly selected files and declared IDs are checked; no vault scan is performed.',
+    'review_status and automation_methods are caller-declared metadata, not authenticated human sign-off.',
 )
 
 
@@ -101,12 +111,27 @@ def _ids(value, *, prefix='', nonempty=False):
     return sorted(ids)
 
 
+def _rel_path(value):
+    if (not isinstance(value, str) or not value.strip() or len(value) > 512
+            or value != value.strip() or '\\' in value or value.startswith('/')
+            or ':' in value or any(ord(char) < 32 for char in value)
+            or any(part in ('', '.', '..') for part in value.split('/'))):
+        raise CoverageError('invalid_path')
+    return value
+
+
+def _folded_rel(rel):
+    return '/'.join(fold_path_part(part) for part in rel.split('/'))
+
+
 def _manifest(value):
     _bounded(value)
     if contains_sensitive(value):
         raise CoverageError('sensitive_input')
-    _fields(value, {'version', 'task', 'requirements', 'acceptance', 'required_checks'},
-            'invalid_manifest')
+    if (not isinstance(value, dict)
+            or not REQUIRED_MANIFEST_KEYS <= value.keys()
+            or (value.keys() - REQUIRED_MANIFEST_KEYS - OPTIONAL_MANIFEST_KEYS)):
+        raise CoverageError('invalid_manifest')
     task = value['task']
     if (type(value['version']) is not int or value['version'] != 1
             or not isinstance(task, str) or not task.strip() or len(task) > 256
@@ -126,9 +151,64 @@ def _manifest(value):
         acceptance.append({'id': ident,
                            'requirements': _ids(item['requirements'], prefix='REQ-'),
                            'checks': _ids(item['checks'])})
+    review_status = value.get('review_status', 'unchecked')
+    if not isinstance(review_status, str) or review_status not in REVIEW_STATUSES:
+        raise CoverageError('invalid_review_status')
+    automation_methods = []
+    if 'automation_methods' in value:
+        raw_methods = value['automation_methods']
+        if (not isinstance(raw_methods, list) or not raw_methods
+                or len(raw_methods) > len(AUTOMATION_METHODS)):
+            raise CoverageError('invalid_automation_methods')
+        for item in raw_methods:
+            if not isinstance(item, str) or item not in AUTOMATION_METHODS:
+                raise CoverageError('invalid_automation_methods')
+        if len(set(raw_methods)) != len(raw_methods):
+            raise CoverageError('duplicate_automation_method')
+        automation_methods = sorted(raw_methods)
+    spec_files = []
+    if 'spec_files' in value:
+        raw_specs = value['spec_files']
+        if not isinstance(raw_specs, list) or len(raw_specs) > MAX_ITEMS:
+            raise CoverageError('invalid_spec_files')
+        seen_specs = set()
+        for item in raw_specs:
+            _fields(item, {'path', 'sha256'}, 'invalid_spec_files')
+            rel = _rel_path(item['path'])
+            sha = item['sha256']
+            if not isinstance(sha, str) or not HASH_RE.fullmatch(sha):
+                raise CoverageError('invalid_spec_files')
+            key = _folded_rel(rel)
+            if key in seen_specs:
+                raise CoverageError('duplicate_spec_file')
+            seen_specs.add(key)
+            spec_files.append({'path': rel, 'sha256': sha})
+        spec_files.sort(key=lambda entry: entry['path'])
+    solution_files = []
+    if 'solution_files' in value:
+        raw_solutions = value['solution_files']
+        if not isinstance(raw_solutions, list) or len(raw_solutions) > MAX_ITEMS:
+            raise CoverageError('invalid_solution_files')
+        seen_solutions = set()
+        for item in raw_solutions:
+            rel = _rel_path(item)
+            key = _folded_rel(rel)
+            if key in seen_solutions:
+                raise CoverageError('duplicate_solution_file')
+            seen_solutions.add(key)
+            solution_files.append(rel)
+        solution_files.sort()
+    permitted_gaps = []
+    if 'permitted_gaps' in value:
+        permitted_gaps = _ids(value['permitted_gaps'], nonempty=False)
     return {'version': 1, 'task': task, 'requirements': requirements,
             'acceptance': sorted(acceptance, key=lambda item: item['id']),
-            'required_checks': checks}
+            'required_checks': checks,
+            'review_status': review_status,
+            'automation_methods': automation_methods,
+            'spec_files': spec_files,
+            'solution_files': solution_files,
+            'permitted_gaps': permitted_gaps}
 
 
 class _Store(evidence.Store):
@@ -174,14 +254,21 @@ def _graph(manifest):
                   for ident in sorted(requirements - mapped_requirements))
     issues.extend({'code': 'unmapped_check', 'id': ident}
                   for ident in sorted(checks - mapped_checks))
+    for ident in sorted(set(manifest['permitted_gaps']) - checks):
+        issues.append({'code': 'unknown_permitted_gap', 'id': ident})
+    spec_keys = {_folded_rel(entry['path']): entry['path'] for entry in manifest['spec_files']}
+    for sol_path in manifest['solution_files']:
+        if _folded_rel(sol_path) in spec_keys:
+            issues.append({'code': 'spec_solution_overlap', 'path': sol_path})
     return issues
 
 
 def _outcomes(manifest, receipt):
     """Compare independently declared expected IDs with submitted observations."""
     expected = set(manifest['required_checks'])
+    permitted_gaps = set(manifest['permitted_gaps']) & expected
     report = receipt['report']
-    submitted, issues = {}, []
+    submitted, issues, permitted_gaps_used = {}, [], []
     if report is None:
         issues.append({'code': 'report_not_recorded'})
     else:
@@ -199,12 +286,35 @@ def _outcomes(manifest, receipt):
                   for ident in sorted(submitted.keys() - expected))
     for ident in sorted(expected & submitted.keys()):
         status = submitted[ident]
-        if status != 'verified':
+        if status == 'gap' and ident in permitted_gaps:
+            permitted_gaps_used.append(ident)
+        elif status != 'verified':
             code = {'gap': 'unsupported_outcome', 'failed': 'reported_failed',
                     'regression': 'reported_regression'}[status]
             issues.append({'code': code, 'id': ident})
     return issues, len(report['checks']) if report else 0, sum(
-        status == 'verified' for ident, status in submitted.items() if ident in expected)
+        status == 'verified' for ident, status in submitted.items() if ident in expected), permitted_gaps_used
+
+
+def _check_spec_files(store, spec_files):
+    """Verify immutable spec/challenge files against pinned SHA-256 digests."""
+    spec_issues, spec_marks, verified_specs = [], {}, []
+    for entry in spec_files:
+        rel, expected_sha = entry['path'], entry['sha256']
+        try:
+            current, mark, _ = store.fingerprint(rel, limit=evidence.MAX_FILE_BYTES)
+        except FileNotFoundError:
+            spec_issues.append({'code': 'spec_file_missing', 'path': rel})
+            continue
+        except evidence.EvidenceError as exc:
+            spec_issues.append({'code': 'spec_file_unsafe', 'path': rel, 'reason': str(exc)})
+            continue
+        spec_marks[current['path']] = mark
+        if current['sha256'] != expected_sha:
+            spec_issues.append({'code': 'spec_hash_mismatch', 'path': rel})
+        else:
+            verified_specs.append({'path': current['path'], 'sha256': current['sha256'], 'size': current['size']})
+    return spec_issues, spec_marks, verified_specs
 
 
 @_public
@@ -222,13 +332,41 @@ def check(vault, manifest_path, evidence_id):
         raise CoverageError('sensitive_input')
     files = receipt['artifacts'] + receipt['evidence']
     sources = [receipt['report_source']] if receipt['report_source'] else []
-    if sum(item['size'] for item in files + sources) > evidence.MAX_SET_BYTES:
+    total_bytes = sum(item['size'] for item in files + sources)
+    if total_bytes > evidence.MAX_SET_BYTES:
         raise CoverageError('file_set_too_large')
     # Validate every selected public path before hashing any of its file bodies.
     for item in files + sources:
         store.path(item['path'])
+    canonical_specs = set()
+    for item in manifest['spec_files']:
+        resolved_spec = store.path(item['path'])
+        canon_key = _folded_rel(evidence.rel_posix(resolved_spec, store.root))
+        if canon_key in canonical_specs:
+            raise CoverageError('duplicate_spec_file')
+        canonical_specs.add(canon_key)
+        try:
+            total_bytes += os.lstat(evidence.fs_path(resolved_spec)).st_size
+        except FileNotFoundError:
+            pass
+    if total_bytes > evidence.MAX_SET_BYTES:
+        raise CoverageError('file_set_too_large')
+    canonical_solutions = set()
+    canonical_overlap_paths = []
+    for sol_path in manifest['solution_files']:
+        resolved_sol = store.path(sol_path)
+        canon_key = _folded_rel(evidence.rel_posix(resolved_sol, store.root))
+        if canon_key in canonical_solutions:
+            raise CoverageError('duplicate_solution_file')
+        canonical_solutions.add(canon_key)
+        if canon_key in canonical_specs:
+            canonical_overlap_paths.append(sol_path)
     issues = _graph(manifest)
-    outcome_issues, submitted_count, verified_count = _outcomes(manifest, receipt)
+    reported_overlaps = {issue['path'] for issue in issues if issue['code'] == 'spec_solution_overlap'}
+    for sol_path in canonical_overlap_paths:
+        if sol_path not in reported_overlaps:
+            issues.append({'code': 'spec_solution_overlap', 'path': sol_path})
+    outcome_issues, submitted_count, verified_count, permitted_gaps_used = _outcomes(manifest, receipt)
     issues.extend(outcome_issues)
     if receipt['task'] != manifest['task']:
         issues.append({'code': 'task_mismatch'})
@@ -239,12 +377,18 @@ def check(vault, manifest_path, evidence_id):
         marks.update(source_marks)
     issues.extend({'code': 'stale_evidence', 'path': item['path'], 'reason': item['reason']}
                   for item in stale)
+    spec_issues, spec_marks, verified_specs = _check_spec_files(store, manifest['spec_files'])
+    issues.extend(spec_issues)
     changed = False
     try:
+        for shared_key in set(marks) & set(spec_marks):
+            if marks[shared_key] != spec_marks[shared_key]:
+                raise CoverageError('changed_during_check')
         store.inputs.policy.fresh()
         store.fresh_policy()
         store.sweep({info['path']: manifest_mark})
         store.sweep(marks)
+        store.sweep(spec_marks)
         store.sweep(receipt_marks, internal=True)
         # A second stable manifest read also detects same-metadata byte changes.
         current, _, _ = store.fingerprint(info['path'], limit=MAX_MANIFEST_BYTES)
@@ -253,20 +397,31 @@ def check(vault, manifest_path, evidence_id):
     except (CoverageError, evidence.EvidenceError, runs.RunError, state.StateError, OSError):
         changed = True
         issues.append({'code': 'changed_during_check'})
-    status = ('stale' if stale or changed else 'pending' if receipt['report'] is None
+    status = ('stale' if stale or spec_issues or changed else 'pending' if receipt['report'] is None
               else 'incomplete' if issues else 'complete')
-    return {'version': 1, 'ok': status == 'complete', 'status': status, 'authority': AUTHORITY,
-            'semantic_fulfillment_verified': False, 'execution_verified': False,
-            'manifest': info,
-            'evidence': {'id': receipt['id'], 'receipt_sha256': receipt['receipt_sha256'],
-                         'status': 'stale' if stale or changed else
-                         'pending' if receipt['report'] is None else 'current'},
-            'counts': {'requirements': len(manifest['requirements']),
-                       'acceptance': len(manifest['acceptance']),
-                       'required_checks': len(manifest['required_checks']),
-                       'submitted_checks': submitted_count,
-                       'reported_verified_checks': verified_count},
-            'issues': issues, 'limitations': list(LIMITATIONS)}
+    result = {'version': 1, 'ok': status == 'complete', 'status': status, 'authority': AUTHORITY,
+              'semantic_fulfillment_verified': False, 'execution_verified': False,
+              'review_status': manifest['review_status'],
+              'independent_reviewed': manifest['review_status'] == 'independent_reviewed',
+              'manifest': info,
+              'evidence': {'id': receipt['id'], 'receipt_sha256': receipt['receipt_sha256'],
+                           'status': 'stale' if stale or changed else
+                           'pending' if receipt['report'] is None else 'current'},
+              'counts': {'requirements': len(manifest['requirements']),
+                         'acceptance': len(manifest['acceptance']),
+                         'required_checks': len(manifest['required_checks']),
+                         'submitted_checks': submitted_count,
+                         'reported_verified_checks': verified_count},
+              'issues': issues, 'limitations': list(LIMITATIONS)}
+    if manifest['automation_methods']:
+        result['automation_methods'] = manifest['automation_methods']
+    if manifest['spec_files']:
+        result['spec_bindings'] = verified_specs
+    if manifest['solution_files']:
+        result['solution_files'] = manifest['solution_files']
+    if manifest['permitted_gaps']:
+        result['permitted_gaps_used'] = permitted_gaps_used
+    return result
 
 
 def main(argv=None):
