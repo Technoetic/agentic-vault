@@ -327,7 +327,7 @@ def record_install_state(
     vault: Path,
     *,
     host: str = "all",
-    engine_version: str = "0.58.0",
+    engine_version: str = "0.59.0",
 ) -> dict:
     """Record current managed and user-owned surfaces into 00-meta/.vault-install-state.json."""
     resolved = Path(vault).resolve()
@@ -663,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
     p_rec = sub.add_parser("record", help="Record current managed and user-owned vault surfaces.")
     p_rec.add_argument("--vault", required=True, type=Path)
     p_rec.add_argument("--host", choices=("claude", "codex", "antigravity", "all"), default="all")
-    p_rec.add_argument("--engine-version", default="0.58.0")
+    p_rec.add_argument("--engine-version", default="0.59.0")
     p_rec.add_argument("--format", choices=("text", "json"), default="json")
 
     p_stat = sub.add_parser("status", help="Inspect drift between recorded install-state and disk.")
