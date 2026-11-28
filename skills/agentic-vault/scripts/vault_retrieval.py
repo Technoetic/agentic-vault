@@ -41,9 +41,10 @@ _ISO_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[
 _FIELD = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$")
 _LINK = re.compile(r"\[\[([^\[\]\n]{1,512})\]\]")
 _TEMPORAL_FIELDS = {"valid_from", "valid_until", "checked_at", "superseded_by"}
+_RETIRED_LIFECYCLE_STATUSES = frozenset({"withdrawn", "superseded"})
 # Statuses that drop a source when an explicit as_of is given. "annotate_only"
 # is an evaluation control: it keeps such sources with the same annotation.
-TEMPORAL_REJECTED_STATUSES = ("invalid", "expired", "not_yet_valid", "superseded", "supersession_unknown")
+TEMPORAL_REJECTED_STATUSES = ("invalid", "expired", "not_yet_valid", "superseded", "supersession_unknown", "withdrawn")
 TEMPORAL_FILTERS = ("exclude", "annotate_only")
 
 
@@ -81,6 +82,7 @@ def _metadata(text: str) -> dict:
     lines = text.splitlines()
     fields: dict[str, str] = {}
     errors: list[str] = []
+    lifecycle_status: str | None = None
     if lines and lines[0].strip() == "---":
         closed = False
         seen: set[str] = set()
@@ -101,6 +103,16 @@ def _metadata(text: str) -> dict:
                     errors.append("ambiguous_temporal_metadata")
                 continue
             name, value = match.groups()
+            if name == "status":
+                try:
+                    raw_status = _scalar(value).strip()
+                except (ValueError, json.JSONDecodeError, RecursionError):
+                    raw_status = ""
+                if raw_status == "withdrawn":
+                    lifecycle_status = "withdrawn"
+                elif raw_status == "superseded" and lifecycle_status != "withdrawn":
+                    lifecycle_status = "superseded"
+                continue
             if name != name.casefold() and name.casefold() in _TEMPORAL_FIELDS:
                 errors.append("nonstandard_temporal_key")
                 continue
@@ -125,7 +137,7 @@ def _metadata(text: str) -> dict:
                 errors.append("invalid_" + name)
     if "valid_from" in dates and "valid_until" in dates and dates["valid_from"] >= dates["valid_until"]:
         errors.append("nonpositive_validity_interval")
-    return {"fields": fields, "dates": dates, "errors": sorted(set(errors))}
+    return {"fields": fields, "dates": dates, "errors": sorted(set(errors)), "lifecycle_status": lifecycle_status}
 
 
 def _filename(target: str) -> str | None:
@@ -149,13 +161,20 @@ def _successor_name(value: str) -> str | None:
 def _temporal(doc: dict, documents: dict, filenames: dict, as_of: datetime | None, complete_filenames: bool = True) -> dict:
     meta = doc["metadata"]
     fields, dates = meta["fields"], meta["dates"]
+    lifecycle_status = meta.get("lifecycle_status")
     result = {"status": "unknown", "currentness": "unknown", **fields, "errors": meta["errors"]}
+    if lifecycle_status in _RETIRED_LIFECYCLE_STATUSES:
+        result["lifecycle_status"] = lifecycle_status
     if meta["errors"]:
         result["status"] = "invalid"
         return result
     if as_of is None:
         # Validity is not guessed from mtime, hash, ingestion or the clock.
         result["status"] = "not_evaluated" if dates else "unknown"
+        return result
+    if lifecycle_status == "withdrawn":
+        # A withdrawn note's proof/evidence is retracted regardless of as_of.
+        result["status"] = "withdrawn"
         return result
     lower, upper = dates.get("valid_from"), dates.get("valid_until")
     if lower is not None and as_of < lower:
@@ -179,6 +198,9 @@ def _temporal(doc: dict, documents: dict, filenames: dict, as_of: datetime | Non
         if as_of >= next_dates["valid_from"]:
             result["status"] = "superseded"
             return result
+    elif lifecycle_status == "superseded":
+        result["status"] = "superseded"
+        return result
     if lower is not None or upper is not None:
         result["status"] = "within_explicit_bounds"
         result["currentness"] = "within_declared_interval"
@@ -346,12 +368,15 @@ def _same_policy_stamp(vault: Path, expected: tuple) -> bool:
         return False
 
 
-def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None, lexical_ngrams=None, temporal_filter="exclude") -> dict:
+def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *, as_of=None, expand_links=0, backend="lexical", external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None, lexical_ngrams=None, temporal_filter="exclude", exclude_withdrawn=False, exclude_superseded=False) -> dict:
     """Retrieve source-bound review context; explicit temporal bounds are half-open.
 
     as_of: ISO date (UTC midnight) or zoned ISO datetime. checked_at is an
     observation timestamp, not a validity boundary. Unknown currentness stays
     unknown. superseded_by uses a unique literal successor's valid_from.
+    status: withdrawn notes are dropped under as_of (when temporal_filter="exclude")
+    and when exclude_withdrawn=True. status: superseded notes without superseded_by
+    are dropped under as_of and when exclude_superseded=True.
     external_candidates: <=50 path strings/path+rank mappings, {candidates:[]},
     or a vault-relative <=64KiB JSON sidecar. Other provider fields are ignored.
     excluded_sources only adds deny scope. Links use literal unique filenames.
@@ -365,10 +390,17 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     the same machinery, fields and status annotations, but no source is dropped
     for its status. Without as_of neither value drops a source.
     The legacy fast path runs only when every option is at its default,
-    lexical_ngrams=None and temporal_filter="exclude" included; any other valid
-    value selects the advanced output, whose diagnostics name that option.
+    lexical_ngrams=None, temporal_filter="exclude", exclude_withdrawn=False and
+    exclude_superseded=False included; any other valid value selects the advanced
+    output, whose diagnostics name that option.
     """
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and lexical_ngrams is None and type(temporal_filter) is str and temporal_filter == "exclude":
+    if (
+        as_of is None and expand_links == 0 and not isinstance(expand_links, bool)
+        and backend == "lexical" and external_candidates is None and excluded_sources == ()
+        and expand_query is False and query_mapping is None and lexical_ngrams is None
+        and type(temporal_filter) is str and temporal_filter == "exclude"
+        and exclude_withdrawn is False and exclude_superseded is False
+    ):
         return _legacy._legacy_recall(vault, query, limit, max_tokens)
     diagnostics = _legacy._diagnostics()
     diagnostics.update({"mode": "advanced", "backend": backend if isinstance(backend, str) else "invalid", "temporal": [], "temporal_rejected": 0, "graph_ambiguous": 0, "graph_unresolved": 0, "graph_links_considered": 0, "external_rejected": 0, "external_bytes_read": 0, "external_provider_status": "not_requested", "abstention": "host_decision", "source_authority": "unverified", "ranking": "lexical/BM25; hybrid uses RRF k=60; graph decays 0.5 per hop"})
@@ -383,6 +415,8 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
             raise ValueError("invalid advanced mode")
         if type(expand_query) is not bool or (query_mapping is not None and not expand_query):
             raise ValueError("query mapping requires explicit expansion")
+        if type(exclude_withdrawn) is not bool or type(exclude_superseded) is not bool:
+            raise ValueError("lifecycle exclusion flags must be booleans")
         if lexical_ngrams is not None and (type(lexical_ngrams) is not str or lexical_ngrams not in LEXICAL_NGRAM_MODES):
             raise ValueError("invalid lexical n-gram mode")
         # Exact str, as for lexical_ngrams: a subclass cannot pose as a mode.
@@ -412,6 +446,10 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     if temporal_filter != "exclude":
         # Default output stays byte-identical; only the control arm says so.
         diagnostics.update({"temporal_filter": temporal_filter, "temporal_unfiltered": 0})
+    if exclude_withdrawn:
+        diagnostics.update({"exclude_withdrawn": True, "withdrawn_excluded": 0})
+    if exclude_superseded:
+        diagnostics.update({"exclude_superseded": True, "superseded_excluded": 0})
     try:
         resolve_note_path(vault, _legacy.CONFIG_RELPATH)
         safe_vault = vault.resolve(strict=True)
@@ -513,6 +551,13 @@ def retrieve(vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
         doc["temporal"] = temporal
         if len(diagnostics["temporal"]) < _legacy.MAX_RESULTS:
             diagnostics["temporal"].append({"path": rel, **temporal})
+        lc_status = doc["metadata"].get("lifecycle_status")
+        if exclude_withdrawn and lc_status == "withdrawn":
+            diagnostics["withdrawn_excluded"] += 1
+            continue
+        if exclude_superseded and lc_status == "superseded":
+            diagnostics["superseded_excluded"] += 1
+            continue
         if temporal_time is not None and temporal["status"] in TEMPORAL_REJECTED_STATUSES:
             if temporal_filter == "exclude":
                 diagnostics["temporal_rejected"] += 1

@@ -437,6 +437,8 @@ def verify(codex: str) -> dict:
                          "skills/agentic-vault/scripts/vault_task_contracts.py",
                          "skills/agentic-vault/scripts/vault_lifecycle.py",
                          "docs/note-lifecycle.md",
+                         "skills/agentic-vault/scripts/vault_policy_drift.py",
+                         "docs/policy-drift.md",
                          "skills/agentic-vault/scripts/vault_staged_evaluation.py",
                          "skills/agentic-vault/scripts/vault_improvement_cycles.py",
                          "skills/agentic-vault/scripts/bizrouter_client.py",

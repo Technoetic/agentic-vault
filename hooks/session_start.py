@@ -103,11 +103,13 @@ _DANGEROUS_INVISIBLE_RE = re.compile(
 )
 # Hidden non-rendered markup patterns stripped from injected session context
 # outside fenced code blocks and inline code spans (v0.58.0, per
-# arXiv:2611.28763v1 — hidden AI-directed text on GitHub). Trailing or
-# standalone single-token machine anchors such as
+# arXiv:2611.28763v1 — hidden AI-directed text on GitHub; extended in v0.60.0
+# per arXiv:2602.10498v1 for Obsidian %% ... %% comments and non-rendered SVG
+# metadata). Trailing or standalone single-token machine anchors such as
 # <!-- av-v0570-release-20261124 --> stay intact.
 _SAFE_ANCHOR_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 _ALWAYS_HIDDEN_TAGS = frozenset({"script", "style", "template"})
+_SVG_HIDDEN_META_TAGS = frozenset({"desc", "title", "metadata"})
 _HTML_VOID_TAGS = frozenset({
     "area", "base", "br", "col", "embed", "hr", "img",
     "input", "link", "meta", "source", "track", "wbr",
@@ -122,8 +124,9 @@ _HTML_ATTR_RE = re.compile(
 )
 _CSS_ZERO_OPACITY_RE = re.compile(r"(?:0+(?:\.0+)?|\.0+)%?(?:!important)?\Z")
 _CSS_ZERO_FONT_RE = re.compile(r"(?:0+(?:\.0+)?|\.0+)(?:[a-z]{1,6}|%)?(?:!important)?\Z")
+_HTML_ZERO_DIM_RE = re.compile(r"(?:0+(?:\.0+)?|\.0+)(?:[a-z]{1,6}|%)?\Z")
 _BLANK_LINE_RE = re.compile(r"\r?\n[ \t]*\r?\n")
-_DELIM_RE = re.compile(r"[<`\\]")
+_DELIM_RE = re.compile(r"[<`\\\%]")
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
@@ -324,6 +327,13 @@ def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:
             if match.group(4) is not None and match.end() == attrs_end:
                 style_val = style_val.rstrip("/")
             if _style_hides_element(style_val):
+                return True
+        if tag_name == "svg" and attr_name in ("width", "height"):
+            dim_val = next((g for g in match.groups()[1:] if g is not None), "")
+            if match.group(4) is not None and match.end() == attrs_end:
+                dim_val = dim_val.rstrip("/")
+            cleaned_dim = "".join(html.unescape(dim_val).lower().split())
+            if cleaned_dim and _HTML_ZERO_DIM_RE.fullmatch(cleaned_dim):
                 return True
     return False
 
@@ -572,16 +582,16 @@ def _index_line_backticks(text: str, start: int, end: int) -> dict[int, deque[in
 
 
 def _strip_hidden_markup(text: str) -> str:
-    """Strip non-rendered HTML comments, hidden Markdown link-ref comments, and hidden HTML elements.
+    """Strip non-rendered HTML/Obsidian comments, hidden Markdown link-ref comments, and hidden HTML/SVG elements.
 
     Runs only on the injected SessionStart buffer (never mutating vault files) in
     guaranteed O(N) time. Preserves fenced code blocks, inline code spans (while
-    respecting backslash-escaped backticks), trailing/standalone benign single-token
-    HTML anchor comments (e.g. ``<!-- av-v0580-release-20261125 -->``), and normal
-    Markdown link references whose destination is not ``#``, ``#...``, ``<>``, or
-    ``<#...>``. Returns the exact same string object when nothing is stripped.
+    respecting backslash-escaped backticks and percent signs), trailing/standalone
+    benign single-token HTML anchor comments (e.g. ``<!-- av-v0580-release-20261125 -->``),
+    and normal Markdown link references whose destination is not ``#``, ``#...``,
+    ``<>``, or ``<#...>``. Returns the exact same string object when nothing is stripped.
     """
-    if not text or ("<!--" not in text and "]:" not in text and "<" not in text):
+    if not text or ("<!--" not in text and "]:" not in text and "<" not in text and "%%" not in text):
         return text
 
     n = len(text)
@@ -590,6 +600,7 @@ def _strip_hidden_markup(text: str) -> str:
     line_had_strip = False
     line_orig_nonempty = False
     changed = False
+    svg_depth = 0
 
     blank_limit = -1
     top_scanner = _TagScanner(text, 0)
@@ -659,11 +670,25 @@ def _strip_hidden_markup(text: str) -> str:
                 i += 1
             continue
 
-        # Backslash escapes before '\' or '`' prevent escaped backticks (\`) from opening code spans.
-        if ch == "\\" and i + 1 < n and text[i + 1] in ("\\", "`"):
+        # Backslash escapes before '\', '`', or '%' prevent escaped delimiters from opening spans/comments.
+        if ch == "\\" and i + 1 < n and text[i + 1] in ("\\", "`", "%"):
             line_buf.append(text[i:i + 2])
             line_orig_nonempty = True
             i += 2
+            continue
+
+        # Obsidian Flavored Markdown %% ... %% comments (non-rendered in Reading View; O(N)).
+        if ch == "%" and i + 1 < n and text[i + 1] == "%":
+            changed = True
+            line_had_strip = True
+            line_orig_nonempty = True
+            end = text.find("%%", i + 2)
+            if end == -1:
+                i = n
+                break
+            i = end + 2
+            if i > cur_eol:
+                cur_eol, _ = _line_end(text, i)
             continue
 
         # CommonMark inline code span on the current line in O(N) amortized time.
@@ -736,6 +761,20 @@ def _strip_hidden_markup(text: str) -> str:
                 i = end + 3
                 continue
 
+            # Track </svg> closing tags so non-rendered SVG metadata (<desc>/<title>/<metadata>)
+            # is stripped only inside <svg>...</svg> without disturbing plain-text placeholders.
+            if i + 1 < n and text[i + 1] == "/":
+                m_close_svg = _HTML_TAG_NAME_RE.match(text, i + 2)
+                if (
+                    m_close_svg is not None
+                    and m_close_svg.group(0).lower() == "svg"
+                    and m_close_svg.end() < n
+                    and (text[m_close_svg.end()] in ">" or text[m_close_svg.end()].isspace())
+                ):
+                    gt_svg = text.find(">", m_close_svg.end(), cur_eol if i <= cur_eol else n)
+                    if gt_svg != -1 and svg_depth > 0:
+                        svg_depth -= 1
+
             # HTML opening tag (CommonMark Type 1 <script>/<style> may span blank lines).
             m_open = _HTML_TAG_NAME_RE.match(text, i + 1)
             if (
@@ -754,15 +793,23 @@ def _strip_hidden_markup(text: str) -> str:
                     tag_end = top_scanner.find_tag_end(m_open.end())
                 if tag_end != -1:
                     attrs = text[m_open.end():tag_end]
-                    if _is_hidden_open_tag(tname, attrs):
+                    is_svg_tag = tname == "svg" or (svg_depth > 0 and tname in _SVG_HIDDEN_META_TAGS)
+                    is_svg_self_closing = is_svg_tag and attrs.rstrip().endswith("/")
+                    if _is_hidden_open_tag(tname, attrs) or (
+                        svg_depth > 0 and tname in _SVG_HIDDEN_META_TAGS
+                    ):
                         changed = True
                         line_had_strip = True
                         line_orig_nonempty = True
-                        if tname in _HTML_VOID_TAGS:
+                        if tname in _HTML_VOID_TAGS or is_svg_self_closing:
                             i = tag_end + 1
                         else:
                             i = _consume_hidden_element(text, tag_end + 1, tname, full_scanner)
+                        if i > cur_eol:
+                            cur_eol, _ = _line_end(text, i)
                         continue
+                    if tname == "svg" and not is_svg_self_closing:
+                        svg_depth += 1
                     # Non-hidden valid HTML tag: emit atomically so quotes inside it are never rescanned.
                     segment = text[i:tag_end + 1]
                     if "\n" not in segment:

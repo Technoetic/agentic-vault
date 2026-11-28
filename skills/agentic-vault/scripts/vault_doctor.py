@@ -662,6 +662,14 @@ INSTALL_STATE_UNAVAILABLE = {
     "status": "unavailable",
     "reason_code": "probe_failed",
 }
+POLICY_DRIFT_UNAVAILABLE = {
+    "schema": "agentic-vault/policy-drift/v1",
+    "status": "unavailable",
+    "reason_code": "probe_failed",
+    "next_action": "check_vault_settings_and_hooks_manually",
+    "authority": "policy_drift_audit_only",
+    "trust_boundary": "static_settings_and_hook_hashes_only_runtime_host_unverified",
+}
 CLOUD_SYNC_UNAVAILABLE = {
     "schema_version": 1,
     "status": "unavailable",
@@ -770,6 +778,12 @@ def _format_text(report: dict) -> str:
             lines.extend(state_lines(report["install_state"]))
         except Exception:  # fail-soft by contract: a fixed line, never exception text
             lines.append("install_state: unavailable (probe_failed)")
+    if "policy_drift" in report:
+        try:
+            from vault_policy_drift import text_lines as drift_lines
+            lines.extend(drift_lines(report["policy_drift"]))
+        except Exception:  # fail-soft by contract: a fixed line, never exception text
+            lines.append("policy_drift: unavailable (probe_failed)")
     if "cloud_sync" in report:
         try:
             from vault_cloud_sync import text_lines as sync_lines
@@ -859,6 +873,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--policy-drift", action="store_true",
+        help=(
+            "Also audit read-only drift against 00-meta/.vault-policy-baseline.json for "
+            "removed operator permissions.deny rules and modified/untracked hook script "
+            "SHA-256 digests. Content-free, fail-soft; never changes the exit code."
+        ),
+    )
+    parser.add_argument(
         "--cloud-sync", action="store_true",
         help=(
             "Also heuristically check whether the vault or configured backup_target sits "
@@ -942,6 +964,13 @@ def main(argv: list[str] | None = None) -> int:
             report["install_state"] = diagnose_install_state(args.vault)
         except Exception:  # fail-soft by contract: fixed words, never exception text
             report["install_state"] = dict(INSTALL_STATE_UNAVAILABLE)
+    if args.policy_drift:
+        # Loaded only on request; read-only deny-rule & hook hash drift, exit code stays the vault's.
+        try:
+            from vault_policy_drift import diagnose_policy_drift
+            report["policy_drift"] = diagnose_policy_drift(args.vault, plugin_root=REPO_ROOT)
+        except Exception:  # fail-soft by contract: fixed words, never exception text
+            report["policy_drift"] = dict(POLICY_DRIFT_UNAVAILABLE)
     if args.cloud_sync:
         # Loaded only on request; lexical/env heuristic only, exit code stays the vault's.
         try:

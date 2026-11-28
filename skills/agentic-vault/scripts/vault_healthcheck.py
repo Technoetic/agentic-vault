@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# agentic-vault:healthcheck engine=0.59.0
+# agentic-vault:healthcheck engine=0.60.0
 """범용 볼트 무결성 검증 엔진 — agentic-vault 플러그인 (표준 라이브러리만 사용, 의존성 0).
 
 설계 원칙: 플러그인 = 엔진, 볼트 = 데이터.
@@ -109,7 +109,7 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-ENGINE_VERSION = "0.59.0"
+ENGINE_VERSION = "0.60.0"
 HEALTHCHECK_SUMMARY_SCHEMA = "agentic-vault/healthcheck-summary/v1"
 CONFIG_RELPATH = "00-meta/vault-config.json"
 ENGINE_RUNTIME_RELPATH = "00-meta/.agentic-vault/runtime"
@@ -231,6 +231,7 @@ KNOWN_CONFIG_KEYS = frozenset({
     "memory_revocation_file", "privileged_notes", "handoff_fold", "tasks_note",
     "constraints_note", "lint_max_warnings", "promotion_review_sessions",
     "checked_at_stale_days", "checked_at_annual_rollover",
+    "exclude_retired_from_active_checks",
 })
 _CONFIG_KEY_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
@@ -522,6 +523,9 @@ def _validate_freshness_keys(config: dict) -> None:
     if "checked_at_annual_rollover" in config:
         if not isinstance(config["checked_at_annual_rollover"], bool):
             raise HealthcheckError("checked_at_annual_rollover must be true/false")
+    if "exclude_retired_from_active_checks" in config:
+        if not isinstance(config["exclude_retired_from_active_checks"], bool):
+            raise HealthcheckError("exclude_retired_from_active_checks must be true/false")
 
 
 def validate_config(raw: object) -> dict:
@@ -2606,11 +2610,15 @@ def main() -> int:
                     help="full 모드 stdout 마지막 줄에 건수만 담은 JSON 요약 한 줄을 더한다")
     ap.add_argument("--worktree-heads", action="store_true",
                     help="연결 작업 트리 HEAD가 어느 분기·태그에도 없는지 확인한다(선택, 읽기 전용)")
+    ap.add_argument("--exclude-retired", action="store_true",
+                    help="full 모드 §7 노화·§8 SSOT 모순 집계에서 status: withdrawn/superseded 노트를 제외한다(선택)")
     args = ap.parse_args()
     if args.json_summary and args.staged:
         ap.error("--json-summary는 --staged와 함께 쓸 수 없다(full 모드 전용)")
     if args.worktree_heads and args.staged:
         ap.error("--worktree-heads는 --staged와 함께 쓸 수 없다(full 모드 전용)")
+    if args.exclude_retired and args.staged:
+        ap.error("--exclude-retired는 --staged와 함께 쓸 수 없다(full 모드 전용)")
 
     # The summary of a run that checks no notes; _main fills it as it returns.
     summary: dict[str, object] = {
@@ -2837,6 +2845,8 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
     fact_hits: dict[str, dict[str, list[str]]] = {label: {} for label, _ in fact_patterns}
     approved_note_texts: dict[str, str] = {}
     duplicate_entry_notes: list[tuple[str, list[list[tuple[int, str, str]]]]] = []
+    exclude_retired = bool(args.exclude_retired or cfg.get("exclude_retired_from_active_checks", False))
+    retired_excluded = 0
 
     # 프런트매터 면제 구역 — 2026-08-05 신설.
     # 구 버전이 하드코딩하던 면제('10-inbox/*', '00-meta/scratch/*' 등)가
@@ -2879,6 +2889,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
         fm, _body = split_frontmatter(text)
 
         exempt = is_fm_exempt(rel)
+        is_retired = False
 
         if fm is None:
             if not exempt:
@@ -2894,6 +2905,9 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
                 oversized_fm.append((rel, fm_lines))
             keys = parse_simple_yaml_keys(fm)
             note_types[rel] = keys.get("type", "")
+            is_retired = keys.get("status", "") in ("withdrawn", "superseded")
+            if exclude_retired and is_retired:
+                retired_excluded += 1
             absent = [k for k in required_keys if k not in keys]
             if absent:
                 missing_keys.append((rel, absent))
@@ -2904,7 +2918,7 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
             fm_text_lines = fm.splitlines()
             for index in unquoted_frontmatter_link_lines(fm):
                 unquoted_links.append(f"{rel} → `{fm_text_lines[index].strip()}`")
-            if stale_days > 0:
+            if stale_days > 0 and not (exclude_retired and is_retired):
                 try:
                     upd_d = datetime.strptime(keys.get("updated", ""), "%Y-%m-%d").date()
                     if (date.today() - upd_d).days > stale_days:
@@ -2928,12 +2942,13 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
             links.add(base)
         outgoing[p.stem] = links
 
-        for label, rx in fact_patterns:
-            vals = set()
-            for m in rx.finditer(clean_text):
-                vals.add(m.group(1) if m.groups() else m.group(0))
-            for v in vals:
-                fact_hits[label].setdefault(v, []).append(rel)
+        if not (exclude_retired and is_retired):
+            for label, rx in fact_patterns:
+                vals = set()
+                for m in rx.finditer(clean_text):
+                    vals.add(m.group(1) if m.groups() else m.group(0))
+                for v in vals:
+                    fact_hits[label].setdefault(v, []).append(rel)
 
     if targets and len(unreadable) == len(targets):
         # 침묵 통과(silent green) 방지: 전 노트가 읽기 실패면 검사가 수행되지 않은 것이다.
@@ -3366,6 +3381,8 @@ def _main(args: argparse.Namespace, summary: dict) -> int:
     })
     if args.worktree_heads:
         summary["unreachable_worktree_heads"] = worktree_head_count
+    if exclude_retired:
+        summary["retired_excluded"] = retired_excluded
     if duplicate_entry_count:
         summary["duplicate_entry_ids"] = duplicate_entry_count
     return 1 if critical > 0 else 0
