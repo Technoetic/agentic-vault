@@ -48,6 +48,7 @@
 | `lesson-clusters <인자>` | [교훈 재발 부류](../../../docs/lesson-recurrence.md), `scripts/vault_lesson_clusters.py --vault PATH --mistakes RELATIVE.md`; 읽기 전용 |
 | `lesson-cues build [--write]` | [교훈 단서 컴파일](../../../assets/adapters/lesson-cues/guide.md), `scripts/vault_lesson_cues.py --vault PATH build`; `--write`일 때만 `00-meta/lesson-cues.json`을 바꾼다. 훅은 Claude Code 전용이라 Codex에는 설치하지 않고, 컴파일 도구만 같은 경로로 쓴다 |
 | `lifecycle check [--json]` | [노트 수명주기](../../../docs/note-lifecycle.md), `scripts/vault_lifecycle.py --vault PATH check`; `withdrawn`·`superseded` 메타데이터, 철회·대체 인용 경고, 의존 연쇄를 읽기 전용 감사 |
+| `policy-drift record\|check [--format text\|json]` | [정책 드리프트](../../../docs/policy-drift.md), `scripts/vault_policy_drift.py record\|check --vault PATH`; 봉인된 기준선 대비 `.claude/settings*.json` 운영자 `deny` 규칙 삭제·훅 설정 변조 및 훅 스크립트 SHA-256 변조를 내용 비노출로 감사 |
 | `impact capture\|check <인자>` | [변경 영향 조회](../../../docs/knowledge-impact.md), `scripts/vault_impact.py --vault PATH capture\|check --input RELATIVE.json`; 명시적 의존관계의 해시 변화·누락을 읽기 전용 검토 |
 | `okf-export <인자>` | [OKF 내보내기](../../../docs/okf-export.md), `scripts/vault_okf.py --vault PATH --note RELATIVE.md --output ABSOLUTE_PATH`; 선택 노트만 볼트 밖 새 묶음으로 변환, 원본 변경·게시 없음 |
 | `lesson-metrics <하위 명령과 인자>` | [효과 관측](../../../docs/memory-patterns.md), `scripts/vault_lesson_metrics.py --vault PATH record/summarize`; 현재 허용된 관측 기록만 추가 |

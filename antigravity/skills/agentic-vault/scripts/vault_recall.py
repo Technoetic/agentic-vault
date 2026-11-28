@@ -743,16 +743,22 @@ def recall(
     vault: Path, query: str, limit: int = 5, max_tokens: int = 1500, *,
     as_of: str | None = None, expand_links: int = 0, backend: str = "lexical",
     external_candidates=None, excluded_sources=(), expand_query=False, query_mapping=None,
-    lexical_ngrams=None,
+    lexical_ngrams=None, exclude_withdrawn: bool = False, exclude_superseded: bool = False,
 ) -> dict:
     """Preserve legacy output by default; advanced options add source review data."""
-    if as_of is None and expand_links == 0 and not isinstance(expand_links, bool) and backend == "lexical" and external_candidates is None and excluded_sources == () and expand_query is False and query_mapping is None and lexical_ngrams is None:
+    if (
+        as_of is None and expand_links == 0 and not isinstance(expand_links, bool)
+        and backend == "lexical" and external_candidates is None and excluded_sources == ()
+        and expand_query is False and query_mapping is None and lexical_ngrams is None
+        and exclude_withdrawn is False and exclude_superseded is False
+    ):
         return _legacy_recall(vault, query, limit, max_tokens)
     return _advanced_retrieval.retrieve(
         vault, query, limit, max_tokens, as_of=as_of, expand_links=expand_links,
         backend=backend, external_candidates=external_candidates,
         excluded_sources=excluded_sources, expand_query=expand_query, query_mapping=query_mapping,
-        lexical_ngrams=lexical_ngrams,
+        lexical_ngrams=lexical_ngrams, exclude_withdrawn=exclude_withdrawn,
+        exclude_superseded=exclude_superseded,
     )
 
 
@@ -777,6 +783,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--query-mapping", help="vault-relative plain trigger => replacement mapping; requires --expand-query")
     parser.add_argument("--lexical-ngrams", choices=("hangul2",),
                         help="opt-in Hangul syllable-bigram BM25 rank added to RRF; bm25/hybrid only")
+    parser.add_argument("--exclude-withdrawn", action="store_true",
+                        help="opt-in exclusion of notes with frontmatter status: withdrawn")
+    parser.add_argument("--exclude-superseded", action="store_true",
+                        help="opt-in exclusion of notes with frontmatter status: superseded")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
@@ -790,6 +800,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         excluded_sources=tuple(args.exclude_source),
         expand_query=args.expand_query, query_mapping=args.query_mapping,
         lexical_ngrams=args.lexical_ngrams,
+        exclude_withdrawn=args.exclude_withdrawn,
+        exclude_superseded=args.exclude_superseded,
     )
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))

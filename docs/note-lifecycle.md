@@ -32,3 +32,4 @@ Exit codes: `0` (clean), `1` (warnings or incomplete), `2` (invalid vault, confi
 - Read-only and offline: never mutates notes, executes commands, queries Git, or accesses the network.
 - Ignores `deny_zones`, `exclude_dirs`, runtime folders, registered linked worktrees, and symlinks/reparse points.
 - Does not modify any of the seven certificate-bound warning-promotion checker files (`checker_sha256` remains unchanged).
+- Since `v0.60.0`, `vault_recall.py` / `vault_retrieval.py` also reads frontmatter `status: withdrawn | superseded` into `temporal.lifecycle_status`, excludes `withdrawn` and unbounded `superseded` under `--as-of` (or via opt-in `--exclude-withdrawn` / `--exclude-superseded`), and `vault_healthcheck.py` supports opt-in `--exclude-retired` / `exclude_retired_from_active_checks` for §7 stale and §8 SSOT checks.
