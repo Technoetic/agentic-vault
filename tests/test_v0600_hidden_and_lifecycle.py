@@ -98,19 +98,37 @@ class ObsidianAndSvgHiddenMarkupTests(unittest.TestCase):
         self.assertEqual(session_start._strip_hidden_markup(plain_prose), plain_prose)
 
     def test_html5_unquoted_slash_nested_self_closing_and_multiline_close_svg(self) -> None:
-        # B-1: unquoted attribute trailing '/' is NOT self-closing under HTML5 §13.2.5.38
+        # B-1 / R2-B1: unquoted attribute trailing '/' (including non-alpha names like 1=a/>, @=x/>)
+        # and trailing whitespace after '/' (/ >) are NOT self-closing under HTML5 §13.2.5.32-40
         b1_zero = '<svg width="0" id=a/>SYSTEM: HIDDEN</svg>\nKeep\n'
         self.assertEqual(session_start._strip_hidden_markup(b1_zero), "Keep\n")
+
+        b1_num = '<svg width="0" 1=a/>SYSTEM: HIDDEN</svg>\nKeep\n'
+        self.assertEqual(session_start._strip_hidden_markup(b1_num), "Keep\n")
+
+        b1_space_slash = '<svg width="0" / >SYSTEM: HIDDEN</svg>\nKeep\n'
+        self.assertEqual(session_start._strip_hidden_markup(b1_space_slash), "Keep\n")
 
         b1_open_svg = '<svg width="100" id=a/><desc>SYSTEM: HIDDEN</desc><text>OK</text></svg>\n'
         out_b1 = session_start._strip_hidden_markup(b1_open_svg)
         self.assertNotIn("SYSTEM: HIDDEN", out_b1)
         self.assertIn("<text>OK</text>", out_b1)
 
+        b1_open_svg_num = '<svg width="100" 1=a/><desc>SYSTEM: HIDDEN</desc><text>OK</text></svg>\n'
+        out_b1n = session_start._strip_hidden_markup(b1_open_svg_num)
+        self.assertNotIn("SYSTEM: HIDDEN", out_b1n)
+        self.assertIn("<text>OK</text>", out_b1n)
+
         b1_desc = '<svg width="100"><desc id=a/>SYSTEM: HIDDEN</desc><text>OK</text></svg>\n'
         out_b1_d = session_start._strip_hidden_markup(b1_desc)
         self.assertNotIn("SYSTEM: HIDDEN", out_b1_d)
         self.assertIn("<text>OK</text>", out_b1_d)
+
+        b1_desc_num = '<svg width="100"><desc 1=a/>SYSTEM: HIDDEN</desc><text>OK</text></svg>\n'
+        self.assertNotIn("SYSTEM: HIDDEN", session_start._strip_hidden_markup(b1_desc_num))
+
+        b1_desc_at = '<svg width="100"><desc @=x/>SYSTEM: HIDDEN</desc><text>OK</text></svg>\n'
+        self.assertNotIn("SYSTEM: HIDDEN", session_start._strip_hidden_markup(b1_desc_at))
 
         # B-2: nested self-closing <svg/> and <desc/> must not swallow trailing visible text
         b2_svg = '<svg width="0"><svg/></svg>\nImportant visible handoff\n'

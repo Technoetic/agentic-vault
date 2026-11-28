@@ -315,24 +315,67 @@ class _TagScanner:
 
 
 def _is_html_self_closing(attrs: str) -> bool:
-    """Return True when the trailing '/' in HTML/SVG attributes is a genuine self-closing slash.
+    """Return True iff the trailing '/' in HTML/SVG attributes sets the HTML5 self-closing flag.
 
-    Under HTML5 §13.2.5.38, a '/' attached to an unquoted attribute value (e.g. ``id=a/>``)
-    is part of that attribute value and does not self-close the element.
+    Implements the WHATWG HTML5 §13.2.5.32-40 attribute-tokenization state machine in O(N) time
+    without regex: rejects '/' consumed by unquoted attribute values (``id=a/>``, ``1=a/>``,
+    ``@=x/>``) and whitespace after '/' (``/ >``).
     """
-    stripped = attrs.rstrip()
-    if not stripped.endswith("/"):
+    if not attrs or attrs[-1] != "/":
         return False
-    if len(stripped) == 1:
-        return True
-    last = None
-    for match in _HTML_ATTR_RE.finditer(stripped):
-        last = match
-    if last is None:
-        return stripped == "/"
-    if last.group(4) is not None and last.end() == len(stripped):
-        return False
-    return not stripped[last.end():-1].strip()
+    # 0=before_name, 1=in_name, 2=after_name, 3=before_val,
+    # 4=in_dq, 5=in_sq, 6=in_unquoted, 7=after_quoted, 8=self_closing
+    state = 0
+    for ch in attrs:
+        if state == 0 or state == 8:
+            if ch.isspace():
+                state = 0
+            elif ch == "/":
+                state = 8
+            else:
+                state = 1
+        elif state == 1:
+            if ch.isspace():
+                state = 2
+            elif ch == "/":
+                state = 8
+            elif ch == "=":
+                state = 3
+        elif state == 2:
+            if ch.isspace():
+                pass
+            elif ch == "/":
+                state = 8
+            elif ch == "=":
+                state = 3
+            else:
+                state = 1
+        elif state == 3:
+            if ch.isspace():
+                pass
+            elif ch == '"':
+                state = 4
+            elif ch == "'":
+                state = 5
+            else:
+                state = 6
+        elif state == 4:
+            if ch == '"':
+                state = 7
+        elif state == 5:
+            if ch == "'":
+                state = 7
+        elif state == 6:
+            if ch.isspace():
+                state = 0
+        else:  # state == 7 (after_quoted)
+            if ch.isspace():
+                state = 0
+            elif ch == "/":
+                state = 8
+            else:
+                state = 1
+    return state == 8
 
 
 def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:

@@ -147,10 +147,10 @@ def _canonical_baseline_sha256(doc: dict) -> str:
 
 
 def _is_unsafe_raw_path(raw: str) -> bool:
-    """Reject NUL bytes, UNC network shares, and Windows device namespaces before any OS I/O."""
+    """Reject NUL bytes, UNC network shares (including mixed slashes), and Windows device namespaces."""
     if not isinstance(raw, str) or not raw or "\x00" in raw:
         return True
-    if raw.startswith("//"):
+    if raw.startswith("//") or raw[:2] in ("/\\", "\\/"):
         return True
     if raw.startswith("\\\\"):
         # Permit only Windows extended local-drive paths (\\?\C:\...), never UNC or device paths.
@@ -1010,7 +1010,10 @@ def diagnose_policy_drift(
     )
     for hpath in untracked_hooks:
         cur_u = live["hooks"][hpath]
-        if cur_u["state"] != "ok":
+        if cur_u["state"] == "missing":
+            hooks_missing += 1
+            _add_finding({"kind": "hook_script_missing", "path": hpath})
+        elif cur_u["state"] != "ok":
             hooks_unsafe += 1
             _add_finding({"kind": "hook_script_unsafe", "path": hpath, "reason": cur_u["state"]})
         else:
