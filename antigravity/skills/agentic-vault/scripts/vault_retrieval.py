@@ -78,6 +78,53 @@ def _scalar(value: str) -> str:
     return value
 
 
+def _status_scalar(value: str) -> str:
+    """Parse a YAML status scalar, tolerating inline comments and quotes like vault_lifecycle."""
+    s = value.strip()
+    if not s or len(s) > 512:
+        return ""
+    if s[0] == '"':
+        i = 1
+        escaped = False
+        while i < len(s):
+            ch = s[i]
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                rest = s[i + 1:].strip()
+                if rest and not rest.startswith("#"):
+                    return ""
+                try:
+                    decoded = json.loads(s[:i + 1])
+                except json.JSONDecodeError:
+                    return ""
+                return decoded.strip().casefold() if isinstance(decoded, str) else ""
+            i += 1
+        return ""
+    if s[0] == "'":
+        i = 1
+        while i < len(s):
+            if s[i] == "'":
+                if i + 1 < len(s) and s[i + 1] == "'":
+                    i += 2
+                    continue
+                rest = s[i + 1:].strip()
+                if rest and not rest.startswith("#"):
+                    return ""
+                return s[1:i].replace("''", "'").strip().casefold()
+            i += 1
+        return ""
+    if s[0] in "[{&*!>|#":
+        return ""
+    for idx, ch in enumerate(s):
+        if ch == "#" and idx > 0 and s[idx - 1] in (" ", "\t"):
+            s = s[:idx].strip()
+            break
+    return s.strip().casefold()
+
+
 def _metadata(text: str) -> dict:
     lines = text.splitlines()
     fields: dict[str, str] = {}
@@ -104,10 +151,7 @@ def _metadata(text: str) -> dict:
                 continue
             name, value = match.groups()
             if name == "status":
-                try:
-                    raw_status = _scalar(value).strip()
-                except (ValueError, json.JSONDecodeError, RecursionError):
-                    raw_status = ""
+                raw_status = _status_scalar(value)
                 if raw_status == "withdrawn":
                     lifecycle_status = "withdrawn"
                 elif raw_status == "superseded" and lifecycle_status != "withdrawn":

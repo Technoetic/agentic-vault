@@ -13,10 +13,11 @@ Contract:
   sealed baseline at ``00-meta/.vault-policy-baseline.json``.
 - Content-free diagnostics: never echoes raw ``permissions.deny`` rule strings,
   hook command lines, environment values, or exception text. Records and reports
-  only normalized rule SHA-256 digests, counts, sanitized relative paths, and
-  script SHA-256 digests.
+  only normalized rule SHA-256 digests, canonical hooks-config SHA-256 digests,
+  counts, sanitized relative paths, and script SHA-256 digests.
 - Fail-closed on symlinked/junctioned/hardlinked vault roots, settings files,
-  baseline files, or hook scripts, and on malformed/duplicate-key JSON.
+  baseline files, or hook scripts, on UNC/device paths, and on malformed,
+  non-finite, or duplicate-key JSON.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -37,14 +39,13 @@ from vault_hook_wiring import (
     HEALTHCHECK_REL,
     SETTINGS_RELS,
     _extract_handler_targets,
-    _sanitize_reported_path,
 )
 
 try:
-    from vault_evidence import fs_path as _fs_path
+    from vault_evidence import plain_path as _plain_path
 except ImportError:  # pragma: no cover - standalone fallback
-    def _fs_path(path: Path) -> str:
-        return str(path)
+    def _plain_path(path: Path) -> Path:
+        return Path(path)
 
 
 SCHEMA = "agentic-vault/policy-drift/v1"
@@ -59,6 +60,19 @@ MAX_DENY_RULES_PER_FILE = 2048
 MAX_HOOK_TARGETS = 256
 MAX_REPORTED_DRIFT = 50
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+RECORDED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+EXT_PREFIX_RE = re.compile(r"^<ext:[0-9a-f]{8}>/")
+DRIVE_PREFIX_RE = re.compile(r"^[A-Za-z]:")
+WIN_DRIVE_ABS_RE = re.compile(r"^[A-Za-z]:\\")
+BASELINE_TOP_KEYS = frozenset({
+    "schema",
+    "recorded_at",
+    "authority",
+    "trust_boundary",
+    "settings",
+    "hooks",
+    "baseline_sha256",
+})
 PLUGIN_HOOK_RELS: tuple[str, ...] = (
     "hooks/session_start.py",
     "hooks/session_checkpoint.py",
@@ -80,6 +94,20 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _canonical_json_sha256(obj: object) -> str:
+    encoded = json.dumps(
+        obj,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return _sha256_bytes(encoded)
+
+
+EMPTY_HOOKS_CONFIG_SHA256 = _canonical_json_sha256({})
+
+
 def _rule_digest(rule: str) -> str:
     return _sha256_bytes(rule.strip().encode("utf-8"))
 
@@ -97,100 +125,227 @@ def _reject_nonfinite_json(token: str) -> object:
     raise ValueError(f"nonfinite_json_number:{token}")
 
 
+def _reject_nonfinite_float(token: str) -> float:
+    val = float(token)
+    if not math.isfinite(val):
+        raise ValueError("nonfinite_json_float")
+    return val
+
+
 def _parse_strict_json(data: bytes) -> object:
     return json.loads(
         data.decode("utf-8-sig"),
         object_pairs_hook=_reject_duplicate_json_keys,
         parse_constant=_reject_nonfinite_json,
+        parse_float=_reject_nonfinite_float,
     )
 
 
 def _canonical_baseline_sha256(doc: dict) -> str:
     body = {k: v for k, v in doc.items() if k != "baseline_sha256"}
-    encoded = json.dumps(
-        body,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return _sha256_bytes(encoded)
+    return _canonical_json_sha256(body)
+
+
+def _is_unsafe_raw_path(raw: str) -> bool:
+    """Reject NUL bytes, UNC network shares, and Windows device namespaces before any OS I/O."""
+    if not isinstance(raw, str) or not raw or "\x00" in raw:
+        return True
+    if raw.startswith("//"):
+        return True
+    if raw.startswith("\\\\"):
+        # Permit only Windows extended local-drive paths (\\?\C:\...), never UNC or device paths.
+        if raw.startswith("\\\\?\\") and WIN_DRIVE_ABS_RE.match(raw[4:]):
+            return False
+        return True
+    return False
+
+
+def _fs_str(path: Path | str, *, force_extended: bool = False) -> str:
+    """Return an OS-safe filesystem string, adding Windows \\\\?\\ prefix when near MAX_PATH."""
+    raw = str(path)
+    if _is_unsafe_raw_path(raw):
+        raise ValueError("unsafe_raw_path")
+    plain = str(_plain_path(Path(raw)))
+    if _is_unsafe_raw_path(plain):
+        raise ValueError("unsafe_raw_path")
+    if os.name != "nt":
+        return plain
+    ab = os.path.normpath(plain) if WIN_DRIVE_ABS_RE.match(plain) else os.path.normpath(os.path.abspath(plain))
+    if _is_unsafe_raw_path(ab):
+        raise ValueError("unsafe_raw_path")
+    if (force_extended or len(ab) >= 240) and WIN_DRIVE_ABS_RE.match(ab):
+        return "\\\\?\\" + ab
+    return ab
+
+
+def _safe_plain_abspath(path: Path | str) -> Path | None:
+    """Normalize a local path without resolving symlinks or touching UNC/network shares."""
+    raw = str(path)
+    if _is_unsafe_raw_path(raw):
+        return None
+    try:
+        plain = str(_plain_path(Path(raw)))
+        if os.name == "nt" and WIN_DRIVE_ABS_RE.match(plain):
+            ab = os.path.normpath(plain)
+        else:
+            ab = os.path.normpath(os.path.abspath(plain))
+    except (OSError, ValueError):
+        return None
+    if _is_unsafe_raw_path(ab):
+        return None
+    return Path(ab)
+
+
+def _lexical_relative_posix(target: Path, base: Path) -> str | None:
+    """Return target's POSIX path relative to base purely lexically (no symlink resolution)."""
+    t_ab = _safe_plain_abspath(target)
+    b_ab = _safe_plain_abspath(base)
+    if t_ab is None or b_ab is None:
+        return None
+    t_str = str(t_ab)
+    b_str = str(b_ab)
+    if os.name == "nt":
+        t_cmp = os.path.normcase(t_str)
+        b_cmp = os.path.normcase(b_str)
+        if t_cmp == b_cmp:
+            return None
+        prefix = b_cmp if b_cmp.endswith("\\") else (b_cmp + "\\")
+        if not t_cmp.startswith(prefix):
+            return None
+        rel_str = t_str[len(prefix):]
+        rel_posix = rel_str.replace("\\", "/")
+    else:
+        try:
+            rel_posix = t_ab.relative_to(b_ab).as_posix()
+        except ValueError:
+            return None
+    parts = [p for p in rel_posix.split("/") if p]
+    if not parts or any(p in (".", "..") for p in parts):
+        return None
+    return "/".join(parts)
 
 
 def _check_safe_root(vault: Path) -> tuple[Path | None, str]:
-    """Verify the vault root itself is a real non-symlink/non-reparse directory."""
+    """Verify the root itself is a real non-symlink/non-reparse local directory."""
+    ab = _safe_plain_abspath(vault)
+    if ab is None:
+        return None, "vault_unsafe"
     try:
-        st = os.lstat(_fs_path(vault))
+        st = os.lstat(_fs_str(ab))
     except FileNotFoundError:
         return None, "vault_not_found"
-    except OSError:
+    except (OSError, ValueError):
         return None, "vault_unreadable"
     if stat.S_ISLNK(st.st_mode) or _is_reparse(st) or not stat.S_ISDIR(st.st_mode):
         return None, "vault_unsafe"
     try:
-        resolved = vault.resolve(strict=True)
-    except OSError:
+        real = Path(os.path.realpath(_fs_str(ab)))
+        plain_real = _plain_path(real)
+        if _is_unsafe_raw_path(str(plain_real)):
+            return None, "vault_unsafe"
+        st2 = os.lstat(_fs_str(plain_real))
+    except (OSError, ValueError):
         return None, "vault_unreadable"
-    return resolved, "ok"
+    if stat.S_ISLNK(st2.st_mode) or _is_reparse(st2) or not stat.S_ISDIR(st2.st_mode):
+        return None, "vault_unsafe"
+    return plain_real, "ok"
+
+
+def _is_safe_rel_posix(rel: str) -> bool:
+    if not isinstance(rel, str) or not rel or "\x00" in rel or "\\" in rel:
+        return False
+    if rel.startswith("/") or rel.endswith("/") or DRIVE_PREFIX_RE.match(rel):
+        return False
+    parts = rel.split("/")
+    if not parts or any(p in ("", ".", "..") for p in parts):
+        return False
+    return True
+
+
+def _is_valid_baseline_hook_path(hpath: str) -> bool:
+    if not isinstance(hpath, str) or not hpath or len(hpath) > 512 or "\x00" in hpath or "\\" in hpath:
+        return False
+    if hpath.startswith("<plugin>/"):
+        return _is_safe_rel_posix(hpath[len("<plugin>/"):])
+    m = EXT_PREFIX_RE.match(hpath)
+    if m is not None:
+        return _is_safe_rel_posix(hpath[m.end():])
+    if hpath.startswith("<"):
+        return False
+    return _is_safe_rel_posix(hpath)
 
 
 def _check_safe_rel_path(root: Path, rel: str) -> tuple[Path | None, str]:
     """Verify every component from root to rel is non-symlink/non-reparse and stays inside root."""
-    norm = rel.replace("\\", "/").strip("/")
-    parts = [part for part in norm.split("/") if part]
-    if not parts or any(part in (".", "..") for part in parts):
+    if not isinstance(rel, str) or "\x00" in rel or _is_unsafe_raw_path(rel):
         return None, "invalid_relative_path"
-    cur = root
+    norm = rel.replace("\\", "/").strip("/")
+    if not _is_safe_rel_posix(norm):
+        return None, "invalid_relative_path"
+    parts = norm.split("/")
+    cur = _plain_path(root)
     for part in parts[:-1]:
         cur = cur / part
         try:
-            st = os.lstat(_fs_path(cur))
+            st = os.lstat(_fs_str(cur))
         except FileNotFoundError:
-            return root / norm, "missing"
-        except OSError:
+            return _plain_path(root) / norm, "missing"
+        except (OSError, ValueError):
             return None, "unreadable"
         if stat.S_ISLNK(st.st_mode) or _is_reparse(st) or not stat.S_ISDIR(st.st_mode):
             return None, "unsafe_path"
     target = cur / parts[-1]
     try:
-        st = os.lstat(_fs_path(target))
+        st = os.lstat(_fs_str(target))
     except FileNotFoundError:
         return target, "missing"
-    except OSError:
+    except (OSError, ValueError):
         return None, "unreadable"
     if stat.S_ISLNK(st.st_mode) or _is_reparse(st) or not stat.S_ISREG(st.st_mode):
         return None, "unsafe_path"
     if st.st_nlink != 1:
         return None, "unsafe_path"
-    try:
-        target.resolve().relative_to(root)
-    except (OSError, ValueError):
+    if _lexical_relative_posix(target, root) is None:
         return None, "unsafe_path"
     return target, "regular"
 
 
 def _read_regular_fd(path: Path, limit: int) -> tuple[bytes | None, str]:
     """Read a regular non-symlink, non-reparse, non-hardlink file under a strict byte bound."""
+    ab = _safe_plain_abspath(path)
+    if ab is None:
+        return None, "unsafe_path"
     try:
-        lst = os.lstat(_fs_path(path))
+        fs_target = _fs_str(ab)
+        lst = os.lstat(fs_target)
     except FileNotFoundError:
         return None, "missing"
-    except OSError:
+    except (OSError, ValueError):
         return None, "unreadable"
     if stat.S_ISLNK(lst.st_mode) or _is_reparse(lst) or not stat.S_ISREG(lst.st_mode):
         return None, "unsafe_path"
     if lst.st_nlink != 1:
         return None, "unsafe_path"
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
-        fd = os.open(_fs_path(path), flags)
+        fd = os.open(fs_target, flags)
     except FileNotFoundError:
         return None, "missing"
-    except OSError:
+    except (OSError, ValueError):
         return None, "unreadable"
     try:
         fst = os.fstat(fd)
-        if not stat.S_ISREG(fst.st_mode) or fst.st_nlink != 1:
+        if (
+            not stat.S_ISREG(fst.st_mode)
+            or fst.st_nlink != 1
+            or _is_reparse(fst)
+            or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino)
+        ):
             os.close(fd)
             return None, "unsafe_path"
         if fst.st_size > limit:
@@ -248,20 +403,32 @@ def _target_display_key(
     raw_target: str,
     resolved_vault: Path,
     effective_plugin: Path | None,
-) -> str:
-    """Deterministic, non-leaking canonical identifier for a hook script."""
-    try:
-        rel_v = target_path.resolve(strict=False).relative_to(resolved_vault)
-        return rel_v.as_posix()
-    except (OSError, ValueError):
-        pass
+) -> tuple[str, bool]:
+    """Deterministic, collision-resistant, non-leaking lexical identifier for a hook script.
+
+    Returns ``(display_key, is_safe_raw)``. Never calls ``.resolve()`` so symlinked paths
+    keep their own lexical key and cannot collide with legitimate targets before ``lstat``.
+    """
+    if _is_unsafe_raw_path(raw_target) or _is_unsafe_raw_path(str(target_path)):
+        digest8 = _sha256_bytes(raw_target.encode("utf-8", errors="replace"))[:8]
+        return f"<unsafe:{digest8}>", False
+    rel_v = _lexical_relative_posix(target_path, resolved_vault)
+    if rel_v is not None:
+        return rel_v, True
     if effective_plugin is not None:
-        try:
-            rel_p = target_path.resolve(strict=False).relative_to(effective_plugin)
-            return "<plugin>/" + rel_p.as_posix()
-        except (OSError, ValueError):
-            pass
-    return _sanitize_reported_path(raw_target, resolved_vault)
+        rel_p = _lexical_relative_posix(target_path, effective_plugin)
+        if rel_p is not None:
+            return "<plugin>/" + rel_p, True
+    ab = _safe_plain_abspath(target_path)
+    if ab is None:
+        digest8 = _sha256_bytes(raw_target.encode("utf-8", errors="replace"))[:8]
+        return f"<unsafe:{digest8}>", False
+    norm_id = os.path.normcase(str(ab))
+    ext_hash8 = _sha256_bytes(norm_id.encode("utf-8"))[:8]
+    tail = raw_target.replace("\\", "/").strip("/")
+    safe_parts = [p for p in tail.split("/") if p and p not in (".", "..") and not DRIVE_PREFIX_RE.match(p)]
+    tail_clean = "/".join(safe_parts[-3:]) if safe_parts else "script"
+    return f"<ext:{ext_hash8}>/{tail_clean}", True
 
 
 def _check_safe_target_file(
@@ -270,14 +437,14 @@ def _check_safe_target_file(
     effective_plugin: Path | None,
 ) -> tuple[bytes | None, str]:
     """Read a hook script safely; verify intermediate components when inside vault or plugin."""
+    if _is_unsafe_raw_path(str(target_path)):
+        return None, "unsafe_path"
     for base in (resolved_vault, effective_plugin):
         if base is None:
             continue
-        try:
-            rel = target_path.relative_to(base).as_posix()
-        except ValueError:
-            continue
-        return _read_vault_rel(base, rel, MAX_HOOK_BYTES)
+        rel = _lexical_relative_posix(target_path, base)
+        if rel is not None:
+            return _read_vault_rel(base, rel, MAX_HOOK_BYTES)
     return _read_regular_fd(target_path, MAX_HOOK_BYTES)
 
 
@@ -285,7 +452,7 @@ def _scan_live_state(
     resolved_vault: Path,
     effective_plugin: Path | None,
 ) -> dict:
-    """Collect current settings deny-rule digests and resolved hook script hashes."""
+    """Collect current settings deny-rule digests, hooks-config hashes, and resolved hook hashes."""
     settings_state: dict[str, dict] = {}
     settings_errors: list[dict[str, str]] = []
     hook_targets: dict[str, dict] = {}
@@ -293,7 +460,14 @@ def _scan_live_state(
     commands_skipped = 0
     hook_target_overflow = False
 
-    def _register_hook(display_key: str, target_path: Path, source: str) -> None:
+    def _register_hook(
+        display_key: str,
+        target_path: Path,
+        source: str,
+        *,
+        safe_raw: bool = True,
+        preloaded: tuple[bytes | None, str] | None = None,
+    ) -> None:
         nonlocal hook_target_overflow
         if display_key in hook_targets:
             if source not in hook_targets[display_key]["sources"]:
@@ -302,7 +476,12 @@ def _scan_live_state(
         if len(hook_targets) >= MAX_HOOK_TARGETS:
             hook_target_overflow = True
             return
-        data, state = _check_safe_target_file(target_path, resolved_vault, effective_plugin)
+        if not safe_raw:
+            data, state = None, "unsafe_path"
+        elif preloaded is not None:
+            data, state = preloaded
+        else:
+            data, state = _check_safe_target_file(target_path, resolved_vault, effective_plugin)
         if data is not None:
             hook_targets[display_key] = {
                 "path": display_key,
@@ -338,6 +517,16 @@ def _scan_live_state(
             settings_errors.append({"source": rel, "reason": "not_an_object"})
             continue
 
+        hooks_raw = doc.get("hooks")
+        if hooks_raw is not None and not isinstance(hooks_raw, dict):
+            settings_errors.append({"source": rel, "reason": "invalid_hooks_schema"})
+            continue
+        try:
+            hooks_config_sha256 = _canonical_json_sha256(hooks_raw if hooks_raw is not None else {})
+        except (TypeError, ValueError, RecursionError):
+            settings_errors.append({"source": rel, "reason": "invalid_hooks_schema"})
+            continue
+
         digests, d_state = _extract_deny_digests(doc)
         if digests is None:
             settings_errors.append({"source": rel, "reason": d_state})
@@ -345,14 +534,14 @@ def _scan_live_state(
             settings_state[rel] = {
                 "source": rel,
                 "settings_sha256": _sha256_bytes(data),
+                "hooks_config_sha256": hooks_config_sha256,
                 "deny_rule_count": len(digests),
                 "deny_rule_digests": digests,
             }
 
-        hooks_map = doc.get("hooks")
-        if not isinstance(hooks_map, dict):
+        if not isinstance(hooks_raw, dict):
             continue
-        for event_name, groups in hooks_map.items():
+        for event_name, groups in hooks_raw.items():
             if not isinstance(event_name, str) or not isinstance(groups, list):
                 continue
             for group in groups:
@@ -370,12 +559,12 @@ def _scan_live_state(
                     if not candidates or was_skipped:
                         commands_skipped += 1
                     for target_path, raw_target in candidates:
-                        key = _target_display_key(
+                        key, safe_raw = _target_display_key(
                             target_path, raw_target, resolved_vault, effective_plugin,
                         )
-                        _register_hook(key, target_path, rel)
+                        _register_hook(key, target_path, rel, safe_raw=safe_raw)
 
-    # Vault git hooks (and vault_healthcheck.py when pre-commit is present)
+    # Managed vault git hooks (and vault_healthcheck.py when pre-commit is present)
     pre_commit_present = False
     for git_rel in GIT_HOOK_RELS:
         data, state = _read_vault_rel(resolved_vault, git_rel, MAX_HOOK_BYTES)
@@ -383,7 +572,12 @@ def _scan_live_state(
             continue
         if git_rel == GIT_PRE_COMMIT_REL and data is not None:
             pre_commit_present = True
-        _register_hook(git_rel, resolved_vault / git_rel, "git-hooks")
+        _register_hook(
+            git_rel,
+            resolved_vault / git_rel,
+            "git-hooks",
+            preloaded=(data, state),
+        )
     if pre_commit_present:
         _register_hook(HEALTHCHECK_REL, resolved_vault / HEALTHCHECK_REL, GIT_PRE_COMMIT_REL)
 
@@ -392,10 +586,15 @@ def _scan_live_state(
         plugin_ok, _ = _check_safe_root(effective_plugin)
         if plugin_ok is not None:
             for p_rel in PLUGIN_HOOK_RELS:
-                _, p_state = _check_safe_rel_path(plugin_ok, p_rel)
+                p_data, p_state = _read_vault_rel(plugin_ok, p_rel, MAX_HOOK_BYTES)
                 if p_state == "missing":
                     continue
-                _register_hook("<plugin>/" + p_rel, plugin_ok / p_rel, "plugin-hooks")
+                _register_hook(
+                    "<plugin>/" + p_rel,
+                    plugin_ok / p_rel,
+                    "plugin-hooks",
+                    preloaded=(p_data, p_state),
+                )
 
     for entry in hook_targets.values():
         entry["sources"] = sorted(entry["sources"])
@@ -411,37 +610,57 @@ def _scan_live_state(
 
 
 def _write_json_atomic(root: Path, rel: str, payload: dict) -> None:
-    norm = rel.replace("\\", "/").strip("/")
-    parts = [part for part in norm.split("/") if part]
-    if len(parts) < 2 or any(part in (".", "..") for part in parts):
+    if not _is_safe_rel_posix(rel.replace("\\", "/").strip("/")):
         raise PolicyDriftError("invalid_baseline_path")
-    cur = root
+    parts = rel.replace("\\", "/").strip("/").split("/")
+    if len(parts) < 2:
+        raise PolicyDriftError("invalid_baseline_path")
+    cur = _plain_path(root)
     for part in parts[:-1]:
         cur = cur / part
-        if cur.exists():
-            st = os.lstat(_fs_path(cur))
+        try:
+            st = os.lstat(_fs_str(cur))
+        except FileNotFoundError:
+            try:
+                os.mkdir(_fs_str(cur))
+            except (OSError, ValueError) as exc:
+                raise PolicyDriftError("baseline_write_failed") from exc
+        except (OSError, ValueError) as exc:
+            raise PolicyDriftError("unsafe_baseline_directory") from exc
+        else:
             if stat.S_ISLNK(st.st_mode) or _is_reparse(st) or not stat.S_ISDIR(st.st_mode):
                 raise PolicyDriftError("unsafe_baseline_directory")
-        else:
-            os.mkdir(_fs_path(cur))
     target = cur / parts[-1]
-    if target.exists() or target.is_symlink():
-        st = os.lstat(_fs_path(target))
+    try:
+        st = os.lstat(_fs_str(target))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        raise PolicyDriftError("unsafe_baseline_target") from exc
+    else:
         if stat.S_ISLNK(st.st_mode) or _is_reparse(st) or not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             raise PolicyDriftError("unsafe_baseline_target")
-    encoded = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
-    fd, tmp_name = tempfile.mkstemp(prefix=".vault-policy-baseline-", suffix=".tmp", dir=_fs_path(cur))
+    try:
+        encoded = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        mkstemp_dir = _fs_str(cur, force_extended=(os.name == "nt" and len(str(cur)) >= 180))
+        fd, tmp_name = tempfile.mkstemp(prefix=".vault-policy-baseline-", suffix=".tmp", dir=mkstemp_dir)
+    except (OSError, ValueError, TypeError) as exc:
+        raise PolicyDriftError("baseline_write_failed") from exc
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(_fs_path(Path(tmp_name)), _fs_path(target))
-    except BaseException:
+        os.replace(_fs_str(tmp_name), _fs_str(target))
+    except BaseException as exc:
         try:
-            os.unlink(_fs_path(Path(tmp_name)))
-        except OSError:
+            os.unlink(_fs_str(tmp_name))
+        except (OSError, ValueError):
             pass
+        if isinstance(exc, (OSError, ValueError)):
+            raise PolicyDriftError("baseline_write_failed") from exc
         raise
 
 
@@ -455,7 +674,14 @@ def _load_baseline(resolved_vault: Path) -> tuple[dict | None, str, str]:
         doc = _parse_strict_json(data)
     except (UnicodeError, ValueError, RecursionError):
         return None, "invalid_json", "invalid"
-    if not isinstance(doc, dict) or doc.get("schema") != BASELINE_SCHEMA:
+    if not isinstance(doc, dict) or set(doc.keys()) != BASELINE_TOP_KEYS:
+        return None, "invalid_schema", "invalid"
+    if doc.get("schema") != BASELINE_SCHEMA:
+        return None, "invalid_schema", "invalid"
+    if doc.get("authority") != AUTHORITY or doc.get("trust_boundary") != TRUST_BOUNDARY:
+        return None, "invalid_schema", "invalid"
+    recorded_at = doc.get("recorded_at")
+    if type(recorded_at) is not str or not RECORDED_AT_RE.fullmatch(recorded_at):
         return None, "invalid_schema", "invalid"
     claimed = doc.get("baseline_sha256")
     if type(claimed) is not str or not HASH_RE.fullmatch(claimed):
@@ -469,7 +695,12 @@ def _load_baseline(resolved_vault: Path) -> tuple[dict | None, str, str]:
 
     settings_list = doc.get("settings")
     hooks_list = doc.get("hooks")
-    if not isinstance(settings_list, list) or not isinstance(hooks_list, list):
+    if (
+        not isinstance(settings_list, list)
+        or not isinstance(hooks_list, list)
+        or len(settings_list) > len(SETTINGS_RELS)
+        or len(hooks_list) > MAX_HOOK_TARGETS
+    ):
         return None, "invalid_schema", "invalid"
     seen_sources: set[str] = set()
     for item in settings_list:
@@ -477,7 +708,10 @@ def _load_baseline(resolved_vault: Path) -> tuple[dict | None, str, str]:
             return None, "invalid_schema", "invalid"
         src = item.get("source")
         digests = item.get("deny_rule_digests")
+        hcfg = item.get("hooks_config_sha256")
         if type(src) is not str or src not in SETTINGS_RELS or src in seen_sources:
+            return None, "invalid_schema", "invalid"
+        if type(hcfg) is not str or not HASH_RE.fullmatch(hcfg):
             return None, "invalid_schema", "invalid"
         if not isinstance(digests, list) or len(digests) > MAX_DENY_RULES_PER_FILE:
             return None, "invalid_schema", "invalid"
@@ -490,7 +724,7 @@ def _load_baseline(resolved_vault: Path) -> tuple[dict | None, str, str]:
             return None, "invalid_schema", "invalid"
         hpath = item.get("path")
         hsha = item.get("sha256")
-        if type(hpath) is not str or not hpath.strip() or hpath in seen_hooks:
+        if type(hpath) is not str or not _is_valid_baseline_hook_path(hpath) or hpath in seen_hooks:
             return None, "invalid_schema", "invalid"
         if type(hsha) is not str or not HASH_RE.fullmatch(hsha):
             return None, "invalid_schema", "invalid"
@@ -498,15 +732,17 @@ def _load_baseline(resolved_vault: Path) -> tuple[dict | None, str, str]:
     return doc, "ok", "verified"
 
 
-def _resolve_plugin_root(plugin_root: Path | None) -> Path | None:
+def _resolve_plugin_root(plugin_root: Path | None) -> tuple[Path | None, str]:
     if plugin_root is not None:
-        ok, _ = _check_safe_root(Path(plugin_root))
-        return ok
+        ok, state = _check_safe_root(Path(plugin_root))
+        if ok is None:
+            return None, f"plugin_root_{state}"
+        return ok, "ok"
     env_root = os.environ.get("CLAUDE_PLUGIN_ROOT")
     if env_root:
         ok, _ = _check_safe_root(Path(env_root))
-        return ok
-    return None
+        return ok, "ok"
+    return None, "ok"
 
 
 def record_policy_baseline(
@@ -518,7 +754,9 @@ def record_policy_baseline(
     resolved_vault, r_state = _check_safe_root(Path(vault))
     if resolved_vault is None:
         raise PolicyDriftError(r_state)
-    effective_plugin = _resolve_plugin_root(plugin_root)
+    effective_plugin, p_state = _resolve_plugin_root(plugin_root)
+    if p_state != "ok":
+        raise PolicyDriftError(p_state)
     live = _scan_live_state(resolved_vault, effective_plugin)
     if live["settings_errors"]:
         raise PolicyDriftError("settings_unreadable_or_invalid")
@@ -569,7 +807,7 @@ def diagnose_policy_drift(
     *,
     plugin_root: Path | None = None,
 ) -> dict:
-    """Read-only comparison of live deny rules and hook scripts against the sealed baseline."""
+    """Read-only comparison of live deny rules, hooks config, and hook scripts against the sealed baseline."""
     resolved_vault, r_state = _check_safe_root(Path(vault))
     if resolved_vault is None:
         return {
@@ -583,7 +821,19 @@ def diagnose_policy_drift(
             "baseline_path": BASELINE_REL,
         }
 
-    effective_plugin = _resolve_plugin_root(plugin_root)
+    effective_plugin, p_state = _resolve_plugin_root(plugin_root)
+    if p_state != "ok":
+        return {
+            "schema": SCHEMA,
+            "status": "error",
+            "reason_code": p_state,
+            "next_action": "pass_a_regular_plugin_root_directory",
+            "authority": AUTHORITY,
+            "trust_boundary": TRUST_BOUNDARY,
+            "baseline_integrity": "unavailable",
+            "baseline_path": BASELINE_REL,
+        }
+
     baseline, b_state, integrity = _load_baseline(resolved_vault)
     live = _scan_live_state(resolved_vault, effective_plugin)
 
@@ -613,6 +863,7 @@ def diagnose_policy_drift(
             "deny_rules_recorded": 0,
             "deny_rules_removed": 0,
             "deny_rules_added": 0,
+            "hooks_config_modified": 0,
             "hooks_recorded": 0,
             "hooks_intact": 0,
             "hooks_modified": 0,
@@ -627,19 +878,22 @@ def diagnose_policy_drift(
     deny_recorded_total = 0
     deny_removed_total = 0
     deny_added_total = 0
+    hooks_config_modified = 0
 
     def _add_finding(finding: dict[str, object]) -> None:
         if len(drift_findings) < MAX_REPORTED_DRIFT:
             drift_findings.append(finding)
 
-    # 1. Operator permissions.deny monotonicity check (arXiv:2611.32195v1)
+    # 1. Operator permissions.deny monotonicity & hooks-config integrity (arXiv:2611.32195v1 / 2611.01976v1)
     baseline_settings_by_src = {s["source"]: s for s in baseline["settings"]}
     error_sources = {e["source"] for e in live["settings_errors"]}
     for src, rec in sorted(baseline_settings_by_src.items()):
         rec_digests = set(rec["deny_rule_digests"])
+        rec_hooks_cfg = rec["hooks_config_sha256"]
         deny_recorded_total += len(rec_digests)
         if src in error_sources:
             deny_removed_total += len(rec_digests)
+            hooks_config_modified += 1
             _add_finding({
                 "kind": "settings_unreadable_or_invalid",
                 "source": src,
@@ -648,12 +902,16 @@ def diagnose_policy_drift(
             continue
         cur = live["settings"].get(src)
         if cur is None:
-            if rec_digests:
+            had_hooks = rec_hooks_cfg != EMPTY_HOOKS_CONFIG_SHA256
+            if rec_digests or had_hooks:
                 deny_removed_total += len(rec_digests)
+                if had_hooks:
+                    hooks_config_modified += 1
                 _add_finding({
                     "kind": "settings_file_missing",
                     "source": src,
                     "removed_count": len(rec_digests),
+                    "had_hooks_config": had_hooks,
                 })
             continue
         cur_digests = set(cur["deny_rule_digests"])
@@ -669,10 +927,25 @@ def diagnose_policy_drift(
             })
         if added:
             deny_added_total += len(added)
+        if cur["hooks_config_sha256"] != rec_hooks_cfg:
+            hooks_config_modified += 1
+            _add_finding({
+                "kind": "hooks_config_modified",
+                "source": src,
+                "recorded_sha256_prefix": rec_hooks_cfg[:12],
+                "current_sha256_prefix": cur["hooks_config_sha256"][:12],
+            })
 
     for src, cur in sorted(live["settings"].items()):
         if src not in baseline_settings_by_src:
             deny_added_total += cur["deny_rule_count"]
+            if cur["hooks_config_sha256"] != EMPTY_HOOKS_CONFIG_SHA256:
+                hooks_config_modified += 1
+                _add_finding({
+                    "kind": "hooks_config_untracked",
+                    "source": src,
+                    "current_sha256_prefix": cur["hooks_config_sha256"][:12],
+                })
 
     # 2. Resolved hook script SHA-256 drift check (arXiv:2611.01976v1)
     baseline_hooks_by_path = {h["path"]: h for h in baseline["hooks"]}
@@ -684,13 +957,20 @@ def diagnose_policy_drift(
     for hpath, rec in sorted(baseline_hooks_by_path.items()):
         cur = live["hooks"].get(hpath)
         if cur is None:
-            # Hook might still exist on disk even if removed from settings; verify directly.
-            direct_path = (
-                (effective_plugin / hpath[len("<plugin>/"):])
-                if hpath.startswith("<plugin>/") and effective_plugin is not None
-                else (resolved_vault / hpath)
-            )
-            data, state = _check_safe_target_file(direct_path, resolved_vault, effective_plugin)
+            if hpath.startswith("<plugin>/"):
+                if effective_plugin is None:
+                    hooks_missing += 1
+                    _add_finding({"kind": "plugin_root_unset", "path": hpath})
+                    continue
+                rel_p = hpath[len("<plugin>/"):]
+                data, state = _read_vault_rel(effective_plugin, rel_p, MAX_HOOK_BYTES)
+            elif EXT_PREFIX_RE.match(hpath):
+                hooks_missing += 1
+                _add_finding({"kind": "hook_unwired_from_settings", "path": hpath})
+                continue
+            else:
+                data, state = _read_vault_rel(resolved_vault, hpath, MAX_HOOK_BYTES)
+
             if state == "missing":
                 hooks_missing += 1
                 _add_finding({"kind": "hook_script_missing", "path": hpath})
@@ -699,7 +979,14 @@ def diagnose_policy_drift(
                 _add_finding({"kind": "hook_script_unsafe", "path": hpath, "reason": state})
             else:
                 hooks_missing += 1
-                _add_finding({"kind": "hook_unwired_from_settings", "path": hpath})
+                content_modified = _sha256_bytes(data) != rec["sha256"]
+                if content_modified:
+                    hooks_modified += 1
+                _add_finding({
+                    "kind": "hook_unwired_from_settings",
+                    "path": hpath,
+                    "content_modified": content_modified,
+                })
             continue
         if cur["state"] == "missing":
             hooks_missing += 1
@@ -722,10 +1009,19 @@ def diagnose_policy_drift(
         hpath for hpath in live["hooks"] if hpath not in baseline_hooks_by_path
     )
     for hpath in untracked_hooks:
-        _add_finding({"kind": "hook_script_untracked", "path": hpath})
+        cur_u = live["hooks"][hpath]
+        if cur_u["state"] != "ok":
+            hooks_unsafe += 1
+            _add_finding({"kind": "hook_script_unsafe", "path": hpath, "reason": cur_u["state"]})
+        else:
+            _add_finding({"kind": "hook_script_untracked", "path": hpath})
+
+    if live["hook_target_overflow"]:
+        _add_finding({"kind": "hook_target_limit_exceeded", "limit": MAX_HOOK_TARGETS})
 
     has_drift = bool(
         deny_removed_total > 0
+        or hooks_config_modified > 0
         or hooks_modified > 0
         or hooks_missing > 0
         or hooks_unsafe > 0
@@ -741,12 +1037,18 @@ def diagnose_policy_drift(
         elif hooks_modified > 0 or hooks_unsafe > 0:
             reason_code = "hook_script_drift"
             next_action = "inspect_modified_hook_scripts_before_trusting"
+        elif hooks_config_modified > 0:
+            reason_code = "hooks_config_modified"
+            next_action = "inspect_settings_hooks_changes_before_trusting"
         elif hooks_missing > 0:
             reason_code = "hook_script_missing"
             next_action = "restore_missing_hooks_or_re_record_baseline"
         elif live["settings_errors"]:
             reason_code = "settings_unreadable"
             next_action = "repair_vault_settings_json"
+        elif live["hook_target_overflow"]:
+            reason_code = "hook_target_limit_exceeded"
+            next_action = "reduce_or_audit_hook_targets_above_cap"
         else:
             reason_code = "untracked_hook_target"
             next_action = "review_new_hooks_and_re_record_baseline"
@@ -764,7 +1066,7 @@ def diagnose_policy_drift(
         "trust_boundary": TRUST_BOUNDARY,
         "baseline_integrity": integrity,
         "baseline_path": BASELINE_REL,
-        "recorded_at": baseline.get("recorded_at"),
+        "recorded_at": baseline["recorded_at"],
         "live_settings_files": len(live["settings"]),
         "live_deny_rules": live_deny_total,
         "live_hooks_resolved": live_hooks_ok,
@@ -772,6 +1074,7 @@ def diagnose_policy_drift(
         "deny_rules_recorded": deny_recorded_total,
         "deny_rules_removed": deny_removed_total,
         "deny_rules_added": deny_added_total,
+        "hooks_config_modified": hooks_config_modified,
         "hooks_recorded": len(baseline_hooks_by_path),
         "hooks_intact": hooks_intact,
         "hooks_modified": hooks_modified,
@@ -790,11 +1093,30 @@ def text_lines(report: dict) -> list[str]:
         f"policy_drift_deny_rules_recorded: {report.get('deny_rules_recorded', 0)}",
         f"policy_drift_deny_rules_removed: {report.get('deny_rules_removed', 0)}",
         f"policy_drift_deny_rules_added: {report.get('deny_rules_added', 0)}",
+        f"policy_drift_hooks_config_modified: {report.get('hooks_config_modified', 0)}",
         f"policy_drift_hooks_recorded: {report.get('hooks_recorded', 0)}",
         f"policy_drift_hooks_intact: {report.get('hooks_intact', 0)}",
         f"policy_drift_hooks_modified: {report.get('hooks_modified', 0)}",
         f"policy_drift_hooks_missing: {report.get('hooks_missing', 0)}",
+        f"policy_drift_hooks_unsafe: {report.get('hooks_unsafe', 0)}",
         f"policy_drift_hooks_untracked: {report.get('hooks_untracked', 0)}",
+        f"policy_drift_trust_boundary: {report.get('trust_boundary', TRUST_BOUNDARY)}",
+    ]
+
+
+def record_text_lines(report: dict) -> list[str]:
+    if report.get("status") != "recorded":
+        return [
+            f"policy_drift_record: {report.get('status', 'error')} ({report.get('reason_code', 'error')})",
+            f"policy_drift_trust_boundary: {report.get('trust_boundary', TRUST_BOUNDARY)}",
+        ]
+    return [
+        f"policy_drift_record: {report['status']} ({report['reason_code']})",
+        f"policy_drift_baseline_path: {report.get('baseline_path', BASELINE_REL)}",
+        f"policy_drift_baseline_sha256: {report.get('baseline_sha256', '')}",
+        f"policy_drift_settings_recorded: {report.get('settings_recorded', 0)}",
+        f"policy_drift_deny_rules_recorded: {report.get('deny_rules_recorded', 0)}",
+        f"policy_drift_hooks_recorded: {report.get('hooks_recorded', 0)}",
         f"policy_drift_trust_boundary: {report.get('trust_boundary', TRUST_BOUNDARY)}",
     ]
 
@@ -840,13 +1162,22 @@ def main(argv: list[str] | None = None) -> int:
             "trust_boundary": TRUST_BOUNDARY,
         }
         rc = 2
+    except (OSError, ValueError):
+        result = {
+            "schema": SCHEMA,
+            "status": "error",
+            "reason_code": "unexpected_io_error",
+            "authority": AUTHORITY,
+            "trust_boundary": TRUST_BOUNDARY,
+        }
+        rc = 2
 
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     elif args.command == "check":
         print("\n".join(text_lines(result)))
     else:
-        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        print("\n".join(record_text_lines(result)))
     return rc
 
 

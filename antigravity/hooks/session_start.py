@@ -110,6 +110,7 @@ _DANGEROUS_INVISIBLE_RE = re.compile(
 _SAFE_ANCHOR_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 _ALWAYS_HIDDEN_TAGS = frozenset({"script", "style", "template"})
 _SVG_HIDDEN_META_TAGS = frozenset({"desc", "title", "metadata"})
+_SVG_SELF_CLOSING_TAGS = frozenset({"svg"}) | _SVG_HIDDEN_META_TAGS
 _HTML_VOID_TAGS = frozenset({
     "area", "base", "br", "col", "embed", "hr", "img",
     "input", "link", "meta", "source", "track", "wbr",
@@ -193,8 +194,8 @@ def _strip_css_comments(value: str) -> str:
     return "".join(parts)
 
 
-def _style_hides_element(style_value: str) -> bool:
-    """Return True when an inline CSS style hides text (display:none, visibility:hidden/collapse, opacity:0, font-size:0)."""
+def _style_hides_element(style_value: str, *, tag_name: str = "") -> bool:
+    """Return True when an inline CSS style hides text (display:none, visibility:hidden/collapse, opacity:0, font-size:0, or zero-size <svg>)."""
     cleaned = _unescape_css(_strip_css_comments(html.unescape(style_value))).lower()
     for decl in cleaned.split(";"):
         if ":" not in decl:
@@ -209,6 +210,8 @@ def _style_hides_element(style_value: str) -> bool:
         if prop == "opacity" and _CSS_ZERO_OPACITY_RE.fullmatch(val):
             return True
         if prop == "font-size" and _CSS_ZERO_FONT_RE.fullmatch(val):
+            return True
+        if tag_name == "svg" and prop in ("width", "height") and _CSS_ZERO_FONT_RE.fullmatch(val):
             return True
     return False
 
@@ -311,6 +314,27 @@ class _TagScanner:
         return -1
 
 
+def _is_html_self_closing(attrs: str) -> bool:
+    """Return True when the trailing '/' in HTML/SVG attributes is a genuine self-closing slash.
+
+    Under HTML5 §13.2.5.38, a '/' attached to an unquoted attribute value (e.g. ``id=a/>``)
+    is part of that attribute value and does not self-close the element.
+    """
+    stripped = attrs.rstrip()
+    if not stripped.endswith("/"):
+        return False
+    if len(stripped) == 1:
+        return True
+    last = None
+    for match in _HTML_ATTR_RE.finditer(stripped):
+        last = match
+    if last is None:
+        return stripped == "/"
+    if last.group(4) is not None and last.end() == len(stripped):
+        return False
+    return not stripped[last.end():-1].strip()
+
+
 def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:
     if tag_name in _ALWAYS_HIDDEN_TAGS:
         return True
@@ -326,7 +350,7 @@ def _is_hidden_open_tag(tag_name: str, attrs: str) -> bool:
             style_val = next((g for g in match.groups()[1:] if g is not None), "")
             if match.group(4) is not None and match.end() == attrs_end:
                 style_val = style_val.rstrip("/")
-            if _style_hides_element(style_val):
+            if _style_hides_element(style_val, tag_name=tag_name):
                 return True
         if tag_name == "svg" and attr_name in ("width", "height"):
             dim_val = next((g for g in match.groups()[1:] if g is not None), "")
@@ -558,7 +582,11 @@ def _consume_hidden_element(
                     pos = n if gt == -1 else gt + 1
                     continue
                 if nested_name == tname and nested_name not in _HTML_VOID_TAGS:
-                    depth += 1
+                    if not (
+                        nested_name in _SVG_SELF_CLOSING_TAGS
+                        and _is_html_self_closing(text[m_open.end():tag_end])
+                    ):
+                        depth += 1
                 pos = tag_end + 1
                 continue
         pos = lt + 1
@@ -601,6 +629,8 @@ def _strip_hidden_markup(text: str) -> str:
     line_orig_nonempty = False
     changed = False
     svg_depth = 0
+    close_svg_next_gt = -1
+    last_close_svg_gt = -1
 
     blank_limit = -1
     top_scanner = _TagScanner(text, 0)
@@ -761,19 +791,24 @@ def _strip_hidden_markup(text: str) -> str:
                 i = end + 3
                 continue
 
-            # Track </svg> closing tags so non-rendered SVG metadata (<desc>/<title>/<metadata>)
-            # is stripped only inside <svg>...</svg> without disturbing plain-text placeholders.
-            if i + 1 < n and text[i + 1] == "/":
+            # Track </svg> closing tags in amortized O(N) time across newlines and self-closing slashes
+            # so non-rendered SVG metadata (<desc>/<title>/<metadata>) is stripped only inside <svg>...</svg>.
+            if svg_depth > 0 and i + 1 < n and text[i + 1] == "/":
                 m_close_svg = _HTML_TAG_NAME_RE.match(text, i + 2)
                 if (
                     m_close_svg is not None
                     and m_close_svg.group(0).lower() == "svg"
                     and m_close_svg.end() < n
-                    and (text[m_close_svg.end()] in ">" or text[m_close_svg.end()].isspace())
+                    and (text[m_close_svg.end()] in ">/" or text[m_close_svg.end()].isspace())
                 ):
-                    gt_svg = text.find(">", m_close_svg.end(), cur_eol if i <= cur_eol else n)
-                    if gt_svg != -1 and svg_depth > 0:
-                        svg_depth -= 1
+                    if close_svg_next_gt != -2:
+                        if close_svg_next_gt < m_close_svg.end():
+                            close_svg_next_gt = text.find(">", m_close_svg.end())
+                            if close_svg_next_gt == -1:
+                                close_svg_next_gt = -2
+                        if close_svg_next_gt != -2 and close_svg_next_gt > last_close_svg_gt:
+                            last_close_svg_gt = close_svg_next_gt
+                            svg_depth -= 1
 
             # HTML opening tag (CommonMark Type 1 <script>/<style> may span blank lines).
             m_open = _HTML_TAG_NAME_RE.match(text, i + 1)
@@ -794,7 +829,7 @@ def _strip_hidden_markup(text: str) -> str:
                 if tag_end != -1:
                     attrs = text[m_open.end():tag_end]
                     is_svg_tag = tname == "svg" or (svg_depth > 0 and tname in _SVG_HIDDEN_META_TAGS)
-                    is_svg_self_closing = is_svg_tag and attrs.rstrip().endswith("/")
+                    is_svg_self_closing = is_svg_tag and _is_html_self_closing(attrs)
                     if _is_hidden_open_tag(tname, attrs) or (
                         svg_depth > 0 and tname in _SVG_HIDDEN_META_TAGS
                     ):

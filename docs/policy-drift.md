@@ -19,9 +19,10 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault <vault> --policy-dri
    - Records sorted unique SHA-256 digests of trimmed `permissions.deny` strings (never raw rule text).
    - Flags `deny_rules_removed` (or `settings_file_missing` / `settings_unreadable_or_invalid`) whenever any recorded `deny` rule disappears or weakens.
    - Adding new `deny` rules increments `deny_rules_added` while keeping `status: "clean"` (monotonic restriction strengthening).
-2. **Resolved hook script SHA-256 integrity**:
-   - Computes SHA-256 digests of scripts referenced by `.claude/settings*.json` hooks, vault git hooks (`00-meta/scripts/git-hooks/pre-commit`, `pre-push`, and `vault_healthcheck.py`), and bundled plugin hooks (`hooks/*.py`, `hooks/run_python_hook.sh` when `--plugin-root` is given).
-   - Flags `hook_script_modified`, `hook_script_missing`, `hook_unwired_from_settings`, `hook_script_unsafe` (symlink, junction, hardlink, or oversized), and `hook_script_untracked`.
+2. **Hook configuration & resolved hook script SHA-256 integrity**:
+   - Computes canonical content-free `hooks_config_sha256` of each `.claude/settings*.json` `hooks` block (detecting inline `python -c` / shell commands, matcher changes, event changes, or command flag tampering while still allowing monotonic `permissions.deny` additions).
+   - Computes SHA-256 digests of scripts referenced by `.claude/settings*.json` hooks, managed vault git hooks (`00-meta/scripts/git-hooks/pre-commit`, `pre-push`, and `vault_healthcheck.py`), and bundled plugin hooks (`hooks/*.py`, `hooks/run_python_hook.sh` when `--plugin-root` is given).
+   - Flags `hooks_config_modified`, `hooks_config_untracked`, `hook_script_modified`, `hook_script_missing`, `hook_unwired_from_settings`, `hook_script_unsafe` (symlink, junction, hardlink, UNC/device path, or oversized), `plugin_root_unset`, and `hook_script_untracked`.
 
 ## Schema & exit codes
 
@@ -32,7 +33,8 @@ python skills/agentic-vault/scripts/vault_doctor.py --vault <vault> --policy-dri
 
 ## Boundaries
 
-- Strictly offline and read-only during `check` and `vault_doctor --policy-drift`; never runs hooks or modifies host settings.
+- Strictly offline and read-only during `check` and `vault_doctor --policy-drift`; never runs hooks, never follows UNC/network paths, and never modifies host settings.
 - Content-free diagnostics: raw `permissions.deny` strings, hook command lines, environment values, and exception text are never stored in the baseline or emitted in reports.
 - Verifies static files on disk against the local sealed baseline; it cannot prove runtime host enforcement or protect against an adversary with write access to both the settings/hooks and `00-meta/.vault-policy-baseline.json`.
+- Git-hook coverage audits the managed vault hook files (`00-meta/scripts/git-hooks/pre-commit`, `pre-push`, and `00-meta/scripts/vault_healthcheck.py`) and does not inspect `.git/config` (`core.hooksPath`) or unmanaged `.git/hooks/` files.
 - Does not modify any of the seven certificate-bound warning-promotion checker files (`checker_sha256` remains unchanged).
